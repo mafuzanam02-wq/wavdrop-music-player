@@ -32,6 +32,7 @@ import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.ui.screen.songs.SongsScreen
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsScreen
 import com.launchpoint.wavdrop.ui.screen.trackdetails.TrackDetailsScreen
+import com.launchpoint.wavdrop.ui.screen.wrapped.WrappedScreen
 
 sealed class Screen(val route: String) {
     data object Home                : Screen("home")
@@ -48,6 +49,7 @@ sealed class Screen(val route: String) {
     data object Statistics          : Screen("statistics")
     data object Reports             : Screen("reports")
     data object MonthlyReports      : Screen("monthly_reports")
+    data object Wrapped             : Screen("wrapped")
     data object Playlists              : Screen("playlists")
     data object SmartCollections      : Screen("smart_collections")
     object TrackDetails               : Screen("track_details/{songId}") {
@@ -231,6 +233,14 @@ fun WavdropNavGraph(
                 onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
             )
         }
+        composable(Screen.Wrapped.route) {
+            WrappedScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+            )
+        }
         composable(Screen.Playlists.route) {
             PlaylistsScreen(
                 onNavigateBack    = { navController.popBackStack() },
@@ -308,6 +318,7 @@ fun WavdropNavGraph(
                 onStatisticsClick        = { navController.navigate(Screen.Statistics.route) },
                 onReportsClick           = { navController.navigate(Screen.Reports.route) },
                 onMonthlyReportsClick    = { navController.navigate(Screen.MonthlyReports.route) },
+                onWrappedClick           = { navController.navigate(Screen.Wrapped.route) },
                 onHomeCustomizationClick = { navController.navigate(Screen.HomeCustomization.route) },
             )
         }

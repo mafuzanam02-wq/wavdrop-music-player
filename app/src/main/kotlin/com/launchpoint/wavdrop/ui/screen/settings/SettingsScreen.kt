@@ -61,6 +61,7 @@ fun SettingsScreen(
     onStatisticsClick: () -> Unit,
     onReportsClick: () -> Unit,
     onMonthlyReportsClick: () -> Unit,
+    onWrappedClick: () -> Unit,
     onHomeCustomizationClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -269,6 +270,13 @@ fun SettingsScreen(
                     title    = "Monthly Reports",
                     subtitle = "Browse listening activity grouped by calendar month.",
                     onClick  = onMonthlyReportsClick,
+                )
+            }
+            item {
+                ClickableSettingsRow(
+                    title = "Wrapped",
+                    subtitle = "Review yearly event-backed listening highlights.",
+                    onClick = onWrappedClick,
                 )
             }
             item { SectionDivider() }

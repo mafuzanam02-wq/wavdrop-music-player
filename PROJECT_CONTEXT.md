@@ -77,6 +77,7 @@ app/src/main/kotlin/com/launchpoint/wavdrop/
         ├── smart/                     SmartCollectionsScreen, SmartCollectionDetailsScreen
         ├── statistics/                StatisticsScreen + StatisticsViewModel
         ├── monthlyreports/            MonthlyReportsScreen + MonthlyReportsViewModel
+        ├── wrapped/                   WrappedScreen + WrappedViewModel
         ├── settings/                  SettingsScreen + SettingsViewModel
         ├── homecustomization/         HomeCustomizationScreen + HomeCustomizationViewModel
         ├── bpstatpreview/             BlackPlayer import preview + apply
@@ -182,6 +183,8 @@ hasActivity, uniqueSongsPlayedCount, uniqueArtistsPlayedCount, uniqueAlbumsPlaye
 - `WrappedBuilder.buildYear(...)` / `buildPeriod(...)`: delegates to `ListeningAnalyticsBuilder.build(...)`
   with no aggregate fallback.
 - `WrappedBuilder.availableYears(...)`: discovers years from event history only.
+- Wrapped UI V1 uses `WrappedBuilder` directly, provides a year selector from available event
+  years, and displays yearly totals/highlights without sharing or export.
 
 ## Library Features
 
@@ -242,11 +245,19 @@ Official launcher icon: Midnight Violet
 Approved alternates: Clean Purple, Deep Teal  
 Future: user-selectable icons via activity-alias (Settings → Appearance)
 
+## Wrapped
+`WrappedScreen` ← `WrappedViewModel` ← `WrappedBuilder`.
+Entry point: Settings → Statistics → Wrapped. Year selector uses
+`WrappedBuilder.availableYears(...)`, so only years with Wavdrop play/skip events appear.
+V1 is intentionally restrained: total plays, listening time, top song/artist/album,
+listening days, busiest day, most skipped track, and recent plays. Sharing/export is not
+implemented yet, and imported aggregate counts are not used to create yearly history.
+
 ## Not Yet Implemented
 - Theme switching / dark mode toggle
 - Tag editing
 - Cloud sync, streaming, equalizer
-- Wrapped UI, sharing, and export
+- Wrapped sharing and export
 - Listening trends / streak tracking
 - Smart playlists (editable, rule-based)
 - filePath-based BlackPlayer matching (requires ContentResolver)
