@@ -10,8 +10,10 @@ import com.launchpoint.wavdrop.data.local.MIGRATION_2_3
 import com.launchpoint.wavdrop.data.local.MIGRATION_3_4
 import com.launchpoint.wavdrop.data.local.MIGRATION_4_5
 import com.launchpoint.wavdrop.data.local.MIGRATION_5_6
+import com.launchpoint.wavdrop.data.local.MIGRATION_6_7
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
+import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
@@ -35,7 +37,14 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): WavdropDatabase =
         Room.databaseBuilder(context, WavdropDatabase::class.java, "wavdrop.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
             .build()
 
     @Provides
@@ -58,4 +67,7 @@ object AppModule {
 
     @Provides
     fun provideTrackListenEventDao(db: WavdropDatabase): TrackListenEventDao = db.trackListenEventDao()
+
+    @Provides
+    fun provideLyricsOverrideDao(db: WavdropDatabase): LyricsOverrideDao = db.lyricsOverrideDao()
 }
