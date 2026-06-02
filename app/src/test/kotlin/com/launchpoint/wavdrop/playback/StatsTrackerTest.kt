@@ -155,11 +155,15 @@ class StatsTrackerTest {
     }
 
     // ── REPEAT_ONE / same-song loop ──────────────────────────────────────────
-
-    // PlayerController.onPositionDiscontinuity(DISCONTINUITY_REASON_AUTO_TRANSITION) is the
-    // reliable REPEAT_ONE signal. It calls onSongSelected(sameSong) + onPlaybackStarted().
-    // onMediaItemTransition(fromTransition=true) is a belt-and-suspenders fallback.
-    // Both reduce to the same StatsTracker call sequence tested below.
+    //
+    // Primary signal: PlayerController.tickAndCheckLoopBoundary() (500 ms position ticker)
+    // detects the wrap via LoopBoundaryDetector.isLoopBoundary and calls:
+    //   statsTracker.onSongSelected(song)   ← flush + check + reset
+    //   statsTracker.onPlaybackStarted()    ← start new session
+    //
+    // Belt-and-suspenders: onPositionDiscontinuity(AUTO_TRANSITION) and
+    // onMediaItemTransition(fromTransition=true) fire the same call sequence when the
+    // IPC delivers them.  Both paths reduce to the StatsTracker sequence tested below.
 
     @Test
     fun `REPEAT_ONE loop after pause increments play count`() {
@@ -170,7 +174,7 @@ class StatsTrackerTest {
         tracker.onPlaybackPaused()            // threshold crossed → count = 1
         assertEquals(1, fakeWriter.plays.size)
 
-        // onPositionDiscontinuity fires → onSongSelected(same) + onPlaybackStarted()
+        // Ticker (or callback) detects loop → onSongSelected(same) + onPlaybackStarted()
         tracker.onSongSelected(song(1))       // flush (no-op, already paused) → check (already counted) → reset
         tracker.onPlaybackStarted()           // new session
         fakeClockMs += 30_000L
@@ -182,13 +186,12 @@ class StatsTrackerTest {
 
     @Test
     fun `REPEAT_ONE continuous play without pause credits each full loop`() {
-        // The critical case: song plays to the end continuously (no pause), loops via
-        // onPositionDiscontinuity which calls onSongSelected while still playing.
+        // Mirrors the ticker-based path: song plays to the end with no pause,
+        // tickAndCheckLoopBoundary detects the wrap and calls onSongSelected + onPlaybackStarted.
         tracker.onSongSelected(song(1))
         tracker.onPlaybackStarted()                      // session 1 starts
 
-        // Loop boundary fires (onPositionDiscontinuity) while still playing:
-        // onSongSelected flushes the in-progress session (30 s) and checks threshold.
+        // Ticker fires at loop boundary: onSongSelected flushes in-progress session.
         fakeClockMs += 30_000L
         tracker.onSongSelected(song(1))                  // flush 30 s → threshold crossed → count = 1; reset
         tracker.onPlaybackStarted()                      // session 2 starts
@@ -199,6 +202,24 @@ class StatsTrackerTest {
 
         assertEquals(2, fakeWriter.plays.size)
         assertTrue(fakeWriter.plays.all { it.songId == 1L })
+    }
+
+    @Test
+    fun `REPEAT_ONE loop increments 1 to 2 to 3 continuously`() {
+        // Three complete loops, each detected by the ticker.
+        tracker.onSongSelected(song(1))
+        repeat(3) {
+            tracker.onPlaybackStarted()
+            fakeClockMs += 30_000L
+            // Ticker: flush + check + reset, then immediately start new session.
+            tracker.onSongSelected(song(1))
+        }
+        // Final pass: close the last open session.
+        tracker.onPlaybackPaused()
+
+        // 3 loop boundaries were processed; only loops whose session crossed threshold count.
+        // The 3 onSongSelected calls each flushed 30 s → count should be 3.
+        assertEquals(3, fakeWriter.plays.size)
     }
 
     @Test

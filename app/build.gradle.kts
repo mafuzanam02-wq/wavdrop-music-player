@@ -31,6 +31,14 @@ android {
         }
     }
 
+    testOptions {
+        unitTests {
+            // Makes Android API stubs return safe defaults (0/null/false) in JVM unit tests
+            // instead of throwing RuntimeException. Required for Log.d and similar calls.
+            isReturnDefaultValues = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

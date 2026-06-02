@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.playback
 
 import android.os.SystemClock
+import android.util.Log
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlayEventWriter
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,14 @@ import javax.inject.Singleton
 class StatsTracker @Inject constructor(
     private val playEventWriter: PlayEventWriter,
 ) {
+    private companion object {
+        const val TAG = "WavStats-ST"
+
+        // Set to true to enable verbose stats lifecycle logs for on-device debugging.
+        // MUST be false (or removed) before a release build.
+        const val DEBUG_STATS = true
+    }
+
     // Overridable in tests (Dispatchers.Unconfined makes launch calls synchronous).
     internal var scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -45,14 +54,20 @@ class StatsTracker @Inject constructor(
     // ── Public API (called from PlayerController on the main thread) ──────────
 
     /**
-     * Must be called when the user selects a song, before the controller starts loading it.
-     * Finalises stats for the previous song.
+     * Must be called when the user selects a song or a loop boundary is detected.
+     * Finalises stats for the previous song (or previous loop of the same song).
      *
-     * If the same song is re-selected (e.g. user taps it again or it loops back), the session
-     * is reset so the replay can be counted — but [finalizeCurrentSong] is NOT called, which
-     * would otherwise record a spurious skip.
+     * Same-song path (REPEAT_ONE loop, user replay): flushes the active session so
+     * the completed loop's time is credited before resetting for the next loop.
+     * Without the flush, continuous play (no pause) would discard each loop's time.
      */
     fun onSongSelected(newSong: Song) {
+        if (DEBUG_STATS) {
+            Log.d(TAG, "[onSongSelected] newId=${newSong.id} currentId=${currentSong?.id} " +
+                "same=${currentSong?.id == newSong.id} " +
+                "playCountedForCurrent=$playCountedForCurrent " +
+                "accumulatedMs=$accumulatedMs sessionStartedAt=$sessionStartedAt")
+        }
         if (currentSong?.id == newSong.id) {
             // Same song re-selected (REPEAT_ONE loop boundary, user replay, etc.).
             // Flush any in-progress session first so the time already played in this
@@ -64,6 +79,7 @@ class StatsTracker @Inject constructor(
             accumulatedMs         = 0L
             sessionStartedAt      = -1L
             playCountedForCurrent = false
+            if (DEBUG_STATS) Log.d(TAG, "[onSongSelected] same-song reset done")
             return
         }
         finalizeCurrentSong(explicitSkip = !playCountedForCurrent)
@@ -71,11 +87,13 @@ class StatsTracker @Inject constructor(
         accumulatedMs         = 0L
         sessionStartedAt      = -1L
         playCountedForCurrent = false
+        if (DEBUG_STATS) Log.d(TAG, "[onSongSelected] switched to new song ${newSong.id}")
     }
 
     /** Called when isPlaying transitions to true. */
     fun onPlaybackStarted() {
         sessionStartedAt = clock()
+        if (DEBUG_STATS) Log.d(TAG, "[onPlaybackStarted] songId=${currentSong?.id} sessionStartedAt=$sessionStartedAt")
     }
 
     /**
@@ -83,6 +101,7 @@ class StatsTracker @Inject constructor(
      * headphone disconnect, etc.).
      */
     fun onPlaybackPaused() {
+        if (DEBUG_STATS) Log.d(TAG, "[onPlaybackPaused] songId=${currentSong?.id} sessionStartedAt=$sessionStartedAt accumulatedMs=$accumulatedMs")
         flushSession()
         checkAndRecordPlay()
     }
@@ -92,9 +111,14 @@ class StatsTracker @Inject constructor(
     /** Accumulate the current in-progress play session into accumulatedMs. */
     private fun flushSession() {
         val start = sessionStartedAt
-        if (start < 0L) return
-        accumulatedMs    += clock() - start
+        if (start < 0L) {
+            if (DEBUG_STATS) Log.d(TAG, "[flushSession] skipped (sessionStartedAt=$start)")
+            return
+        }
+        val elapsed = clock() - start
+        accumulatedMs    += elapsed
         sessionStartedAt  = -1L
+        if (DEBUG_STATS) Log.d(TAG, "[flushSession] elapsed=$elapsed newAccumulatedMs=$accumulatedMs songId=${currentSong?.id}")
     }
 
     /**
@@ -102,15 +126,27 @@ class StatsTracker @Inject constructor(
      * record a play event exactly once per song selection.
      */
     private fun checkAndRecordPlay() {
-        if (playCountedForCurrent) return
-        val song = currentSong ?: return
+        if (playCountedForCurrent) {
+            if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] skipped — already counted for this session (songId=${currentSong?.id})")
+            return
+        }
+        val song = currentSong ?: run {
+            if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] skipped — no current song")
+            return
+        }
         // threshold = min(30 s, 50 % of track duration)
         val threshold = minOf(30_000L, song.duration / 2L)
-        if (threshold <= 0L) return             // malformed duration, skip
-        if (accumulatedMs >= threshold) {
+        if (threshold <= 0L) {
+            if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] skipped — malformed threshold=$threshold songId=${song.id}")
+            return
+        }
+        val passed = accumulatedMs >= threshold
+        if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] songId=${song.id} accumulatedMs=$accumulatedMs threshold=$threshold passed=$passed")
+        if (passed) {
             playCountedForCurrent = true
             val listenedMs = accumulatedMs
             val durationMs = song.duration
+            if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] → calling recordPlay songId=${song.id} listenedMs=$listenedMs durationMs=$durationMs")
             scope.launch {
                 playEventWriter.recordPlay(song.id, song.uri, listenedMs, durationMs)
             }

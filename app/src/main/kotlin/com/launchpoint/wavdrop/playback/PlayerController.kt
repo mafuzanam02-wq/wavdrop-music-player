@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -40,6 +41,14 @@ class PlayerController @Inject constructor(
     private val statsTracker: StatsTracker,
     private val sessionRepository: PlaybackSessionRepository,
 ) {
+    private companion object {
+        const val TAG = "WavStats-PC"
+
+        // Set to true to enable verbose stats lifecycle logs for on-device debugging.
+        // MUST be false (or removed) before a release build.
+        const val DEBUG_STATS = true
+    }
+
     private var mediaController: MediaController? = null
 
     private var pendingPlaybackRequest: PlaybackRequest? = null
@@ -51,6 +60,11 @@ class PlayerController @Inject constructor(
     private var shuffleEnabled: Boolean = false
     private var repeatMode: RepeatMode = RepeatMode.OFF
 
+    // Last position observed by the 500 ms ticker. Starts at -1 (uninitialized).
+    // Reset to -1 whenever a new song/session starts so the loop detector doesn't see
+    // a false wrap from the old song's late position to the new song's early position.
+    private var lastKnownPositionMs: Long = -1L
+
     private val _nowPlayingState = MutableStateFlow(NowPlayingState())
     val nowPlayingState: StateFlow<NowPlayingState> = _nowPlayingState.asStateFlow()
 
@@ -59,6 +73,11 @@ class PlayerController @Inject constructor(
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (DEBUG_STATS) {
+                val songId = _nowPlayingState.value.song?.id
+                val pos = mediaController?.currentPosition ?: -1
+                Log.d(TAG, "[isPlayingChanged] isPlaying=$isPlaying songId=$songId pos=$pos repeatMode=$repeatMode")
+            }
             syncNowPlayingState()
             if (isPlaying) {
                 statsTracker.onPlaybackStarted()
@@ -72,30 +91,32 @@ class PlayerController @Inject constructor(
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            // Belt-and-suspenders: covers queue auto-advance and any REPEAT_ONE loop where
-            // Media3 does fire onMediaItemTransition. The primary loop-boundary signal is
-            // onPositionDiscontinuity below; this acts as a fallback for missed callbacks.
+            if (DEBUG_STATS) {
+                Log.d(TAG, "[mediaItemTransition] reason=$reason mediaId=${mediaItem?.mediaId} repeatMode=$repeatMode isPlaying=${mediaController?.isPlaying}")
+            }
+            // Reset position tracking so the ticker doesn't mistake the old song's
+            // late position for a loop wrap on the new song.
+            lastKnownPositionMs = -1L
+            // Belt-and-suspenders: covers queue auto-advance and any REPEAT_ONE loop
+            // where Media3 does fire this callback. The primary loop-boundary signal
+            // is the position ticker below; this handles whatever IPC delivers.
             syncNowPlayingState(fromTransition = true)
             saveSessionAsync()
         }
 
-        /**
-         * Primary REPEAT_ONE detection. Media3 does NOT reliably fire onMediaItemTransition
-         * on every loop of the same item — it may fire 0 or 1 times. However,
-         * onPositionDiscontinuity with DISCONTINUITY_REASON_AUTO_TRANSITION fires on every
-         * automatic position jump, including each REPEAT_ONE restart and each queue
-         * auto-advance. We use it as the definitive "new listening session" signal.
-         *
-         * Seeks ([DISCONTINUITY_REASON_SEEK]) do NOT trigger this path, so user scrubbing
-         * within a song never resets the stats session.
-         */
         override fun onPositionDiscontinuity(
             oldPosition: Player.PositionInfo,
             newPosition: Player.PositionInfo,
             reason: Int,
         ) {
+            if (DEBUG_STATS) {
+                Log.d(TAG, "[posDiscontinuity] reason=$reason old=${oldPosition.positionMs} new=${newPosition.positionMs} oldIdx=${oldPosition.mediaItemIndex} newIdx=${newPosition.mediaItemIndex} repeatMode=$repeatMode isPlaying=${mediaController?.isPlaying}")
+            }
             if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                // Reset ticker tracking so it doesn't double-detect this same boundary.
+                lastKnownPositionMs = -1L
                 val song = libraryQueue.getOrNull(newPosition.mediaItemIndex) ?: return
+                if (DEBUG_STATS) Log.d(TAG, "[posDiscontinuity] AUTO_TRANSITION → songId=${song.id}")
                 statsTracker.onSongSelected(song)
                 if (mediaController?.isPlaying == true) {
                     statsTracker.onPlaybackStarted()
@@ -104,6 +125,9 @@ class PlayerController @Inject constructor(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (DEBUG_STATS) {
+                Log.d(TAG, "[playbackStateChanged] state=$playbackState songId=${_nowPlayingState.value.song?.id} repeatMode=$repeatMode")
+            }
             syncNowPlayingState()
         }
     }
@@ -158,6 +182,8 @@ class PlayerController @Inject constructor(
         val playbackStartIndex = playbackOrder.indexOf(originalStartIndex)
             .takeIf { it >= 0 } ?: 0
 
+        // Reset position tracking so the ticker doesn't see the old position as a loop wrap.
+        lastKnownPositionMs = -1L
         statsTracker.onSongSelected(startSong)
         _nowPlayingState.update {
             it.copy(
@@ -330,7 +356,7 @@ class PlayerController @Inject constructor(
         if (positionTickerJob?.isActive == true) return
         positionTickerJob = scope.launch {
             while (true) {
-                syncPosition()
+                tickAndCheckLoopBoundary()
                 delay(500)
             }
         }
@@ -341,6 +367,51 @@ class PlayerController @Inject constructor(
         positionTickerJob = null
     }
 
+    /**
+     * Called by the 500 ms position ticker while playing.
+     *
+     * Handles two responsibilities:
+     * 1. Update NowPlayingState with the latest position/duration from the controller.
+     * 2. Detect REPEAT_ONE loop boundaries when Media3 callbacks (onMediaItemTransition,
+     *    onPositionDiscontinuity) are not delivered reliably over IPC.
+     *
+     * The detection is position-based: if the previous observed position was at least
+     * [LoopBoundaryDetector.LOOP_MIN_PREV_POS_MS] and the current position is under
+     * [LoopBoundaryDetector.LOOP_NEAR_START_MS], the song looped back to the start.
+     * Only active when [repeatMode] == [RepeatMode.ONE].
+     */
+    private fun tickAndCheckLoopBoundary() {
+        val controller = mediaController ?: return
+        val currentPos = controller.currentPosition.coerceAtLeast(0L)
+        val durationMs = controller.duration.let { d -> if (d < 0) 0L else d }
+
+        val prev = lastKnownPositionMs
+        lastKnownPositionMs = currentPos
+
+        if (DEBUG_STATS) {
+            Log.d(TAG, "[ticker] prev=$prev cur=$currentPos dur=$durationMs repeat=$repeatMode isPlaying=${controller.isPlaying}")
+        }
+
+        if (LoopBoundaryDetector.isLoopBoundary(prev, currentPos, repeatMode)) {
+            val song = currentQueueIndex()?.let { libraryQueue.getOrNull(it) }
+            if (song != null) {
+                if (DEBUG_STATS) Log.d(TAG, "[ticker] LOOP BOUNDARY detected prev=$prev cur=$currentPos songId=${song.id}")
+                statsTracker.onSongSelected(song)
+                statsTracker.onPlaybackStarted()
+            }
+        }
+
+        _nowPlayingState.update {
+            it.copy(
+                positionMs         = currentPos,
+                durationMs         = durationMs,
+                bufferedPositionMs = controller.bufferedPosition.coerceAtLeast(0L),
+                isSeekable         = controller.isCurrentMediaItemSeekable,
+            )
+        }
+    }
+
+    /** One-shot position sync with no loop-detection side effect (used on pause). */
     private fun syncPosition() {
         val controller = mediaController ?: return
         _nowPlayingState.update {
@@ -354,6 +425,9 @@ class PlayerController @Inject constructor(
     }
 
     private fun seekToQueueIndex(controller: MediaController, index: Int) {
+        // Reset position tracking: after the seek the ticker should not see the old
+        // song's position as a loop wrap when the new item starts near 0.
+        lastKnownPositionMs = -1L
         val shouldPlay = controller.isPlaying
         controller.seekTo(index, 0L)
         if (shouldPlay) controller.play()
@@ -376,13 +450,16 @@ class PlayerController @Inject constructor(
             ?.let(playbackOrder::indexOf)
             ?.takeIf { it >= 0 }
             ?: _nowPlayingState.value.currentIndex
-        // fromTransition=true on every onMediaItemTransition (auto-advance, REPEAT_ONE, seek).
-        // The song-ID guard alone misses REPEAT_ONE because the ID doesn't change, leaving
-        // playCountedForCurrent stuck at true and the second play never counted.
-        if (currentSong != null && (fromTransition || currentSong.id != _nowPlayingState.value.song?.id)) {
+
+        val songChanged = currentSong != null && currentSong.id != _nowPlayingState.value.song?.id
+        if (DEBUG_STATS && (fromTransition || songChanged)) {
+            Log.d(TAG, "[syncNPS] fromTransition=$fromTransition songChanged=$songChanged currentSongId=${currentSong?.id} prevSongId=${_nowPlayingState.value.song?.id} isPlaying=${controller?.isPlaying}")
+        }
+
+        if (currentSong != null && (fromTransition || songChanged)) {
             statsTracker.onSongSelected(currentSong)
-            // During auto-advance / repeat the player stays in isPlaying=true, so
-            // onIsPlayingChanged(true) never fires. Start the new session explicitly.
+            // During auto-advance / repeat the player may stay in isPlaying=true,
+            // so onIsPlayingChanged(true) never fires for the new song.
             if (controller?.isPlaying == true) {
                 statsTracker.onPlaybackStarted()
             }
