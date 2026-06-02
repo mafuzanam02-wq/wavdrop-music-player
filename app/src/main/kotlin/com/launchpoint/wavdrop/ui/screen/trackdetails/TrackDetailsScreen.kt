@@ -15,15 +15,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -56,8 +60,10 @@ fun TrackDetailsScreen(
 ) {
     val uiState           by viewModel.uiState.collectAsStateWithLifecycle()
     val lyricsState       by lyricsViewModel.lyricsState.collectAsStateWithLifecycle()
+    val hasCustomLyrics   by lyricsViewModel.hasCustomLyrics.collectAsStateWithLifecycle()
     val playlists         by viewModel.playlists.collectAsStateWithLifecycle()
     var showAddToPlaylist by remember { mutableStateOf(false) }
+    var showLyricsEditor  by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -99,7 +105,10 @@ fun TrackDetailsScreen(
                 song              = state.song,
                 stats             = state.stats,
                 lyrics            = lyricsState,
+                hasCustomLyrics   = hasCustomLyrics,
                 onAddToPlaylist   = { showAddToPlaylist = true },
+                onEditLyrics      = { showLyricsEditor = true },
+                onClearLyrics     = { lyricsViewModel.clearCustomLyrics() },
                 modifier          = Modifier.padding(innerPadding),
             )
         }
@@ -117,6 +126,24 @@ fun TrackDetailsScreen(
                 showAddToPlaylist = false
             },
             onDismiss        = { showAddToPlaylist = false },
+        )
+    }
+
+    if (showLyricsEditor) {
+        LyricsEditorDialog(
+            lyrics = lyricsState,
+            hasCustomLyrics = hasCustomLyrics,
+            onSave = { text ->
+                lyricsViewModel.saveCustomLyrics(text) {
+                    showLyricsEditor = false
+                }
+            },
+            onClear = {
+                lyricsViewModel.clearCustomLyrics {
+                    showLyricsEditor = false
+                }
+            },
+            onDismiss = { showLyricsEditor = false },
         )
     }
 }
@@ -151,7 +178,10 @@ private fun ReadyContent(
     song: Song,
     stats: TrackStats?,
     lyrics: LyricsResult,
+    hasCustomLyrics: Boolean,
     onAddToPlaylist: () -> Unit,
+    onEditLyrics: () -> Unit,
+    onClearLyrics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -193,6 +223,19 @@ private fun ReadyContent(
         // ── Lyrics section ───────────────────────────────────────────────────
         SectionHeader("Lyrics")
         LyricsSection(lyrics)
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onEditLyrics) {
+                Text("Edit lyrics")
+            }
+            if (hasCustomLyrics) {
+                TextButton(onClick = onClearLyrics) {
+                    Text("Clear custom lyrics")
+                }
+            }
+        }
 
         SectionDivider()
 
@@ -209,6 +252,65 @@ private fun ReadyContent(
         SectionHeader("Coming soon")
         PlaceholderRow("Import history")
     }
+}
+
+@Composable
+private fun LyricsEditorDialog(
+    lyrics: LyricsResult,
+    hasCustomLyrics: Boolean,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember(lyrics) {
+        mutableStateOf((lyrics as? LyricsResult.Available)?.text.orEmpty())
+    }
+    val canSave = text.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit lyrics") },
+        text = {
+            Column {
+                Text(
+                    text = "Unsynced lyrics. Timing and karaoke highlighting are not supported yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                )
+                Spacer(Modifier.height(12.dp))
+                TextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    placeholder = { Text("Lyrics") },
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(text) },
+                enabled = canSave,
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (hasCustomLyrics) {
+                    OutlinedButton(onClick = onClear) {
+                        Text("Clear")
+                    }
+                    Spacer(Modifier.size(8.dp))
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        },
+    )
 }
 
 // ── Shared components ─────────────────────────────────────────────────────────

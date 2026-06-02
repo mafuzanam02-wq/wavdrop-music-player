@@ -5,11 +5,13 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
+import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
+import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistSongEntity
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
@@ -24,8 +26,9 @@ import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
         PlaylistEntity::class,
         PlaylistSongEntity::class,
         TrackListenEventEntity::class,
+        LyricsOverrideEntity::class,
     ],
-    version      = 6,
+    version      = 7,
     exportSchema = true,
 )
 abstract class WavdropDatabase : RoomDatabase() {
@@ -34,6 +37,7 @@ abstract class WavdropDatabase : RoomDatabase() {
     abstract fun importBaselineDao(): ImportBaselineDao
     abstract fun playlistDao(): PlaylistDao
     abstract fun trackListenEventDao(): TrackListenEventDao
+    abstract fun lyricsOverrideDao(): LyricsOverrideDao
 }
 
 /** Add the track_stats table. */
@@ -144,6 +148,25 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         )
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS index_track_listen_events_songId_occurredAt ON track_listen_events(songId, occurredAt)"
+        )
+    }
+}
+
+/** Add app-managed unsynced lyric overrides. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS lyrics_overrides (
+                songId     INTEGER NOT NULL PRIMARY KEY,
+                contentUri TEXT    NOT NULL,
+                lyrics     TEXT    NOT NULL,
+                updatedAt  INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_lyrics_overrides_contentUri ON lyrics_overrides(contentUri)"
         )
     }
 }

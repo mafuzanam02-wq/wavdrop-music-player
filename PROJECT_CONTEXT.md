@@ -16,7 +16,7 @@
 | UI | Jetpack Compose, Material3 |
 | Compose BOM | 2024.12.01 |
 | DI | Hilt 2.52 (KSP) |
-| Database | Room 2.6.1 (`WavdropDatabase` v6, `wavdrop.db`) |
+| Database | Room 2.6.1 (`WavdropDatabase` v7, `wavdrop.db`) |
 | Preferences | DataStore 1.1.1 |
 | Playback | Media3 1.4.1 / ExoPlayer |
 | Image loading | Coil 2.7.0 |
@@ -32,18 +32,20 @@ app/src/main/kotlin/com/launchpoint/wavdrop/
 ├── data/
 │   ├── model/                         Domain models (Song, TrackStats, summaries, ...)
 │   ├── local/
-│   │   ├── WavdropDatabase.kt         Room v6, exportSchema=true
+│   │   ├── WavdropDatabase.kt         Room v7, exportSchema=true
 │   │   ├── dao/                       SongDao, TrackStatsDao, ImportBaselineDao,
-│   │   │                              PlaylistDao, TrackListenEventDao
+│   │   │                              PlaylistDao, TrackListenEventDao, LyricsOverrideDao
 │   │   └── entity/                    SongEntity, TrackStatsEntity, ImportBaselineEntity,
-│   │                                  PlaylistEntity, PlaylistSongEntity, TrackListenEventEntity
+│   │                                  PlaylistEntity, PlaylistSongEntity, TrackListenEventEntity,
+│   │                                  LyricsOverrideEntity
 │   ├── legacy/                        BlackPlayer EX import (parse → match → apply)
 │   ├── backup/                        WavdropBackup JSON export/import system
 │   ├── lyrics/                        Sidecar (.lrc) + ID3 embedded lyrics
 │   ├── grouping/                      ArtistGrouper, AlbumGrouper
 │   ├── library/                       FolderGrouper
 │   ├── search/                        LibrarySearch, AlphabetIndex
-│   ├── settings/                      LibraryScanSettings, HomeLayoutSettings (DataStore)
+│   ├── settings/                      LibraryScanSettings, HomeLayoutSettings,
+│   │                                  StartupDestination (DataStore)
 │   ├── playback/                      PlaybackSessionSnapshot, PlaybackSessionRules,
 │   │                                  PlaybackSessionRepository (resume-on-launch)
 │   ├── playlists/                     PlaylistNameRules, PlaylistPositionRules
@@ -84,7 +86,7 @@ app/src/main/kotlin/com/launchpoint/wavdrop/
         └── backupimport/              WavdropBackup import preview + apply
 ```
 
-## Room Database — Schema v6
+## Room Database — Schema v7
 
 | Version | Migration | What changed |
 |---|---|---|
@@ -93,6 +95,7 @@ app/src/main/kotlin/com/launchpoint/wavdrop/
 | 3→4 | MIGRATION_3_4 | Add `folderPath`, `folderName` columns to `songs` |
 | 4→5 | MIGRATION_4_5 | Add `playlists` + `playlist_songs` tables |
 | 5→6 | MIGRATION_5_6 | Add `track_listen_events` table + 2 indices |
+| 6→7 | MIGRATION_6_7 | Add `lyrics_overrides` table + contentUri index |
 
 ### Entities
 | Entity | Table | Key fields |
@@ -103,6 +106,7 @@ app/src/main/kotlin/com/launchpoint/wavdrop/
 | `PlaylistEntity` | `playlists` | AUTOINCREMENT, name, createdAt, updatedAt |
 | `PlaylistSongEntity` | `playlist_songs` | playlistId+position PK, CASCADE delete |
 | `TrackListenEventEntity` | `track_listen_events` | TYPE_PLAY/TYPE_SKIP; occurredAt, listenedMs, durationMs, source |
+| `LyricsOverrideEntity` | `lyrics_overrides` | songId PK, contentUri, lyrics, updatedAt |
 
 **Event history rule:** `TrackListenEventEntity` rows are written only by Wavdrop playback
 (`StatsTracker` → `StatsRepository`). BlackPlayer imports and JSON restore paths NEVER write
@@ -206,9 +210,15 @@ Room v5. `PlaylistEntity` + `PlaylistSongEntity` (cascade delete, position-based
 MOST_SKIPPED, LONG_TRACKS, SHORT_TRACKS. Built by `SmartCollectionBuilder` from songs + stats.
 No schema change — computed on demand.
 
-### Lyrics (Phase 1 — complete, do not reopen)
-`LyricsRepository` → `SidecarLyricsExtractor` (.lrc sidecar) + ID3 embedded SYLT/USLT tags.
-`LyricsTextCleaner` strips timestamps. `LyricsDiagnostics` for debug.
+### Lyrics
+`LyricsRepository` read precedence:
+1. App-managed user lyric override (`lyrics_overrides`)
+2. Embedded ID3 SYLT/USLT lyrics
+3. Same-folder `.lrc` sidecar
+4. Same-folder `.txt` sidecar
+
+`LyricsTextCleaner` strips timestamps. `LyricsDiagnostics` reports embedded/sidecar lookup
+status. Editing is unsynced text only; Wavdrop does not write audio tags or fetch lyrics online.
 
 ## Home Dashboard
 Section pinning via `HomeSectionId` enum (7 sections). `HomeLayoutSettingsRepository` persists
@@ -217,7 +227,8 @@ point. `LIBRARY_SHORTCUT` is always visible (non-toggleable).
 
 ## Settings Screen
 Route: `Screen.Settings`. Sections: Library (scan settings, import), Backup & Restore,
-Statistics (Monthly Reports, Listening Reports), Appearance (Home Sections), About.
+Statistics (Monthly Reports, Listening Reports), Appearance (Open app to, Home Sections), About.
+Startup preference is stored in Preferences DataStore under `startup_destination`; default is Home.
 
 ## BlackPlayer EX Import
 Parse → match (title+artist+album, case-insensitive) → preview → apply via `db.withTransaction`.
@@ -252,6 +263,18 @@ Entry point: Settings → Statistics → Wrapped. Year selector uses
 V1 is intentionally restrained: total plays, listening time, top song/artist/album,
 listening days, busiest day, most skipped track, and recent plays. Sharing/export is not
 implemented yet, and imported aggregate counts are not used to create yearly history.
+
+## Startup Screen Preference
+`AppSettingsRepository` stores `StartupDestination` in the existing `wavdrop_preferences`
+DataStore. `WavdropNavGraph` reads the preference once at graph creation and uses it as the
+start destination: Home, Library, Now Playing, or Settings. Existing in-app navigation routes
+remain unchanged.
+
+## Editable Lyrics Foundation
+Track Details exposes "Edit lyrics" for unsynced lyrics. Saved lyrics are app-managed Room
+overrides in `lyrics_overrides`; "Clear custom lyrics" deletes the override and reverts to
+embedded/sidecar lookup. No ID3 tag writing, online lookup, synced lyrics, or karaoke/highlight
+support is implemented.
 
 ## Not Yet Implemented
 - Theme switching / dark mode toggle

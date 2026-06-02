@@ -1,6 +1,10 @@
 package com.launchpoint.wavdrop.data.lyrics
 
+import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.model.Song
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -32,6 +36,28 @@ class LyricsRepositoryTest {
         override fun lookup(song: Song): SidecarLyricsLookup {
             callCount++
             return responses[song.id] ?: default
+        }
+    }
+
+    private class FakeLyricsOverrideDao(
+        initial: LyricsOverrideEntity? = null,
+    ) : LyricsOverrideDao {
+        private val overrideFlow = MutableStateFlow(initial)
+
+        override fun observeBySongId(songId: Long): Flow<LyricsOverrideEntity?> =
+            overrideFlow
+
+        override suspend fun getForSong(songId: Long, contentUri: String): LyricsOverrideEntity? =
+            overrideFlow.value?.takeIf { it.songId == songId || it.contentUri == contentUri }
+
+        override suspend fun upsert(entity: LyricsOverrideEntity) {
+            overrideFlow.value = entity
+        }
+
+        override suspend fun deleteForSong(songId: Long, contentUri: String) {
+            if (overrideFlow.value?.let { it.songId == songId || it.contentUri == contentUri } == true) {
+                overrideFlow.value = null
+            }
         }
     }
 
@@ -104,6 +130,82 @@ class LyricsRepositoryTest {
 
         assertEquals(LyricsResult.Available("Verse one"), result)
         assertEquals(0, sidecar.callCount)
+    }
+
+    @Test
+    fun `getLyrics returns custom override before embedded and sidecar lyrics`() {
+        val song = song(31)
+        val embedded = FakeLyricsExtractor(default = LyricsResult.Available("Embedded"))
+        val sidecar = FakeSidecarLyricsExtractor(
+            default = sidecarLookup(
+                result = LyricsResult.Available("Sidecar"),
+                sameFolderLrc = LyricsLookupStatus.FOUND,
+            ),
+        )
+        val overrideDao = FakeLyricsOverrideDao(
+            LyricsOverrideEntity(
+                songId = song.id,
+                contentUri = song.uri,
+                lyrics = "Custom lyrics",
+                updatedAt = 1L,
+            ),
+        )
+        val repo = LyricsRepository(
+            embedded,
+            sidecar,
+            LyricsOverrideRepository(overrideDao),
+        )
+
+        val result = runBlocking { repo.getLyrics(song) }
+
+        assertEquals(LyricsResult.Available("Custom lyrics"), result)
+        assertEquals(0, embedded.callCount)
+        assertEquals(0, sidecar.callCount)
+    }
+
+    @Test
+    fun `saveCustomLyrics invalidates cached lyrics and returns override`() {
+        val song = song(32)
+        val embedded = FakeLyricsExtractor(default = LyricsResult.Available("Embedded"))
+        val repo = LyricsRepository(
+            embedded,
+            FakeSidecarLyricsExtractor(),
+            LyricsOverrideRepository(FakeLyricsOverrideDao()),
+        )
+
+        val result = runBlocking {
+            assertEquals(LyricsResult.Available("Embedded"), repo.getLyrics(song))
+            repo.saveCustomLyrics(song, "Custom\nLyrics")
+            repo.getLyrics(song)
+        }
+
+        assertEquals(LyricsResult.Available("Custom\nLyrics"), result)
+    }
+
+    @Test
+    fun `clearCustomLyrics invalidates cached override and falls back`() {
+        val song = song(33)
+        val overrideDao = FakeLyricsOverrideDao(
+            LyricsOverrideEntity(
+                songId = song.id,
+                contentUri = song.uri,
+                lyrics = "Custom",
+                updatedAt = 1L,
+            ),
+        )
+        val repo = LyricsRepository(
+            FakeLyricsExtractor(default = LyricsResult.Available("Embedded")),
+            FakeSidecarLyricsExtractor(),
+            LyricsOverrideRepository(overrideDao),
+        )
+
+        val result = runBlocking {
+            assertEquals(LyricsResult.Available("Custom"), repo.getLyrics(song))
+            repo.clearCustomLyrics(song)
+            repo.getLyrics(song)
+        }
+
+        assertEquals(LyricsResult.Available("Embedded"), result)
     }
 
     @Test

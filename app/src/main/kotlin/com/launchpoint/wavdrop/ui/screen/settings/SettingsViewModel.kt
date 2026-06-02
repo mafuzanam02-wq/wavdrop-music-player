@@ -5,9 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
+import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +36,7 @@ sealed interface LibraryScanUiState {
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val backupRepository: WavdropBackupRepository,
+    private val appSettingsRepository: AppSettingsRepository,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
     private val songRepository: SongRepository,
 ) : ViewModel() {
@@ -46,6 +49,13 @@ class SettingsViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = LibraryScanSettings(),
+        )
+
+    val startupDestination: StateFlow<StartupDestination> =
+        appSettingsRepository.startupDestination.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = StartupDestination.HOME,
         )
 
     private val _libraryScanUiState =
@@ -88,6 +98,12 @@ class SettingsViewModel @Inject constructor(
     fun removeSelectedFolderUri(folderUri: String) {
         viewModelScope.launch {
             scanSettingsRepository.removeSelectedFolderUri(folderUri)
+        }
+    }
+
+    fun setStartupDestination(destination: StartupDestination) {
+        viewModelScope.launch {
+            appSettingsRepository.setStartupDestination(destination)
         }
     }
 

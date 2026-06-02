@@ -2,6 +2,9 @@ package com.launchpoint.wavdrop.ui.screen.nowplaying
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,7 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -50,7 +52,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -562,23 +568,76 @@ private fun SeekBar(
     } else {
         0f
     }
+    var trackWidthPx by remember { mutableStateOf(0) }
+
+    fun seekToOffset(x: Float) {
+        if (trackWidthPx <= 0 || durationMs <= 0) return
+        val fraction = (x / trackWidthPx).coerceIn(0f, 1f)
+        dragPositionMs = (fraction * durationMs).toLong()
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Slider(
-            value = sliderValue,
-            onValueChange = { fraction ->
-                isDragging = true
-                dragPositionMs = (fraction * durationMs).toLong()
-            },
-            onValueChangeFinished = {
-                if (isDragging) {
-                    onSeek(dragPositionMs)
-                    isDragging = false
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .onSizeChanged { trackWidthPx = it.width }
+                .pointerInput(isSeekable, durationMs, trackWidthPx) {
+                    if (!isSeekable || durationMs <= 0) return@pointerInput
+                    detectTapGestures { offset ->
+                        seekToOffset(offset.x)
+                        onSeek(dragPositionMs)
+                    }
                 }
-            },
-            enabled = isSeekable && durationMs > 0,
-            modifier = Modifier.fillMaxWidth(),
-        )
+                .pointerInput(isSeekable, durationMs, trackWidthPx) {
+                    if (!isSeekable || durationMs <= 0) return@pointerInput
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            seekToOffset(offset.x)
+                        },
+                        onDrag = { change, _ ->
+                            seekToOffset(change.position.x)
+                        },
+                        onDragEnd = {
+                            if (isDragging) onSeek(dragPositionMs)
+                            isDragging = false
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                        },
+                    )
+                },
+        ) {
+            val activeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+            val inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
+            val thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val centerY = size.height / 2f
+                val activeEnd = size.width * sliderValue
+                drawLine(
+                    color = inactiveColor,
+                    start = Offset(0f, centerY),
+                    end = Offset(size.width, centerY),
+                    strokeWidth = 3.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = activeColor,
+                    start = Offset(0f, centerY),
+                    end = Offset(activeEnd, centerY),
+                    strokeWidth = 4.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+                if (durationMs > 0) {
+                    drawCircle(
+                        color = thumbColor,
+                        radius = 5.dp.toPx(),
+                        center = Offset(activeEnd, centerY),
+                    )
+                }
+            }
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()

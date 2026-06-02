@@ -1,13 +1,24 @@
 package com.launchpoint.wavdrop.ui.navigation
 
 import android.net.Uri
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumsScreen
 import com.launchpoint.wavdrop.ui.screen.artists.ArtistDetailsScreen
@@ -88,10 +99,26 @@ private fun NavHostController.navigatePrimary(route: String) {
 @Composable
 fun WavdropNavGraph(
     navController: NavHostController = rememberNavController(),
+    viewModel: WavdropNavViewModel = hiltViewModel(),
 ) {
+    val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
+    var startRoute by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(startupDestination) {
+        if (startRoute == null && startupDestination != null) {
+            startRoute = startupDestination!!.toRoute()
+        }
+    }
+
+    val resolvedStartRoute = startRoute
+    if (resolvedStartRoute == null) {
+        Box(Modifier.fillMaxSize())
+        return
+    }
+
     NavHost(
         navController    = navController,
-        startDestination = Screen.Home.route,
+        startDestination = resolvedStartRoute,
     ) {
         composable(Screen.Home.route) {
             HomeScreen(
@@ -328,4 +355,11 @@ fun WavdropNavGraph(
             )
         }
     }
+}
+
+private fun StartupDestination.toRoute(): String = when (this) {
+    StartupDestination.HOME -> Screen.Home.route
+    StartupDestination.LIBRARY -> Screen.Library.route
+    StartupDestination.NOW_PLAYING -> Screen.NowPlaying.route
+    StartupDestination.SETTINGS -> Screen.Settings.route
 }

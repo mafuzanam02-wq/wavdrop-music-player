@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -29,11 +30,13 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
+import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import java.time.LocalDate
@@ -68,6 +72,7 @@ fun SettingsScreen(
     val exportState by viewModel.exportUiState.collectAsStateWithLifecycle()
     val scanSettings by viewModel.libraryScanSettings.collectAsStateWithLifecycle()
     val scanState by viewModel.libraryScanUiState.collectAsStateWithLifecycle()
+    val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val suggestedExportName = remember { "wavdrop-backup-${LocalDate.now()}.json" }
     val exportLauncher = rememberLauncherForActivityResult(
@@ -96,6 +101,7 @@ fun SettingsScreen(
     var minimumDurationSeconds by remember(scanSettings.minimumTrackDurationSeconds) {
         mutableFloatStateOf(scanSettings.minimumTrackDurationSeconds.toFloat())
     }
+    var showStartupDestinationDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -284,6 +290,13 @@ fun SettingsScreen(
             item { SectionHeader("Appearance") }
             item {
                 ClickableSettingsRow(
+                    title = "Open app to",
+                    subtitle = startupDestination.displayName,
+                    onClick = { showStartupDestinationDialog = true },
+                )
+            }
+            item {
+                ClickableSettingsRow(
                     title   = "Home Sections",
                     subtitle = "Choose which sections appear on your Home screen.",
                     onClick  = onHomeCustomizationClick,
@@ -300,6 +313,17 @@ fun SettingsScreen(
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+
+    if (showStartupDestinationDialog) {
+        StartupDestinationDialog(
+            selected = startupDestination,
+            onSelect = { destination ->
+                viewModel.setStartupDestination(destination)
+                showStartupDestinationDialog = false
+            },
+            onDismiss = { showStartupDestinationDialog = false },
+        )
     }
 }
 
@@ -405,6 +429,47 @@ private fun MinimumDurationRow(
             )
         }
     }
+}
+
+@Composable
+private fun StartupDestinationDialog(
+    selected: StartupDestination,
+    onSelect: (StartupDestination) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Open app to") },
+        text = {
+            Column {
+                StartupDestination.entries.forEach { destination ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(destination) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = destination == selected,
+                            onClick = { onSelect(destination) },
+                        )
+                        Text(
+                            text = destination.displayName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable
