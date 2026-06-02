@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -58,6 +59,7 @@ fun SongsScreen(
     val nowPlaying by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val favoriteSongIds by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isSearchActive) {
@@ -116,19 +118,26 @@ fun SongsScreen(
             )
         },
     ) { innerPadding ->
-        when (val state = uiState) {
-            HomeUiState.Loading -> LoadingSongs(Modifier.padding(innerPadding))
-            HomeUiState.Empty -> EmptySongs(Modifier.padding(innerPadding))
-            is HomeUiState.Songs -> SongListContent(
-                songs = state.songs,
-                currentSongId = nowPlaying.song?.id,
-                favoriteSongIds = favoriteSongIds,
-                onSongClick = viewModel::playSong,
-                onShuffleAll = viewModel::shuffleAll,
-                onToggleFavorite = viewModel::toggleFavorite,
-                onTrackDetailsClick = onTrackDetailsClick,
-                modifier = Modifier.padding(innerPadding),
-            )
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = viewModel::refreshLibrary,
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+        ) {
+            when (val state = uiState) {
+                HomeUiState.Loading -> LoadingSongs()
+                HomeUiState.Empty -> EmptySongs()
+                is HomeUiState.Songs -> SongListContent(
+                    songs = state.songs,
+                    currentSongId = nowPlaying.song?.id,
+                    favoriteSongIds = favoriteSongIds,
+                    onSongClick = viewModel::playSong,
+                    onShuffleAll = viewModel::shuffleAll,
+                    onToggleFavorite = viewModel::toggleFavorite,
+                    onTrackDetailsClick = onTrackDetailsClick,
+                )
+            }
         }
     }
 }

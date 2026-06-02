@@ -72,11 +72,35 @@ class PlayerController @Inject constructor(
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            // Pass fromTransition=true so StatsTracker resets its session even for same-song
-            // repeats (REPEAT_ONE / RepeatMode.ONE), where the song ID doesn't change but
-            // a new listening session has started.
+            // Belt-and-suspenders: covers queue auto-advance and any REPEAT_ONE loop where
+            // Media3 does fire onMediaItemTransition. The primary loop-boundary signal is
+            // onPositionDiscontinuity below; this acts as a fallback for missed callbacks.
             syncNowPlayingState(fromTransition = true)
             saveSessionAsync()
+        }
+
+        /**
+         * Primary REPEAT_ONE detection. Media3 does NOT reliably fire onMediaItemTransition
+         * on every loop of the same item — it may fire 0 or 1 times. However,
+         * onPositionDiscontinuity with DISCONTINUITY_REASON_AUTO_TRANSITION fires on every
+         * automatic position jump, including each REPEAT_ONE restart and each queue
+         * auto-advance. We use it as the definitive "new listening session" signal.
+         *
+         * Seeks ([DISCONTINUITY_REASON_SEEK]) do NOT trigger this path, so user scrubbing
+         * within a song never resets the stats session.
+         */
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                val song = libraryQueue.getOrNull(newPosition.mediaItemIndex) ?: return
+                statsTracker.onSongSelected(song)
+                if (mediaController?.isPlaying == true) {
+                    statsTracker.onPlaybackStarted()
+                }
+            }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {

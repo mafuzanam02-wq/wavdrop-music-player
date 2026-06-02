@@ -54,9 +54,15 @@ class StatsTracker @Inject constructor(
      */
     fun onSongSelected(newSong: Song) {
         if (currentSong?.id == newSong.id) {
-            // Same song re-selected: reset session so a fresh play can be counted.
-            accumulatedMs = 0L
-            sessionStartedAt = -1L
+            // Same song re-selected (REPEAT_ONE loop boundary, user replay, etc.).
+            // Flush any in-progress session first so the time already played in this
+            // loop is credited and the threshold can be checked — then reset cleanly
+            // for the next session. Without the flush, continuous REPEAT_ONE play
+            // (no pause between loops) would silently discard each loop's listen time.
+            flushSession()
+            checkAndRecordPlay()
+            accumulatedMs         = 0L
+            sessionStartedAt      = -1L
             playCountedForCurrent = false
             return
         }

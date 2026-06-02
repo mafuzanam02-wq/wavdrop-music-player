@@ -140,6 +140,22 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { repository.sync() }
     }
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    /** Explicit rescan of MediaStore / music folders, triggered by pull-to-refresh. */
+    fun refreshLibrary() {
+        if (_isRefreshing.value) return
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                repository.sync()
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
     fun playSong(song: Song) {
         val queue = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
         playerController.playFromQueue(queue = queue, startSong = song)

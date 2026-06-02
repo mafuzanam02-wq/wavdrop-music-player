@@ -154,47 +154,121 @@ class StatsTrackerTest {
         assertEquals(1, fakeWriter.plays.size)
     }
 
-    // ── REPEAT_ONE / same-song loop (PlayerController fix) ───────────────────
+    // ── REPEAT_ONE / same-song loop ──────────────────────────────────────────
 
-    /**
-     * Mirrors the REPEAT_ONE / song-loop scenario. When PlayerController detects
-     * onMediaItemTransition it now always calls onSongSelected + onPlaybackStarted,
-     * even when the song ID hasn't changed (RepeatMode.ONE). The two-call sequence
-     * (onSongSelected then onPlaybackStarted) is what this test verifies.
-     */
+    // PlayerController.onPositionDiscontinuity(DISCONTINUITY_REASON_AUTO_TRANSITION) is the
+    // reliable REPEAT_ONE signal. It calls onSongSelected(sameSong) + onPlaybackStarted().
+    // onMediaItemTransition(fromTransition=true) is a belt-and-suspenders fallback.
+    // Both reduce to the same StatsTracker call sequence tested below.
+
     @Test
-    fun `REPEAT_ONE loop increments play count on second loop`() {
-        // First loop: normal play
+    fun `REPEAT_ONE loop after pause increments play count`() {
+        // First loop plays through, user pauses partway (common case).
         tracker.onSongSelected(song(1))
         tracker.onPlaybackStarted()
         fakeClockMs += 30_000L
-        tracker.onPlaybackPaused()
+        tracker.onPlaybackPaused()            // threshold crossed → count = 1
         assertEquals(1, fakeWriter.plays.size)
 
-        // Media3 fires onMediaItemTransition for the repeat → PlayerController calls
-        // onSongSelected(same song) then onPlaybackStarted() because isPlaying stays true.
-        tracker.onSongSelected(song(1))      // session reset
-        tracker.onPlaybackStarted()          // new session starts immediately
+        // onPositionDiscontinuity fires → onSongSelected(same) + onPlaybackStarted()
+        tracker.onSongSelected(song(1))       // flush (no-op, already paused) → check (already counted) → reset
+        tracker.onPlaybackStarted()           // new session
         fakeClockMs += 30_000L
-        tracker.onPlaybackPaused()
+        tracker.onPlaybackPaused()            // threshold crossed → count = 2
 
         assertEquals(2, fakeWriter.plays.size)
         assertTrue(fakeWriter.plays.all { it.songId == 1L })
     }
 
     @Test
-    fun `REPEAT_ONE loop does not double-count if threshold not crossed on second pass`() {
+    fun `REPEAT_ONE continuous play without pause credits each full loop`() {
+        // The critical case: song plays to the end continuously (no pause), loops via
+        // onPositionDiscontinuity which calls onSongSelected while still playing.
+        tracker.onSongSelected(song(1))
+        tracker.onPlaybackStarted()                      // session 1 starts
+
+        // Loop boundary fires (onPositionDiscontinuity) while still playing:
+        // onSongSelected flushes the in-progress session (30 s) and checks threshold.
+        fakeClockMs += 30_000L
+        tracker.onSongSelected(song(1))                  // flush 30 s → threshold crossed → count = 1; reset
+        tracker.onPlaybackStarted()                      // session 2 starts
+
+        // Second loop plays through and pauses.
+        fakeClockMs += 30_000L
+        tracker.onPlaybackPaused()                       // threshold crossed → count = 2
+
+        assertEquals(2, fakeWriter.plays.size)
+        assertTrue(fakeWriter.plays.all { it.songId == 1L })
+    }
+
+    @Test
+    fun `REPEAT_ONE three continuous loops each count`() {
+        tracker.onSongSelected(song(1))
+        repeat(3) {
+            tracker.onPlaybackStarted()
+            fakeClockMs += 30_000L
+            // Each loop boundary: flush + check (crosses threshold) + reset
+            tracker.onSongSelected(song(1))
+        }
+        // Final pause to flush the last open session (below threshold since reset just happened)
+        tracker.onPlaybackPaused()
+
+        assertEquals(3, fakeWriter.plays.size)
+    }
+
+    @Test
+    fun `REPEAT_ONE loop does not double-count when threshold not crossed on next pass`() {
         tracker.onSongSelected(song(1))
         tracker.onPlaybackStarted()
         fakeClockMs += 30_000L
         tracker.onPlaybackPaused()            // first play counted
 
-        tracker.onSongSelected(song(1))       // loop starts
+        tracker.onSongSelected(song(1))       // loop boundary: flush (0 accumulated) → reset
         tracker.onPlaybackStarted()
         fakeClockMs += 5_000L                 // only 5 s — below threshold
         tracker.onPlaybackPaused()
 
-        assertEquals(1, fakeWriter.plays.size)  // still only one play
+        assertEquals(1, fakeWriter.plays.size)
+    }
+
+    @Test
+    fun `re-tap while playing above threshold credits the in-progress session`() {
+        // User plays 35 s (above 30 s threshold) then taps the same song again.
+        // onSongSelected flushes the active session before resetting.
+        tracker.onSongSelected(song(1))
+        tracker.onPlaybackStarted()
+        fakeClockMs += 35_000L
+
+        // User taps same song — PlayerController calls onSongSelected before setMediaItems.
+        tracker.onSongSelected(song(1))       // flush 35 s → threshold crossed → count = 1; reset
+
+        assertEquals(1, fakeWriter.plays.size)
+        assertEquals(35_000L, fakeWriter.plays[0].listenedMs)
+    }
+
+    @Test
+    fun `re-tap while playing below threshold discards partial listen`() {
+        tracker.onSongSelected(song(1))
+        tracker.onPlaybackStarted()
+        fakeClockMs += 10_000L
+
+        tracker.onSongSelected(song(1))       // flush 10 s → below threshold → reset
+
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
+    @Test
+    fun `seeking within same song does not reset the stats session`() {
+        // Seeks do NOT call onSongSelected — only onPositionDiscontinuity with
+        // DISCONTINUITY_REASON_AUTO_TRANSITION triggers onSongSelected. Seeking within
+        // the same song continues accumulating time in the same session.
+        tracker.onSongSelected(song(1))
+        playFor(15_000L)                      // 15 s — below threshold
+        // (user seeks forward — no StatsTracker call, time keeps accumulating)
+        playFor(20_000L)                      // +20 s = 35 s total → threshold crossed
+
+        assertEquals(1, fakeWriter.plays.size)
+        assertEquals(35_000L, fakeWriter.plays[0].listenedMs)
     }
 
     // ── skip logic ────────────────────────────────────────────────────────────
