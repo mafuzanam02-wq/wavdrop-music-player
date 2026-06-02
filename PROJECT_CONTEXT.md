@@ -273,16 +273,18 @@ All Songs, and `StartupDestination.SONGS` routes to `Screen.Songs.route`. Existi
 navigation routes remain unchanged.
 
 ## Navigation / Home / Song Actions
-Primary bottom navigation is Home, Library, and Settings only. Now Playing remains a direct route
-and is opened from mini-player/active playback entry points.
+Primary bottom navigation is Home, Songs, Library, and Settings only. Songs routes directly to
+All Songs. Now Playing remains a direct route and is opened from mini-player/active playback entry
+points.
 
 Home is a compact dashboard rather than a full song-list duplicate. It emphasizes continue
 listening, a recent-or-most-played preview, smart collections, and the Library shortcut.
 
 All Songs rows keep double-tap favorite toggling but no longer show a visible heart action. Row
 overflow menus provide Play, Play next, Add to queue, Toggle/Remove favorite, View stats, and View
-folder when folder metadata is available. Search result taps start playback at the selected song
-while preserving the full All Songs/library queue order.
+folder when folder metadata is available. Favorite toggles show brief snackbar feedback. Search
+result taps start playback at the selected song while preserving the full All Songs/library queue
+order.
 
 ## Editable Lyrics Foundation
 Track Details exposes "Edit lyrics" for unsynced lyrics. Saved lyrics are app-managed Room

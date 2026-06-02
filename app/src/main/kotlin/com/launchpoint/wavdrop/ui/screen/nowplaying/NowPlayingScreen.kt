@@ -5,7 +5,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +25,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -33,10 +33,11 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -84,6 +85,7 @@ import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 fun NowPlayingScreen(
     onNavigateBack: () -> Unit,
     onHomeClick: () -> Unit = {},
+    onSongsClick: () -> Unit = {},
     onLibraryClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
     onOpenTrackDetails: (Long) -> Unit = {},
@@ -101,6 +103,7 @@ fun NowPlayingScreen(
     var showAddToPlaylist by remember { mutableStateOf(false) }
     var showLyricsOverlay by remember { mutableStateOf(false) }
     var showLyricsEditor  by remember { mutableStateOf(false) }
+    var showMoreActions   by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -115,7 +118,9 @@ fun NowPlayingScreen(
                     }
                 },
                 actions = {
-                    if (state.song != null) {
+                    val song = state.song
+                    if (song != null) {
+                        val folderKey = song.validFolderKey()
                         IconButton(onClick = { showAddToPlaylist = true }) {
                             Icon(
                                 imageVector        = Icons.AutoMirrored.Filled.PlaylistAdd,
@@ -131,6 +136,36 @@ fun NowPlayingScreen(
                                                      else MaterialTheme.colorScheme.onSurface,
                             )
                         }
+                        Box {
+                            IconButton(onClick = { showMoreActions = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "More actions",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showMoreActions,
+                                onDismissRequest = { showMoreActions = false },
+                            ) {
+                                if (folderKey != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Folder") },
+                                        onClick = {
+                                            showMoreActions = false
+                                            onOpenFolder(folderKey)
+                                        },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Stats") },
+                                    onClick = {
+                                        showMoreActions = false
+                                        onOpenStatistics()
+                                    },
+                                )
+                            }
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -143,6 +178,7 @@ fun NowPlayingScreen(
             PrimaryNavigationBar(
                 selected = null,
                 onHomeClick = onHomeClick,
+                onSongsClick = onSongsClick,
                 onLibraryClick = onLibraryClick,
                 onSettingsClick = onSettingsClick,
             )
@@ -166,8 +202,6 @@ fun NowPlayingScreen(
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenAlbum        = onOpenAlbum,
                 onOpenArtist       = onOpenArtist,
-                onOpenFolder       = onOpenFolder,
-                onOpenStatistics   = onOpenStatistics,
                 modifier          = Modifier.padding(innerPadding),
             )
         }
@@ -225,8 +259,6 @@ private fun NowPlayingContent(
     onOpenTrackDetails: (Long) -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
-    onOpenFolder: (String) -> Unit,
-    onOpenStatistics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val song = state.song ?: return
@@ -260,14 +292,6 @@ private fun NowPlayingContent(
             } else {
                 null
             },
-        )
-
-        Spacer(Modifier.height(14.dp))
-        NowPlayingActionRow(
-            song = song,
-            onToggleLyrics = onToggleLyrics,
-            onOpenFolder = onOpenFolder,
-            onOpenStatistics = onOpenStatistics,
         )
 
         Spacer(Modifier.height(16.dp))
@@ -333,58 +357,6 @@ private fun NowPlayingContent(
             }
         }
     }
-}
-
-@Composable
-private fun NowPlayingActionRow(
-    song: Song,
-    onToggleLyrics: () -> Unit,
-    onOpenFolder: (String) -> Unit,
-    onOpenStatistics: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val folderKey = song.validFolderKey()
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        NowPlayingActionChip(
-            label = "Lyrics",
-            onClick = onToggleLyrics,
-        )
-        if (folderKey != null) {
-            NowPlayingActionChip(
-                label = "Folder",
-                onClick = { onOpenFolder(folderKey) },
-            )
-        }
-        NowPlayingActionChip(
-            label = "Stats",
-            onClick = onOpenStatistics,
-        )
-    }
-}
-
-@Composable
-private fun NowPlayingActionChip(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    AssistChip(
-        onClick = onClick,
-        label = {
-            Text(
-                text = label,
-                maxLines = 1,
-            )
-        },
-        modifier = modifier,
-    )
 }
 
 @Composable

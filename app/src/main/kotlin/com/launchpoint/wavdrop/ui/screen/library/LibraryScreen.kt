@@ -83,6 +83,7 @@ fun LibraryScreen(
                 PrimaryNavigationBar(
                     selected = PrimaryDestination.LIBRARY,
                     onHomeClick = onHomeClick,
+                    onSongsClick = onSongsClick,
                     onLibraryClick = {},
                     onSettingsClick = onSettingsClick,
                 )

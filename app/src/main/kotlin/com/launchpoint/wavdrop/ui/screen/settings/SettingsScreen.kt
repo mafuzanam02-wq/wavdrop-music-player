@@ -58,6 +58,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onHomeClick: () -> Unit = {},
+    onSongsClick: () -> Unit = {},
     onLibraryClick: () -> Unit = {},
     onNowPlayingClick: () -> Unit = {},
     onImportClick: () -> Unit,
@@ -125,6 +126,7 @@ fun SettingsScreen(
             PrimaryNavigationBar(
                 selected = PrimaryDestination.SETTINGS,
                 onHomeClick = onHomeClick,
+                onSongsClick = onSongsClick,
                 onLibraryClick = onLibraryClick,
                 onSettingsClick = {},
             )

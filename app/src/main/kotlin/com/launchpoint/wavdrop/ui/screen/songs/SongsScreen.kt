@@ -23,6 +23,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,6 +46,8 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
+import com.launchpoint.wavdrop.ui.components.PrimaryDestination
+import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.components.SongRow
 import com.launchpoint.wavdrop.ui.screen.home.HomeUiState
@@ -54,7 +58,10 @@ import kotlinx.coroutines.launch
 @Composable
 fun SongsScreen(
     onNavigateBack: () -> Unit,
+    onHomeClick: () -> Unit,
+    onLibraryClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
@@ -65,6 +72,8 @@ fun SongsScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
 
     BackHandler(enabled = isSearchActive) {
         isSearchActive = false
@@ -110,16 +119,27 @@ fun SongsScreen(
                 )
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            MiniPlayer(
-                nowPlaying = nowPlaying,
-                onOpenNowPlaying = onNowPlayingClick,
-                onTogglePlayPause = viewModel::togglePlayPause,
-                onPrevious = viewModel::skipToPrevious,
-                onNext = viewModel::skipToNext,
-                onToggleShuffle = viewModel::toggleShuffle,
-                onCycleRepeatMode = viewModel::cycleRepeatMode,
-            )
+            androidx.compose.foundation.layout.Column {
+                MiniPlayer(
+                    nowPlaying = nowPlaying,
+                    onOpenNowPlaying = onNowPlayingClick,
+                    onTogglePlayPause = viewModel::togglePlayPause,
+                    onPrevious = viewModel::skipToPrevious,
+                    onNext = viewModel::skipToNext,
+                    onToggleShuffle = viewModel::toggleShuffle,
+                    onCycleRepeatMode = viewModel::cycleRepeatMode,
+                    applyNavigationBarsPadding = false,
+                )
+                PrimaryNavigationBar(
+                    selected = PrimaryDestination.SONGS,
+                    onHomeClick = onHomeClick,
+                    onSongsClick = {},
+                    onLibraryClick = onLibraryClick,
+                    onSettingsClick = onSettingsClick,
+                )
+            }
         },
     ) { innerPadding ->
         PullToRefreshBox(
@@ -140,7 +160,14 @@ fun SongsScreen(
                     onShuffleAll = viewModel::shuffleAll,
                     onPlayNext = viewModel::playNext,
                     onAddToQueue = viewModel::addToQueue,
-                    onToggleFavorite = viewModel::toggleFavorite,
+                    onToggleFavorite = { song, wasFavorite ->
+                        viewModel.toggleFavorite(song.id)
+                        snackbarScope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
+                            )
+                        }
+                    },
                     onTrackDetailsClick = onTrackDetailsClick,
                     onFolderClick = onFolderClick,
                 )
@@ -158,7 +185,7 @@ private fun SongListContent(
     onShuffleAll: () -> Unit,
     onPlayNext: (Song) -> Unit,
     onAddToQueue: (Song) -> Unit,
-    onToggleFavorite: (Long) -> Unit,
+    onToggleFavorite: (Song, Boolean) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -213,7 +240,7 @@ private fun SongListContent(
                     onPlay = { onSongClick(song) },
                     onPlayNext = { onPlayNext(song) },
                     onAddToQueue = { onAddToQueue(song) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
+                    onToggleFavorite = { onToggleFavorite(song, song.id in favoriteSongIds) },
                     onViewStats = { onTrackDetailsClick(song.id) },
                     onViewFolder = song.validFolderKey()?.let { folderKey ->
                         { onFolderClick(folderKey) }

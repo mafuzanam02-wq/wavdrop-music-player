@@ -80,6 +80,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     onSettingsClick: () -> Unit = {},
+    onSongsClick: () -> Unit = {},
     onLibraryClick: () -> Unit = {},
     onNowPlayingClick: () -> Unit = {},
     onTrackDetailsClick: (Long) -> Unit = {},
@@ -177,6 +178,7 @@ fun HomeScreen(
                 PrimaryNavigationBar(
                     selected = PrimaryDestination.HOME,
                     onHomeClick = {},
+                    onSongsClick = onSongsClick,
                     onLibraryClick = onLibraryClick,
                     onSettingsClick = onSettingsClick,
                 )
