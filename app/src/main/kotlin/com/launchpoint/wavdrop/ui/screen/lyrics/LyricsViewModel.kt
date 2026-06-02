@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -30,6 +32,7 @@ class LyricsViewModel @Inject constructor(
     private val _lyricsState = MutableStateFlow<LyricsResult>(LyricsResult.Loading)
     val lyricsState: StateFlow<LyricsResult> = _lyricsState.asStateFlow()
 
+    /** True while a user override exists for this track. */
     val hasCustomLyrics: StateFlow<Boolean> =
         lyricsRepository.observeOverride(songId)
             .map { it != null }
@@ -41,7 +44,19 @@ class LyricsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            reloadLyrics()
+            // Re-observe whenever the song entity itself changes (e.g. MediaStore rescan
+            // with a different URI). distinctUntilChanged prevents restarts for no-op emits.
+            songRepository.observeSongById(songId)
+                .filterNotNull()
+                .distinctUntilChanged { old, new -> old.id == new.id && old.uri == new.uri }
+                .collectLatest { song ->
+                    // observeLyrics reacts to override changes automatically:
+                    // saving custom lyrics pushes Available immediately; clearing pushes
+                    // Loading then the file result — all without re-entering the screen.
+                    lyricsRepository.observeLyrics(song).collect { result ->
+                        _lyricsState.value = result
+                    }
+                }
         }
     }
 
@@ -49,7 +64,7 @@ class LyricsViewModel @Inject constructor(
         viewModelScope.launch {
             val song = songRepository.observeSongById(songId).filterNotNull().first()
             lyricsRepository.saveCustomLyrics(song, text)
-            reloadLyrics()
+            // No reloadLyrics() needed — observeLyrics auto-updates via the Room override Flow.
             onComplete()
         }
     }
@@ -58,14 +73,8 @@ class LyricsViewModel @Inject constructor(
         viewModelScope.launch {
             val song = songRepository.observeSongById(songId).filterNotNull().first()
             lyricsRepository.clearCustomLyrics(song)
-            reloadLyrics()
+            // No reloadLyrics() needed — observeLyrics auto-updates via the Room override Flow.
             onComplete()
         }
-    }
-
-    private suspend fun reloadLyrics() {
-        val song = songRepository.observeSongById(songId).filterNotNull().first()
-        _lyricsState.value = LyricsResult.Loading
-        _lyricsState.value = lyricsRepository.getLyrics(song)
     }
 }

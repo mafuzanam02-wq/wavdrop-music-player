@@ -5,8 +5,11 @@ import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.model.Song
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LyricsRepositoryTest {
@@ -382,6 +385,146 @@ class LyricsRepositoryTest {
         }
 
         assertEquals(2, fake.callCount)
+    }
+
+    // ── observeLyrics reactive Flow ───────────────────────────────────────────
+
+    /**
+     * When an override exists, [LyricsRepository.observeLyrics] must emit the override
+     * text immediately without touching the file extractors.
+     */
+    @Test
+    fun `observeLyrics emits override immediately when override exists`() {
+        val song = song(300)
+        val overrideDao = FakeLyricsOverrideDao(
+            LyricsOverrideEntity(song.id, song.uri, "Custom override", 1L),
+        )
+        val embedded = FakeLyricsExtractor(default = LyricsResult.Available("Embedded"))
+        val repo = LyricsRepository(embedded, FakeSidecarLyricsExtractor(),
+            LyricsOverrideRepository(overrideDao))
+
+        val result = runBlocking { repo.observeLyrics(song).take(1).toList().single() }
+
+        assertEquals(LyricsResult.Available("Custom override"), result)
+        assertEquals(0, embedded.callCount) // file extractors not consulted
+    }
+
+    /**
+     * With no override the flow emits [LyricsResult.Loading] first, then the file result.
+     */
+    @Test
+    fun `observeLyrics emits loading then file result when no override`() {
+        val song = song(301)
+        val repo = LyricsRepository(
+            FakeLyricsExtractor(default = LyricsResult.Available("File lyrics")),
+            FakeSidecarLyricsExtractor(),
+            LyricsOverrideRepository(FakeLyricsOverrideDao()),
+        )
+
+        val results = runBlocking { repo.observeLyrics(song).take(2).toList() }
+
+        assertEquals(LyricsResult.Loading, results[0])
+        assertEquals(LyricsResult.Available("File lyrics"), results[1])
+    }
+
+    /**
+     * With no override and no file lyrics, the flow emits Loading then NotFound.
+     */
+    @Test
+    fun `observeLyrics emits loading then NotFound when no lyrics anywhere`() {
+        val song = song(302)
+        val repo = LyricsRepository(
+            FakeLyricsExtractor(default = LyricsResult.NotFound),
+            FakeSidecarLyricsExtractor(default = sidecarLookup()),
+            LyricsOverrideRepository(FakeLyricsOverrideDao()),
+        )
+
+        val results = runBlocking { repo.observeLyrics(song).take(2).toList() }
+
+        assertEquals(LyricsResult.Loading, results[0])
+        assertEquals(LyricsResult.NotFound, results[1])
+    }
+
+    /**
+     * After [LyricsRepository.saveCustomLyrics] is called, a fresh [observeLyrics]
+     * observation returns the saved override — verifying the Room override propagates.
+     */
+    @Test
+    fun `observeLyrics returns saved override on subsequent observation`() {
+        val song = song(303)
+        val repo = LyricsRepository(
+            FakeLyricsExtractor(default = LyricsResult.NotFound),
+            FakeSidecarLyricsExtractor(default = sidecarLookup()),
+            LyricsOverrideRepository(FakeLyricsOverrideDao()),
+        )
+
+        runBlocking {
+            // Initial observation: no override → file fallback
+            val initial = repo.observeLyrics(song).take(2).toList().last()
+            assertEquals(LyricsResult.NotFound, initial)
+
+            // Save an override
+            repo.saveCustomLyrics(song, "Saved lyrics")
+
+            // Subsequent observation: override now present → emits immediately
+            val afterSave = repo.observeLyrics(song).take(1).toList().single()
+            assertEquals(LyricsResult.Available("Saved lyrics"), afterSave)
+        }
+    }
+
+    /**
+     * After [LyricsRepository.clearCustomLyrics] is called, a fresh [observeLyrics]
+     * observation falls back to file lyrics — verifying the override removal propagates.
+     */
+    @Test
+    fun `observeLyrics falls back to file lyrics after override is cleared`() {
+        val song = song(304)
+        val overrideDao = FakeLyricsOverrideDao(
+            LyricsOverrideEntity(song.id, song.uri, "Custom", 1L),
+        )
+        val repo = LyricsRepository(
+            FakeLyricsExtractor(default = LyricsResult.Available("Embedded fallback")),
+            FakeSidecarLyricsExtractor(),
+            LyricsOverrideRepository(overrideDao),
+        )
+
+        runBlocking {
+            // Initial observation: override exists
+            val withOverride = repo.observeLyrics(song).take(1).toList().single()
+            assertEquals(LyricsResult.Available("Custom"), withOverride)
+
+            // Clear the override
+            repo.clearCustomLyrics(song)
+
+            // Subsequent observation: no override → file lookup
+            val results = repo.observeLyrics(song).take(2).toList()
+            assertEquals(LyricsResult.Loading, results[0])
+            assertEquals(LyricsResult.Available("Embedded fallback"), results[1])
+        }
+    }
+
+    /**
+     * The override always takes precedence over embedded lyrics.
+     */
+    @Test
+    fun `observeLyrics override wins over embedded and sidecar`() {
+        val song = song(305)
+        val repo = LyricsRepository(
+            FakeLyricsExtractor(default = LyricsResult.Available("Embedded")),
+            FakeSidecarLyricsExtractor(
+                default = sidecarLookup(
+                    result = LyricsResult.Available("Sidecar"),
+                    sameFolderLrc = LyricsLookupStatus.FOUND,
+                ),
+            ),
+            LyricsOverrideRepository(FakeLyricsOverrideDao(
+                LyricsOverrideEntity(song.id, song.uri, "Override wins", 1L),
+            )),
+        )
+
+        val result = runBlocking { repo.observeLyrics(song).take(1).toList().single() }
+
+        assertEquals(LyricsResult.Available("Override wins"), result)
     }
 
     @Test

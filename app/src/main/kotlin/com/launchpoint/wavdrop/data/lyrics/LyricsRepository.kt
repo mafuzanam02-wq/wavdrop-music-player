@@ -2,6 +2,9 @@ package com.launchpoint.wavdrop.data.lyrics
 
 import com.launchpoint.wavdrop.data.model.Song
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -29,6 +32,32 @@ class LyricsRepository @Inject constructor(
 
     fun observeOverride(songId: Long) =
         overrideRepository?.observeOverride(songId) ?: flowOf(null)
+
+    /**
+     * Reactive lyrics stream for a single song.
+     *
+     * Emits immediately whenever the user override changes:
+     * - Override present  → [LyricsResult.Available] with the override text.
+     * - No override       → [LyricsResult.Loading] followed by the result from embedded /
+     *                       sidecar lookup (runs on [Dispatchers.IO]).
+     *
+     * Use this in ViewModels instead of the one-shot [getLyrics] so that saving or clearing
+     * custom lyrics updates the displayed lyrics without requiring a screen reload.
+     */
+    fun observeLyrics(song: Song): Flow<LyricsResult> {
+        val overrideFlow = overrideRepository?.observeOverride(song.id) ?: flowOf(null)
+        return overrideFlow.flatMapLatest { override ->
+            if (override != null) {
+                flowOf<LyricsResult>(LyricsResult.Available(override.lyrics))
+            } else {
+                flow<LyricsResult> {
+                    emit(LyricsResult.Loading)
+                    val result = withContext(Dispatchers.IO) { resolveFileLyrics(song) }
+                    emit(result)
+                }
+            }
+        }
+    }
 
     suspend fun saveCustomLyrics(song: Song, lyrics: String) {
         overrideRepository?.saveOverride(song, lyrics)
@@ -90,6 +119,22 @@ class LyricsRepository @Inject constructor(
                 songContentUri = song.uri,
             ),
         )
+    }
+
+    /**
+     * Embedded + sidecar lookup with no override check. Called from [observeLyrics] when
+     * no user override exists. Must be called from a background dispatcher.
+     */
+    private fun resolveFileLyrics(song: Song): LyricsResult {
+        val embedded = embeddedExtractor.extract(song.uri)
+        if (embedded is LyricsResult.Available) return embedded
+        val sidecar = sidecarExtractor.lookup(song)
+        return when {
+            sidecar.result is LyricsResult.Available -> sidecar.result
+            embedded is LyricsResult.Error && sidecar.result is LyricsResult.Error ->
+                LyricsResult.Error("${embedded.message}; ${sidecar.result.message}")
+            else -> LyricsResult.NotFound
+        }
     }
 
     private fun LyricsResult.toLookupStatus(): LyricsLookupStatus = when (this) {

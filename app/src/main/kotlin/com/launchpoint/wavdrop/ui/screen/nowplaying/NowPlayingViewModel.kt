@@ -55,8 +55,11 @@ class NowPlayingViewModel @Inject constructor(
                     if (song == null) {
                         _lyricsState.value = LyricsResult.NotFound
                     } else {
-                        _lyricsState.value = LyricsResult.Loading
-                        _lyricsState.value = lyricsRepository.getLyrics(song)
+                        // Observe reactively: any override save/clear emits a new value
+                        // immediately without needing the song to change or screen to reload.
+                        lyricsRepository.observeLyrics(song).collect { result ->
+                            _lyricsState.value = result
+                        }
                     }
                 }
         }
