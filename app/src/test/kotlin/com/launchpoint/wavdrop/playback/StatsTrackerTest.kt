@@ -154,6 +154,49 @@ class StatsTrackerTest {
         assertEquals(1, fakeWriter.plays.size)
     }
 
+    // ── REPEAT_ONE / same-song loop (PlayerController fix) ───────────────────
+
+    /**
+     * Mirrors the REPEAT_ONE / song-loop scenario. When PlayerController detects
+     * onMediaItemTransition it now always calls onSongSelected + onPlaybackStarted,
+     * even when the song ID hasn't changed (RepeatMode.ONE). The two-call sequence
+     * (onSongSelected then onPlaybackStarted) is what this test verifies.
+     */
+    @Test
+    fun `REPEAT_ONE loop increments play count on second loop`() {
+        // First loop: normal play
+        tracker.onSongSelected(song(1))
+        tracker.onPlaybackStarted()
+        fakeClockMs += 30_000L
+        tracker.onPlaybackPaused()
+        assertEquals(1, fakeWriter.plays.size)
+
+        // Media3 fires onMediaItemTransition for the repeat → PlayerController calls
+        // onSongSelected(same song) then onPlaybackStarted() because isPlaying stays true.
+        tracker.onSongSelected(song(1))      // session reset
+        tracker.onPlaybackStarted()          // new session starts immediately
+        fakeClockMs += 30_000L
+        tracker.onPlaybackPaused()
+
+        assertEquals(2, fakeWriter.plays.size)
+        assertTrue(fakeWriter.plays.all { it.songId == 1L })
+    }
+
+    @Test
+    fun `REPEAT_ONE loop does not double-count if threshold not crossed on second pass`() {
+        tracker.onSongSelected(song(1))
+        tracker.onPlaybackStarted()
+        fakeClockMs += 30_000L
+        tracker.onPlaybackPaused()            // first play counted
+
+        tracker.onSongSelected(song(1))       // loop starts
+        tracker.onPlaybackStarted()
+        fakeClockMs += 5_000L                 // only 5 s — below threshold
+        tracker.onPlaybackPaused()
+
+        assertEquals(1, fakeWriter.plays.size)  // still only one play
+    }
+
     // ── skip logic ────────────────────────────────────────────────────────────
 
     @Test

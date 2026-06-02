@@ -72,7 +72,10 @@ class PlayerController @Inject constructor(
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            syncNowPlayingState()
+            // Pass fromTransition=true so StatsTracker resets its session even for same-song
+            // repeats (REPEAT_ONE / RepeatMode.ONE), where the song ID doesn't change but
+            // a new listening session has started.
+            syncNowPlayingState(fromTransition = true)
             saveSessionAsync()
         }
 
@@ -341,7 +344,7 @@ class PlayerController @Inject constructor(
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
     }
 
-    private fun syncNowPlayingState() {
+    private fun syncNowPlayingState(fromTransition: Boolean = false) {
         val controller = mediaController
         val currentQueueIndex = controller?.currentMediaItemIndex ?: currentQueueIndex()
         val currentSong = currentQueueIndex?.let { libraryQueue.getOrNull(it) }
@@ -349,10 +352,13 @@ class PlayerController @Inject constructor(
             ?.let(playbackOrder::indexOf)
             ?.takeIf { it >= 0 }
             ?: _nowPlayingState.value.currentIndex
-        if (currentSong != null && currentSong.id != _nowPlayingState.value.song?.id) {
+        // fromTransition=true on every onMediaItemTransition (auto-advance, REPEAT_ONE, seek).
+        // The song-ID guard alone misses REPEAT_ONE because the ID doesn't change, leaving
+        // playCountedForCurrent stuck at true and the second play never counted.
+        if (currentSong != null && (fromTransition || currentSong.id != _nowPlayingState.value.song?.id)) {
             statsTracker.onSongSelected(currentSong)
-            // During auto-advance the player stays in isPlaying=true, so onIsPlayingChanged(true)
-            // never fires for the new song. Start its session explicitly here.
+            // During auto-advance / repeat the player stays in isPlaying=true, so
+            // onIsPlayingChanged(true) never fires. Start the new session explicitly.
             if (controller?.isPlaying == true) {
                 statsTracker.onPlaybackStarted()
             }

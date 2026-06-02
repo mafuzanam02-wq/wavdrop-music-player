@@ -30,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -52,6 +53,7 @@ fun StatisticsScreen(
     viewModel: StatisticsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -72,14 +74,21 @@ fun StatisticsScreen(
             )
         },
     ) { innerPadding ->
-        when (val state = uiState) {
-            StatisticsUiState.Loading -> LoadingContent(Modifier.padding(innerPadding))
-            StatisticsUiState.Empty -> EmptyContent(Modifier.padding(innerPadding))
-            is StatisticsUiState.Content -> DashboardContent(
-                summary = state.summary,
-                onTrackDetailsClick = onTrackDetailsClick,
-                modifier = Modifier.padding(innerPadding),
-            )
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+        ) {
+            when (val state = uiState) {
+                StatisticsUiState.Loading -> LoadingContent()
+                StatisticsUiState.Empty -> EmptyContent()
+                is StatisticsUiState.Content -> DashboardContent(
+                    summary = state.summary,
+                    onTrackDetailsClick = onTrackDetailsClick,
+                )
+            }
         }
     }
 }
