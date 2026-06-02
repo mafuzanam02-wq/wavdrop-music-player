@@ -1,4 +1,4 @@
-package com.launchpoint.wavdrop.ui.screen.nowplaying
+﻿package com.launchpoint.wavdrop.ui.screen.nowplaying
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -35,17 +34,21 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,13 +96,11 @@ fun NowPlayingScreen(
     val state             by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val lyricsState       by viewModel.lyricsState.collectAsStateWithLifecycle()
     val isFavorite        by viewModel.isFavorite.collectAsStateWithLifecycle()
+    val hasCustomLyrics   by viewModel.hasCustomLyrics.collectAsStateWithLifecycle()
     val playlists         by viewModel.playlists.collectAsStateWithLifecycle()
     var showAddToPlaylist by remember { mutableStateOf(false) }
     var showLyricsOverlay by remember { mutableStateOf(false) }
-
-    LaunchedEffect(state.song?.id) {
-        showLyricsOverlay = false
-    }
+    var showLyricsEditor  by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -140,10 +141,9 @@ fun NowPlayingScreen(
         },
         bottomBar = {
             PrimaryNavigationBar(
-                selected = PrimaryDestination.NOW_PLAYING,
+                selected = null,
                 onHomeClick = onHomeClick,
                 onLibraryClick = onLibraryClick,
-                onNowPlayingClick = {},
                 onSettingsClick = onSettingsClick,
             )
         },
@@ -162,7 +162,7 @@ fun NowPlayingScreen(
                 lyrics            = lyricsState,
                 showLyricsOverlay = showLyricsOverlay,
                 onToggleLyrics    = { showLyricsOverlay = !showLyricsOverlay },
-                onCloseLyrics     = { showLyricsOverlay = false },
+                onEditLyrics      = { showLyricsEditor = true },
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenAlbum        = onOpenAlbum,
                 onOpenArtist       = onOpenArtist,
@@ -187,6 +187,26 @@ fun NowPlayingScreen(
             onDismiss        = { showAddToPlaylist = false },
         )
     }
+
+    if (showLyricsEditor && state.song != null) {
+        LyricsEditorDialog(
+            lyrics = lyricsState,
+            hasCustomLyrics = hasCustomLyrics,
+            onSave = { text ->
+                viewModel.saveCustomLyrics(text) {
+                    showLyricsEditor = false
+                    showLyricsOverlay = true
+                }
+            },
+            onClear = {
+                viewModel.clearCustomLyrics {
+                    showLyricsEditor = false
+                    showLyricsOverlay = true
+                }
+            },
+            onDismiss = { showLyricsEditor = false },
+        )
+    }
 }
 
 @Composable
@@ -201,7 +221,7 @@ private fun NowPlayingContent(
     lyrics: LyricsResult,
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
-    onCloseLyrics: () -> Unit,
+    onEditLyrics: () -> Unit,
     onOpenTrackDetails: (Long) -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
@@ -227,7 +247,8 @@ private fun NowPlayingContent(
             queuePosition      = queuePosition,
             lyrics             = lyrics,
             showLyricsOverlay  = showLyricsOverlay,
-            onCloseLyrics      = onCloseLyrics,
+            onToggleLyrics     = onToggleLyrics,
+            onEditLyrics       = onEditLyrics,
             onOpenTrackDetails = { onOpenTrackDetails(song.id) },
             onOpenArtist       = if (song.hasKnownArtist()) {
                 { onOpenArtist(ArtistGrouper.artistKey(song)) }
@@ -367,12 +388,72 @@ private fun NowPlayingActionChip(
 }
 
 @Composable
+private fun LyricsEditorDialog(
+    lyrics: LyricsResult,
+    hasCustomLyrics: Boolean,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember(lyrics) {
+        mutableStateOf((lyrics as? LyricsResult.Available)?.text.orEmpty())
+    }
+    val canSave = text.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit lyrics") },
+        text = {
+            Column {
+                Text(
+                    text = "Unsynced lyrics. Timing and karaoke highlighting are not supported yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                )
+                Spacer(Modifier.height(12.dp))
+                TextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    placeholder = { Text("Lyrics") },
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(text) },
+                enabled = canSave,
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (hasCustomLyrics) {
+                    OutlinedButton(onClick = onClear) {
+                        Text("Clear")
+                    }
+                    Spacer(Modifier.size(8.dp))
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        },
+    )
+}
+
+@Composable
 private fun TrackInfoBlock(
     song: Song,
     queuePosition: String,
     lyrics: LyricsResult,
     showLyricsOverlay: Boolean,
-    onCloseLyrics: () -> Unit,
+    onToggleLyrics: () -> Unit,
+    onEditLyrics: () -> Unit,
     onOpenTrackDetails: () -> Unit,
     onOpenArtist: (() -> Unit)?,
     onOpenAlbum: (() -> Unit)?,
@@ -386,13 +467,26 @@ private fun TrackInfoBlock(
             song = song,
             lyrics = lyrics,
             showLyricsOverlay = showLyricsOverlay,
-            onCloseLyrics = onCloseLyrics,
+            onToggleLyrics = onToggleLyrics,
+            onEditLyrics = onEditLyrics,
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 360.dp)
                 .aspectRatio(1f),
         )
-        Spacer(Modifier.height(28.dp))
+        if (!showLyricsOverlay) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Double-tap for lyrics · Long-press to edit",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
+        } else {
+            Spacer(Modifier.height(24.dp))
+        }
         Text(
             text       = song.title,
             style      = MaterialTheme.typography.headlineSmall,
@@ -447,10 +541,18 @@ private fun ArtworkWithLyricsOverlay(
     song: Song,
     lyrics: LyricsResult,
     showLyricsOverlay: Boolean,
-    onCloseLyrics: () -> Unit,
+    onToggleLyrics: () -> Unit,
+    onEditLyrics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier = modifier) {
+    Box(
+        modifier = modifier.pointerInput(showLyricsOverlay, song.id) {
+            detectTapGestures(
+                onDoubleTap = { onToggleLyrics() },
+                onLongPress = { onEditLyrics() },
+            )
+        },
+    ) {
         ArtworkImage(
             artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
             contentDescription = "Album artwork for ${song.album}",
@@ -464,22 +566,21 @@ private fun ArtworkWithLyricsOverlay(
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.58f)),
             ) {
-                IconButton(
-                    onClick = onCloseLyrics,
-                    modifier = Modifier.align(Alignment.TopEnd),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close lyrics",
-                        tint = Color.White,
-                    )
-                }
-
                 LyricsOverlayContent(
                     lyrics = lyrics,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 22.dp, end = 22.dp, top = 52.dp, bottom = 22.dp),
+                        .padding(start = 22.dp, end = 22.dp, top = 22.dp, bottom = 52.dp),
+                )
+                Text(
+                    text = "Double-tap to close · Long-press to edit",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.62f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
                 )
             }
         }
@@ -513,7 +614,7 @@ private fun LyricsOverlayContent(
         is LyricsResult.Error -> {
             Box(modifier = modifier, contentAlignment = Alignment.Center) {
                 Text(
-                    text = "No lyrics found for this track.",
+                    text = "No lyrics found",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.88f),
                     textAlign = TextAlign.Center,

@@ -136,7 +136,7 @@ fun HomeScreen(
     // ── Layout ────────────────────────────────────────────────────────────────
     Scaffold(
         topBar = {
-            if (isSearchActive) {
+            if (false) {
                 SearchTopAppBar(
                     query        = searchQuery,
                     onQueryChange = viewModel::setSearchQuery,
@@ -154,15 +154,6 @@ fun HomeScreen(
                             contentDescription = "Wavdrop",
                             modifier           = Modifier.size(48.dp),
                         )
-                    },
-                    actions = {
-                        IconButton(onClick = { isSearchActive = true }) {
-                            Icon(
-                                imageVector        = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint               = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor    = MaterialTheme.colorScheme.surface,
@@ -187,7 +178,6 @@ fun HomeScreen(
                     selected = PrimaryDestination.HOME,
                     onHomeClick = {},
                     onLibraryClick = onLibraryClick,
-                    onNowPlayingClick = onNowPlayingClick,
                     onSettingsClick = onSettingsClick,
                 )
             }
@@ -195,7 +185,7 @@ fun HomeScreen(
     ) { innerPadding ->
         when (permissionStatus) {
             AudioPermissionStatus.Granted ->
-                if (isSearchActive) {
+                if (false) {
                     LibraryContent(
                         uiState             = uiState,
                         currentSongId       = nowPlaying.song?.id,
@@ -453,57 +443,33 @@ private fun HomeDashboardContent(
                 )
             }
         } else {
-            if (HomeSectionId.RECENTLY_PLAYED in visibleSections) {
+            val previewTitle: String
+            val previewSongs: List<Song>
+            val previewEmptyText: String
+            if (HomeSectionId.RECENTLY_PLAYED in visibleSections && dashboard.recentlyPlayed.isNotEmpty()) {
+                previewTitle = "Recently Played"
+                previewSongs = dashboard.recentlyPlayed
+                previewEmptyText = "Play a song and recent listens will land here."
+            } else {
+                previewTitle = "Most Played"
+                previewSongs = dashboard.mostPlayed
+                previewEmptyText = "Your repeat listens will appear here."
+            }
+
+            if (
+                HomeSectionId.RECENTLY_PLAYED in visibleSections ||
+                HomeSectionId.MOST_PLAYED in visibleSections
+            ) {
                 dashboardSection(
-                    title = "Recently Played",
-                    songs = dashboard.recentlyPlayed,
-                    emptyText = "Play a song and recent listens will land here.",
+                    title = previewTitle,
+                    songs = previewSongs,
+                    emptyText = previewEmptyText,
                     currentSongId = currentSongId,
                     favoriteSongIds = favoriteSongIds,
                     onSongClick = onSongClick,
                     onToggleFavorite = onToggleFavorite,
                     onTrackDetailsClick = onTrackDetailsClick,
                 )
-            }
-            if (HomeSectionId.FAVORITES in visibleSections) {
-                dashboardSection(
-                    title = "Favorites",
-                    songs = dashboard.favorites,
-                    emptyText = "Mark tracks you love and they will collect here.",
-                    currentSongId = currentSongId,
-                    favoriteSongIds = favoriteSongIds,
-                    onSongClick = onSongClick,
-                    onToggleFavorite = onToggleFavorite,
-                    onTrackDetailsClick = onTrackDetailsClick,
-                )
-            }
-            if (HomeSectionId.MOST_PLAYED in visibleSections) {
-                dashboardSection(
-                    title = "Most Played",
-                    songs = dashboard.mostPlayed,
-                    emptyText = "Your repeat listens will appear here.",
-                    currentSongId = currentSongId,
-                    favoriteSongIds = favoriteSongIds,
-                    onSongClick = onSongClick,
-                    onToggleFavorite = onToggleFavorite,
-                    onTrackDetailsClick = onTrackDetailsClick,
-                )
-            }
-            if (HomeSectionId.PLAYLISTS in visibleSections) {
-                item {
-                    DashboardListSectionHeader(
-                        title = "Playlists",
-                        actionLabel = "View all",
-                        onActionClick = onPlaylistsClick,
-                    )
-                }
-                if (dashboard.playlists.isEmpty()) {
-                    item { DashboardEmptyText("Create a playlist and it will show up here.") }
-                } else {
-                    items(dashboard.playlists, key = { it.id }) { playlist ->
-                        PlaylistPreviewRow(playlist = playlist, onClick = onPlaylistsClick)
-                    }
-                }
             }
             if (HomeSectionId.SMART_COLLECTIONS in visibleSections) {
                 item {

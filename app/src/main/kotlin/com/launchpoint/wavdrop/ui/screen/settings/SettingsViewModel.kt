@@ -55,7 +55,7 @@ class SettingsViewModel @Inject constructor(
         appSettingsRepository.startupDestination.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = StartupDestination.HOME,
+            initialValue = StartupDestination.SONGS,
         )
 
     private val _libraryScanUiState =

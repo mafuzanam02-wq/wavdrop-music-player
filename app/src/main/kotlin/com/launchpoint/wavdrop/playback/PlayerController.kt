@@ -208,6 +208,23 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    fun playNext(song: Song) {
+        val currentIndex = currentQueueIndex()
+        if (libraryQueue.isEmpty() || currentIndex == null) {
+            playSong(song)
+            return
+        }
+        insertIntoQueue(song = song, index = currentIndex + 1)
+    }
+
+    fun addToQueue(song: Song) {
+        if (libraryQueue.isEmpty()) {
+            playSong(song)
+            return
+        }
+        insertIntoQueue(song = song, index = libraryQueue.size)
+    }
+
     fun togglePlayPause() {
         val controller = mediaController ?: return
         if (controller.isPlaying) controller.pause() else controller.play()
@@ -440,6 +457,34 @@ class PlayerController @Inject constructor(
             shuffleEnabled = shuffleEnabled,
         )
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+    }
+
+    private fun insertIntoQueue(song: Song, index: Int) {
+        val currentQueueIndex = currentQueueIndex() ?: 0
+        val insertIndex = index.coerceIn(0, libraryQueue.size)
+        libraryQueue = libraryQueue.toMutableList().apply {
+            add(insertIndex, song)
+        }
+
+        val adjustedCurrentIndex = if (insertIndex <= currentQueueIndex) {
+            currentQueueIndex + 1
+        } else {
+            currentQueueIndex
+        }
+        rebuildPlaybackQueue(currentQueueIndex = adjustedCurrentIndex)
+        val playbackIndex = playbackOrder.indexOf(adjustedCurrentIndex)
+            .takeIf { it >= 0 } ?: _nowPlayingState.value.currentIndex
+
+        mediaController?.addMediaItem(insertIndex, song.toMediaItem())
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = playbackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
     }
 
     private fun syncNowPlayingState(fromTransition: Boolean = false) {

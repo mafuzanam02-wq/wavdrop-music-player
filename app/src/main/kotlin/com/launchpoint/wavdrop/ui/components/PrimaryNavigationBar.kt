@@ -3,7 +3,6 @@ package com.launchpoint.wavdrop.ui.components
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -14,16 +13,14 @@ import androidx.compose.runtime.Composable
 enum class PrimaryDestination {
     HOME,
     LIBRARY,
-    NOW_PLAYING,
     SETTINGS,
 }
 
 @Composable
 fun PrimaryNavigationBar(
-    selected: PrimaryDestination,
+    selected: PrimaryDestination?,
     onHomeClick: () -> Unit,
     onLibraryClick: () -> Unit,
-    onNowPlayingClick: () -> Unit,
     onSettingsClick: () -> Unit,
 ) {
     NavigationBar {
@@ -38,12 +35,6 @@ fun PrimaryNavigationBar(
             onClick = onLibraryClick,
             icon = { Icon(Icons.Default.LibraryMusic, contentDescription = null) },
             label = { Text("Library") },
-        )
-        NavigationBarItem(
-            selected = selected == PrimaryDestination.NOW_PLAYING,
-            onClick = onNowPlayingClick,
-            icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
-            label = { Text("Now Playing") },
         )
         NavigationBarItem(
             selected = selected == PrimaryDestination.SETTINGS,

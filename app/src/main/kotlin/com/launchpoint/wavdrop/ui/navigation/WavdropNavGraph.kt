@@ -148,6 +148,7 @@ fun WavdropNavGraph(
                 onNavigateBack      = { navController.popBackStack() },
                 onNowPlayingClick   = { navController.navigatePrimary(Screen.NowPlaying.route) },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onFolderClick       = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
             )
         }
         composable(Screen.BpstatPreview.route) {
@@ -360,6 +361,7 @@ fun WavdropNavGraph(
 private fun StartupDestination.toRoute(): String = when (this) {
     StartupDestination.HOME -> Screen.Home.route
     StartupDestination.LIBRARY -> Screen.Library.route
+    StartupDestination.SONGS -> Screen.Songs.route
     StartupDestination.NOW_PLAYING -> Screen.NowPlaying.route
     StartupDestination.SETTINGS -> Screen.Settings.route
 }

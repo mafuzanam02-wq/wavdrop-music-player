@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
@@ -53,6 +56,7 @@ fun SongsScreen(
     onNavigateBack: () -> Unit,
     onNowPlayingClick: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onFolderClick: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -132,10 +136,13 @@ fun SongsScreen(
                     songs = state.songs,
                     currentSongId = nowPlaying.song?.id,
                     favoriteSongIds = favoriteSongIds,
-                    onSongClick = viewModel::playSong,
+                    onSongClick = viewModel::playSongFromLibraryQueue,
                     onShuffleAll = viewModel::shuffleAll,
+                    onPlayNext = viewModel::playNext,
+                    onAddToQueue = viewModel::addToQueue,
                     onToggleFavorite = viewModel::toggleFavorite,
                     onTrackDetailsClick = onTrackDetailsClick,
+                    onFolderClick = onFolderClick,
                 )
             }
         }
@@ -149,8 +156,11 @@ private fun SongListContent(
     favoriteSongIds: Set<Long>,
     onSongClick: (Song) -> Unit,
     onShuffleAll: () -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onFolderClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (songs.isEmpty()) {
@@ -196,13 +206,18 @@ private fun SongListContent(
                 )
             }
             items(songs, key = { it.id }) { song ->
-                SongRow(
+                SongRowWithActions(
                     song = song,
                     isCurrent = song.id == currentSongId,
                     isFavorite = song.id in favoriteSongIds,
-                    onClick = { onSongClick(song) },
+                    onPlay = { onSongClick(song) },
+                    onPlayNext = { onPlayNext(song) },
+                    onAddToQueue = { onAddToQueue(song) },
                     onToggleFavorite = { onToggleFavorite(song.id) },
-                    onOpenDetails = { onTrackDetailsClick(song.id) },
+                    onViewStats = { onTrackDetailsClick(song.id) },
+                    onViewFolder = song.validFolderKey()?.let { folderKey ->
+                        { onFolderClick(folderKey) }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider(
@@ -220,6 +235,98 @@ private fun SongListContent(
             modifier = Modifier.align(Alignment.CenterEnd),
         )
     }
+}
+
+@Composable
+private fun SongRowWithActions(
+    song: Song,
+    isCurrent: Boolean,
+    isFavorite: Boolean,
+    onPlay: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onViewStats: () -> Unit,
+    onViewFolder: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        SongRow(
+            song = song,
+            isCurrent = isCurrent,
+            isFavorite = isFavorite,
+            onClick = onPlay,
+            onToggleFavorite = onToggleFavorite,
+            onOpenDetails = onViewStats,
+            showFavoriteButton = false,
+            onMoreClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.align(Alignment.TopEnd),
+        ) {
+            DropdownMenuItem(
+                text = { Text("Play") },
+                onClick = {
+                    expanded = false
+                    onPlay()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Play next") },
+                onClick = {
+                    expanded = false
+                    onPlayNext()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Add to queue") },
+                onClick = {
+                    expanded = false
+                    onAddToQueue()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(if (isFavorite) "Remove favorite" else "Toggle favorite") },
+                onClick = {
+                    expanded = false
+                    onToggleFavorite()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("View stats") },
+                onClick = {
+                    expanded = false
+                    onViewStats()
+                },
+            )
+            if (onViewFolder != null) {
+                DropdownMenuItem(
+                    text = { Text("View folder") },
+                    onClick = {
+                        expanded = false
+                        onViewFolder()
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun Song.validFolderKey(): String? {
+    val hasFolderMetadata = !folderPath
+        ?.trim()
+        ?.trim('/', '\\')
+        .isNullOrBlank()
+    if (!hasFolderMetadata) return null
+
+    return FolderGrouper.folderKey(this)
+        .takeUnless { it == FolderGrouper.UNKNOWN_FOLDER }
+        ?.takeIf { it.isNotBlank() }
 }
 
 @Composable

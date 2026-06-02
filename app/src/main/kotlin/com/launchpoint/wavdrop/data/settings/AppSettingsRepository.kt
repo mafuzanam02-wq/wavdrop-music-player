@@ -22,7 +22,7 @@ class AppSettingsRepository @Inject constructor(
         }
         .map { preferences ->
             preferences[STARTUP_DESTINATION_KEY]?.toStartupDestination()
-                ?: StartupDestination.HOME
+                ?: StartupDestination.SONGS
         }
 
     suspend fun setStartupDestination(destination: StartupDestination) {

@@ -58,7 +58,13 @@ class HomeViewModel @Inject constructor(
 
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
-    val uiState: StateFlow<HomeUiState> = combine(repository.songs, _searchQuery) { songs, query ->
+    private val allSongs: StateFlow<List<Song>> = repository.songs.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList(),
+    )
+
+    val uiState: StateFlow<HomeUiState> = combine(allSongs, _searchQuery) { songs, query ->
         when {
             songs.isEmpty() -> HomeUiState.Empty
             else            -> HomeUiState.Songs(LibrarySearch.filterSongs(songs, query))
@@ -70,7 +76,7 @@ class HomeViewModel @Inject constructor(
     )
 
     val dashboardState: StateFlow<HomeDashboardUiState> = combine(
-        repository.songs,
+        allSongs,
         statsRepository.allTrackStatsEntities(),
         playlistRepository.observePlaylists(),
         smartCollectionRepository.observeSmartCollections(),
@@ -161,6 +167,19 @@ class HomeViewModel @Inject constructor(
         playerController.playFromQueue(queue = queue, startSong = song)
     }
 
+    fun playSongFromLibraryQueue(song: Song) {
+        val queue = allSongs.value
+        playerController.playFromQueue(queue = queue.ifEmpty { listOf(song) }, startSong = song)
+    }
+
+    fun playNext(song: Song) {
+        playerController.playNext(song)
+    }
+
+    fun addToQueue(song: Song) {
+        playerController.addToQueue(song)
+    }
+
     fun shuffleAll() {
         val songs = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
         if (songs.isEmpty()) return
@@ -169,7 +188,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun toggleFavorite(songId: Long) {
-        val song = (uiState.value as? HomeUiState.Songs)?.songs?.firstOrNull { it.id == songId } ?: return
+        val song = allSongs.value.firstOrNull { it.id == songId } ?: return
         viewModelScope.launch { statsRepository.toggleFavorite(songId, song.uri) }
     }
 

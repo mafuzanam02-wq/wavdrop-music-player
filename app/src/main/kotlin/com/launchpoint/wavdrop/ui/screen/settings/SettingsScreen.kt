@@ -126,7 +126,6 @@ fun SettingsScreen(
                 selected = PrimaryDestination.SETTINGS,
                 onHomeClick = onHomeClick,
                 onLibraryClick = onLibraryClick,
-                onNowPlayingClick = onNowPlayingClick,
                 onSettingsClick = {},
             )
         },

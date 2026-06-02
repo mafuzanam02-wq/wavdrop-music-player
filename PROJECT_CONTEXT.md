@@ -228,7 +228,8 @@ point. `LIBRARY_SHORTCUT` is always visible (non-toggleable).
 ## Settings Screen
 Route: `Screen.Settings`. Sections: Library (scan settings, import), Backup & Restore,
 Statistics (Monthly Reports, Listening Reports), Appearance (Open app to, Home Sections), About.
-Startup preference is stored in Preferences DataStore under `startup_destination`; default is Home.
+Startup preference is stored in Preferences DataStore under `startup_destination`; default is
+All Songs.
 
 ## BlackPlayer EX Import
 Parse → match (title+artist+album, case-insensitive) → preview → apply via `db.withTransaction`.
@@ -267,8 +268,21 @@ implemented yet, and imported aggregate counts are not used to create yearly his
 ## Startup Screen Preference
 `AppSettingsRepository` stores `StartupDestination` in the existing `wavdrop_preferences`
 DataStore. `WavdropNavGraph` reads the preference once at graph creation and uses it as the
-start destination: Home, Library, Now Playing, or Settings. Existing in-app navigation routes
-remain unchanged.
+start destination: Home, Library, All Songs, Now Playing, or Settings. Default startup is
+All Songs, and `StartupDestination.SONGS` routes to `Screen.Songs.route`. Existing in-app
+navigation routes remain unchanged.
+
+## Navigation / Home / Song Actions
+Primary bottom navigation is Home, Library, and Settings only. Now Playing remains a direct route
+and is opened from mini-player/active playback entry points.
+
+Home is a compact dashboard rather than a full song-list duplicate. It emphasizes continue
+listening, a recent-or-most-played preview, smart collections, and the Library shortcut.
+
+All Songs rows keep double-tap favorite toggling but no longer show a visible heart action. Row
+overflow menus provide Play, Play next, Add to queue, Toggle/Remove favorite, View stats, and View
+folder when folder metadata is available. Search result taps start playback at the selected song
+while preserving the full All Songs/library queue order.
 
 ## Editable Lyrics Foundation
 Track Details exposes "Edit lyrics" for unsynced lyrics. Saved lyrics are app-managed Room

@@ -11,6 +11,7 @@ import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,11 +19,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class NowPlayingViewModel @Inject constructor(
     private val playerController: PlayerController,
@@ -43,6 +47,22 @@ class NowPlayingViewModel @Inject constructor(
         .stateIn(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
+    val hasCustomLyrics: StateFlow<Boolean> = nowPlayingState
+        .map { it.song }
+        .distinctUntilChanged { old, new -> old?.id == new?.id }
+        .flatMapLatest { song ->
+            if (song == null) {
+                flowOf(false)
+            } else {
+                lyricsRepository.observeOverride(song.id).map { it != null }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
             initialValue = false,
         )
 
@@ -81,6 +101,22 @@ class NowPlayingViewModel @Inject constructor(
     fun cycleRepeatMode() = playerController.cycleRepeatMode()
 
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
+
+    fun saveCustomLyrics(text: String, onComplete: () -> Unit = {}) {
+        val song = nowPlayingState.value.song ?: return
+        viewModelScope.launch {
+            lyricsRepository.saveCustomLyrics(song, text)
+            onComplete()
+        }
+    }
+
+    fun clearCustomLyrics(onComplete: () -> Unit = {}) {
+        val song = nowPlayingState.value.song ?: return
+        viewModelScope.launch {
+            lyricsRepository.clearCustomLyrics(song)
+            onComplete()
+        }
+    }
 
     val playlists: StateFlow<List<PlaylistSummary>> = playlistRepository.observePlaylists()
         .stateIn(

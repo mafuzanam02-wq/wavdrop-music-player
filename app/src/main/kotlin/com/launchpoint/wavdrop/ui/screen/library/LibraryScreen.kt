@@ -84,7 +84,6 @@ fun LibraryScreen(
                     selected = PrimaryDestination.LIBRARY,
                     onHomeClick = onHomeClick,
                     onLibraryClick = {},
-                    onNowPlayingClick = onNowPlayingClick,
                     onSettingsClick = onSettingsClick,
                 )
             }

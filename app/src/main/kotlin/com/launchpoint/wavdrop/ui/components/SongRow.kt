@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,6 +37,8 @@ fun SongRow(
     onToggleFavorite: () -> Unit,
     onOpenDetails: () -> Unit,
     modifier: Modifier = Modifier,
+    showFavoriteButton: Boolean = true,
+    onMoreClick: (() -> Unit)? = null,
 ) {
     val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
@@ -90,14 +93,24 @@ fun SongRow(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        IconButton(onClick = onToggleFavorite) {
-            Icon(
-                imageVector        = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                contentDescription = if (isFavorite) "Unfavorite" else "Favorite",
-                tint               = if (isFavorite) MaterialTheme.colorScheme.primary
-                                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                modifier           = Modifier.size(20.dp),
-            )
+        if (onMoreClick != null) {
+            IconButton(onClick = onMoreClick) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More actions",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                )
+            }
+        } else if (showFavoriteButton) {
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    imageVector        = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = if (isFavorite) "Unfavorite" else "Favorite",
+                    tint               = if (isFavorite) MaterialTheme.colorScheme.primary
+                                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                    modifier           = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
