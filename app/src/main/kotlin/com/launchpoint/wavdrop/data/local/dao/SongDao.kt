@@ -13,6 +13,12 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY title ASC")
     fun getAllSongs(): Flow<List<SongEntity>>
 
+    @Query("SELECT * FROM songs WHERE id = :songId")
+    fun observeSongById(songId: Long): Flow<SongEntity?>
+
+    @Query("SELECT * FROM songs ORDER BY title ASC")
+    suspend fun getAllSongsSnapshot(): List<SongEntity>
+
     @Query("SELECT * FROM songs WHERE artist = :artist ORDER BY album, trackNumber")
     fun getSongsByArtist(artist: String): Flow<List<SongEntity>>
 

@@ -1,14 +1,86 @@
-﻿package com.launchpoint.wavdrop.ui.navigation
+package com.launchpoint.wavdrop.ui.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.navigation.NavType
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.launchpoint.wavdrop.ui.screen.albums.AlbumDetailsScreen
+import com.launchpoint.wavdrop.ui.screen.albums.AlbumsScreen
+import com.launchpoint.wavdrop.ui.screen.artists.ArtistDetailsScreen
+import com.launchpoint.wavdrop.ui.screen.artists.ArtistsScreen
+import com.launchpoint.wavdrop.ui.screen.backupimport.BackupImportPreviewScreen
+import com.launchpoint.wavdrop.ui.screen.bpstatpreview.BpstatPreviewScreen
+import com.launchpoint.wavdrop.ui.screen.folders.FolderDetailsScreen
+import com.launchpoint.wavdrop.ui.screen.folders.FoldersScreen
+import com.launchpoint.wavdrop.ui.screen.home.HomeCustomizationScreen
 import com.launchpoint.wavdrop.ui.screen.home.HomeScreen
+import com.launchpoint.wavdrop.ui.screen.library.LibraryScreen
+import com.launchpoint.wavdrop.ui.screen.nowplaying.NowPlayingScreen
+import com.launchpoint.wavdrop.ui.screen.playlists.AddSongsToPlaylistScreen
+import com.launchpoint.wavdrop.ui.screen.playlists.PlaylistDetailsScreen
+import com.launchpoint.wavdrop.ui.screen.playlists.PlaylistsScreen
+import com.launchpoint.wavdrop.ui.screen.monthlyreports.MonthlyReportsScreen
+import com.launchpoint.wavdrop.ui.screen.reports.ReportsScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsScreen
+import com.launchpoint.wavdrop.ui.screen.smart.SmartCollectionDetailsScreen
+import com.launchpoint.wavdrop.ui.screen.smart.SmartCollectionsScreen
+import com.launchpoint.wavdrop.data.model.SmartCollectionType
+import com.launchpoint.wavdrop.ui.screen.songs.SongsScreen
+import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsScreen
+import com.launchpoint.wavdrop.ui.screen.trackdetails.TrackDetailsScreen
 
 sealed class Screen(val route: String) {
-    data object Home : Screen("home")
+    data object Home                : Screen("home")
+    data object Library             : Screen("library")
+    data object Songs               : Screen("songs")
+    data object BpstatPreview       : Screen("bpstat_preview")
+    data object BackupImportPreview : Screen("backup_import_preview")
+    data object NowPlaying          : Screen("now_playing")
+    data object Settings            : Screen("settings")
+    data object HomeCustomization   : Screen("home_customization")
+    data object Albums              : Screen("albums")
+    data object Artists             : Screen("artists")
+    data object Folders             : Screen("folders")
+    data object Statistics          : Screen("statistics")
+    data object Reports             : Screen("reports")
+    data object MonthlyReports      : Screen("monthly_reports")
+    data object Playlists              : Screen("playlists")
+    data object SmartCollections      : Screen("smart_collections")
+    object TrackDetails               : Screen("track_details/{songId}") {
+        fun createRoute(songId: Long) = "track_details/$songId"
+    }
+    object PlaylistDetails            : Screen("playlist_details/{playlistId}") {
+        fun createRoute(playlistId: Long) = "playlist_details/$playlistId"
+    }
+    object AddSongsToPlaylist         : Screen("playlist_details/{playlistId}/add_songs") {
+        fun createRoute(playlistId: Long) = "playlist_details/$playlistId/add_songs"
+    }
+    object SmartCollectionDetails     : Screen("smart_collection_details/{type}") {
+        fun createRoute(type: SmartCollectionType) = "smart_collection_details/${type.name}"
+    }
+    object AlbumDetails               : Screen("album_details/{albumKey}") {
+        fun createRoute(albumKey: String) = "album_details/${Uri.encode(albumKey)}"
+    }
+    object ArtistDetails            : Screen("artist_details/{artistKey}") {
+        fun createRoute(artistKey: String) = "artist_details/${Uri.encode(artistKey)}"
+    }
+    object FolderDetails            : Screen("folder_details/{folderKey}") {
+        fun createRoute(folderKey: String) = "folder_details/${Uri.encode(folderKey)}"
+    }
+}
+
+private fun NavHostController.navigatePrimary(route: String) {
+    navigate(route) {
+        launchSingleTop = true
+        restoreState = true
+        popUpTo(Screen.Home.route) {
+            saveState = true
+        }
+    }
 }
 
 @Composable
@@ -20,7 +92,229 @@ fun WavdropNavGraph(
         startDestination = Screen.Home.route,
     ) {
         composable(Screen.Home.route) {
-            HomeScreen()
+            HomeScreen(
+                onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
+                onLibraryClick      = { navController.navigatePrimary(Screen.Library.route) },
+                onNowPlayingClick   = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onPlaylistsClick         = { navController.navigate(Screen.Playlists.route) },
+                onSmartCollectionsClick  = { navController.navigate(Screen.SmartCollections.route) },
+            )
+        }
+        composable(Screen.Library.route) {
+            LibraryScreen(
+                onSongsClick            = { navController.navigate(Screen.Songs.route) },
+                onAlbumsClick           = { navController.navigate(Screen.Albums.route) },
+                onArtistsClick          = { navController.navigate(Screen.Artists.route) },
+                onFoldersClick          = { navController.navigate(Screen.Folders.route) },
+                onPlaylistsClick        = { navController.navigate(Screen.Playlists.route) },
+                onSmartCollectionsClick = { navController.navigate(Screen.SmartCollections.route) },
+                onHomeClick             = { navController.navigatePrimary(Screen.Home.route) },
+                onNowPlayingClick       = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onSettingsClick         = { navController.navigatePrimary(Screen.Settings.route) },
+            )
+        }
+        composable(Screen.Songs.route) {
+            SongsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onNowPlayingClick   = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+            )
+        }
+        composable(Screen.BpstatPreview.route) {
+            BpstatPreviewScreen(
+                onNavigateBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = "${Screen.BackupImportPreview.route}?uri={uri}",
+            arguments = listOf(
+                navArgument("uri") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
+            val selectedUri = backStackEntry.arguments
+                ?.getString("uri")
+                ?.let(Uri::parse)
+            BackupImportPreviewScreen(
+                selectedUri = selectedUri,
+                onNavigateBack = { navController.popBackStack() },
+            )
+        }
+        composable(Screen.NowPlaying.route) {
+            NowPlayingScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onHomeClick         = { navController.navigatePrimary(Screen.Home.route) },
+                onLibraryClick      = { navController.navigatePrimary(Screen.Library.route) },
+                onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
+                onOpenTrackDetails  = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onOpenAlbum         = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+                onOpenArtist        = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onOpenFolder        = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
+                onOpenStatistics    = { navController.navigate(Screen.Statistics.route) },
+            )
+        }
+        composable(
+            route = Screen.TrackDetails.route,
+            arguments = listOf(
+                navArgument("songId") { type = NavType.LongType },
+            ),
+        ) {
+            TrackDetailsScreen(
+                onNavigateBack = { navController.popBackStack() },
+            )
+        }
+        composable(Screen.Albums.route) {
+            AlbumsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onAlbumClick   = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+            )
+        }
+        composable(
+            route     = Screen.AlbumDetails.route,
+            arguments = listOf(
+                navArgument("albumKey") { type = NavType.StringType },
+            ),
+        ) {
+            AlbumDetailsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+            )
+        }
+        composable(Screen.Artists.route) {
+            ArtistsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onArtistClick  = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+            )
+        }
+        composable(
+            route     = Screen.ArtistDetails.route,
+            arguments = listOf(
+                navArgument("artistKey") { type = NavType.StringType },
+            ),
+        ) {
+            ArtistDetailsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+            )
+        }
+        composable(Screen.Folders.route) {
+            FoldersScreen(
+                onNavigateBack    = { navController.popBackStack() },
+                onFolderClick     = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
+                onNowPlayingClick = { navController.navigate(Screen.NowPlaying.route) },
+            )
+        }
+        composable(Screen.Statistics.route) {
+            StatisticsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+            )
+        }
+        composable(Screen.Reports.route) {
+            ReportsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+            )
+        }
+        composable(Screen.MonthlyReports.route) {
+            MonthlyReportsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+            )
+        }
+        composable(Screen.Playlists.route) {
+            PlaylistsScreen(
+                onNavigateBack    = { navController.popBackStack() },
+                onPlaylistClick   = { playlistId -> navController.navigate(Screen.PlaylistDetails.createRoute(playlistId)) },
+                onNowPlayingClick = { navController.navigate(Screen.NowPlaying.route) },
+            )
+        }
+        composable(Screen.SmartCollections.route) {
+            SmartCollectionsScreen(
+                onNavigateBack    = { navController.popBackStack() },
+                onCollectionClick = { type -> navController.navigate(Screen.SmartCollectionDetails.createRoute(type)) },
+                onNowPlayingClick = { navController.navigate(Screen.NowPlaying.route) },
+            )
+        }
+        composable(
+            route     = Screen.SmartCollectionDetails.route,
+            arguments = listOf(
+                navArgument("type") { type = NavType.StringType },
+            ),
+        ) {
+            SmartCollectionDetailsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onNowPlayingClick   = { navController.navigate(Screen.NowPlaying.route) },
+            )
+        }
+        composable(
+            route     = Screen.PlaylistDetails.route,
+            arguments = listOf(
+                navArgument("playlistId") { type = NavType.LongType },
+            ),
+        ) { backStackEntry ->
+            val playlistId = checkNotNull(backStackEntry.arguments?.getLong("playlistId"))
+            PlaylistDetailsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onAddSongsClick     = { navController.navigate(Screen.AddSongsToPlaylist.createRoute(playlistId)) },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onNowPlayingClick   = { navController.navigate(Screen.NowPlaying.route) },
+            )
+        }
+        composable(
+            route     = Screen.AddSongsToPlaylist.route,
+            arguments = listOf(
+                navArgument("playlistId") { type = NavType.LongType },
+            ),
+        ) {
+            AddSongsToPlaylistScreen(
+                onNavigateBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route     = Screen.FolderDetails.route,
+            arguments = listOf(
+                navArgument("folderKey") { type = NavType.StringType },
+            ),
+        ) {
+            FolderDetailsScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onNowPlayingClick   = { navController.navigate(Screen.NowPlaying.route) },
+            )
+        }
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                onNavigateBack           = { navController.popBackStack() },
+                onHomeClick              = { navController.navigatePrimary(Screen.Home.route) },
+                onLibraryClick           = { navController.navigatePrimary(Screen.Library.route) },
+                onNowPlayingClick        = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onImportClick            = { navController.navigate(Screen.BpstatPreview.route) },
+                onBackupImportClick      = { uri ->
+                    navController.navigate(
+                        "${Screen.BackupImportPreview.route}?uri=${Uri.encode(uri.toString())}"
+                    )
+                },
+                onStatisticsClick        = { navController.navigate(Screen.Statistics.route) },
+                onReportsClick           = { navController.navigate(Screen.Reports.route) },
+                onMonthlyReportsClick    = { navController.navigate(Screen.MonthlyReports.route) },
+                onHomeCustomizationClick = { navController.navigate(Screen.HomeCustomization.route) },
+            )
+        }
+        composable(Screen.HomeCustomization.route) {
+            HomeCustomizationScreen(
+                onNavigateBack = { navController.popBackStack() },
+            )
         }
     }
 }

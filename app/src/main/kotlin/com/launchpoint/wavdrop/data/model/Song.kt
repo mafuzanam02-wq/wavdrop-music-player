@@ -11,4 +11,6 @@ data class Song(
     val dateAdded: Long,      // epoch seconds (from MediaStore)
     val trackNumber: Int,
     val year: Int,
+    val folderPath: String? = null,
+    val folderName: String? = null,
 )

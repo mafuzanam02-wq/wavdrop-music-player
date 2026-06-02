@@ -1,0 +1,25 @@
+# Gradle and Android build output
+.gradle/
+build/
+**/build/
+
+# Local machine configuration
+local.properties
+.idea/
+*.iml
+.claude/settings.local.json
+
+# Android packaged artifacts
+*.apk
+*.ap_
+*.aab
+
+# JVM/build byproducts
+*.class
+*.dex
+*.log
+*.hprof
+
+# OS metadata
+.DS_Store
+Thumbs.db
