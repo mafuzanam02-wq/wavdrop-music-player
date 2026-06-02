@@ -95,6 +95,32 @@ class StatsDashboardBuilderTest {
     }
 
     @Test
+    fun `a song can appear in multiple section lists without being deduplicated`() {
+        // Song 1 has plays AND was recently played AND has skips — it legitimately belongs in
+        // all three lists.  The UI must use composite keys (e.g. "most_played_1") rather than
+        // bare song.id keys so the same ID in multiple LazyColumn sections doesn't crash Compose.
+        val summary = StatsDashboardBuilder.build(
+            songs = listOf(song(1, "AllThree"), song(2, "OnlyPlays")),
+            stats = listOf(
+                stats(songId = 1, playCount = 5, skipCount = 3, lastPlayedAt = 1000L),
+                stats(songId = 2, playCount = 2, skipCount = 0, lastPlayedAt = 0L),
+            ),
+        )
+
+        val mostPlayedIds = summary.mostPlayedSongs.map { it.song.id }
+        val recentlyPlayedIds = summary.recentlyPlayedSongs.map { it.song.id }
+        val mostSkippedIds = summary.mostSkippedSongs.map { it.song.id }
+
+        assertTrue("song 1 must appear in mostPlayedSongs", 1L in mostPlayedIds)
+        assertTrue("song 1 must appear in recentlyPlayedSongs", 1L in recentlyPlayedIds)
+        assertTrue("song 1 must appear in mostSkippedSongs", 1L in mostSkippedIds)
+
+        // The same ID across sections — StatisticsScreen must prefix keys per-section.
+        val allIds = mostPlayedIds + recentlyPlayedIds + mostSkippedIds
+        assertTrue("song 1 id appears in more than one section list", allIds.count { it == 1L } > 1)
+    }
+
+    @Test
     fun `top lists are limited to ten songs`() {
         val songs = (1L..12L).map { song(it, "Song $it") }
         val stats = (1L..12L).map {

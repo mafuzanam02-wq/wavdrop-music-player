@@ -137,6 +137,7 @@ private fun DashboardContent(
 
         statsSection(
             title = "Most Played",
+            sectionKey = "most_played",
             songs = summary.mostPlayedSongs,
             emptyMessage = "No plays recorded yet.",
             metric = { "${it.playCount} plays" },
@@ -145,6 +146,7 @@ private fun DashboardContent(
 
         statsSection(
             title = "Recently Played",
+            sectionKey = "recently_played",
             songs = summary.recentlyPlayedSongs,
             emptyMessage = "No recent plays yet.",
             metric = { StatisticsFormatters.formatLastPlayed(it.lastPlayedAt) },
@@ -153,6 +155,7 @@ private fun DashboardContent(
 
         statsSection(
             title = "Most Skipped",
+            sectionKey = "most_skipped",
             songs = summary.mostSkippedSongs,
             emptyMessage = "No skips recorded yet.",
             metric = { "${it.skipCount} skips" },
@@ -257,6 +260,7 @@ private fun OverviewCard(
 
 private fun androidx.compose.foundation.lazy.LazyListScope.statsSection(
     title: String,
+    sectionKey: String,
     songs: List<SongStatsSummary>,
     emptyMessage: String,
     metric: (SongStatsSummary) -> String,
@@ -267,7 +271,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.statsSection(
         item { EmptySectionRow(emptyMessage) }
         return
     }
-    items(songs, key = { it.song.id }) { summary ->
+    // Prefix with sectionKey so the same song ID in multiple sections (e.g. Most Played +
+    // Recently Played) doesn't produce duplicate LazyColumn keys and crash Compose.
+    items(songs, key = { "${sectionKey}_${it.song.id}" }) { summary ->
         SongStatsRow(
             summary = summary,
             metric = metric(summary),

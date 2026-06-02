@@ -171,6 +171,7 @@ private fun MonthlyContent(
         monthSongSection(
             title = "Top Songs",
             subtitle = "Ranked by event-backed plays this month",
+            sectionKey = "top_songs",
             songs = report.topSongs,
             emptyMessage = "No plays recorded for this month.",
             metric = { "${it.playCount} plays this month" },
@@ -205,6 +206,7 @@ private fun MonthlyContent(
 
         item { SectionHeader("Recently Played in ${state.selectedMonth.toDisplayLabel()}") }
         monthSongRows(
+            sectionKey = "recent_songs",
             songs = report.recentlyPlayedInMonth,
             emptyMessage = "No recent plays for this month.",
             metric = { StatisticsFormatters.formatLastPlayed(it.lastPlayedAt) },
@@ -428,6 +430,7 @@ private fun HabitsSection(
 private fun LazyListScope.monthSongSection(
     title: String,
     subtitle: String,
+    sectionKey: String,
     songs: List<SongStatsSummary>,
     emptyMessage: String,
     metric: (SongStatsSummary) -> String,
@@ -435,6 +438,7 @@ private fun LazyListScope.monthSongSection(
 ) {
     item { SectionHeader(title, subtitle) }
     monthSongRows(
+        sectionKey = sectionKey,
         songs = songs,
         emptyMessage = emptyMessage,
         metric = metric,
@@ -443,6 +447,7 @@ private fun LazyListScope.monthSongSection(
 }
 
 private fun LazyListScope.monthSongRows(
+    sectionKey: String,
     songs: List<SongStatsSummary>,
     emptyMessage: String,
     metric: (SongStatsSummary) -> String,
@@ -452,7 +457,9 @@ private fun LazyListScope.monthSongRows(
         item { EmptySectionRow(emptyMessage) }
         return
     }
-    items(songs, key = { "song_${it.song.id}" }) { summary ->
+    // Prefix with sectionKey: the same song can appear in both topSongs and recentlyPlayedInMonth
+    // inside the same LazyColumn, which would produce duplicate "song_${id}" keys and crash Compose.
+    items(songs, key = { "${sectionKey}_${it.song.id}" }) { summary ->
         ReportRow(
             title = summary.song.title,
             subtitle = summary.song.artist.ifBlank { "Unknown Artist" },

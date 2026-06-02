@@ -2,7 +2,7 @@ package com.launchpoint.wavdrop.playback
 
 import android.os.SystemClock
 import com.launchpoint.wavdrop.data.model.Song
-import com.launchpoint.wavdrop.data.repository.StatsRepository
+import com.launchpoint.wavdrop.data.repository.PlayEventWriter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,42 +22,54 @@ import javax.inject.Singleton
  */
 @Singleton
 class StatsTracker @Inject constructor(
-    private val statsRepository: StatsRepository,
+    private val playEventWriter: PlayEventWriter,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Overridable in tests (Dispatchers.Unconfined makes launch calls synchronous).
+    internal var scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var currentSong: Song? = null
 
-    // Wall-clock ms (from SystemClock.elapsedRealtime) when the current play
-    // session started. -1 means not currently playing.
+    // Wall-clock ms when the current play session started. -1 means not currently playing.
     private var sessionStartedAt: Long = -1L
 
-    // Total listening time accumulated for the current song across all
-    // play/pause cycles in this play session.
+    // Total listening time accumulated for the current song across all play/pause cycles.
     private var accumulatedMs: Long = 0L
 
-    // Guard: once we've counted a meaningful play we don't count again for the
-    // same continuous play session (even if the user pauses and resumes).
+    // Guard: once we've counted a meaningful play we don't count again for the same
+    // continuous play session (even if the user pauses and resumes).
     private var playCountedForCurrent: Boolean = false
+
+    // Overridable in tests (internal visibility keeps it out of production call sites).
+    internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
 
     // ── Public API (called from PlayerController on the main thread) ──────────
 
     /**
-     * Must be called when the user selects a new song, before the controller
-     * starts loading it. Finalises stats for the previous song.
+     * Must be called when the user selects a song, before the controller starts loading it.
+     * Finalises stats for the previous song.
+     *
+     * If the same song is re-selected (e.g. user taps it again or it loops back), the session
+     * is reset so the replay can be counted — but [finalizeCurrentSong] is NOT called, which
+     * would otherwise record a spurious skip.
      */
     fun onSongSelected(newSong: Song) {
-        if (currentSong?.id == newSong.id) return   // same song re-tapped, ignore
+        if (currentSong?.id == newSong.id) {
+            // Same song re-selected: reset session so a fresh play can be counted.
+            accumulatedMs = 0L
+            sessionStartedAt = -1L
+            playCountedForCurrent = false
+            return
+        }
         finalizeCurrentSong(explicitSkip = !playCountedForCurrent)
-        currentSong         = newSong
-        accumulatedMs       = 0L
-        sessionStartedAt    = -1L
+        currentSong           = newSong
+        accumulatedMs         = 0L
+        sessionStartedAt      = -1L
         playCountedForCurrent = false
     }
 
     /** Called when isPlaying transitions to true. */
     fun onPlaybackStarted() {
-        sessionStartedAt = SystemClock.elapsedRealtime()
+        sessionStartedAt = clock()
     }
 
     /**
@@ -75,8 +87,8 @@ class StatsTracker @Inject constructor(
     private fun flushSession() {
         val start = sessionStartedAt
         if (start < 0L) return
-        accumulatedMs   += SystemClock.elapsedRealtime() - start
-        sessionStartedAt = -1L
+        accumulatedMs    += clock() - start
+        sessionStartedAt  = -1L
     }
 
     /**
@@ -94,7 +106,7 @@ class StatsTracker @Inject constructor(
             val listenedMs = accumulatedMs
             val durationMs = song.duration
             scope.launch {
-                statsRepository.recordPlay(song.id, song.uri, listenedMs, durationMs)
+                playEventWriter.recordPlay(song.id, song.uri, listenedMs, durationMs)
             }
         }
     }
@@ -111,7 +123,7 @@ class StatsTracker @Inject constructor(
             val song = currentSong ?: return
             // Only count as a skip if there was any engagement at all.
             if (accumulatedMs > 0L) {
-                scope.launch { statsRepository.recordSkip(song.id, song.uri, song.duration) }
+                scope.launch { playEventWriter.recordSkip(song.id, song.uri, song.duration) }
             }
         }
     }

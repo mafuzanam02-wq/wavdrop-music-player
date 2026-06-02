@@ -351,6 +351,11 @@ class PlayerController @Inject constructor(
             ?: _nowPlayingState.value.currentIndex
         if (currentSong != null && currentSong.id != _nowPlayingState.value.song?.id) {
             statsTracker.onSongSelected(currentSong)
+            // During auto-advance the player stays in isPlaying=true, so onIsPlayingChanged(true)
+            // never fires for the new song. Start its session explicitly here.
+            if (controller?.isPlaying == true) {
+                statsTracker.onPlaybackStarted()
+            }
         }
         _nowPlayingState.update {
             it.copy(

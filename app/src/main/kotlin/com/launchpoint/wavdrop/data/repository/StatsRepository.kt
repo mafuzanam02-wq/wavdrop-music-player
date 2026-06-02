@@ -17,13 +17,15 @@ import com.launchpoint.wavdrop.data.model.TrackStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
+import javax.inject.Singleton
 
+@Singleton
 class StatsRepository @Inject constructor(
     private val db: WavdropDatabase,
     private val dao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
     private val listenEventDao: TrackListenEventDao,
-) {
+) : PlayEventWriter {
     // ── Regular write ops ─────────────────────────────────────────────────────
 
     /**
@@ -35,7 +37,7 @@ class StatsRepository @Inject constructor(
      * NOTE: BlackPlayer imports do NOT call this method — they go through [applyBpstatImport]
      * which calls [TrackStatsDao.mergeImportedStats] directly. No events are written for imports.
      */
-    suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long = 0L) {
+    override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
         val nowMs = System.currentTimeMillis()
         dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
         dao.incrementPlayCount(songId, nowMs = nowMs, listenedMs = listenedMs)
@@ -56,7 +58,7 @@ class StatsRepository @Inject constructor(
      *
      * [durationMs] is the track's total duration — 0 if unknown. Used only for the event record.
      */
-    suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long = 0L) {
+    override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
         dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
         dao.incrementSkipCount(songId)
         listenEventDao.insert(
