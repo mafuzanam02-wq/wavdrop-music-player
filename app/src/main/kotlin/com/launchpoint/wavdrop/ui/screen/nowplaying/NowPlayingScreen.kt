@@ -610,12 +610,29 @@ private fun LyricsOverlayContent(
         LyricsResult.NotFound,
         is LyricsResult.Error -> {
             Box(modifier = modifier, contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No lyrics found",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.88f),
-                    textAlign = TextAlign.Center,
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.40f),
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Text(
+                        text = "No lyrics found",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White.copy(alpha = 0.88f),
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        text = "Long-press to add your own",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.50f),
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
     }
