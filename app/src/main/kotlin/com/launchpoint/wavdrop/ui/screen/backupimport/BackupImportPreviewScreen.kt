@@ -209,6 +209,7 @@ private fun PreviewContent(
             StatRow("Import Baselines", state.baselineCount.toString())
             StatRow("Lyrics overrides", state.lyricsOverridesCount.toString())
             StatRow("Preferences",      if (state.hasPreferences) "Included" else "Not included")
+            StatRow("Playlists",        state.playlistCount.toString())
         }
 
         item { Spacer(Modifier.height(16.dp)) }
@@ -217,7 +218,7 @@ private fun PreviewContent(
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick  = { showDialog = true },
-                enabled  = state.statsCount > 0 || state.lyricsOverridesCount > 0,
+                enabled  = state.statsCount > 0 || state.lyricsOverridesCount > 0 || state.playlistCount > 0,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
@@ -293,6 +294,10 @@ private fun AppliedContent(
                     StatRow("Favorites restored", result.favoritesRestored.toString())
                     if (result.preferencesRestored) {
                         StatRow("Preferences", "Restored")
+                    }
+                    if (result.playlistsRestored > 0 || result.playlistSongsRestored > 0) {
+                        StatRow("Playlists created", result.playlistsRestored.toString())
+                        StatRow("Playlist songs added", result.playlistSongsRestored.toString())
                     }
                 }
             }

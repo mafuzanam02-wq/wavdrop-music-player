@@ -46,6 +46,23 @@ data class BackupPreferences(
     val homeVisibleSections: List<String>?,
 )
 
+data class BackupPlaylistSong(
+    val songId: Long,
+    val contentUri: String,
+    val position: Int,
+    val title: String,
+    val artist: String,
+    val album: String,
+)
+
+data class BackupPlaylist(
+    val id: Long,
+    val name: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val songs: List<BackupPlaylistSong>,
+)
+
 data class WavdropBackup(
     val exportedAt: String,
     val songs: List<BackupSong>,
@@ -53,4 +70,5 @@ data class WavdropBackup(
     val importBaselines: List<BackupImportBaseline>,
     val lyricsOverrides: List<BackupLyricsOverride> = emptyList(),
     val preferences: BackupPreferences? = null,
+    val playlists: List<BackupPlaylist> = emptyList(),
 )

@@ -120,6 +120,27 @@ object WavdropBackupParser {
                 )
             }
 
+            val playlists = (root["playlists"] as? List<*>)
+                ?.mapObjects("playlists") { pi, playlist ->
+                    BackupPlaylist(
+                        id        = playlist.requiredLong("playlists[$pi].id", "id"),
+                        name      = playlist.requiredString("playlists[$pi].name", "name"),
+                        createdAt = playlist.requiredLong("playlists[$pi].createdAt", "createdAt"),
+                        updatedAt = playlist.requiredLong("playlists[$pi].updatedAt", "updatedAt"),
+                        songs     = (playlist["songs"] as? List<*>)
+                            ?.mapObjects("playlists[$pi].songs") { si, song ->
+                                BackupPlaylistSong(
+                                    songId     = song.requiredLong("playlists[$pi].songs[$si].songId", "songId"),
+                                    contentUri = song.requiredString("playlists[$pi].songs[$si].contentUri", "contentUri"),
+                                    position   = song.requiredInt("playlists[$pi].songs[$si].position", "position"),
+                                    title      = song.requiredString("playlists[$pi].songs[$si].title", "title"),
+                                    artist     = song.requiredString("playlists[$pi].songs[$si].artist", "artist"),
+                                    album      = song.requiredString("playlists[$pi].songs[$si].album", "album"),
+                                )
+                            } ?: emptyList(),
+                    )
+                } ?: emptyList()
+
             success(
                 WavdropBackup(
                     exportedAt      = root["exportedAt"] as? String ?: "",
@@ -128,6 +149,7 @@ object WavdropBackupParser {
                     importBaselines = importBaselines,
                     lyricsOverrides = lyricsOverrides,
                     preferences     = preferences,
+                    playlists       = playlists,
                 )
             )
         } catch (e: BackupParseException) {

@@ -6,10 +6,13 @@ import com.launchpoint.wavdrop.data.legacy.ImportSourceTypes
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
+import com.launchpoint.wavdrop.data.local.entity.PlaylistEntity
+import com.launchpoint.wavdrop.data.local.entity.PlaylistSongEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
@@ -28,6 +31,7 @@ class WavdropBackupImportRepository @Inject constructor(
     private val trackStatsDao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
+    private val playlistDao: PlaylistDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
 ) {
@@ -139,13 +143,66 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
+            // Playlist restore
+            var playlistsRestored     = 0
+            var playlistSongsRestored = 0
+
+            for (backupPlaylist in backup.playlists) {
+                val name = backupPlaylist.name.trim()
+                if (name.isBlank()) continue
+
+                val playlistId = playlistDao.findByName(name)?.playlistId
+                    ?: run {
+                        playlistsRestored++
+                        playlistDao.insertPlaylist(
+                            PlaylistEntity(name = name, createdAt = importedAt, updatedAt = importedAt)
+                        )
+                    }
+
+                val existingSongIds = playlistDao.getSongsForPlaylistSnapshot(playlistId)
+                    .map { it.songId }
+                    .toMutableSet()
+                var nextPos = playlistDao.getMaxPosition(playlistId) + 1
+                var songsAddedHere = 0
+
+                for (backupSong in backupPlaylist.songs.sortedBy { it.position }) {
+                    val currentSong = byUri[backupSong.contentUri]
+                        ?: byTags[Triple(
+                            backupSong.title.norm(),
+                            backupSong.artist.norm(),
+                            backupSong.album.norm(),
+                        )]
+                        ?: continue
+
+                    if (currentSong.id !in existingSongIds) {
+                        playlistDao.insertSong(
+                            PlaylistSongEntity(
+                                playlistId = playlistId,
+                                songId     = currentSong.id,
+                                position   = nextPos,
+                            )
+                        )
+                        existingSongIds += currentSong.id
+                        nextPos++
+                        songsAddedHere++
+                        playlistSongsRestored++
+                    }
+                }
+
+                if (songsAddedHere > 0) {
+                    playlistDao.touchPlaylist(playlistId, importedAt)
+                }
+            }
+
             WavdropBackupImportApplyResult(
-                matchedTracks     = match.matchedRows.size,
-                unmatchedTracks   = match.unmatchedCount,
-                playsAdded        = playsAdded,
-                skipsAdded        = skipsAdded,
-                lyricsRestored    = lyricsRestored,
-                favoritesRestored = favoritesRestored,
+                matchedTracks         = match.matchedRows.size,
+                unmatchedTracks       = match.unmatchedCount,
+                playsAdded            = playsAdded,
+                skipsAdded            = skipsAdded,
+                lyricsRestored        = lyricsRestored,
+                favoritesRestored     = favoritesRestored,
+                playlistsRestored     = playlistsRestored,
+                playlistSongsRestored = playlistSongsRestored,
             )
         }
 

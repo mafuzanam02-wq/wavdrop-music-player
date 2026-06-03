@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
@@ -28,6 +29,7 @@ class WavdropBackupRepository @Inject constructor(
     private val trackStatsDao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
+    private val playlistDao: PlaylistDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
 ) {
@@ -36,6 +38,29 @@ class WavdropBackupRepository @Inject constructor(
         val stats      = trackStatsDao.getAllStatsSnapshot()
         val baselines  = importBaselineDao.getAllImportBaselinesSnapshot()
         val lyrics     = lyricsOverrideDao.getAllSnapshot()
+
+        val songById = songs.associateBy { it.id }
+        val playlists = playlistDao.getAllPlaylistsSnapshot().map { playlist ->
+            BackupPlaylist(
+                id        = playlist.playlistId,
+                name      = playlist.name,
+                createdAt = playlist.createdAt,
+                updatedAt = playlist.updatedAt,
+                songs     = playlistDao.getSongsForPlaylistSnapshot(playlist.playlistId)
+                    .sortedBy { it.position }
+                    .mapNotNull { ps ->
+                        val song = songById[ps.songId] ?: return@mapNotNull null
+                        BackupPlaylistSong(
+                            songId     = ps.songId,
+                            contentUri = song.uri,
+                            position   = ps.position,
+                            title      = song.title,
+                            artist     = song.artist,
+                            album      = song.album,
+                        )
+                    },
+            )
+        }
 
         val preferences = BackupPreferences(
             startupDestination  = appSettingsRepository.startupDestination.first().name,
@@ -52,6 +77,7 @@ class WavdropBackupRepository @Inject constructor(
             importBaselines = baselines.map(ImportBaselineEntity::toBackup),
             lyricsOverrides = lyrics.map(LyricsOverrideEntity::toBackup),
             preferences     = preferences,
+            playlists       = playlists,
         )
 
         val json = WavdropBackupExporter.toJson(backup)

@@ -31,6 +31,12 @@ interface PlaylistDao {
     """)
     fun getAllPlaylistsWithCount(): Flow<List<PlaylistWithCount>>
 
+    @Query("SELECT * FROM playlists ORDER BY name COLLATE NOCASE ASC")
+    suspend fun getAllPlaylistsSnapshot(): List<PlaylistEntity>
+
+    @Query("SELECT * FROM playlists WHERE LOWER(name) = LOWER(:name) LIMIT 1")
+    suspend fun findByName(name: String): PlaylistEntity?
+
     @Query("SELECT * FROM playlists WHERE playlistId = :id")
     fun observePlaylist(id: Long): Flow<PlaylistEntity?>
 
