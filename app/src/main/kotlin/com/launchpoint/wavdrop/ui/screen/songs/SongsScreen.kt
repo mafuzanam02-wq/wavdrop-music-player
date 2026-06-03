@@ -31,10 +31,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -154,6 +156,7 @@ fun SongsScreen(
                 HomeUiState.Empty -> EmptySongs()
                 is HomeUiState.Songs -> SongListContent(
                     songs = state.songs,
+                    showAlphabetIndex = !isSearchActive,
                     currentSongId = nowPlaying.song?.id,
                     favoriteSongIds = favoriteSongIds,
                     onSongClick = viewModel::playSongFromLibraryQueue,
@@ -179,6 +182,7 @@ fun SongsScreen(
 @Composable
 private fun SongListContent(
     songs: List<Song>,
+    showAlphabetIndex: Boolean = true,
     currentSongId: Long?,
     favoriteSongIds: Set<Long>,
     onSongClick: (Song) -> Unit,
@@ -202,6 +206,25 @@ private fun SongListContent(
     }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+
+    // Derive the first letter of the topmost visible song for the side-index highlight.
+    // derivedStateOf limits recomposition to when the letter actually changes, not every scroll frame.
+    val songsRef = rememberUpdatedState(songs)
+    val currentLetter: Char? by remember {
+        derivedStateOf {
+            val items = songsRef.value
+            val songIdx = listState.firstVisibleItemIndex - 1 // -1 for the shuffle header at index 0
+            if (songIdx < 0) null
+            else {
+                val ch = items.getOrNull(songIdx)?.title?.trim()?.firstOrNull()?.uppercaseChar()
+                when {
+                    ch == null -> null
+                    ch in 'A'..'Z' -> ch
+                    else -> '#'
+                }
+            }
+        }
+    }
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(
@@ -253,14 +276,17 @@ private fun SongListContent(
                 )
             }
         }
-        AlphabetSideIndex(
-            onLetterSelected = { letter ->
-                AlphabetIndex.firstIndexForSongLetter(songs, letter)?.let { index ->
-                    coroutineScope.launch { listState.animateScrollToItem(index + 1) }
-                }
-            },
-            modifier = Modifier.align(Alignment.CenterEnd),
-        )
+        if (showAlphabetIndex) {
+            AlphabetSideIndex(
+                activeLetter = currentLetter,
+                onLetterSelected = { letter ->
+                    AlphabetIndex.firstIndexForSongLetter(songs, letter)?.let { index ->
+                        coroutineScope.launch { listState.scrollToItem(index + 1) }
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
     }
 }
 
