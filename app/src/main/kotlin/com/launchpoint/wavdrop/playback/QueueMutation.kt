@@ -47,6 +47,23 @@ internal object QueueMutation {
         return newQueue
     }
 
+    fun insertAfterCurrent(
+        playbackQueue: List<Song>,
+        song: Song,
+        currentPlaybackIndex: Int,
+    ): List<Song>? {
+        if (playbackQueue.isEmpty()) return listOf(song)
+        if (currentPlaybackIndex !in playbackQueue.indices) return null
+        val insertIndex = (currentPlaybackIndex + 1).coerceAtMost(playbackQueue.size)
+        return playbackQueue.toMutableList().also { it.add(insertIndex, song) }
+    }
+
+    fun append(
+        playbackQueue: List<Song>,
+        song: Song,
+    ): List<Song> =
+        playbackQueue.toMutableList().also { it.add(song) }
+
     /**
      * Swaps [playbackIndex] with [otherIndex] in [playbackQueue].
      * Both indices must be strictly after [currentPlaybackIndex] and within bounds.

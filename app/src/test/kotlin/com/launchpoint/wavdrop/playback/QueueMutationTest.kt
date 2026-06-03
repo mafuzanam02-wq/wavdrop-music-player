@@ -117,4 +117,21 @@ class QueueMutationTest {
         val r2 = QueueMutation.swapAdjacent(queue, 3, 2, currentPlaybackIndex = 1)
         assertEquals(r1, r2)
     }
+
+    @Test
+    fun `insertAfterCurrent inserts selected song directly after current`() {
+        val result = QueueMutation.insertAfterCurrent(queue, song = e, currentPlaybackIndex = 1)!!
+        assertEquals(listOf(a, b, e, c, d, e), result)
+    }
+
+    @Test
+    fun `insertAfterCurrent returns null for stale current index`() {
+        assertNull(QueueMutation.insertAfterCurrent(queue, song = e, currentPlaybackIndex = 99))
+    }
+
+    @Test
+    fun `append adds selected song to queue end`() {
+        val result = QueueMutation.append(queue, song = c)
+        assertEquals(listOf(a, b, c, d, e, c), result)
+    }
 }
