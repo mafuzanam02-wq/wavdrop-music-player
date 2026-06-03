@@ -101,11 +101,12 @@ fun NowPlayingScreen(
     val isFavorite        by viewModel.isFavorite.collectAsStateWithLifecycle()
     val hasCustomLyrics   by viewModel.hasCustomLyrics.collectAsStateWithLifecycle()
     val playlists         by viewModel.playlists.collectAsStateWithLifecycle()
-    var showAddToPlaylist by remember { mutableStateOf(false) }
-    var showLyricsOverlay by remember { mutableStateOf(false) }
-    var showLyricsEditor  by remember { mutableStateOf(false) }
-    var showMoreActions   by remember { mutableStateOf(false) }
-    var showQueueSheet    by remember { mutableStateOf(false) }
+    var showAddToPlaylist  by remember { mutableStateOf(false) }
+    var showLyricsOverlay  by remember { mutableStateOf(false) }
+    var showLyricsEditor   by remember { mutableStateOf(false) }
+    var overlayBeforeEdit  by remember { mutableStateOf(false) }
+    var showMoreActions    by remember { mutableStateOf(false) }
+    var showQueueSheet     by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -200,7 +201,7 @@ fun NowPlayingScreen(
                 lyrics            = lyricsState,
                 showLyricsOverlay = showLyricsOverlay,
                 onToggleLyrics    = { showLyricsOverlay = !showLyricsOverlay },
-                onEditLyrics      = { showLyricsEditor = true },
+                onEditLyrics      = { overlayBeforeEdit = showLyricsOverlay; showLyricsEditor = true },
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenAlbum        = onOpenAlbum,
                 onOpenArtist       = onOpenArtist,
@@ -232,13 +233,13 @@ fun NowPlayingScreen(
             onSave = { text ->
                 viewModel.saveCustomLyrics(text) {
                     showLyricsEditor = false
-                    showLyricsOverlay = true
+                    showLyricsOverlay = overlayBeforeEdit
                 }
             },
             onClear = {
                 viewModel.clearCustomLyrics {
                     showLyricsEditor = false
-                    showLyricsOverlay = true
+                    showLyricsOverlay = overlayBeforeEdit
                 }
             },
             onDismiss = { showLyricsEditor = false },
