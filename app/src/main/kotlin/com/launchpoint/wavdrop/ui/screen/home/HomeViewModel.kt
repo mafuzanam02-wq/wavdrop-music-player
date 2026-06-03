@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
@@ -12,6 +13,7 @@ import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.search.LibrarySearch
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettings
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -41,6 +43,7 @@ data class HomeDashboardUiState(
     val mostPlayed: List<Song> = emptyList(),
     val playlists: List<PlaylistSummary> = emptyList(),
     val smartCollections: List<SmartCollection> = emptyList(),
+    val wrapped: WrappedSummary? = null,
 )
 
 @HiltViewModel
@@ -78,10 +81,21 @@ class HomeViewModel @Inject constructor(
     val dashboardState: StateFlow<HomeDashboardUiState> = combine(
         allSongs,
         statsRepository.allTrackStatsEntities(),
+        statsRepository.allListenEvents(),
         playlistRepository.observePlaylists(),
         smartCollectionRepository.observeSmartCollections(),
-    ) { songs, stats, playlists, smartCollections ->
+    ) { songs, stats, events, playlists, smartCollections ->
         val songsById = songs.associateBy { it.id }
+        val latestWrapped = WrappedBuilder.availableYears(events)
+            .firstOrNull()
+            ?.let { year ->
+                WrappedBuilder.buildYear(
+                    year = year,
+                    songs = songs,
+                    events = events,
+                )
+            }
+            ?.takeIf { it.hasActivity && !it.emptyState.isEmpty }
         HomeDashboardUiState(
             totalSongs = songs.size,
             recentlyPlayed = stats
@@ -102,6 +116,7 @@ class HomeViewModel @Inject constructor(
             smartCollections = smartCollections
                 .filter { it.songCount > 0 }
                 .take(DASHBOARD_COLLECTION_PREVIEW_LIMIT),
+            wrapped = latestWrapped,
         )
     }.stateIn(
         scope = viewModelScope,

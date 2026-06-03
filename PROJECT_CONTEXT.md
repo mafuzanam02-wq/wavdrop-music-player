@@ -221,9 +221,10 @@ No schema change — computed on demand.
 status. Editing is unsynced text only; Wavdrop does not write audio tags or fetch lyrics online.
 
 ## Home Dashboard
-Section pinning via `HomeSectionId` enum (7 sections). `HomeLayoutSettingsRepository` persists
+Section pinning via `HomeSectionId` enum (8 sections). `HomeLayoutSettingsRepository` persists
 visible sections as `Set<String>` in DataStore. `HomeCustomizationScreen` is the settings entry
-point. `LIBRARY_SHORTCUT` is always visible (non-toggleable).
+point. `LIBRARY_SHORTCUT` is always visible (non-toggleable). The optional Wrapped section shows a
+compact link to the latest event-backed Wrapped year only when Wrapped data exists.
 
 ## Settings Screen
 Route: `Screen.Settings`. Sections: Library (scan settings, import), Backup & Restore,

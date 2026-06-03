@@ -27,6 +27,7 @@ object HomeLayoutSettingsRules {
         HomeSectionId.MOST_PLAYED        -> "Most Played"
         HomeSectionId.PLAYLISTS          -> "Playlists"
         HomeSectionId.SMART_COLLECTIONS  -> "Smart Collections"
+        HomeSectionId.WRAPPED            -> "Wrapped"
         HomeSectionId.LIBRARY_SHORTCUT   -> "Library Shortcut"
     }
 
@@ -37,6 +38,7 @@ object HomeLayoutSettingsRules {
         HomeSectionId.MOST_PLAYED        -> "Your most-played tracks."
         HomeSectionId.PLAYLISTS          -> "Preview your playlists."
         HomeSectionId.SMART_COLLECTIONS  -> "Auto-generated collections from your listening history."
+        HomeSectionId.WRAPPED            -> "Shortcut to your latest event-backed year in music."
         HomeSectionId.LIBRARY_SHORTCUT   -> "Quick link to your full library. Always visible."
     }
 
@@ -47,6 +49,7 @@ object HomeLayoutSettingsRules {
         HomeSectionId.MOST_PLAYED,
         HomeSectionId.PLAYLISTS,
         HomeSectionId.SMART_COLLECTIONS,
+        HomeSectionId.WRAPPED,
         HomeSectionId.LIBRARY_SHORTCUT,
     )
 }

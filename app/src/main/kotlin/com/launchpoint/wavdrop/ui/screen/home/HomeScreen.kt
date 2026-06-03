@@ -62,6 +62,7 @@ import com.launchpoint.wavdrop.R
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
@@ -86,6 +87,7 @@ fun HomeScreen(
     onTrackDetailsClick: (Long) -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
     onSmartCollectionsClick: () -> Unit = {},
+    onWrappedClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -210,6 +212,7 @@ fun HomeScreen(
                         onLibraryClick      = onLibraryClick,
                         onPlaylistsClick    = onPlaylistsClick,
                         onSmartCollectionsClick = onSmartCollectionsClick,
+                        onWrappedClick      = onWrappedClick,
                         onSongClick         = viewModel::playSong,
                         onToggleFavorite    = viewModel::toggleFavorite,
                         onTrackDetailsClick = onTrackDetailsClick,
@@ -418,6 +421,7 @@ private fun HomeDashboardContent(
     onLibraryClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
     onSmartCollectionsClick: () -> Unit,
+    onWrappedClick: () -> Unit,
     onSongClick: (Song) -> Unit,
     onToggleFavorite: (Long) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
@@ -472,6 +476,15 @@ private fun HomeDashboardContent(
                     onToggleFavorite = onToggleFavorite,
                     onTrackDetailsClick = onTrackDetailsClick,
                 )
+            }
+            if (HomeSectionId.WRAPPED in visibleSections && dashboard.wrapped != null) {
+                item {
+                    WrappedPreviewCard(
+                        wrapped = dashboard.wrapped,
+                        onClick = onWrappedClick,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
             }
             if (HomeSectionId.SMART_COLLECTIONS in visibleSections) {
                 item {
@@ -537,6 +550,65 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                 thickness = 0.5.dp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WrappedPreviewCard(
+    wrapped: WrappedSummary,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val highlight = when {
+        wrapped.mostPlayedArtist != null -> "Top artist: ${wrapped.mostPlayedArtist.artistKey}"
+        wrapped.mostPlayedSong != null -> "Top track: ${wrapped.mostPlayedSong.song.title}"
+        else -> "${wrapped.totalPlayCount} plays"
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.padding(start = 14.dp, top = 14.dp, end = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(26.dp),
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Wrapped",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "${wrapped.year} - $highlight",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TextButton(onClick = onClick) {
+                    Text("View")
+                }
+            }
+            Text(
+                text = "View your year in music",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                modifier = Modifier.padding(start = 52.dp, end = 14.dp, bottom = 14.dp),
             )
         }
     }

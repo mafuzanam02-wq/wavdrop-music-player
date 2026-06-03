@@ -7,6 +7,7 @@ enum class HomeSectionId {
     MOST_PLAYED,
     PLAYLISTS,
     SMART_COLLECTIONS,
+    WRAPPED,
     LIBRARY_SHORTCUT;
 
     companion object {
