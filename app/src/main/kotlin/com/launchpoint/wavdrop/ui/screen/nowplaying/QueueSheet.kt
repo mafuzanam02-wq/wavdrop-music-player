@@ -94,41 +94,29 @@ private fun QueueSheetContent(
 
     // Scroll to the "Playing now" section header on open and when the current track changes.
     // LazyColumn item layout (0-based):
-    //   0           "Queue" title
-    //   1           "Previously played" header   } only when currentIndex > 0
-    //   2..ci+1     previous song rows           }
-    //   ci+2 or 1   "Playing now" header         <- scroll target
-    //   ci+3 or 2   QueueNowPlayingRow
+    //   0           "Previously played" header   } only when currentIndex > 0
+    //   1..ci       previous song rows           }
+    //   ci+1 or 0   "Playing now" header         <- scroll target
+    //   ci+2 or 1   QueueNowPlayingRow
     LaunchedEffect(currentIndex) {
         if (currentIndex >= 0) {
-            val target = if (currentIndex > 0) 2 + currentIndex else 1
+            val target = if (currentIndex > 0) currentIndex + 1 else 0
             listState.scrollToItem(target)
         }
     }
 
-    LazyColumn(state = listState) {
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Queue",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close queue",
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
-                    )
-                }
-            }
-        }
-
+    Column(modifier = Modifier.fillMaxWidth()) {
+        QueueSheetHeader(onDismiss = onDismiss)
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false),
+        ) {
         // ── Previously played ─────────────────────────────────────────────────
         if (previousSongs.isNotEmpty()) {
             item {
@@ -214,10 +202,34 @@ private fun QueueSheetContent(
         }
 
         item { Spacer(Modifier.height(24.dp)) }
+        }
     }
 }
 
 // ── Section header ────────────────────────────────────────────────────────────
+
+@Composable
+private fun QueueSheetHeader(onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Queue",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onDismiss) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Close queue",
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+            )
+        }
+    }
+}
 
 @Composable
 private fun QueueSectionHeader(label: String, modifier: Modifier = Modifier) {

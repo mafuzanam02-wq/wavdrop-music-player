@@ -28,10 +28,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -107,9 +109,10 @@ fun AlbumsScreen(
             AlbumsUiState.Loading  -> LoadingContent(Modifier.padding(innerPadding))
             AlbumsUiState.Empty    -> EmptyContent(Modifier.padding(innerPadding))
             is AlbumsUiState.Ready -> AlbumListContent(
-                albums       = s.albums,
-                onAlbumClick = onAlbumClick,
-                modifier     = Modifier.padding(innerPadding),
+                albums            = s.albums,
+                showAlphabetIndex = !isSearchActive,
+                onAlbumClick      = onAlbumClick,
+                modifier          = Modifier.padding(innerPadding),
             )
         }
     }
@@ -118,6 +121,7 @@ fun AlbumsScreen(
 @Composable
 private fun AlbumListContent(
     albums: List<AlbumSummary>,
+    showAlphabetIndex: Boolean = true,
     onAlbumClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -134,6 +138,20 @@ private fun AlbumListContent(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
+    // No header item — firstVisibleItemIndex maps directly to albums[index].
+    val albumsRef = rememberUpdatedState(albums)
+    val currentLetter: Char? by remember {
+        derivedStateOf {
+            val ch = albumsRef.value.getOrNull(listState.firstVisibleItemIndex)
+                ?.albumKey?.trim()?.firstOrNull()?.uppercaseChar()
+            when {
+                ch == null -> null
+                ch in 'A'..'Z' -> ch
+                else -> '#'
+            }
+        }
+    }
+
     Box(modifier.fillMaxSize()) {
         LazyColumn(
             state          = listState,
@@ -148,14 +166,17 @@ private fun AlbumListContent(
                 )
             }
         }
-        AlphabetSideIndex(
-            onLetterSelected = { letter ->
-                AlphabetIndex.firstIndexForAlbumLetter(albums, letter)?.let { index ->
-                    coroutineScope.launch { listState.animateScrollToItem(index) }
-                }
-            },
-            modifier = Modifier.align(Alignment.CenterEnd),
-        )
+        if (showAlphabetIndex) {
+            AlphabetSideIndex(
+                activeLetter = currentLetter,
+                onLetterSelected = { letter ->
+                    AlphabetIndex.firstIndexForAlbumLetter(albums, letter)?.let { index ->
+                        coroutineScope.launch { listState.scrollToItem(index) }
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
     }
 }
 
