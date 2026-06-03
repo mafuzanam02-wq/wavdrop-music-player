@@ -117,6 +117,10 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setPauseOnAudioDisconnect(enabled: Boolean) {
+        viewModelScope.launch { resumeBehaviorRepository.setPauseOnAudioDisconnect(enabled) }
+    }
+
     fun setRememberLastTrack(enabled: Boolean) {
         viewModelScope.launch { resumeBehaviorRepository.setRememberLastTrack(enabled) }
     }

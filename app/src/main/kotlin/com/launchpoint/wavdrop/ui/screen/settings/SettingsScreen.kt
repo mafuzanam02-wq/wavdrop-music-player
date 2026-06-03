@@ -161,6 +161,14 @@ fun SettingsScreen(
             item { SectionHeader("Playback") }
             item {
                 ToggleSettingsRow(
+                    title    = "Pause when audio output disconnects",
+                    subtitle = "Pause playback when headphones or Bluetooth audio disconnects.",
+                    checked  = resumeBehavior.pauseOnAudioDisconnect,
+                    onCheckedChange = viewModel::setPauseOnAudioDisconnect,
+                )
+            }
+            item {
+                ToggleSettingsRow(
                     title    = "Remember last played track",
                     subtitle = "Restore the last playing song when you reopen Wavdrop.",
                     checked  = resumeBehavior.rememberLastTrack,

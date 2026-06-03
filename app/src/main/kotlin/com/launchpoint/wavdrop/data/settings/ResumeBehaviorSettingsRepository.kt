@@ -22,6 +22,7 @@ class ResumeBehaviorSettingsRepository @Inject constructor(
         }
         .map { prefs ->
             ResumeBehaviorSettings(
+                pauseOnAudioDisconnect = prefs[PAUSE_ON_AUDIO_DISCONNECT] ?: true,
                 rememberLastTrack      = prefs[REMEMBER_LAST_TRACK] ?: true,
                 rememberPosition       = prefs[REMEMBER_POSITION] ?: true,
                 restoreQueue           = prefs[RESTORE_QUEUE] ?: true,
@@ -29,6 +30,10 @@ class ResumeBehaviorSettingsRepository @Inject constructor(
                 autoResumeOnBluetooth  = prefs[AUTO_RESUME_BLUETOOTH] ?: false,
             )
         }
+
+    suspend fun setPauseOnAudioDisconnect(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[PAUSE_ON_AUDIO_DISCONNECT] = enabled }
+    }
 
     suspend fun setRememberLastTrack(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[REMEMBER_LAST_TRACK] = enabled }
@@ -51,7 +56,8 @@ class ResumeBehaviorSettingsRepository @Inject constructor(
     }
 
     private companion object {
-        val REMEMBER_LAST_TRACK    = booleanPreferencesKey("resume_remember_last_track")
+        val PAUSE_ON_AUDIO_DISCONNECT = booleanPreferencesKey("playback_pause_on_audio_disconnect")
+        val REMEMBER_LAST_TRACK       = booleanPreferencesKey("resume_remember_last_track")
         val REMEMBER_POSITION      = booleanPreferencesKey("resume_remember_position")
         val RESTORE_QUEUE          = booleanPreferencesKey("resume_restore_queue")
         val AUTO_RESUME_HEADPHONES = booleanPreferencesKey("resume_auto_headphones")
