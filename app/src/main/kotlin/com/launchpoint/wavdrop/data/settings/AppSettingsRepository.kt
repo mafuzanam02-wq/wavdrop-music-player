@@ -7,7 +7,6 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
-import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -79,6 +78,34 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val themeMode: Flow<ThemeMode> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[THEME_MODE_KEY]?.toThemeMode() ?: ThemeMode.SYSTEM
+        }
+
+    suspend fun setThemeMode(mode: ThemeMode) {
+        dataStore.edit { preferences ->
+            preferences[THEME_MODE_KEY] = mode.name
+        }
+    }
+
+    val accentColor: Flow<AccentColor> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[ACCENT_COLOR_KEY]?.toAccentColor() ?: AccentColor.MIDNIGHT_VIOLET
+        }
+
+    suspend fun setAccentColor(color: AccentColor) {
+        dataStore.edit { preferences ->
+            preferences[ACCENT_COLOR_KEY] = color.name
+        }
+    }
+
     private fun String.toStartupDestination(): StartupDestination? =
         runCatching { StartupDestination.valueOf(this) }.getOrNull()
 
@@ -91,10 +118,18 @@ class AppSettingsRepository @Inject constructor(
     private fun String.toAppIconChoice(): AppIconChoice? =
         runCatching { AppIconChoice.valueOf(this) }.getOrNull()
 
+    private fun String.toThemeMode(): ThemeMode? =
+        runCatching { ThemeMode.valueOf(this) }.getOrNull()
+
+    private fun String.toAccentColor(): AccentColor? =
+        runCatching { AccentColor.valueOf(this) }.getOrNull()
+
     private companion object {
         val STARTUP_DESTINATION_KEY = stringPreferencesKey("startup_destination")
         val MOST_PLAYED_PERIOD_KEY  = stringPreferencesKey("most_played_period")
         val MOST_PLAYED_LIMIT_KEY   = stringPreferencesKey("most_played_limit")
         val APP_ICON_CHOICE_KEY     = stringPreferencesKey("app_icon_choice")
+        val THEME_MODE_KEY          = stringPreferencesKey("theme_mode")
+        val ACCENT_COLOR_KEY        = stringPreferencesKey("accent_color")
     }
 }

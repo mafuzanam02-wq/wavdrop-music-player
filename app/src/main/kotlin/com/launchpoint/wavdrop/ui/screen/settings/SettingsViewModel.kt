@@ -8,8 +8,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
+import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
@@ -81,6 +83,20 @@ class SettingsViewModel @Inject constructor(
             initialValue = AppIconChoice.MIDNIGHT_VIOLET,
         )
 
+    val themeMode: StateFlow<ThemeMode> =
+        appSettingsRepository.themeMode.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ThemeMode.SYSTEM,
+        )
+
+    val accentColor: StateFlow<AccentColor> =
+        appSettingsRepository.accentColor.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = AccentColor.MIDNIGHT_VIOLET,
+        )
+
     private val _libraryScanUiState =
         MutableStateFlow<LibraryScanUiState>(LibraryScanUiState.Idle)
     val libraryScanUiState: StateFlow<LibraryScanUiState> =
@@ -148,6 +164,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setAutoResumeOnBluetooth(enabled: Boolean) {
         viewModelScope.launch { resumeBehaviorRepository.setAutoResumeOnBluetooth(enabled) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { appSettingsRepository.setThemeMode(mode) }
+    }
+
+    fun setAccentColor(color: AccentColor) {
+        viewModelScope.launch { appSettingsRepository.setAccentColor(color) }
     }
 
     fun setAppIcon(choice: AppIconChoice) {

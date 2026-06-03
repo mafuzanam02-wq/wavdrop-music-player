@@ -47,9 +47,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.StartupDestination
+import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import java.time.LocalDate
@@ -78,6 +80,8 @@ fun SettingsScreen(
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
     val resumeBehavior by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
     val appIconChoice by viewModel.appIconChoice.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val suggestedExportName = remember { "wavdrop-backup-${LocalDate.now()}.json" }
     val exportLauncher = rememberLauncherForActivityResult(
@@ -167,6 +171,32 @@ fun SettingsScreen(
                         name     = choice.displayName,
                         selected = appIconChoice == choice,
                         onClick  = { viewModel.setAppIcon(choice) },
+                    )
+                }
+            }
+            item { SectionDivider() }
+
+            // ── Theme Mode ───────────────────────────────────────────────────
+            item { SectionHeader("Theme Mode") }
+            ThemeMode.entries.forEach { mode ->
+                item {
+                    IconChoiceRow(
+                        name     = mode.displayName,
+                        selected = themeMode == mode,
+                        onClick  = { viewModel.setThemeMode(mode) },
+                    )
+                }
+            }
+            item { SectionDivider() }
+
+            // ── Accent Color ─────────────────────────────────────────────────
+            item { SectionHeader("Accent Color") }
+            AccentColor.entries.forEach { color ->
+                item {
+                    IconChoiceRow(
+                        name     = color.displayName,
+                        selected = accentColor == color,
+                        onClick  = { viewModel.setAccentColor(color) },
                     )
                 }
             }
