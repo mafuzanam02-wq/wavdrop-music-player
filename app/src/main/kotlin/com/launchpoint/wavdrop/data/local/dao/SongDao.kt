@@ -10,13 +10,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface SongDao {
 
-    @Query("SELECT * FROM songs ORDER BY title ASC")
+    @Query("SELECT * FROM songs ORDER BY title COLLATE NOCASE ASC, title ASC, id ASC")
     fun getAllSongs(): Flow<List<SongEntity>>
 
     @Query("SELECT * FROM songs WHERE id = :songId")
     fun observeSongById(songId: Long): Flow<SongEntity?>
 
-    @Query("SELECT * FROM songs ORDER BY title ASC")
+    @Query("SELECT * FROM songs ORDER BY title COLLATE NOCASE ASC, title ASC, id ASC")
     suspend fun getAllSongsSnapshot(): List<SongEntity>
 
     @Query("SELECT * FROM songs WHERE artist = :artist ORDER BY album, trackNumber")

@@ -4,6 +4,7 @@ import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
 import com.launchpoint.wavdrop.data.mediastore.MediaStoreScanner
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.search.SongSort
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -17,7 +18,9 @@ class SongRepository @Inject constructor(
     private val scanner: MediaStoreScanner,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
 ) {
-    val songs: Flow<List<Song>> = dao.getAllSongs().map { it.map(SongEntity::toDomain) }
+    val songs: Flow<List<Song>> = dao.getAllSongs().map { entities ->
+        entities.map(SongEntity::toDomain).sortedWith(SongSort.byTitle)
+    }
 
     fun observeSongById(songId: Long): Flow<Song?> =
         dao.observeSongById(songId).map { it?.toDomain() }
