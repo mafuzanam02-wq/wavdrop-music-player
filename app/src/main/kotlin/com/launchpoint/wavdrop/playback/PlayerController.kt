@@ -277,19 +277,21 @@ class PlayerController @Inject constructor(
     fun moveQueueItemUp(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex <= currentPlaybackIndex || playbackIndex <= 0) return
-        val newQueue = QueueMutation.swapAdjacent(
-            playbackQueue, playbackIndex, playbackIndex - 1, currentPlaybackIndex,
-        ) ?: return
-        applyQueueMutationByIdentity(newQueue, currentPlaybackIndex)
+        moveQueueItemWithNativePlaylistMove(
+            playbackIndex = playbackIndex,
+            otherIndex = playbackIndex - 1,
+            currentPlaybackIndex = currentPlaybackIndex,
+        )
     }
 
     fun moveQueueItemDown(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex <= currentPlaybackIndex || playbackIndex >= playbackQueue.size - 1) return
-        val newQueue = QueueMutation.swapAdjacent(
-            playbackQueue, playbackIndex, playbackIndex + 1, currentPlaybackIndex,
-        ) ?: return
-        applyQueueMutationByIdentity(newQueue, currentPlaybackIndex)
+        moveQueueItemWithNativePlaylistMove(
+            playbackIndex = playbackIndex,
+            otherIndex = playbackIndex + 1,
+            currentPlaybackIndex = currentPlaybackIndex,
+        )
     }
 
     fun moveToPlayNext(playbackIndex: Int) {
@@ -640,6 +642,48 @@ class PlayerController @Inject constructor(
             shuffleEnabled = shuffleEnabled,
         )
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+    }
+
+    private fun moveQueueItemWithNativePlaylistMove(
+        playbackIndex: Int,
+        otherIndex: Int,
+        currentPlaybackIndex: Int,
+    ) {
+        val nativeMove = QueueMutation.playbackOrderAfterNativeMove(
+            playbackOrder = playbackOrder,
+            playbackIndex = playbackIndex,
+            otherIndex = otherIndex,
+            currentPlaybackIndex = currentPlaybackIndex,
+        ) ?: return
+        val newLibraryQueue = libraryQueue.moveItem(
+            fromIndex = nativeMove.fromLibraryIndex,
+            toIndex = nativeMove.toLibraryIndex,
+        ) ?: return
+
+        libraryQueue = newLibraryQueue
+        playbackOrder = nativeMove.playbackOrder
+        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+
+        mediaController?.moveMediaItem(nativeMove.fromLibraryIndex, nativeMove.toLibraryIndex)
+
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
+    }
+
+    private fun List<Song>.moveItem(fromIndex: Int, toIndex: Int): List<Song>? {
+        if (fromIndex !in indices || toIndex !in indices) return null
+        if (fromIndex == toIndex) return this
+        val moved = toMutableList()
+        val item = moved.removeAt(fromIndex)
+        moved.add(toIndex, item)
+        return moved
     }
 
     private fun applyQueueMutationByIdentity(

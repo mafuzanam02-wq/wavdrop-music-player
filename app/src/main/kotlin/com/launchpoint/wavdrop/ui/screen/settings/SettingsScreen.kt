@@ -6,6 +6,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -111,6 +113,7 @@ fun SettingsScreen(
         mutableFloatStateOf(scanSettings.minimumTrackDurationSeconds.toFloat())
     }
     var showStartupDestinationDialog by remember { mutableStateOf(false) }
+    var showFormatsDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -421,6 +424,13 @@ fun SettingsScreen(
                 AboutInfoRow(label = "Database", value = "wavdrop.db")
                 AboutInfoRow(label = "Version",  value = "Development build")
             }
+            item {
+                ClickableSettingsRow(
+                    title    = "Supported Audio Formats",
+                    subtitle = "MP3, AAC, FLAC, OGG, Opus, WAV and more",
+                    onClick  = { showFormatsDialog = true },
+                )
+            }
             item { Spacer(Modifier.height(24.dp)) }
         }
     }
@@ -434,6 +444,10 @@ fun SettingsScreen(
             },
             onDismiss = { showStartupDestinationDialog = false },
         )
+    }
+
+    if (showFormatsDialog) {
+        AudioFormatsDialog(onDismiss = { showFormatsDialog = false })
     }
 }
 
@@ -813,6 +827,65 @@ private fun AboutInfoRow(
             text  = value,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun AudioFormatsDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Supported Audio Formats") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text  = "Wavdrop supports formats that Android MediaStore can index " +
+                            "and Media3/ExoPlayer can play on your device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.height(14.dp))
+                FormatGroup(
+                    title   = "Reliably supported",
+                    formats = "MP3 · AAC / M4A · FLAC · OGG Vorbis · Opus · WAV · AMR · MIDI",
+                )
+                Spacer(Modifier.height(12.dp))
+                FormatGroup(
+                    title   = "Device-dependent",
+                    formats = "ALAC · WMA · AC-3 · E-AC-3 · DTS · High-bit-depth WAV",
+                )
+                Spacer(Modifier.height(12.dp))
+                FormatGroup(
+                    title   = "Not currently supported",
+                    formats = "APE · AIFF · WavPack · Musepack · TTA · DSD / DSF / DFF · RealAudio",
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@Composable
+private fun FormatGroup(
+    title: String,
+    formats: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text  = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text  = formats,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
         )
     }
 }

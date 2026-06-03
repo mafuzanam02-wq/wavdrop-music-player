@@ -197,4 +197,68 @@ class QueueMutationTest {
         // shift all >= 0 (all): [1,2,3,4,5], insert 0 at position 2 → [1,2,0,3,4,5]
         assertEquals(listOf(1, 2, 0, 3, 4, 5), result)
     }
+
+    // ── playbackOrderAfterNativeMove ────────────────────────────────────────────
+
+    @Test
+    fun `playbackOrderAfterNativeMove returns native move indexes for identity move up`() {
+        val result = QueueMutation.playbackOrderAfterNativeMove(
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            playbackIndex = 3,
+            otherIndex = 2,
+            currentPlaybackIndex = 1,
+        )!!
+
+        assertEquals(3, result.fromLibraryIndex)
+        assertEquals(2, result.toLibraryIndex)
+        assertEquals(listOf(0, 1, 2, 3, 4), result.playbackOrder)
+    }
+
+    @Test
+    fun `playbackOrderAfterNativeMove returns native move indexes for identity move down`() {
+        val result = QueueMutation.playbackOrderAfterNativeMove(
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            playbackIndex = 2,
+            otherIndex = 3,
+            currentPlaybackIndex = 1,
+        )!!
+
+        assertEquals(2, result.fromLibraryIndex)
+        assertEquals(3, result.toLibraryIndex)
+        assertEquals(listOf(0, 1, 2, 3, 4), result.playbackOrder)
+    }
+
+    @Test
+    fun `playbackOrderAfterNativeMove preserves shuffled current and swaps visible up-next items`() {
+        val result = QueueMutation.playbackOrderAfterNativeMove(
+            playbackOrder = listOf(0, 3, 1, 4, 2),
+            playbackIndex = 3,
+            otherIndex = 2,
+            currentPlaybackIndex = 1,
+        )!!
+
+        assertEquals(4, result.fromLibraryIndex)
+        assertEquals(1, result.toLibraryIndex)
+        assertEquals(listOf(0, 4, 1, 2, 3), result.playbackOrder)
+    }
+
+    @Test
+    fun `playbackOrderAfterNativeMove rejects current and previous items`() {
+        assertNull(
+            QueueMutation.playbackOrderAfterNativeMove(
+                playbackOrder = listOf(0, 1, 2, 3, 4),
+                playbackIndex = 1,
+                otherIndex = 2,
+                currentPlaybackIndex = 1,
+            ),
+        )
+        assertNull(
+            QueueMutation.playbackOrderAfterNativeMove(
+                playbackOrder = listOf(0, 1, 2, 3, 4),
+                playbackIndex = 0,
+                otherIndex = 3,
+                currentPlaybackIndex = 1,
+            ),
+        )
+    }
 }

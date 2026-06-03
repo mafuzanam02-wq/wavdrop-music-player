@@ -6,6 +6,11 @@ import com.launchpoint.wavdrop.data.model.Song
 internal object QueueMutation {
 
     data class RemoveResult(val queue: List<Song>, val currentIndex: Int)
+    data class NativeMoveResult(
+        val playbackOrder: List<Int>,
+        val fromLibraryIndex: Int,
+        val toLibraryIndex: Int,
+    )
 
     /**
      * Removes the item at [playbackIndex] from [playbackQueue].
@@ -82,6 +87,36 @@ internal object QueueMutation {
     }
 
     /**
+     * Returns the playback-order mapping needed after moving a Media3/library playlist item.
+     * The native playlist move changes library indices first; playback positions are then swapped
+     * so the visible queue order reflects Move Up / Move Down without rebuilding playback.
+     */
+    fun playbackOrderAfterNativeMove(
+        playbackOrder: List<Int>,
+        playbackIndex: Int,
+        otherIndex: Int,
+        currentPlaybackIndex: Int,
+    ): NativeMoveResult? {
+        if (playbackIndex <= currentPlaybackIndex || otherIndex <= currentPlaybackIndex) return null
+        if (playbackIndex !in playbackOrder.indices || otherIndex !in playbackOrder.indices) return null
+        if (playbackIndex == otherIndex) return null
+
+        val fromLibraryIndex = playbackOrder[playbackIndex]
+        val toLibraryIndex = playbackOrder[otherIndex]
+        val remappedOrder = playbackOrder
+            .map { remapLibraryIndexAfterMove(it, fromLibraryIndex, toLibraryIndex) }
+            .toMutableList()
+        val moved = remappedOrder[playbackIndex]
+        remappedOrder[playbackIndex] = remappedOrder[otherIndex]
+        remappedOrder[otherIndex] = moved
+        return NativeMoveResult(
+            playbackOrder = remappedOrder,
+            fromLibraryIndex = fromLibraryIndex,
+            toLibraryIndex = toLibraryIndex,
+        )
+    }
+
+    /**
      * Swaps [playbackIndex] with [otherIndex] in [playbackQueue].
      * Both indices must be strictly after [currentPlaybackIndex] and within bounds.
      * Returns the reordered queue or null if invalid.
@@ -100,4 +135,12 @@ internal object QueueMutation {
         newQueue[otherIndex] = tmp
         return newQueue
     }
+
+    private fun remapLibraryIndexAfterMove(index: Int, fromIndex: Int, toIndex: Int): Int =
+        when {
+            index == fromIndex -> toIndex
+            fromIndex < toIndex && index in (fromIndex + 1)..toIndex -> index - 1
+            toIndex < fromIndex && index in toIndex until fromIndex -> index + 1
+            else -> index
+        }
 }
