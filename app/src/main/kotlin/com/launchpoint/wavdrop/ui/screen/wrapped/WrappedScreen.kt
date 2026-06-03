@@ -25,6 +25,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,6 +39,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -154,8 +159,10 @@ private fun WrappedContent(
     Column(modifier = modifier.fillMaxSize()) {
         YearSelector(
             year = state.selectedYear,
+            availableYears = years,
             hasPrevious = selectedIndex >= 0 && selectedIndex < years.lastIndex,
             hasNext = selectedIndex > 0,
+            onSelectYear = onSelectYear,
             onPrevious = {
                 if (selectedIndex >= 0 && selectedIndex < years.lastIndex)
                     onSelectYear(years[selectedIndex + 1])
@@ -209,12 +216,17 @@ private fun WrappedContent(
 @Composable
 private fun YearSelector(
     year: Int,
+    availableYears: List<Int>,
     hasPrevious: Boolean,
     hasNext: Boolean,
+    onSelectYear: (Int) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var expanded by remember { mutableStateOf(false) }
+    val canSelectYear = availableYears.size > 1
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -230,12 +242,38 @@ private fun YearSelector(
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
             )
         }
-        Text(
-            text = year.toString(),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+        Box {
+            TextButton(
+                onClick = { expanded = true },
+                enabled = canSelectYear,
+            ) {
+                Text(
+                    text = year.toString(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (canSelectYear) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                    },
+                )
+            }
+            DropdownMenu(
+                expanded = expanded && canSelectYear,
+                onDismissRequest = { expanded = false },
+            ) {
+                availableYears.forEach { availableYear ->
+                    DropdownMenuItem(
+                        text = { Text(availableYear.toString()) },
+                        onClick = {
+                            expanded = false
+                            onSelectYear(availableYear)
+                        },
+                        enabled = availableYear != year,
+                    )
+                }
+            }
+        }
         IconButton(onClick = onNext, enabled = hasNext) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
