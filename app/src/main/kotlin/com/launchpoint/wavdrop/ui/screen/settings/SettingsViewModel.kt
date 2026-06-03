@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
@@ -182,19 +183,35 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun applyAppIcon(choice: AppIconChoice) {
-        val pm = context.packageManager
-        AppIconChoice.entries.forEach { iconChoice ->
-            val state = if (iconChoice == choice) {
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-            } else {
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-            }
-            pm.setComponentEnabledSetting(
-                ComponentName(context.packageName, "${context.packageName}.${iconChoice.aliasSimpleName}"),
-                state,
+        val pm = context.packageName
+        val packageManager = context.packageManager
+
+        // Enable the chosen alias FIRST so the launcher always has an active component.
+        // Disabling the current alias before enabling the replacement can leave a brief
+        // window with no active launcher entry, which causes Samsung/some launchers to
+        // lose the shortcut instead of updating the icon.
+        val enableCn = ComponentName(pm, "$pm.${choice.aliasSimpleName}")
+        packageManager.setComponentEnabledSetting(
+            enableCn,
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+        Log.d(TAG, "Icon alias ENABLED: ${choice.aliasSimpleName}")
+
+        // Disable all other aliases.
+        AppIconChoice.entries.filter { it != choice }.forEach { iconChoice ->
+            val disableCn = ComponentName(pm, "$pm.${iconChoice.aliasSimpleName}")
+            packageManager.setComponentEnabledSetting(
+                disableCn,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 PackageManager.DONT_KILL_APP,
             )
+            Log.d(TAG, "Icon alias DISABLED: ${iconChoice.aliasSimpleName}")
         }
+    }
+
+    private companion object {
+        const val TAG = "Wavdrop-IconSwitch"
     }
 
     fun rescanLibrary() {
