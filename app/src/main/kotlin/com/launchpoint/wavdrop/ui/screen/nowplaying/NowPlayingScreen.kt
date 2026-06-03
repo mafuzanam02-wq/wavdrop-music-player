@@ -1,5 +1,10 @@
 ﻿package com.launchpoint.wavdrop.ui.screen.nowplaying
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
@@ -66,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
@@ -121,6 +127,7 @@ fun NowPlayingScreen(
                     }
                 },
                 actions = {
+                    val context = LocalContext.current
                     val song = state.song
                     if (song != null) {
                         val folderKey = song.validFolderKey()
@@ -165,6 +172,13 @@ fun NowPlayingScreen(
                                     onClick = {
                                         showMoreActions = false
                                         onOpenStatistics()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Search lyrics online") },
+                                    onClick = {
+                                        showMoreActions = false
+                                        searchLyricsOnline(context, song)
                                     },
                                 )
                             }
@@ -782,6 +796,24 @@ private fun formatMs(ms: Long): String {
     val m = total / 60
     val s = total % 60
     return "%d:%02d".format(m, s)
+}
+
+private fun searchLyricsOnline(context: Context, song: Song) {
+    val query = buildString {
+        if (song.hasKnownArtist()) {
+            append(song.artist)
+            append(' ')
+        }
+        append(song.title)
+        append(" lyrics")
+    }
+    val url = "https://www.google.com/search?q=${Uri.encode(query)}"
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "No browser found", Toast.LENGTH_SHORT).show()
+    }
 }
 
 @Composable
