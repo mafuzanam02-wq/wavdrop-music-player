@@ -741,18 +741,25 @@ private fun SeekBar(
     var isDragging by remember { mutableStateOf(false) }
     var dragPositionMs by remember { mutableStateOf(0L) }
 
+    val safeDurationMs = durationMs.coerceAtLeast(0L)
     val displayPositionMs = if (isDragging) dragPositionMs else positionMs
-    val sliderValue = if (durationMs > 0) {
-        (displayPositionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+    val safeDisplayPositionMs = displayPositionMs.coerceForDisplay(safeDurationMs)
+    val remainingMs = if (safeDurationMs > 0) {
+        (safeDurationMs - safeDisplayPositionMs).coerceAtLeast(0L)
+    } else {
+        0L
+    }
+    val sliderValue = if (safeDurationMs > 0) {
+        (safeDisplayPositionMs.toFloat() / safeDurationMs).coerceIn(0f, 1f)
     } else {
         0f
     }
     var trackWidthPx by remember { mutableStateOf(0) }
 
     fun seekToOffset(x: Float) {
-        if (trackWidthPx <= 0 || durationMs <= 0) return
+        if (trackWidthPx <= 0 || safeDurationMs <= 0) return
         val fraction = (x / trackWidthPx).coerceIn(0f, 1f)
-        dragPositionMs = (fraction * durationMs).toLong()
+        dragPositionMs = (fraction * safeDurationMs).toLong()
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -761,15 +768,15 @@ private fun SeekBar(
                 .fillMaxWidth()
                 .height(36.dp)
                 .onSizeChanged { trackWidthPx = it.width }
-                .pointerInput(isSeekable, durationMs, trackWidthPx) {
-                    if (!isSeekable || durationMs <= 0) return@pointerInput
+                .pointerInput(isSeekable, safeDurationMs, trackWidthPx) {
+                    if (!isSeekable || safeDurationMs <= 0) return@pointerInput
                     detectTapGestures { offset ->
                         seekToOffset(offset.x)
                         onSeek(dragPositionMs)
                     }
                 }
-                .pointerInput(isSeekable, durationMs, trackWidthPx) {
-                    if (!isSeekable || durationMs <= 0) return@pointerInput
+                .pointerInput(isSeekable, safeDurationMs, trackWidthPx) {
+                    if (!isSeekable || safeDurationMs <= 0) return@pointerInput
                     detectDragGestures(
                         onDragStart = { offset ->
                             isDragging = true
@@ -808,7 +815,7 @@ private fun SeekBar(
                     strokeWidth = 4.dp.toPx(),
                     cap = StrokeCap.Round,
                 )
-                if (durationMs > 0) {
+                if (safeDurationMs > 0) {
                     drawCircle(
                         color = thumbColor,
                         radius = 5.dp.toPx(),
@@ -824,12 +831,12 @@ private fun SeekBar(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = formatMs(displayPositionMs),
+                text = formatMs(safeDisplayPositionMs),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
             )
             Text(
-                text = if (durationMs > 0) "-${formatMs(durationMs - displayPositionMs)}" else "--:--",
+                text = if (safeDurationMs > 0) "-${formatMs(remainingMs)}" else "--:--",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
             )
@@ -843,6 +850,9 @@ private fun formatMs(ms: Long): String {
     val s = total % 60
     return "%d:%02d".format(m, s)
 }
+
+private fun Long.coerceForDisplay(durationMs: Long): Long =
+    if (durationMs > 0L) coerceIn(0L, durationMs) else coerceAtLeast(0L)
 
 private fun searchLyricsOnline(context: Context, song: Song) {
     val query = buildString {

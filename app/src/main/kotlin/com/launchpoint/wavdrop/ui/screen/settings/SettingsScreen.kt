@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -74,6 +75,7 @@ fun SettingsScreen(
     val scanSettings by viewModel.libraryScanSettings.collectAsStateWithLifecycle()
     val scanState by viewModel.libraryScanUiState.collectAsStateWithLifecycle()
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
+    val resumeBehavior by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val suggestedExportName = remember { "wavdrop-backup-${LocalDate.now()}.json" }
     val exportLauncher = rememberLauncherForActivityResult(
@@ -137,6 +139,75 @@ fun SettingsScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
+            // ── Personalization ──────────────────────────────────────────────
+            item { SectionHeader("Personalization") }
+            item {
+                ClickableSettingsRow(
+                    title   = "Open app to",
+                    subtitle = startupDestination.displayName,
+                    onClick  = { showStartupDestinationDialog = true },
+                )
+            }
+            item {
+                ClickableSettingsRow(
+                    title   = "Home Sections",
+                    subtitle = "Choose which sections appear on your Home screen.",
+                    onClick  = onHomeCustomizationClick,
+                )
+            }
+            item { SectionDivider() }
+
+            // ── Playback ─────────────────────────────────────────────────────
+            item { SectionHeader("Playback") }
+            item {
+                ToggleSettingsRow(
+                    title    = "Remember last played track",
+                    subtitle = "Restore the last playing song when you reopen Wavdrop.",
+                    checked  = resumeBehavior.rememberLastTrack,
+                    onCheckedChange = viewModel::setRememberLastTrack,
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title    = "Remember playback position",
+                    subtitle = "Resume from where you left off instead of starting from the beginning.",
+                    checked  = resumeBehavior.rememberPosition,
+                    onCheckedChange = viewModel::setRememberPosition,
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title    = "Restore last queue",
+                    subtitle = "Reload the full queue from your previous session.",
+                    checked  = resumeBehavior.restoreQueue,
+                    onCheckedChange = viewModel::setRestoreQueue,
+                )
+            }
+            item { SectionDivider() }
+
+            // ── Headphones & Bluetooth ───────────────────────────────────────
+            item { SectionHeader("Headphones & Bluetooth") }
+            item {
+                ToggleSettingsRow(
+                    title    = "Auto Resume on wired headphones",
+                    subtitle = "Resume playback when wired headphones are connected. Not yet available.",
+                    checked  = resumeBehavior.autoResumeOnHeadphones,
+                    onCheckedChange = {},
+                    enabled  = false,
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title    = "Auto Resume on Bluetooth",
+                    subtitle = "Resume playback when a Bluetooth audio device connects. Not yet available.",
+                    checked  = resumeBehavior.autoResumeOnBluetooth,
+                    onCheckedChange = {},
+                    enabled  = false,
+                )
+            }
+            item { SectionDivider() }
+
+            // ── Library ──────────────────────────────────────────────────────
             item { SectionHeader("Library") }
             item {
                 ClickableSettingsRow(
@@ -150,18 +221,18 @@ fun SettingsScreen(
             item { SectionHeader("Library Scan") }
             item {
                 ScanModeRow(
-                    title = "Scan whole device",
+                    title    = "Scan whole device",
                     subtitle = "Find audio from the device media library.",
                     selected = scanSettings.scanMode == LibraryScanMode.WHOLE_DEVICE,
-                    onClick = { viewModel.setScanMode(LibraryScanMode.WHOLE_DEVICE) },
+                    onClick  = { viewModel.setScanMode(LibraryScanMode.WHOLE_DEVICE) },
                 )
             }
             item {
                 ScanModeRow(
-                    title = "Selected folders only",
+                    title    = "Selected folders only",
                     subtitle = "Only include audio from the folders listed below when Wavdrop can match them.",
                     selected = scanSettings.scanMode == LibraryScanMode.SELECTED_FOLDERS,
-                    onClick = { viewModel.setScanMode(LibraryScanMode.SELECTED_FOLDERS) },
+                    onClick  = { viewModel.setScanMode(LibraryScanMode.SELECTED_FOLDERS) },
                 )
             }
             if (
@@ -177,8 +248,8 @@ fun SettingsScreen(
             }
             item {
                 MinimumDurationRow(
-                    seconds = minimumDurationSeconds.roundToInt(),
-                    onSecondsChange = { minimumDurationSeconds = it.toFloat() },
+                    seconds          = minimumDurationSeconds.roundToInt(),
+                    onSecondsChange  = { minimumDurationSeconds = it.toFloat() },
                     onChangeFinished = {
                         viewModel.setMinimumTrackDurationSeconds(
                             minimumDurationSeconds.roundToInt(),
@@ -188,26 +259,26 @@ fun SettingsScreen(
             }
             item {
                 ClickableSettingsRow(
-                    title = "Add folder",
+                    title    = "Add folder",
                     subtitle = "Choose a music folder using Android's folder picker.",
-                    onClick = { folderPickerLauncher.launch(null) },
+                    onClick  = { folderPickerLauncher.launch(null) },
                 )
             }
             items(
                 items = scanSettings.selectedFolderUris,
-                key = { it },
+                key   = { it },
             ) { folderUri ->
                 SelectedFolderRow(
                     folderUri = folderUri,
-                    onRemove = { viewModel.removeSelectedFolderUri(folderUri) },
+                    onRemove  = { viewModel.removeSelectedFolderUri(folderUri) },
                 )
             }
             item {
                 ClickableSettingsRow(
-                    title = "Rescan library",
+                    title    = "Rescan library",
                     subtitle = "Scan again using the current library scan settings.",
-                    enabled = scanState != LibraryScanUiState.Scanning,
-                    onClick = viewModel::rescanLibrary,
+                    enabled  = scanState != LibraryScanUiState.Scanning,
+                    onClick  = viewModel::rescanLibrary,
                 )
             }
             when (val state = scanState) {
@@ -227,13 +298,14 @@ fun SettingsScreen(
             }
             item { SectionDivider() }
 
+            // ── Backup & Restore ─────────────────────────────────────────────
             item { SectionHeader("Backup & Restore") }
             item {
                 ClickableSettingsRow(
-                    title    = "Export Wavdrop Data",
+                    title   = "Export Wavdrop Data",
                     subtitle = "Create a local JSON backup of your library metadata and stats.",
-                    enabled  = exportState != ExportUiState.Exporting,
-                    onClick  = { exportLauncher.launch(suggestedExportName) },
+                    enabled = exportState != ExportUiState.Exporting,
+                    onClick = { exportLauncher.launch(suggestedExportName) },
                 )
             }
             when (val state = exportState) {
@@ -257,6 +329,7 @@ fun SettingsScreen(
             }
             item { SectionDivider() }
 
+            // ── Statistics ───────────────────────────────────────────────────
             item { SectionHeader("Statistics") }
             item {
                 ClickableSettingsRow(
@@ -281,36 +354,20 @@ fun SettingsScreen(
             }
             item {
                 ClickableSettingsRow(
-                    title = "Wrapped",
+                    title    = "Wrapped",
                     subtitle = "Review yearly event-backed listening highlights.",
-                    onClick = onWrappedClick,
+                    onClick  = onWrappedClick,
                 )
             }
             item { SectionDivider() }
 
-            item { SectionHeader("Appearance") }
-            item {
-                ClickableSettingsRow(
-                    title = "Open app to",
-                    subtitle = startupDestination.displayName,
-                    onClick = { showStartupDestinationDialog = true },
-                )
-            }
-            item {
-                ClickableSettingsRow(
-                    title   = "Home Sections",
-                    subtitle = "Choose which sections appear on your Home screen.",
-                    onClick  = onHomeCustomizationClick,
-                )
-            }
-            item { SectionDivider() }
-
+            // ── About ────────────────────────────────────────────────────────
             item { SectionHeader("About") }
             item {
-                AboutInfoRow(label = "App",     value = "Wavdrop")
-                AboutInfoRow(label = "Package", value = "com.launchpoint.wavdrop")
+                AboutInfoRow(label = "App",      value = "Wavdrop")
+                AboutInfoRow(label = "Package",  value = "com.launchpoint.wavdrop")
                 AboutInfoRow(label = "Database", value = "wavdrop.db")
-                AboutInfoRow(label = "Version", value = "Development build")
+                AboutInfoRow(label = "Version",  value = "Development build")
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
@@ -571,6 +628,45 @@ private fun ClickableSettingsRow(
             contentDescription = null,
             tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
             modifier           = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun ToggleSettingsRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier          = modifier
+            .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.45f)
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text  = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+        Switch(
+            checked          = checked,
+            onCheckedChange  = if (enabled) onCheckedChange else null,
+            enabled          = enabled,
+            modifier         = Modifier.padding(start = 12.dp),
         )
     }
 }

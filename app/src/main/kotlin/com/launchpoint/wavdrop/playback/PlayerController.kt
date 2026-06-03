@@ -13,6 +13,7 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRules
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionSnapshot
+import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,6 +42,7 @@ class PlayerController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val statsTracker: StatsTracker,
     private val sessionRepository: PlaybackSessionRepository,
+    private val resumeBehaviorRepository: ResumeBehaviorSettingsRepository,
 ) {
     private companion object {
         const val TAG = "WavStats-PC"
@@ -122,6 +125,8 @@ class PlayerController @Inject constructor(
                     statsTracker.onPlaybackStarted()
                 }
             }
+            syncNowPlayingState(notifyStats = reason != Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
+            saveSessionAsync()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -160,7 +165,9 @@ class PlayerController @Inject constructor(
                             controller.shuffleModeEnabled = false
                             controller.setMediaItems(libraryQueue.map { it.toMediaItem() }, startIndex, restorePos)
                             controller.prepare()
+                            syncNowPlayingState()
                         }
+                        else -> syncNowPlayingState()
                     }
                 }
             },
@@ -192,6 +199,10 @@ class PlayerController @Inject constructor(
                 currentIndex = playbackStartIndex,
                 shuffleEnabled = shuffleEnabled,
                 repeatMode = repeatMode,
+                positionMs = 0L,
+                durationMs = startSong.duration.coerceAtLeast(0L),
+                bufferedPositionMs = 0L,
+                isSeekable = false,
             )
         }
 
@@ -204,6 +215,7 @@ class PlayerController @Inject constructor(
         controller.shuffleModeEnabled = false
         controller.setMediaItems(libraryQueue.map { it.toMediaItem() }, originalStartIndex, 0L)
         controller.prepare()
+        syncNowPlayingState()
         controller.play()
         saveSessionAsync()
     }
@@ -290,6 +302,7 @@ class PlayerController @Inject constructor(
     fun togglePlayPause() {
         val controller = mediaController ?: return
         if (controller.isPlaying) controller.pause() else controller.play()
+        syncNowPlayingState()
     }
 
     fun skipToNext() {
@@ -311,7 +324,11 @@ class PlayerController @Inject constructor(
             repeatMode = repeatMode,
         )) {
             is PreviousQueueAction.MoveTo -> seekToQueueIndex(controller, action.index)
-            PreviousQueueAction.RestartCurrent -> controller.seekTo(0L)
+            PreviousQueueAction.RestartCurrent -> {
+                controller.seekTo(0L)
+                syncPosition()
+                saveSessionAsync()
+            }
             null -> Unit
         }
     }
@@ -352,7 +369,7 @@ class PlayerController @Inject constructor(
         val duration = _nowPlayingState.value.durationMs
         val clamped = positionMs.coerceIn(0L, if (duration > 0) duration else positionMs)
         controller.seekTo(clamped)
-        _nowPlayingState.update { it.copy(positionMs = clamped) }
+        syncPosition(positionOverrideMs = clamped)
         saveSessionAsync()
     }
 
@@ -360,7 +377,11 @@ class PlayerController @Inject constructor(
         if (hasRestoredSession) return
         hasRestoredSession = true
         scope.launch {
-            val snapshot = sessionRepository.load() ?: return@launch
+            val rawSnapshot = sessionRepository.load() ?: return@launch
+            val resumeSettings = resumeBehaviorRepository.settings.first()
+            val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, resumeSettings)
+                ?: return@launch
+
             val idSet = availableSongs.associateBy { it.id }
             val mappedQueue = snapshot.queueSongIds.mapNotNull { idSet[it] }
             val startSong = PlaybackSessionRules.resolveStartSong(
@@ -377,12 +398,15 @@ class PlayerController @Inject constructor(
 
             _nowPlayingState.update {
                 it.copy(
-                    song           = startSong,
-                    queue          = playbackQueue,
-                    currentIndex   = playbackIndex,
-                    shuffleEnabled = shuffleEnabled,
-                    repeatMode     = repeatMode,
-                    positionMs     = snapshot.positionMs,
+                    song               = startSong,
+                    queue              = playbackQueue,
+                    currentIndex       = playbackIndex,
+                    shuffleEnabled     = shuffleEnabled,
+                    repeatMode         = repeatMode,
+                    positionMs         = snapshot.positionMs,
+                    durationMs         = startSong.duration.coerceAtLeast(0L),
+                    bufferedPositionMs = 0L,
+                    isSeekable         = false,
                 )
             }
 
@@ -391,7 +415,7 @@ class PlayerController @Inject constructor(
                 pendingRestorePositionMs = snapshot.positionMs
                 return@launch
             }
-            controller.repeatMode       = repeatMode.toPlayerRepeatMode()
+            controller.repeatMode         = repeatMode.toPlayerRepeatMode()
             controller.shuffleModeEnabled = false
             controller.setMediaItems(
                 libraryQueue.map { it.toMediaItem() },
@@ -399,6 +423,7 @@ class PlayerController @Inject constructor(
                 snapshot.positionMs,
             )
             controller.prepare()
+            syncNowPlayingState()
         }
     }
 
@@ -461,8 +486,8 @@ class PlayerController @Inject constructor(
      */
     private fun tickAndCheckLoopBoundary() {
         val controller = mediaController ?: return
-        val currentPos = controller.currentPosition.coerceAtLeast(0L)
-        val durationMs = controller.duration.let { d -> if (d < 0) 0L else d }
+        val durationMs = controller.safeDurationMs(fallbackMs = _nowPlayingState.value.song?.duration ?: 0L)
+        val currentPos = controller.safePositionMs(durationMs)
 
         val prev = lastKnownPositionMs
         lastKnownPositionMs = currentPos
@@ -484,20 +509,22 @@ class PlayerController @Inject constructor(
             it.copy(
                 positionMs         = currentPos,
                 durationMs         = durationMs,
-                bufferedPositionMs = controller.bufferedPosition.coerceAtLeast(0L),
+                bufferedPositionMs = controller.safeBufferedPositionMs(durationMs),
                 isSeekable         = controller.isCurrentMediaItemSeekable,
             )
         }
     }
 
     /** One-shot position sync with no loop-detection side effect (used on pause). */
-    private fun syncPosition() {
+    private fun syncPosition(positionOverrideMs: Long? = null) {
         val controller = mediaController ?: return
         _nowPlayingState.update {
+            val durationMs = controller.safeDurationMs(fallbackMs = it.song?.duration ?: 0L)
+            val positionMs = positionOverrideMs ?: controller.safePositionMs(durationMs)
             it.copy(
-                positionMs         = controller.currentPosition.coerceAtLeast(0L),
-                durationMs         = controller.duration.let { d -> if (d < 0) 0L else d },
-                bufferedPositionMs = controller.bufferedPosition.coerceAtLeast(0L),
+                positionMs         = positionMs.coerceForDuration(durationMs),
+                durationMs         = durationMs,
+                bufferedPositionMs = controller.safeBufferedPositionMs(durationMs),
                 isSeekable         = controller.isCurrentMediaItemSeekable,
             )
         }
@@ -510,6 +537,8 @@ class PlayerController @Inject constructor(
         val shouldPlay = controller.isPlaying
         controller.seekTo(index, 0L)
         if (shouldPlay) controller.play()
+        syncNowPlayingState()
+        saveSessionAsync()
     }
 
     private fun rebuildPlaybackQueue(currentQueueIndex: Int) {
@@ -553,7 +582,7 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
-    private fun syncNowPlayingState(fromTransition: Boolean = false) {
+    private fun syncNowPlayingState(fromTransition: Boolean = false, notifyStats: Boolean = true) {
         val controller = mediaController
         val currentQueueIndex = controller?.currentMediaItemIndex ?: currentQueueIndex()
         val currentSong = currentQueueIndex?.let { libraryQueue.getOrNull(it) }
@@ -567,7 +596,7 @@ class PlayerController @Inject constructor(
             Log.d(TAG, "[syncNPS] fromTransition=$fromTransition songChanged=$songChanged currentSongId=${currentSong?.id} prevSongId=${_nowPlayingState.value.song?.id} isPlaying=${controller?.isPlaying}")
         }
 
-        if (currentSong != null && (fromTransition || songChanged)) {
+        if (notifyStats && currentSong != null && (fromTransition || songChanged)) {
             statsTracker.onSongSelected(currentSong)
             // During auto-advance / repeat the player may stay in isPlaying=true,
             // so onIsPlayingChanged(true) never fires for the new song.
@@ -576,6 +605,9 @@ class PlayerController @Inject constructor(
             }
         }
         _nowPlayingState.update {
+            val durationMs = controller?.safeDurationMs(fallbackMs = currentSong?.duration ?: it.song?.duration ?: 0L)
+                ?: it.durationMs
+            val positionMs = controller?.safePositionMs(durationMs) ?: it.positionMs.coerceForDuration(durationMs)
             it.copy(
                 song               = currentSong ?: it.song,
                 isPlaying          = controller?.isPlaying ?: it.isPlaying,
@@ -583,13 +615,25 @@ class PlayerController @Inject constructor(
                 currentIndex       = currentPlaybackIndex,
                 shuffleEnabled     = shuffleEnabled,
                 repeatMode         = repeatMode,
-                positionMs         = controller?.currentPosition?.coerceAtLeast(0L) ?: it.positionMs,
-                durationMs         = controller?.duration?.let { d -> if (d < 0) 0L else d } ?: it.durationMs,
-                bufferedPositionMs = controller?.bufferedPosition?.coerceAtLeast(0L) ?: it.bufferedPositionMs,
+                positionMs         = positionMs,
+                durationMs         = durationMs,
+                bufferedPositionMs = controller?.safeBufferedPositionMs(durationMs) ?: it.bufferedPositionMs.coerceForDuration(durationMs),
                 isSeekable         = controller?.isCurrentMediaItemSeekable ?: it.isSeekable,
             )
         }
     }
+
+    private fun MediaController.safePositionMs(durationMs: Long): Long =
+        currentPosition.coerceAtLeast(0L).coerceForDuration(durationMs)
+
+    private fun MediaController.safeDurationMs(fallbackMs: Long): Long =
+        duration.takeIf { it > 0L } ?: fallbackMs.coerceAtLeast(0L)
+
+    private fun MediaController.safeBufferedPositionMs(durationMs: Long): Long =
+        bufferedPosition.coerceAtLeast(0L).coerceForDuration(durationMs)
+
+    private fun Long.coerceForDuration(durationMs: Long): Long =
+        if (durationMs > 0L) coerceIn(0L, durationMs) else coerceAtLeast(0L)
 
     private fun currentQueueIndex(): Int? {
         mediaController?.currentMediaItemIndex

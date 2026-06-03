@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.data.playback
 
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.playback.RepeatMode
 
 internal object PlaybackSessionRules {
@@ -19,6 +20,41 @@ internal object PlaybackSessionRules {
         RepeatMode.ALL.name -> RepeatMode.ALL
         RepeatMode.ONE.name -> RepeatMode.ONE
         else                -> RepeatMode.OFF
+    }
+
+    /**
+     * Transforms [snapshot] according to [settings] before it is handed to the session-restore
+     * path in PlayerController.
+     *
+     * Returns null when [settings.rememberLastTrack] is false — the caller should skip restore
+     * entirely in that case.
+     *
+     * Transformation rules (applied in order):
+     * 1. rememberLastTrack = false  → return null (skip restore)
+     * 2. restoreQueue = false       → collapse queue to the single playing song; currentIndex = 0
+     * 3. rememberPosition = false   → zero the saved position
+     */
+    fun applyResumeBehavior(
+        snapshot: PlaybackSessionSnapshot,
+        settings: ResumeBehaviorSettings,
+    ): PlaybackSessionSnapshot? {
+        if (!settings.rememberLastTrack) return null
+
+        var adjusted = snapshot
+
+        if (!settings.restoreQueue) {
+            val singleId = adjusted.currentSongId
+                ?: adjusted.queueSongIds.getOrNull(adjusted.currentIndex)
+            if (singleId != null) {
+                adjusted = adjusted.copy(queueSongIds = listOf(singleId), currentIndex = 0)
+            }
+        }
+
+        if (!settings.rememberPosition) {
+            adjusted = adjusted.copy(positionMs = 0L)
+        }
+
+        return adjusted
     }
 
     fun resolveStartSong(

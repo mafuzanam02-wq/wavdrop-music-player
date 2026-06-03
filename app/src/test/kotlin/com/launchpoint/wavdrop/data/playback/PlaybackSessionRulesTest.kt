@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.data.playback
 
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.playback.RepeatMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -135,5 +136,101 @@ class PlaybackSessionRulesTest {
                 mappedQueue   = emptyList(),
             )
         )
+    }
+
+    // ── applyResumeBehavior ───────────────────────────────────────────────────
+
+    private fun snapshot(
+        queueIds: List<Long> = listOf(1L, 2L, 3L),
+        currentSongId: Long? = 2L,
+        currentIndex: Int = 1,
+        positionMs: Long = 45_000L,
+    ) = PlaybackSessionSnapshot(
+        queueSongIds   = queueIds,
+        currentSongId  = currentSongId,
+        currentIndex   = currentIndex,
+        positionMs     = positionMs,
+        repeatMode     = RepeatMode.OFF,
+        shuffleEnabled = false,
+        updatedAtMs    = 0L,
+    )
+
+    private val allOn = ResumeBehaviorSettings(
+        rememberLastTrack = true,
+        rememberPosition  = true,
+        restoreQueue      = true,
+    )
+
+    @Test
+    fun `applyResumeBehavior all defaults returns snapshot unchanged`() {
+        val s = snapshot()
+        val result = PlaybackSessionRules.applyResumeBehavior(s, allOn)
+        assertEquals(s, result)
+    }
+
+    @Test
+    fun `applyResumeBehavior rememberLastTrack false returns null`() {
+        val settings = allOn.copy(rememberLastTrack = false)
+        assertNull(PlaybackSessionRules.applyResumeBehavior(snapshot(), settings))
+    }
+
+    @Test
+    fun `applyResumeBehavior rememberPosition false zeroes position`() {
+        val settings = allOn.copy(rememberPosition = false)
+        val result = PlaybackSessionRules.applyResumeBehavior(snapshot(positionMs = 90_000L), settings)!!
+        assertEquals(0L, result.positionMs)
+    }
+
+    @Test
+    fun `applyResumeBehavior rememberPosition false keeps queue and song intact`() {
+        val settings = allOn.copy(rememberPosition = false)
+        val s = snapshot()
+        val result = PlaybackSessionRules.applyResumeBehavior(s, settings)!!
+        assertEquals(s.queueSongIds,  result.queueSongIds)
+        assertEquals(s.currentSongId, result.currentSongId)
+        assertEquals(s.currentIndex,  result.currentIndex)
+    }
+
+    @Test
+    fun `applyResumeBehavior restoreQueue false collapses queue to current song by id`() {
+        val settings = allOn.copy(restoreQueue = false)
+        val result = PlaybackSessionRules.applyResumeBehavior(snapshot(), settings)!!
+        assertEquals(listOf(2L), result.queueSongIds)
+        assertEquals(0, result.currentIndex)
+    }
+
+    @Test
+    fun `applyResumeBehavior restoreQueue false preserves position and song id`() {
+        val settings = allOn.copy(restoreQueue = false)
+        val result = PlaybackSessionRules.applyResumeBehavior(snapshot(positionMs = 30_000L), settings)!!
+        assertEquals(2L, result.currentSongId)
+        assertEquals(30_000L, result.positionMs)
+    }
+
+    @Test
+    fun `applyResumeBehavior restoreQueue false with null currentSongId falls back to index`() {
+        val s = snapshot(queueIds = listOf(10L, 20L, 30L), currentSongId = null, currentIndex = 2)
+        val settings = allOn.copy(restoreQueue = false)
+        val result = PlaybackSessionRules.applyResumeBehavior(s, settings)!!
+        assertEquals(listOf(30L), result.queueSongIds)
+        assertEquals(0, result.currentIndex)
+    }
+
+    @Test
+    fun `applyResumeBehavior restoreQueue false and rememberPosition false both applied`() {
+        val settings = allOn.copy(restoreQueue = false, rememberPosition = false)
+        val result = PlaybackSessionRules.applyResumeBehavior(snapshot(positionMs = 60_000L), settings)!!
+        assertEquals(listOf(2L), result.queueSongIds)
+        assertEquals(0L, result.positionMs)
+    }
+
+    @Test
+    fun `applyResumeBehavior rememberLastTrack false ignores other settings`() {
+        val settings = ResumeBehaviorSettings(
+            rememberLastTrack = false,
+            rememberPosition  = true,
+            restoreQueue      = true,
+        )
+        assertNull(PlaybackSessionRules.applyResumeBehavior(snapshot(), settings))
     }
 }

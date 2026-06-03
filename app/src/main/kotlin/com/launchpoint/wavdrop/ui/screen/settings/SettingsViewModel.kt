@@ -9,6 +9,8 @@ import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
+import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
+import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -38,6 +40,7 @@ class SettingsViewModel @Inject constructor(
     private val backupRepository: WavdropBackupRepository,
     private val appSettingsRepository: AppSettingsRepository,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
+    private val resumeBehaviorRepository: ResumeBehaviorSettingsRepository,
     private val songRepository: SongRepository,
 ) : ViewModel() {
 
@@ -56,6 +59,13 @@ class SettingsViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = StartupDestination.SONGS,
+        )
+
+    val resumeBehaviorSettings: StateFlow<ResumeBehaviorSettings> =
+        resumeBehaviorRepository.settings.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ResumeBehaviorSettings(),
         )
 
     private val _libraryScanUiState =
@@ -105,6 +115,18 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             appSettingsRepository.setStartupDestination(destination)
         }
+    }
+
+    fun setRememberLastTrack(enabled: Boolean) {
+        viewModelScope.launch { resumeBehaviorRepository.setRememberLastTrack(enabled) }
+    }
+
+    fun setRememberPosition(enabled: Boolean) {
+        viewModelScope.launch { resumeBehaviorRepository.setRememberPosition(enabled) }
+    }
+
+    fun setRestoreQueue(enabled: Boolean) {
+        viewModelScope.launch { resumeBehaviorRepository.setRestoreQueue(enabled) }
     }
 
     fun rescanLibrary() {
