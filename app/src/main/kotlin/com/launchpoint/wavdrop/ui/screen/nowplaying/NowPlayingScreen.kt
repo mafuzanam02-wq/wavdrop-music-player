@@ -567,6 +567,7 @@ private fun ArtworkWithLyricsOverlay(
     onEditLyrics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context       = LocalContext.current
     val currentToggle by rememberUpdatedState(onToggleLyrics)
     val currentEdit   by rememberUpdatedState(onEditLyrics)
     Box(
@@ -592,6 +593,7 @@ private fun ArtworkWithLyricsOverlay(
             ) {
                 LyricsOverlayContent(
                     lyrics = lyrics,
+                    onSearchOnline = { searchLyricsOnline(context, song) },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(start = 22.dp, end = 22.dp, top = 22.dp, bottom = 52.dp),
@@ -614,6 +616,7 @@ private fun ArtworkWithLyricsOverlay(
 @Composable
 private fun LyricsOverlayContent(
     lyrics: LyricsResult,
+    onSearchOnline: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (lyrics) {
@@ -659,6 +662,13 @@ private fun LyricsOverlayContent(
                         color = Color.White.copy(alpha = 0.50f),
                         textAlign = TextAlign.Center,
                     )
+                    TextButton(onClick = onSearchOnline) {
+                        Text(
+                            text = "Search lyrics online",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(alpha = 0.75f),
+                        )
+                    }
                 }
             }
         }
