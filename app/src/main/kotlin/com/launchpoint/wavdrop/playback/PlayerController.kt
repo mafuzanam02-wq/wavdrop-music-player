@@ -225,6 +225,44 @@ class PlayerController @Inject constructor(
         insertIntoQueue(song = song, index = libraryQueue.size)
     }
 
+    fun jumpToQueueItem(playbackIndex: Int) {
+        val controller = mediaController ?: return
+        val libraryIndex = playbackOrder.getOrNull(playbackIndex) ?: return
+        seekToQueueIndex(controller, libraryIndex)
+    }
+
+    fun removeFromQueue(playbackIndex: Int) {
+        val currentPlaybackIndex = _nowPlayingState.value.currentIndex
+        val mutation = QueueMutation.remove(playbackQueue, playbackIndex, currentPlaybackIndex) ?: return
+        applyReorderedQueue(mutation.queue, mutation.currentIndex)
+    }
+
+    fun moveQueueItemUp(playbackIndex: Int) {
+        val currentPlaybackIndex = _nowPlayingState.value.currentIndex
+        if (playbackIndex <= currentPlaybackIndex || playbackIndex <= 0) return
+        val newQueue = QueueMutation.swapAdjacent(
+            playbackQueue, playbackIndex, playbackIndex - 1, currentPlaybackIndex,
+        ) ?: return
+        applyReorderedQueue(newQueue, currentPlaybackIndex)
+    }
+
+    fun moveQueueItemDown(playbackIndex: Int) {
+        val currentPlaybackIndex = _nowPlayingState.value.currentIndex
+        if (playbackIndex <= currentPlaybackIndex || playbackIndex >= playbackQueue.size - 1) return
+        val newQueue = QueueMutation.swapAdjacent(
+            playbackQueue, playbackIndex, playbackIndex + 1, currentPlaybackIndex,
+        ) ?: return
+        applyReorderedQueue(newQueue, currentPlaybackIndex)
+    }
+
+    fun moveToPlayNext(playbackIndex: Int) {
+        val currentPlaybackIndex = _nowPlayingState.value.currentIndex
+        val newQueue = QueueMutation.moveToPlayNext(
+            playbackQueue, playbackIndex, currentPlaybackIndex,
+        ) ?: return
+        applyReorderedQueue(newQueue, currentPlaybackIndex)
+    }
+
     fun togglePlayPause() {
         val controller = mediaController ?: return
         if (controller.isPlaying) controller.pause() else controller.play()
@@ -457,6 +495,40 @@ class PlayerController @Inject constructor(
             shuffleEnabled = shuffleEnabled,
         )
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+    }
+
+    /**
+     * Replaces the active queue with [newPlaybackQueue] in order, keeping the player at
+     * [currentPlaybackIndex]. Used by queue-reorder and remove operations.
+     *
+     * Rebuilding via setMediaItems is intentional: it is the only way to keep ExoPlayer's
+     * internal sequence consistent with arbitrary playback-order changes. For local files the
+     * re-prepare is instant and the seek to the saved position is seamless.
+     */
+    private fun applyReorderedQueue(newPlaybackQueue: List<Song>, currentPlaybackIndex: Int) {
+        libraryQueue = newPlaybackQueue
+        playbackOrder = libraryQueue.indices.toList()
+        playbackQueue = libraryQueue
+
+        val controller = mediaController
+        val currentPos = controller?.currentPosition ?: 0L
+        val wasPlaying = controller?.isPlaying == true
+
+        controller?.setMediaItems(
+            libraryQueue.map { it.toMediaItem() },
+            currentPlaybackIndex,
+            currentPos,
+        )
+        controller?.prepare()
+        if (wasPlaying) controller?.play()
+
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = currentPlaybackIndex,
+            )
+        }
+        saveSessionAsync()
     }
 
     private fun insertIntoQueue(song: Song, index: Int) {

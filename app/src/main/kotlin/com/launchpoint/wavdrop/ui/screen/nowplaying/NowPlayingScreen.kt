@@ -104,6 +104,7 @@ fun NowPlayingScreen(
     var showLyricsOverlay by remember { mutableStateOf(false) }
     var showLyricsEditor  by remember { mutableStateOf(false) }
     var showMoreActions   by remember { mutableStateOf(false) }
+    var showQueueSheet    by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -202,6 +203,7 @@ fun NowPlayingScreen(
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenAlbum        = onOpenAlbum,
                 onOpenArtist       = onOpenArtist,
+                onOpenQueue       = { showQueueSheet = true },
                 modifier          = Modifier.padding(innerPadding),
             )
         }
@@ -241,6 +243,22 @@ fun NowPlayingScreen(
             onDismiss = { showLyricsEditor = false },
         )
     }
+
+    if (showQueueSheet) {
+        QueueSheet(
+            state        = state,
+            onDismiss    = { showQueueSheet = false },
+            onJumpToItem = { viewModel.jumpToQueueItem(it) },
+            onRemoveItem = { viewModel.removeFromQueue(it) },
+            onMoveUp     = { viewModel.moveQueueItemUp(it) },
+            onMoveDown   = { viewModel.moveQueueItemDown(it) },
+            onPlayNext   = { viewModel.moveToPlayNext(it) },
+            onViewStats  = { songId ->
+                showQueueSheet = false
+                onOpenTrackDetails(songId)
+            },
+        )
+    }
 }
 
 @Composable
@@ -259,6 +277,7 @@ private fun NowPlayingContent(
     onOpenTrackDetails: (Long) -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
+    onOpenQueue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val song = state.song ?: return
@@ -356,6 +375,12 @@ private fun NowPlayingContent(
                 )
             }
         }
+
+        val upNextCount = (state.queue.size - state.currentIndex - 1).coerceAtLeast(0)
+        QueueHandle(
+            upNextCount = upNextCount,
+            onClick = onOpenQueue,
+        )
     }
 }
 

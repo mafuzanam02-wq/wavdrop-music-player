@@ -102,6 +102,16 @@ class NowPlayingViewModel @Inject constructor(
 
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
 
+    fun jumpToQueueItem(playbackIndex: Int) = playerController.jumpToQueueItem(playbackIndex)
+
+    fun removeFromQueue(playbackIndex: Int) = playerController.removeFromQueue(playbackIndex)
+
+    fun moveQueueItemUp(playbackIndex: Int) = playerController.moveQueueItemUp(playbackIndex)
+
+    fun moveQueueItemDown(playbackIndex: Int) = playerController.moveQueueItemDown(playbackIndex)
+
+    fun moveToPlayNext(playbackIndex: Int) = playerController.moveToPlayNext(playbackIndex)
+
     fun saveCustomLyrics(text: String, onComplete: () -> Unit = {}) {
         val song = nowPlayingState.value.song ?: return
         viewModelScope.launch {
