@@ -1,13 +1,18 @@
 package com.launchpoint.wavdrop.playback
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.launchpoint.wavdrop.MainActivity
+import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -15,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -26,9 +32,24 @@ import kotlinx.coroutines.launch
 class PlaybackService : MediaSessionService() {
 
     @Inject lateinit var resumeBehaviorRepository: ResumeBehaviorSettingsRepository
+    @Inject lateinit var playerController: PlayerController
+    @Inject lateinit var songRepository: SongRepository
 
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    // Fires when an audio device is added to the system (e.g. BT headphones connect).
+    // Runs on the main thread because registerAudioDeviceCallback is called with null handler.
+    private val audioDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) {
+            if (addedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }) {
+                serviceScope.launch {
+                    val songs = songRepository.songs.first()
+                    playerController.resumeForBluetooth(songs)
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -50,6 +71,10 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        // Register for audio device connection events. Null handler → main thread.
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
+
         val openAppIntent = PendingIntent.getActivity(
             this,
             0,
@@ -65,6 +90,10 @@ class PlaybackService : MediaSessionService() {
         mediaSession
 
     override fun onDestroy() {
+        // Unregister the BT listener before cancelling the scope so no callback
+        // can enqueue a new coroutine after the scope is cancelled.
+        (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+            .unregisterAudioDeviceCallback(audioDeviceCallback)
         // Cancel the settings observer before releasing the player to avoid
         // calling setHandleAudioBecomingNoisy on a released ExoPlayer instance.
         serviceScope.cancel()

@@ -1,10 +1,14 @@
 package com.launchpoint.wavdrop.ui.screen.settings
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
+import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
@@ -13,6 +17,7 @@ import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,6 +42,7 @@ sealed interface LibraryScanUiState {
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val backupRepository: WavdropBackupRepository,
     private val appSettingsRepository: AppSettingsRepository,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
@@ -66,6 +72,13 @@ class SettingsViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ResumeBehaviorSettings(),
+        )
+
+    val appIconChoice: StateFlow<AppIconChoice> =
+        appSettingsRepository.appIconChoice.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = AppIconChoice.MIDNIGHT_VIOLET,
         )
 
     private val _libraryScanUiState =
@@ -131,6 +144,33 @@ class SettingsViewModel @Inject constructor(
 
     fun setRestoreQueue(enabled: Boolean) {
         viewModelScope.launch { resumeBehaviorRepository.setRestoreQueue(enabled) }
+    }
+
+    fun setAutoResumeOnBluetooth(enabled: Boolean) {
+        viewModelScope.launch { resumeBehaviorRepository.setAutoResumeOnBluetooth(enabled) }
+    }
+
+    fun setAppIcon(choice: AppIconChoice) {
+        viewModelScope.launch {
+            appSettingsRepository.setAppIconChoice(choice)
+            applyAppIcon(choice)
+        }
+    }
+
+    private fun applyAppIcon(choice: AppIconChoice) {
+        val pm = context.packageManager
+        AppIconChoice.entries.forEach { iconChoice ->
+            val state = if (iconChoice == choice) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            } else {
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            }
+            pm.setComponentEnabledSetting(
+                ComponentName(context.packageName, "${context.packageName}.${iconChoice.aliasSimpleName}"),
+                state,
+                PackageManager.DONT_KILL_APP,
+            )
+        }
     }
 
     fun rescanLibrary() {

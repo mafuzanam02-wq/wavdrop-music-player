@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
+import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -63,6 +64,21 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val appIconChoice: Flow<AppIconChoice> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[APP_ICON_CHOICE_KEY]?.toAppIconChoice()
+                ?: AppIconChoice.MIDNIGHT_VIOLET
+        }
+
+    suspend fun setAppIconChoice(choice: AppIconChoice) {
+        dataStore.edit { preferences ->
+            preferences[APP_ICON_CHOICE_KEY] = choice.name
+        }
+    }
+
     private fun String.toStartupDestination(): StartupDestination? =
         runCatching { StartupDestination.valueOf(this) }.getOrNull()
 
@@ -72,9 +88,13 @@ class AppSettingsRepository @Inject constructor(
     private fun String.toMostPlayedDisplayLimit(): MostPlayedDisplayLimit? =
         runCatching { MostPlayedDisplayLimit.valueOf(this) }.getOrNull()
 
+    private fun String.toAppIconChoice(): AppIconChoice? =
+        runCatching { AppIconChoice.valueOf(this) }.getOrNull()
+
     private companion object {
         val STARTUP_DESTINATION_KEY = stringPreferencesKey("startup_destination")
-        val MOST_PLAYED_PERIOD_KEY = stringPreferencesKey("most_played_period")
-        val MOST_PLAYED_LIMIT_KEY = stringPreferencesKey("most_played_limit")
+        val MOST_PLAYED_PERIOD_KEY  = stringPreferencesKey("most_played_period")
+        val MOST_PLAYED_LIMIT_KEY   = stringPreferencesKey("most_played_limit")
+        val APP_ICON_CHOICE_KEY     = stringPreferencesKey("app_icon_choice")
     }
 }

@@ -22,15 +22,60 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Wavdrop">
 
+        <!--
+            MainActivity: no LAUNCHER intent filter here.
+            All launcher entry points are provided by the activity-alias entries below
+            so that the launcher icon and label can be switched without killing the app.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Midnight Violet — default launcher alias (enabled at install time) -->
+        <activity-alias
+            android:name=".MainActivityAliasMidnightViolet"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/launcher_label"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <!-- Clean Purple — disabled until the user switches to it -->
+        <activity-alias
+            android:name=".MainActivityAliasCleanPurple"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/launcher_label"
+            android:icon="@mipmap/ic_launcher_clean_purple"
+            android:roundIcon="@mipmap/ic_launcher_clean_purple_round">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Deep Teal — disabled until the user switches to it -->
+        <activity-alias
+            android:name=".MainActivityAliasDeepTeal"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/launcher_label"
+            android:icon="@mipmap/ic_launcher_deep_teal"
+            android:roundIcon="@mipmap/ic_launcher_deep_teal_round">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!--
             PlaybackService: MediaSessionService that owns ExoPlayer + MediaSession.

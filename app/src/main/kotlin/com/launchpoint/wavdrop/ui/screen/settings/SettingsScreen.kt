@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
@@ -76,6 +77,7 @@ fun SettingsScreen(
     val scanState by viewModel.libraryScanUiState.collectAsStateWithLifecycle()
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
     val resumeBehavior by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
+    val appIconChoice by viewModel.appIconChoice.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val suggestedExportName = remember { "wavdrop-backup-${LocalDate.now()}.json" }
     val exportLauncher = rememberLauncherForActivityResult(
@@ -157,6 +159,19 @@ fun SettingsScreen(
             }
             item { SectionDivider() }
 
+            // ── App Icon ─────────────────────────────────────────────────────
+            item { SectionHeader("App Icon") }
+            AppIconChoice.entries.forEach { choice ->
+                item {
+                    IconChoiceRow(
+                        name     = choice.displayName,
+                        selected = appIconChoice == choice,
+                        onClick  = { viewModel.setAppIcon(choice) },
+                    )
+                }
+            }
+            item { SectionDivider() }
+
             // ── Playback ─────────────────────────────────────────────────────
             item { SectionHeader("Playback") }
             item {
@@ -207,10 +222,9 @@ fun SettingsScreen(
             item {
                 ToggleSettingsRow(
                     title    = "Auto Resume on Bluetooth",
-                    subtitle = "Resume playback when a Bluetooth audio device connects. Not yet available.",
+                    subtitle = "Resume playback when a Bluetooth audio device connects.",
                     checked  = resumeBehavior.autoResumeOnBluetooth,
-                    onCheckedChange = {},
-                    enabled  = false,
+                    onCheckedChange = viewModel::setAutoResumeOnBluetooth,
                 )
             }
             item { SectionDivider() }
@@ -636,6 +650,30 @@ private fun ClickableSettingsRow(
             contentDescription = null,
             tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
             modifier           = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun IconChoiceRow(
+    name: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier          = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Text(
+            text     = name,
+            style    = MaterialTheme.typography.bodyLarge,
+            color    = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 4.dp),
         )
     }
 }

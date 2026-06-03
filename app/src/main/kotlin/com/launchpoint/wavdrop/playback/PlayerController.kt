@@ -13,6 +13,7 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRules
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionSnapshot
+import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -425,6 +426,97 @@ class PlayerController @Inject constructor(
             controller.prepare()
             syncNowPlayingState()
         }
+    }
+
+    /**
+     * Resumes the last session and starts playback after a Bluetooth audio device connects.
+     *
+     * Guards checked (in order):
+     * 1. autoResumeOnBluetooth setting must be ON.
+     * 2. rememberLastTrack must be ON.
+     * 3. Playback must not already be active.
+     * 4. A ~1 s delay lets the BT audio route stabilize; playback is re-checked after.
+     *
+     * Warm path (HomeViewModel already called restoreSessionIfNeeded): the session is loaded
+     * and the player is prepared; this just calls play().
+     * Cold path (service restarted before HomeViewModel): loads and prepares the session,
+     * then calls play().
+     */
+    fun resumeForBluetooth(availableSongs: List<Song>) {
+        scope.launch {
+            val settings = resumeBehaviorRepository.settings.first()
+            if (!settings.autoResumeOnBluetooth) return@launch
+            if (!settings.rememberLastTrack) return@launch
+
+            val controller = mediaController ?: return@launch
+            if (controller.isPlaying) return@launch
+
+            delay(1_000L)
+
+            if (controller.isPlaying) return@launch
+
+            val song = _nowPlayingState.value.song
+            if (song != null && libraryQueue.isNotEmpty()) {
+                // Warm path: session already loaded, player is prepared — just start.
+                lastKnownPositionMs = -1L
+                statsTracker.onSongSelected(song)
+                controller.play()
+            } else {
+                // Cold path: load session from scratch before playing.
+                resumeSessionForBluetooth(availableSongs, settings)
+            }
+        }
+    }
+
+    private suspend fun resumeSessionForBluetooth(
+        availableSongs: List<Song>,
+        settings: ResumeBehaviorSettings,
+    ) {
+        val rawSnapshot = sessionRepository.load() ?: return
+        val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, settings) ?: return
+
+        val idSet = availableSongs.associateBy { it.id }
+        val mappedQueue = snapshot.queueSongIds.mapNotNull { idSet[it] }
+        val startSong = PlaybackSessionRules.resolveStartSong(
+            sessionSongId = snapshot.currentSongId,
+            sessionIndex  = PlaybackSessionRules.clampIndex(snapshot.currentIndex, mappedQueue.size),
+            mappedQueue   = mappedQueue,
+        ) ?: return
+
+        libraryQueue   = mappedQueue
+        shuffleEnabled = snapshot.shuffleEnabled
+        repeatMode     = snapshot.repeatMode
+        rebuildPlaybackQueue(currentQueueIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0))
+        val playbackIndex = playbackOrder.indexOf(mappedQueue.indexOf(startSong)).takeIf { it >= 0 } ?: 0
+
+        lastKnownPositionMs = -1L
+        statsTracker.onSongSelected(startSong)
+
+        _nowPlayingState.update {
+            it.copy(
+                song               = startSong,
+                queue              = playbackQueue,
+                currentIndex       = playbackIndex,
+                shuffleEnabled     = shuffleEnabled,
+                repeatMode         = repeatMode,
+                positionMs         = snapshot.positionMs,
+                durationMs         = startSong.duration.coerceAtLeast(0L),
+                bufferedPositionMs = 0L,
+                isSeekable         = false,
+            )
+        }
+
+        val controller = mediaController ?: return
+        controller.repeatMode         = repeatMode.toPlayerRepeatMode()
+        controller.shuffleModeEnabled = false
+        controller.setMediaItems(
+            libraryQueue.map { it.toMediaItem() },
+            mappedQueue.indexOf(startSong).coerceAtLeast(0),
+            snapshot.positionMs,
+        )
+        controller.prepare()
+        syncNowPlayingState()
+        controller.play()
     }
 
     private fun saveSessionAsync() {
