@@ -96,6 +96,12 @@ private fun NavHostController.navigatePrimary(route: String) {
     }
 }
 
+private fun NavHostController.navigateNowPlaying() {
+    navigate(Screen.NowPlaying.route) {
+        launchSingleTop = true
+    }
+}
+
 @Composable
 fun WavdropNavGraph(
     navController: NavHostController = rememberNavController(),
@@ -125,7 +131,7 @@ fun WavdropNavGraph(
                 onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
                 onSongsClick        = { navController.navigatePrimary(Screen.Songs.route) },
                 onLibraryClick      = { navController.navigatePrimary(Screen.Library.route) },
-                onNowPlayingClick   = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onNowPlayingClick   = { navController.navigateNowPlaying() },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onPlaylistsClick         = { navController.navigate(Screen.Playlists.route) },
                 onSmartCollectionsClick  = { navController.navigate(Screen.SmartCollections.route) },
@@ -141,7 +147,7 @@ fun WavdropNavGraph(
                 onPlaylistsClick        = { navController.navigate(Screen.Playlists.route) },
                 onSmartCollectionsClick = { navController.navigate(Screen.SmartCollections.route) },
                 onHomeClick             = { navController.navigatePrimary(Screen.Home.route) },
-                onNowPlayingClick       = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onNowPlayingClick       = { navController.navigateNowPlaying() },
                 onSettingsClick         = { navController.navigatePrimary(Screen.Settings.route) },
             )
         }
@@ -150,7 +156,7 @@ fun WavdropNavGraph(
                 onNavigateBack      = { navController.popBackStack() },
                 onHomeClick         = { navController.navigatePrimary(Screen.Home.route) },
                 onLibraryClick      = { navController.navigatePrimary(Screen.Library.route) },
-                onNowPlayingClick   = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onNowPlayingClick   = { navController.navigateNowPlaying() },
                 onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onFolderClick       = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
@@ -242,7 +248,7 @@ fun WavdropNavGraph(
             FoldersScreen(
                 onNavigateBack    = { navController.popBackStack() },
                 onFolderClick     = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
-                onNowPlayingClick = { navController.navigate(Screen.NowPlaying.route) },
+                onNowPlayingClick = { navController.navigateNowPlaying() },
             )
         }
         composable(Screen.Statistics.route) {
@@ -279,14 +285,14 @@ fun WavdropNavGraph(
             PlaylistsScreen(
                 onNavigateBack    = { navController.popBackStack() },
                 onPlaylistClick   = { playlistId -> navController.navigate(Screen.PlaylistDetails.createRoute(playlistId)) },
-                onNowPlayingClick = { navController.navigate(Screen.NowPlaying.route) },
+                onNowPlayingClick = { navController.navigateNowPlaying() },
             )
         }
         composable(Screen.SmartCollections.route) {
             SmartCollectionsScreen(
                 onNavigateBack    = { navController.popBackStack() },
                 onCollectionClick = { type -> navController.navigate(Screen.SmartCollectionDetails.createRoute(type)) },
-                onNowPlayingClick = { navController.navigate(Screen.NowPlaying.route) },
+                onNowPlayingClick = { navController.navigateNowPlaying() },
             )
         }
         composable(
@@ -298,7 +304,7 @@ fun WavdropNavGraph(
             SmartCollectionDetailsScreen(
                 onNavigateBack      = { navController.popBackStack() },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
-                onNowPlayingClick   = { navController.navigate(Screen.NowPlaying.route) },
+                onNowPlayingClick   = { navController.navigateNowPlaying() },
             )
         }
         composable(
@@ -312,7 +318,7 @@ fun WavdropNavGraph(
                 onNavigateBack      = { navController.popBackStack() },
                 onAddSongsClick     = { navController.navigate(Screen.AddSongsToPlaylist.createRoute(playlistId)) },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
-                onNowPlayingClick   = { navController.navigate(Screen.NowPlaying.route) },
+                onNowPlayingClick   = { navController.navigateNowPlaying() },
             )
         }
         composable(
@@ -334,7 +340,7 @@ fun WavdropNavGraph(
             FolderDetailsScreen(
                 onNavigateBack      = { navController.popBackStack() },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
-                onNowPlayingClick   = { navController.navigate(Screen.NowPlaying.route) },
+                onNowPlayingClick   = { navController.navigateNowPlaying() },
             )
         }
         composable(Screen.Settings.route) {
@@ -343,7 +349,7 @@ fun WavdropNavGraph(
                 onHomeClick              = { navController.navigatePrimary(Screen.Home.route) },
                 onSongsClick             = { navController.navigatePrimary(Screen.Songs.route) },
                 onLibraryClick           = { navController.navigatePrimary(Screen.Library.route) },
-                onNowPlayingClick        = { navController.navigatePrimary(Screen.NowPlaying.route) },
+                onNowPlayingClick        = { navController.navigateNowPlaying() },
                 onImportClick            = { navController.navigate(Screen.BpstatPreview.route) },
                 onBackupImportClick      = { uri ->
                     navController.navigate(
