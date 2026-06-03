@@ -32,9 +32,17 @@ data class BackupImportBaseline(
     val lastImportedAt: Long,
 )
 
+data class BackupLyricsOverride(
+    val songId: Long,
+    val contentUri: String,
+    val lyrics: String,
+    val updatedAt: Long,
+)
+
 data class WavdropBackup(
     val exportedAt: String,
     val songs: List<BackupSong>,
     val trackStats: List<BackupTrackStats>,
     val importBaselines: List<BackupImportBaseline>,
+    val lyricsOverrides: List<BackupLyricsOverride> = emptyList(),
 )

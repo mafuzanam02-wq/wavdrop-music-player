@@ -100,12 +100,23 @@ object WavdropBackupParser {
                     )
                 }
 
+            val lyricsOverrides = (root["lyricsOverrides"] as? List<*>)
+                ?.mapObjects("lyricsOverrides") { index, item ->
+                    BackupLyricsOverride(
+                        songId     = item.requiredLong("lyricsOverrides[$index].songId", "songId"),
+                        contentUri = item.requiredString("lyricsOverrides[$index].contentUri", "contentUri"),
+                        lyrics     = item.requiredString("lyricsOverrides[$index].lyrics", "lyrics"),
+                        updatedAt  = item.requiredLong("lyricsOverrides[$index].updatedAt", "updatedAt"),
+                    )
+                } ?: emptyList()
+
             success(
                 WavdropBackup(
-                    exportedAt = root["exportedAt"] as? String ?: "",
-                    songs = songs,
-                    trackStats = trackStats,
+                    exportedAt      = root["exportedAt"] as? String ?: "",
+                    songs           = songs,
+                    trackStats      = trackStats,
                     importBaselines = importBaselines,
+                    lyricsOverrides = lyricsOverrides,
                 )
             )
         } catch (e: BackupParseException) {

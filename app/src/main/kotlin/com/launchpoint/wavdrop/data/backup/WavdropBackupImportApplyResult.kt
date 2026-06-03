@@ -5,4 +5,5 @@ data class WavdropBackupImportApplyResult(
     val unmatchedTracks: Int,
     val playsAdded: Long,
     val skipsAdded: Long,
+    val lyricsRestored: Int = 0,
 )

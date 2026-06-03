@@ -207,6 +207,7 @@ private fun PreviewContent(
             StatRow("Songs",            state.songCount.toString())
             StatRow("Statistics",       state.statsCount.toString())
             StatRow("Import Baselines", state.baselineCount.toString())
+            StatRow("Lyrics overrides", state.lyricsOverridesCount.toString())
         }
 
         item { Spacer(Modifier.height(16.dp)) }
@@ -215,7 +216,7 @@ private fun PreviewContent(
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick  = { showDialog = true },
-                enabled  = state.statsCount > 0,
+                enabled  = state.statsCount > 0 || state.lyricsOverridesCount > 0,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
@@ -239,9 +240,9 @@ private fun ConfirmApplyDialog(
         title = { Text("Apply Wavdrop backup?") },
         text  = {
             Text(
-                text  = "This will merge statistics from this Wavdrop backup into your " +
-                        "current library. Existing statistics will not be overwritten. " +
-                        "Re-imported counts are ignored.",
+                text  = "This will merge statistics and lyrics from this Wavdrop backup " +
+                        "into your current library. Existing statistics will not be " +
+                        "overwritten. Lyrics are only replaced if the backup copy is newer.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
             )
@@ -287,6 +288,7 @@ private fun AppliedContent(
                     StatRow("Unmatched tracks", result.unmatchedTracks.toString())
                     StatRow("Plays added",      result.playsAdded.toString())
                     StatRow("Skips added",      result.skipsAdded.toString())
+                    StatRow("Lyrics restored",  result.lyricsRestored.toString())
                 }
             }
             Spacer(Modifier.height(28.dp))

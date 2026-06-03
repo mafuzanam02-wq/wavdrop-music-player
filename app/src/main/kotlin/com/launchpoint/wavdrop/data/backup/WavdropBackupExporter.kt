@@ -15,6 +15,7 @@ object WavdropBackupExporter {
         put("songs", songsArray(backup.songs))
         put("trackStats", trackStatsArray(backup.trackStats))
         put("importBaselines", baselinesArray(backup.importBaselines))
+        put("lyricsOverrides", lyricsOverridesArray(backup.lyricsOverrides))
     }.toString(2)
 
     private fun songsArray(songs: List<BackupSong>): JSONArray = JSONArray().apply {
@@ -57,6 +58,17 @@ object WavdropBackupExporter {
                 put("lastImportedPlayCount",  b.lastImportedPlayCount)
                 put("lastImportedSkipCount",  b.lastImportedSkipCount)
                 put("lastImportedAt",         b.lastImportedAt)
+            })
+        }
+    }
+
+    private fun lyricsOverridesArray(overrides: List<BackupLyricsOverride>): JSONArray = JSONArray().apply {
+        overrides.forEach { o ->
+            put(JSONObject().apply {
+                put("songId",     o.songId)
+                put("contentUri", o.contentUri)
+                put("lyrics",     o.lyrics)
+                put("updatedAt",  o.updatedAt)
             })
         }
     }

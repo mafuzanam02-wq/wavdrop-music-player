@@ -53,6 +53,9 @@ class LyricsRepositoryTest {
         override suspend fun getForSong(songId: Long, contentUri: String): LyricsOverrideEntity? =
             overrideFlow.value?.takeIf { it.songId == songId || it.contentUri == contentUri }
 
+        override suspend fun getAllSnapshot(): List<LyricsOverrideEntity> =
+            listOfNotNull(overrideFlow.value)
+
         override suspend fun upsert(entity: LyricsOverrideEntity) {
             overrideFlow.value = entity
         }

@@ -5,9 +5,11 @@ import com.launchpoint.wavdrop.data.legacy.ImportDeltaCalculator
 import com.launchpoint.wavdrop.data.legacy.ImportSourceTypes
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
+import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
+import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.Song
 import javax.inject.Inject
@@ -19,6 +21,7 @@ class WavdropBackupImportRepository @Inject constructor(
     private val songDao: SongDao,
     private val trackStatsDao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
+    private val lyricsOverrideDao: LyricsOverrideDao,
 ) {
     suspend fun applyImport(backup: WavdropBackup): WavdropBackupImportApplyResult =
         db.withTransaction {
@@ -85,11 +88,47 @@ class WavdropBackupImportRepository @Inject constructor(
                 )
             }
 
+            // Lyrics overrides restore
+            val backupSongById = backup.songs.associateBy { it.id }
+            val byUri  = currentSongs.associateBy { it.uri }
+            val byTags = currentSongs.associateBy {
+                Triple(it.title.norm(), it.artist.norm(), it.album.norm())
+            }
+            var lyricsRestored = 0
+
+            for (override in backup.lyricsOverrides) {
+                val song = byUri[override.contentUri]
+                    ?: run {
+                        val backupSong = backupSongById[override.songId] ?: return@run null
+                        byTags[Triple(
+                            backupSong.title.norm(),
+                            backupSong.artist.norm(),
+                            backupSong.album.norm(),
+                        )]
+                    } ?: continue
+
+                val existing = lyricsOverrideDao.getForSong(song.id, song.uri)
+                if (existing == null || override.updatedAt > existing.updatedAt) {
+                    lyricsOverrideDao.upsert(
+                        LyricsOverrideEntity(
+                            songId     = song.id,
+                            contentUri = song.uri,
+                            lyrics     = override.lyrics,
+                            updatedAt  = override.updatedAt,
+                        )
+                    )
+                    lyricsRestored++
+                }
+            }
+
             WavdropBackupImportApplyResult(
                 matchedTracks   = match.matchedRows.size,
                 unmatchedTracks = match.unmatchedCount,
                 playsAdded      = playsAdded,
                 skipsAdded      = skipsAdded,
+                lyricsRestored  = lyricsRestored,
             )
         }
 }
+
+private fun String.norm() = trim().lowercase()

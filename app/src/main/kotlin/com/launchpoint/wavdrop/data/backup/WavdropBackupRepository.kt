@@ -3,9 +3,11 @@ package com.launchpoint.wavdrop.data.backup
 import android.content.Context
 import android.net.Uri
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
+import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
+import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,17 +24,20 @@ class WavdropBackupRepository @Inject constructor(
     private val songDao: SongDao,
     private val trackStatsDao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
+    private val lyricsOverrideDao: LyricsOverrideDao,
 ) {
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
         val songs      = songDao.getAllSongsSnapshot()
         val stats      = trackStatsDao.getAllStatsSnapshot()
         val baselines  = importBaselineDao.getAllImportBaselinesSnapshot()
+        val lyrics     = lyricsOverrideDao.getAllSnapshot()
 
         val backup = WavdropBackup(
             exportedAt      = Instant.now().toString(),
             songs           = songs.map(SongEntity::toBackup),
             trackStats      = stats.map(TrackStatsEntity::toBackup),
             importBaselines = baselines.map(ImportBaselineEntity::toBackup),
+            lyricsOverrides = lyrics.map(LyricsOverrideEntity::toBackup),
         )
 
         val json = WavdropBackupExporter.toJson(backup)
@@ -75,4 +80,11 @@ private fun ImportBaselineEntity.toBackup() = BackupImportBaseline(
     lastImportedPlayCount = lastImportedPlayCount,
     lastImportedSkipCount = lastImportedSkipCount,
     lastImportedAt        = lastImportedAt,
+)
+
+private fun LyricsOverrideEntity.toBackup() = BackupLyricsOverride(
+    songId     = songId,
+    contentUri = contentUri,
+    lyrics     = lyrics,
+    updatedAt  = updatedAt,
 )

@@ -23,12 +23,13 @@ sealed interface BackupImportUiState {
     data object Loading : BackupImportUiState
 
     data class Preview(
-        val format        : String,
-        val version       : Int,
-        val exportedAt    : String,
-        val songCount     : Int,
-        val statsCount    : Int,
-        val baselineCount : Int,
+        val format               : String,
+        val version              : Int,
+        val exportedAt           : String,
+        val songCount            : Int,
+        val statsCount           : Int,
+        val baselineCount        : Int,
+        val lyricsOverridesCount : Int,
     ) : BackupImportUiState
 
     data object Applying : BackupImportUiState
@@ -75,12 +76,13 @@ class BackupImportPreviewViewModel @Inject constructor(
         parsedBackup = backup
 
         return BackupImportUiState.Preview(
-            format        = WavdropBackupParser.SUPPORTED_FORMAT,
-            version       = WavdropBackupParser.SUPPORTED_VERSION,
-            exportedAt    = backup.exportedAt.ifBlank { "Unknown" },
-            songCount     = backup.songs.size,
-            statsCount    = backup.trackStats.size,
-            baselineCount = backup.importBaselines.size,
+            format               = WavdropBackupParser.SUPPORTED_FORMAT,
+            version              = WavdropBackupParser.SUPPORTED_VERSION,
+            exportedAt           = backup.exportedAt.ifBlank { "Unknown" },
+            songCount            = backup.songs.size,
+            statsCount           = backup.trackStats.size,
+            baselineCount        = backup.importBaselines.size,
+            lyricsOverridesCount = backup.lyricsOverrides.size,
         )
     }
 

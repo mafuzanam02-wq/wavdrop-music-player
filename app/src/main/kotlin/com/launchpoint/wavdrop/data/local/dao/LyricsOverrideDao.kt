@@ -22,6 +22,9 @@ interface LyricsOverrideDao {
     )
     suspend fun getForSong(songId: Long, contentUri: String): LyricsOverrideEntity?
 
+    @Query("SELECT * FROM lyrics_overrides")
+    suspend fun getAllSnapshot(): List<LyricsOverrideEntity>
+
     @Upsert
     suspend fun upsert(entity: LyricsOverrideEntity)
 
