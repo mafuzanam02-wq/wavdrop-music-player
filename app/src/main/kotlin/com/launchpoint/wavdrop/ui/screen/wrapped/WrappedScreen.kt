@@ -55,7 +55,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private const val WRAPPED_PAGE_COUNT = 9
+private const val WRAPPED_PAGE_COUNT = 8
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -189,8 +189,7 @@ private fun WrappedContent(
                 3 -> TopTrackPage(wrapped, onTrackDetailsClick)
                 4 -> TopArtistPage(wrapped, onArtistClick)
                 5 -> TopAlbumPage(wrapped, onAlbumClick)
-                6 -> MostReplayedPage(wrapped, onTrackDetailsClick)
-                7 -> MostSkippedPage(wrapped, onTrackDetailsClick)
+                6 -> MostSkippedPage(wrapped, onTrackDetailsClick)
                 else -> RecentPlaysPage(wrapped, onTrackDetailsClick)
             }
         }
@@ -581,27 +580,6 @@ private fun TopAlbumPage(
             TextButton(onClick = { onAlbumClick(album.albumKey) }) {
                 Text("View album")
             }
-        }
-    }
-}
-
-@Composable
-private fun MostReplayedPage(
-    wrapped: WrappedSummary,
-    onTrackDetailsClick: (Long) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    InsightCard(label = "Most Replayed", modifier = modifier) {
-        val song = wrapped.mostReplayedTrack
-        if (song == null) {
-            NoDataText("No replay data for this year.")
-        } else {
-            FeaturedTrack(
-                song = song,
-                subline = "${song.playCount} plays",
-                caption = "The track you kept coming back to",
-                onDetailsClick = { onTrackDetailsClick(song.song.id) },
-            )
         }
     }
 }
