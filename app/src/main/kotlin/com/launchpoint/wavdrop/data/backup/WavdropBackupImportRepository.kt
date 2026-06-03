@@ -40,10 +40,11 @@ class WavdropBackupImportRepository @Inject constructor(
                 )
             }
 
-            val match      = WavdropBackupStatsMatcher.match(backup, currentSongs)
-            val importedAt = System.currentTimeMillis()
-            var playsAdded = 0L
-            var skipsAdded = 0L
+            val match            = WavdropBackupStatsMatcher.match(backup, currentSongs)
+            val importedAt       = System.currentTimeMillis()
+            var playsAdded       = 0L
+            var skipsAdded       = 0L
+            var favoritesRestored = 0
 
             for ((song, backupStats) in match.matchedRows) {
                 val sourceKey = "uri:${song.uri}"
@@ -86,6 +87,15 @@ class WavdropBackupImportRepository @Inject constructor(
                         lastImportedAt        = importedAt,
                     )
                 )
+
+                // Restore favorite: only set true, never clear a local favorite.
+                if (backupStats.isFavorite) {
+                    trackStatsDao.insertIfAbsent(
+                        TrackStatsEntity(songId = song.id, contentUri = song.uri)
+                    )
+                    trackStatsDao.setFavorite(song.id, true)
+                    favoritesRestored++
+                }
             }
 
             // Lyrics overrides restore
@@ -122,11 +132,12 @@ class WavdropBackupImportRepository @Inject constructor(
             }
 
             WavdropBackupImportApplyResult(
-                matchedTracks   = match.matchedRows.size,
-                unmatchedTracks = match.unmatchedCount,
-                playsAdded      = playsAdded,
-                skipsAdded      = skipsAdded,
-                lyricsRestored  = lyricsRestored,
+                matchedTracks      = match.matchedRows.size,
+                unmatchedTracks    = match.unmatchedCount,
+                playsAdded         = playsAdded,
+                skipsAdded         = skipsAdded,
+                lyricsRestored     = lyricsRestored,
+                favoritesRestored  = favoritesRestored,
             )
         }
 }
