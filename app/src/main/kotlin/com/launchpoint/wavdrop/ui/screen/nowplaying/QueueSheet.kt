@@ -80,31 +80,59 @@ private fun QueueSheetContent(
     onPlayNext: (Int) -> Unit,
     onViewStats: (Long) -> Unit,
 ) {
-    val currentSong = state.queue.getOrNull(state.currentIndex)
-    val upNextSongs = if (state.currentIndex >= 0) {
-        state.queue.drop(state.currentIndex + 1)
-    } else {
-        emptyList()
-    }
+    val currentIndex = state.currentIndex
+    val previousSongs = if (currentIndex > 0) state.queue.take(currentIndex) else emptyList()
+    val currentSong = state.queue.getOrNull(currentIndex)
+    val upNextSongs = if (currentIndex >= 0) state.queue.drop(currentIndex + 1) else emptyList()
 
     LazyColumn {
         item {
             Text(
-                text = "Up Next",
+                text = "Queue",
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
         }
 
+        // ── Previously played ─────────────────────────────────────────────────
+        if (previousSongs.isNotEmpty()) {
+            item {
+                QueueSectionHeader(label = "Previously played · ${previousSongs.size}")
+            }
+            itemsIndexed(
+                items = previousSongs,
+                // key = absolute queue index (0..currentIndex-1), always unique
+                key = { index, _ -> index },
+            ) { index, song ->
+                QueuePreviousItemRow(
+                    song = song,
+                    onJump = { onJumpToItem(index) },
+                    onViewStats = { onViewStats(song.id) },
+                )
+                if (index < previousSongs.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 56.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        }
+
+        // ── Playing now ───────────────────────────────────────────────────────
         if (currentSong != null) {
             item {
-                QueueSectionHeader(label = "Playing now")
+                QueueSectionHeader(
+                    label = "Playing now",
+                    modifier = Modifier.padding(top = if (previousSongs.isNotEmpty()) 8.dp else 0.dp),
+                )
             }
             item {
                 QueueNowPlayingRow(song = currentSong)
             }
         }
 
+        // ── Up next ───────────────────────────────────────────────────────────
         if (upNextSongs.isNotEmpty()) {
             item {
                 QueueSectionHeader(
@@ -114,11 +142,12 @@ private fun QueueSheetContent(
             }
             itemsIndexed(
                 items = upNextSongs,
-                key = { _, song -> song.id },
+                // key = absolute queue index (currentIndex+1..), always unique
+                key = { index, _ -> currentIndex + 1 + index },
             ) { index, song ->
-                val playbackIndex = state.currentIndex + 1 + index
+                val playbackIndex = currentIndex + 1 + index
                 val isFirstUpNext = index == 0
-                val isLastUpNext = index == upNextSongs.size - 1
+                val isLastUpNext = index == upNextSongs.lastIndex
                 QueueItemRow(
                     song = song,
                     isFirstUpNext = isFirstUpNext,
@@ -153,6 +182,8 @@ private fun QueueSheetContent(
     }
 }
 
+// ── Section header ────────────────────────────────────────────────────────────
+
 @Composable
 private fun QueueSectionHeader(label: String, modifier: Modifier = Modifier) {
     Text(
@@ -162,6 +193,8 @@ private fun QueueSectionHeader(label: String, modifier: Modifier = Modifier) {
         modifier = modifier.padding(horizontal = 20.dp, vertical = 6.dp),
     )
 }
+
+// ── Playing-now row (highlighted) ─────────────────────────────────────────────
 
 @Composable
 private fun QueueNowPlayingRow(song: Song) {
@@ -212,6 +245,73 @@ private fun QueueNowPlayingRow(song: Song) {
         }
     }
 }
+
+// ── Previously-played row (dimmed, limited actions) ───────────────────────────
+
+@Composable
+private fun QueuePreviousItemRow(
+    song: Song,
+    onJump: () -> Unit,
+    onViewStats: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onJump)
+            .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Spacer matches the 20 dp drag-handle icon width in QueueItemRow for visual alignment
+        Spacer(Modifier.size(20.dp))
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+        ) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Box {
+            IconButton(onClick = { expanded = true }) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Previous item actions",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                )
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Play") },
+                    onClick = { expanded = false; onJump() },
+                )
+                DropdownMenuItem(
+                    text = { Text("View stats") },
+                    onClick = { expanded = false; onViewStats() },
+                )
+            }
+        }
+    }
+}
+
+// ── Up-next row (full actions) ────────────────────────────────────────────────
 
 @Composable
 private fun QueueItemRow(
@@ -303,6 +403,8 @@ private fun QueueItemRow(
         }
     }
 }
+
+// ── Handle shown on Now Playing screen ───────────────────────────────────────
 
 @Composable
 fun QueueHandle(
