@@ -208,6 +208,7 @@ private fun PreviewContent(
             StatRow("Statistics",       state.statsCount.toString())
             StatRow("Import Baselines", state.baselineCount.toString())
             StatRow("Lyrics overrides", state.lyricsOverridesCount.toString())
+            StatRow("Preferences",      if (state.hasPreferences) "Included" else "Not included")
         }
 
         item { Spacer(Modifier.height(16.dp)) }
@@ -290,6 +291,9 @@ private fun AppliedContent(
                     StatRow("Skips added",      result.skipsAdded.toString())
                     StatRow("Lyrics restored",    result.lyricsRestored.toString())
                     StatRow("Favorites restored", result.favoritesRestored.toString())
+                    if (result.preferencesRestored) {
+                        StatRow("Preferences", "Restored")
+                    }
                 }
             }
             Spacer(Modifier.height(28.dp))

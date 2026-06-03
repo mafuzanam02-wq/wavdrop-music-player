@@ -10,6 +10,9 @@ import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import kotlinx.coroutines.flow.first
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.time.Instant
@@ -25,6 +28,8 @@ class WavdropBackupRepository @Inject constructor(
     private val trackStatsDao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
+    private val appSettingsRepository: AppSettingsRepository,
+    private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
 ) {
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
         val songs      = songDao.getAllSongsSnapshot()
@@ -32,12 +37,21 @@ class WavdropBackupRepository @Inject constructor(
         val baselines  = importBaselineDao.getAllImportBaselinesSnapshot()
         val lyrics     = lyricsOverrideDao.getAllSnapshot()
 
+        val preferences = BackupPreferences(
+            startupDestination  = appSettingsRepository.startupDestination.first().name,
+            mostPlayedPeriod    = appSettingsRepository.mostPlayedPeriod.first().name,
+            mostPlayedLimit     = appSettingsRepository.mostPlayedDisplayLimit.first().name,
+            homeVisibleSections = homeLayoutSettingsRepository.settings.first()
+                .visibleSections.map { it.name },
+        )
+
         val backup = WavdropBackup(
             exportedAt      = Instant.now().toString(),
             songs           = songs.map(SongEntity::toBackup),
             trackStats      = stats.map(TrackStatsEntity::toBackup),
             importBaselines = baselines.map(ImportBaselineEntity::toBackup),
             lyricsOverrides = lyrics.map(LyricsOverrideEntity::toBackup),
+            preferences     = preferences,
         )
 
         val json = WavdropBackupExporter.toJson(backup)

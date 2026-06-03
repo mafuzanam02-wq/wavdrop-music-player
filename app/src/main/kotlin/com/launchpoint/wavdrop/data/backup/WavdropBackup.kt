@@ -39,10 +39,18 @@ data class BackupLyricsOverride(
     val updatedAt: Long,
 )
 
+data class BackupPreferences(
+    val startupDestination: String?,
+    val mostPlayedPeriod: String?,
+    val mostPlayedLimit: String?,
+    val homeVisibleSections: List<String>?,
+)
+
 data class WavdropBackup(
     val exportedAt: String,
     val songs: List<BackupSong>,
     val trackStats: List<BackupTrackStats>,
     val importBaselines: List<BackupImportBaseline>,
     val lyricsOverrides: List<BackupLyricsOverride> = emptyList(),
+    val preferences: BackupPreferences? = null,
 )

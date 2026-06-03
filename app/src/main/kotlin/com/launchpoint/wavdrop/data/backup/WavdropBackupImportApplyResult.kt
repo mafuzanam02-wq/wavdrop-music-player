@@ -7,4 +7,5 @@ data class WavdropBackupImportApplyResult(
     val skipsAdded: Long,
     val lyricsRestored: Int = 0,
     val favoritesRestored: Int = 0,
+    val preferencesRestored: Boolean = false,
 )

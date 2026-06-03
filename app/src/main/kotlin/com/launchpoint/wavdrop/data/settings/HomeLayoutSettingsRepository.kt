@@ -34,6 +34,15 @@ class HomeLayoutSettingsRepository @Inject constructor(
             }
         }
 
+    suspend fun setVisibleSections(sections: Set<HomeSectionId>) {
+        dataStore.edit { prefs ->
+            prefs[HOME_VISIBLE_SECTIONS_KEY] =
+                (sections + HomeLayoutSettingsRules.ALWAYS_VISIBLE_SECTIONS)
+                    .map { it.name }
+                    .toSet()
+        }
+    }
+
     suspend fun setSectionVisible(id: HomeSectionId, visible: Boolean) {
         dataStore.edit { prefs ->
             val current = prefs[HOME_VISIBLE_SECTIONS_KEY]

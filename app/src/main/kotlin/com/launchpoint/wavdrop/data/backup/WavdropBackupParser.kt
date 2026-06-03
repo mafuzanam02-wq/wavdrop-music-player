@@ -110,6 +110,16 @@ object WavdropBackupParser {
                     )
                 } ?: emptyList()
 
+            val preferences = (root["preferences"] as? Map<*, *>)?.let { obj ->
+                BackupPreferences(
+                    startupDestination  = obj["startupDestination"] as? String,
+                    mostPlayedPeriod    = obj["mostPlayedPeriod"] as? String,
+                    mostPlayedLimit     = obj["mostPlayedLimit"] as? String,
+                    homeVisibleSections = (obj["homeVisibleSections"] as? List<*>)
+                        ?.filterIsInstance<String>(),
+                )
+            }
+
             success(
                 WavdropBackup(
                     exportedAt      = root["exportedAt"] as? String ?: "",
@@ -117,6 +127,7 @@ object WavdropBackupParser {
                     trackStats      = trackStats,
                     importBaselines = importBaselines,
                     lyricsOverrides = lyricsOverrides,
+                    preferences     = preferences,
                 )
             )
         } catch (e: BackupParseException) {

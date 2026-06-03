@@ -30,6 +30,7 @@ sealed interface BackupImportUiState {
         val statsCount           : Int,
         val baselineCount        : Int,
         val lyricsOverridesCount : Int,
+        val hasPreferences       : Boolean,
     ) : BackupImportUiState
 
     data object Applying : BackupImportUiState
@@ -83,6 +84,7 @@ class BackupImportPreviewViewModel @Inject constructor(
             statsCount           = backup.trackStats.size,
             baselineCount        = backup.importBaselines.size,
             lyricsOverridesCount = backup.lyricsOverrides.size,
+            hasPreferences       = backup.preferences != null,
         )
     }
 

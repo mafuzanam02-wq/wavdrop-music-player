@@ -11,7 +11,13 @@ import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
+import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
+import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.HomeSectionId
+import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import com.launchpoint.wavdrop.data.settings.StartupDestination
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,9 +28,11 @@ class WavdropBackupImportRepository @Inject constructor(
     private val trackStatsDao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
+    private val appSettingsRepository: AppSettingsRepository,
+    private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
 ) {
-    suspend fun applyImport(backup: WavdropBackup): WavdropBackupImportApplyResult =
-        db.withTransaction {
+    suspend fun applyImport(backup: WavdropBackup): WavdropBackupImportApplyResult {
+        val dbResult = db.withTransaction {
             val currentSongs = songDao.getAllSongsSnapshot().map { e ->
                 Song(
                     id          = e.id,
@@ -132,14 +140,38 @@ class WavdropBackupImportRepository @Inject constructor(
             }
 
             WavdropBackupImportApplyResult(
-                matchedTracks      = match.matchedRows.size,
-                unmatchedTracks    = match.unmatchedCount,
-                playsAdded         = playsAdded,
-                skipsAdded         = skipsAdded,
-                lyricsRestored     = lyricsRestored,
-                favoritesRestored  = favoritesRestored,
+                matchedTracks     = match.matchedRows.size,
+                unmatchedTracks   = match.unmatchedCount,
+                playsAdded        = playsAdded,
+                skipsAdded        = skipsAdded,
+                lyricsRestored    = lyricsRestored,
+                favoritesRestored = favoritesRestored,
             )
         }
+
+        // Restore preferences outside the Room transaction — DataStore is not Room-transactional.
+        var preferencesRestored = false
+        backup.preferences?.let { prefs ->
+            prefs.startupDestination
+                ?.let { runCatching { StartupDestination.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setStartupDestination(it); preferencesRestored = true }
+
+            prefs.mostPlayedPeriod
+                ?.let { runCatching { MostPlayedPeriod.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setMostPlayedPeriod(it); preferencesRestored = true }
+
+            prefs.mostPlayedLimit
+                ?.let { runCatching { MostPlayedDisplayLimit.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setMostPlayedDisplayLimit(it); preferencesRestored = true }
+
+            prefs.homeVisibleSections
+                ?.mapNotNull { runCatching { HomeSectionId.valueOf(it) }.getOrNull() }
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { homeLayoutSettingsRepository.setVisibleSections(it.toSet()); preferencesRestored = true }
+        }
+
+        return dbResult.copy(preferencesRestored = preferencesRestored)
+    }
 }
 
 private fun String.norm() = trim().lowercase()
