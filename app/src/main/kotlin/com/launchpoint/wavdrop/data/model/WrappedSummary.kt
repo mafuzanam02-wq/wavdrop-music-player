@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.data.model
 
+import java.time.DayOfWeek
 import java.time.LocalDate
 
 data class WrappedSummary(
@@ -23,6 +24,13 @@ data class WrappedSummary(
     val mostSkippedTrack: SongStatsSummary?,
     val recentlyPlayed: List<SongStatsSummary>,
     val emptyState: ListeningAnalyticsEmptyState,
+    // V2 insights
+    val longestStreak: Int,
+    val currentStreak: Int,
+    val mostActiveDayOfWeek: DayOfWeek?,
+    val mostActiveHour: Int?,
+    val averageListeningTimePerActiveDayMs: Long,
+    val mostReplayedTrack: SongStatsSummary?,
 ) {
     val year: Int get() = period.year
     val hasActivity: Boolean get() = totalPlayCount > 0 || totalSkipCount > 0

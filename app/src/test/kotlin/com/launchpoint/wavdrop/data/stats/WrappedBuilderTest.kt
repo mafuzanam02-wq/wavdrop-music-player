@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.data.stats
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.model.ListeningAnalyticsEmptyReason
 import com.launchpoint.wavdrop.data.model.Song
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -15,6 +16,8 @@ import org.junit.Test
 class WrappedBuilderTest {
 
     private val utc: ZoneId = ZoneOffset.UTC
+
+    // ── V1 tests ──────────────────────────────────────────────────────────────
 
     @Test
     fun `availableYears returns event-backed years most recent first`() {
@@ -178,6 +181,181 @@ class WrappedBuilderTest {
         assertTrue(wrapped.emptyState.isEmpty)
     }
 
+    // ── V2 insight tests ──────────────────────────────────────────────────────
+
+    @Test
+    fun `longestStreak spans the longest consecutive listening run`() {
+        // Jan 1–3 = 3 consecutive, gap, Jan 5–6 = 2 consecutive
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 1)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 2)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 3)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 5)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 6)),
+        )
+
+        val wrapped = WrappedBuilder.buildYear(2026, listOf(song(1)), events, utc)
+
+        assertEquals(3, wrapped.longestStreak)
+    }
+
+    @Test
+    fun `currentStreak reflects consecutive days ending at the last active day`() {
+        // Jan 1–3 = 3 consecutive, gap, Jan 5–6 = 2 consecutive
+        // Current streak ends at Jan 6, going back: Jan 5 is consecutive → streak = 2
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 1)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 2)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 3)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 5)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 6)),
+        )
+
+        val wrapped = WrappedBuilder.buildYear(2026, listOf(song(1)), events, utc)
+
+        assertEquals(2, wrapped.currentStreak)
+    }
+
+    @Test
+    fun `streak is 1 when all plays fall on a single day`() {
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 3, 15)),
+            playEvent(songId = 2, occurredAt = epochMs(2026, 3, 15)),
+        )
+
+        val wrapped = WrappedBuilder.buildYear(
+            2026,
+            listOf(song(1), song(2)),
+            events,
+            utc,
+        )
+
+        assertEquals(1, wrapped.longestStreak)
+        assertEquals(1, wrapped.currentStreak)
+    }
+
+    @Test
+    fun `streaks are 0 when there are no play events`() {
+        val wrapped = WrappedBuilder.buildYear(
+            year = 2026,
+            songs = listOf(song(1)),
+            events = listOf(skipEvent(songId = 1, occurredAt = epochMs(2026, 6, 1))),
+            zone = utc,
+        )
+
+        assertEquals(0, wrapped.longestStreak)
+        assertEquals(0, wrapped.currentStreak)
+    }
+
+    @Test
+    fun `mostActiveDayOfWeek is the weekday with most play events`() {
+        // 2026-01-05 = Monday, 2026-01-06 = Tuesday
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 5)),       // Monday
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 5) + ONE_HOUR_MS),  // Monday
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 5) + TWO_HOURS_MS), // Monday
+            playEvent(songId = 2, occurredAt = epochMs(2026, 1, 6)),       // Tuesday
+        )
+
+        val wrapped = WrappedBuilder.buildYear(2026, listOf(song(1), song(2)), events, utc)
+
+        assertEquals(DayOfWeek.MONDAY, wrapped.mostActiveDayOfWeek)
+    }
+
+    @Test
+    fun `mostActiveDayOfWeek is null when no play events exist`() {
+        val wrapped = WrappedBuilder.buildYear(
+            year = 2026,
+            songs = listOf(song(1)),
+            events = emptyList(),
+            zone = utc,
+        )
+
+        assertNull(wrapped.mostActiveDayOfWeek)
+    }
+
+    @Test
+    fun `mostActiveHour is the hour of day with most play events`() {
+        // 14:00 UTC = 2 PM → hour 14
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 1) + 14 * ONE_HOUR_MS),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 2) + 14 * ONE_HOUR_MS),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 3) + 10 * ONE_HOUR_MS),
+        )
+
+        val wrapped = WrappedBuilder.buildYear(2026, listOf(song(1)), events, utc)
+
+        assertEquals(14, wrapped.mostActiveHour)
+    }
+
+    @Test
+    fun `mostActiveHour is null when no play events exist`() {
+        val wrapped = WrappedBuilder.buildYear(
+            year = 2026,
+            songs = listOf(song(1)),
+            events = emptyList(),
+            zone = utc,
+        )
+
+        assertNull(wrapped.mostActiveHour)
+    }
+
+    @Test
+    fun `averageListeningTimePerActiveDayMs equals total time divided by active days`() {
+        // 2 active days, 120_000ms total → 60_000ms per day
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 1), listenedMs = 70_000L),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 2), listenedMs = 50_000L),
+        )
+
+        val wrapped = WrappedBuilder.buildYear(2026, listOf(song(1)), events, utc)
+
+        assertEquals(2, wrapped.listeningDaysCount)
+        assertEquals(60_000L, wrapped.averageListeningTimePerActiveDayMs)
+    }
+
+    @Test
+    fun `averageListeningTimePerActiveDayMs is 0 when there are no play events`() {
+        val wrapped = WrappedBuilder.buildYear(
+            year = 2026,
+            songs = listOf(song(1)),
+            events = emptyList(),
+            zone = utc,
+        )
+
+        assertEquals(0L, wrapped.averageListeningTimePerActiveDayMs)
+    }
+
+    @Test
+    fun `mostReplayedTrack is the song with the highest play count`() {
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 1)),
+            playEvent(songId = 2, occurredAt = epochMs(2026, 1, 2)),
+            playEvent(songId = 2, occurredAt = epochMs(2026, 1, 3)),
+            playEvent(songId = 2, occurredAt = epochMs(2026, 1, 4)),
+        )
+        val songs = listOf(song(id = 1, title = "A"), song(id = 2, title = "B"))
+
+        val wrapped = WrappedBuilder.buildYear(2026, songs, events, utc)
+
+        assertEquals("B", wrapped.mostReplayedTrack?.song?.title)
+        assertEquals(3, wrapped.mostReplayedTrack?.playCount)
+    }
+
+    @Test
+    fun `mostReplayedTrack is null when no songs are matched`() {
+        val wrapped = WrappedBuilder.buildYear(
+            year = 2026,
+            songs = emptyList(),
+            events = listOf(playEvent(songId = 99, occurredAt = epochMs(2026, 1, 1))),
+            zone = utc,
+        )
+
+        assertNull(wrapped.mostReplayedTrack)
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
     private fun epochMs(year: Int, month: Int, day: Int): Long =
         LocalDate.of(year, month, day)
             .atStartOfDay()
@@ -226,4 +404,9 @@ class WrappedBuilderTest {
         durationMs = 200_000L,
         source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
     )
+
+    companion object {
+        private const val ONE_HOUR_MS = 3_600_000L
+        private const val TWO_HOURS_MS = 7_200_000L
+    }
 }

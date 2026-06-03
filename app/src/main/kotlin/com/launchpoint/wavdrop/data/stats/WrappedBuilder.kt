@@ -5,6 +5,9 @@ import com.launchpoint.wavdrop.data.model.MonthYear
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedPeriod
 import com.launchpoint.wavdrop.data.model.WrappedSummary
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 
 object WrappedBuilder {
@@ -41,6 +44,7 @@ object WrappedBuilder {
         events: List<TrackListenEventEntity>,
         topListLimit: Int = DEFAULT_TOP_LIST_LIMIT,
     ): WrappedSummary {
+        val zone = period.range.zone
         val analytics = ListeningAnalyticsBuilder.build(
             range = period.range,
             songs = songs,
@@ -48,6 +52,33 @@ object WrappedBuilder {
             events = events,
             topListLimit = topListLimit,
         )
+
+        val periodPlayEvents = events.filter {
+            period.range.contains(it.occurredAt) && it.eventType == TrackListenEventEntity.TYPE_PLAY
+        }
+
+        val sortedPlayDays: List<LocalDate> = periodPlayEvents
+            .map { Instant.ofEpochMilli(it.occurredAt).atZone(zone).toLocalDate() }
+            .toSortedSet()
+            .toList()
+
+        val mostActiveDayOfWeek: DayOfWeek? = periodPlayEvents
+            .groupingBy { Instant.ofEpochMilli(it.occurredAt).atZone(zone).dayOfWeek }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
+        val mostActiveHour: Int? = periodPlayEvents
+            .groupingBy { Instant.ofEpochMilli(it.occurredAt).atZone(zone).hour }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+
+        val averageListeningTimePerActiveDayMs: Long = if (analytics.listeningDaysCount > 0) {
+            analytics.totalListeningTimeMs / analytics.listeningDaysCount
+        } else {
+            0L
+        }
 
         return WrappedSummary(
             period = period,
@@ -70,6 +101,40 @@ object WrappedBuilder {
             mostSkippedTrack = analytics.mostSkippedTrack,
             recentlyPlayed = analytics.recentlyPlayed,
             emptyState = analytics.emptyState,
+            longestStreak = computeLongestStreak(sortedPlayDays),
+            currentStreak = computeCurrentStreak(sortedPlayDays),
+            mostActiveDayOfWeek = mostActiveDayOfWeek,
+            mostActiveHour = mostActiveHour,
+            averageListeningTimePerActiveDayMs = averageListeningTimePerActiveDayMs,
+            mostReplayedTrack = analytics.topSongs.firstOrNull(),
         )
+    }
+
+    private fun computeLongestStreak(sortedDays: List<LocalDate>): Int {
+        if (sortedDays.isEmpty()) return 0
+        var longest = 1
+        var current = 1
+        for (i in 1 until sortedDays.size) {
+            if (sortedDays[i] == sortedDays[i - 1].plusDays(1)) {
+                current++
+                if (current > longest) longest = current
+            } else {
+                current = 1
+            }
+        }
+        return longest
+    }
+
+    private fun computeCurrentStreak(sortedDays: List<LocalDate>): Int {
+        if (sortedDays.isEmpty()) return 0
+        var streak = 1
+        for (i in sortedDays.lastIndex - 1 downTo 0) {
+            if (sortedDays[i + 1] == sortedDays[i].plusDays(1)) {
+                streak++
+            } else {
+                break
+            }
+        }
+        return streak
     }
 }
