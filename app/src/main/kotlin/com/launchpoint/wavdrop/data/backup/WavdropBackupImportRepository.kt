@@ -22,6 +22,8 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import com.launchpoint.wavdrop.data.settings.LibraryScanMode
+import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,6 +39,7 @@ class WavdropBackupImportRepository @Inject constructor(
     private val trackListenEventDao: TrackListenEventDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
+    private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
 ) {
     suspend fun applyImport(backup: WavdropBackup): WavdropBackupImportApplyResult {
         val dbResult = db.withTransaction {
@@ -287,6 +290,19 @@ class WavdropBackupImportRepository @Inject constructor(
                 ?.mapNotNull { runCatching { HomeSectionId.valueOf(it) }.getOrNull() }
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { homeLayoutSettingsRepository.setVisibleSections(it.toSet()); preferencesRestored = true }
+
+            prefs.scanMode
+                ?.let { runCatching { LibraryScanMode.valueOf(it) }.getOrNull() }
+                ?.let { libraryScanSettingsRepository.setScanMode(it); preferencesRestored = true }
+
+            prefs.minimumTrackDurationSeconds
+                ?.let { libraryScanSettingsRepository.setMinimumTrackDurationSeconds(it); preferencesRestored = true }
+
+            val folderUris = prefs.selectedFolderUris?.filter { it.isNotBlank() }
+            if (!folderUris.isNullOrEmpty()) {
+                libraryScanSettingsRepository.setSelectedFolderUris(folderUris)
+                preferencesRestored = true
+            }
         }
 
         return dbResult.copy(preferencesRestored = preferencesRestored)

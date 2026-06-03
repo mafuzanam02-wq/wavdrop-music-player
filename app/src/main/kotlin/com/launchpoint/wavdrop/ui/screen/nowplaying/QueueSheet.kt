@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -29,6 +30,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,7 +87,23 @@ private fun QueueSheetContent(
     val currentSong = state.queue.getOrNull(currentIndex)
     val upNextSongs = if (currentIndex >= 0) state.queue.drop(currentIndex + 1) else emptyList()
 
-    LazyColumn {
+    val listState = rememberLazyListState()
+
+    // Scroll to the "Playing now" section header on open and when the current track changes.
+    // LazyColumn item layout (0-based):
+    //   0           "Queue" title
+    //   1           "Previously played" header   } only when currentIndex > 0
+    //   2..ci+1     previous song rows           }
+    //   ci+2 or 1   "Playing now" header         <- scroll target
+    //   ci+3 or 2   QueueNowPlayingRow
+    LaunchedEffect(currentIndex) {
+        if (currentIndex >= 0) {
+            val target = if (currentIndex > 0) 2 + currentIndex else 1
+            listState.scrollToItem(target)
+        }
+    }
+
+    LazyColumn(state = listState) {
         item {
             Text(
                 text = "Queue",

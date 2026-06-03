@@ -15,6 +15,7 @@ import com.launchpoint.wavdrop.data.local.entity.SongEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import kotlinx.coroutines.flow.first
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
@@ -35,6 +36,7 @@ class WavdropBackupRepository @Inject constructor(
     private val trackListenEventDao: TrackListenEventDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
+    private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
 ) {
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
         val songs      = songDao.getAllSongsSnapshot()
@@ -83,12 +85,16 @@ class WavdropBackupRepository @Inject constructor(
             )
         }
 
+        val scanSettings = libraryScanSettingsRepository.settings.first()
         val preferences = BackupPreferences(
-            startupDestination  = appSettingsRepository.startupDestination.first().name,
-            mostPlayedPeriod    = appSettingsRepository.mostPlayedPeriod.first().name,
-            mostPlayedLimit     = appSettingsRepository.mostPlayedDisplayLimit.first().name,
-            homeVisibleSections = homeLayoutSettingsRepository.settings.first()
+            startupDestination          = appSettingsRepository.startupDestination.first().name,
+            mostPlayedPeriod            = appSettingsRepository.mostPlayedPeriod.first().name,
+            mostPlayedLimit             = appSettingsRepository.mostPlayedDisplayLimit.first().name,
+            homeVisibleSections         = homeLayoutSettingsRepository.settings.first()
                 .visibleSections.map { it.name },
+            scanMode                    = scanSettings.scanMode.name,
+            selectedFolderUris          = scanSettings.selectedFolderUris.takeIf { it.isNotEmpty() },
+            minimumTrackDurationSeconds = scanSettings.minimumTrackDurationSeconds,
         )
 
         val backup = WavdropBackup(

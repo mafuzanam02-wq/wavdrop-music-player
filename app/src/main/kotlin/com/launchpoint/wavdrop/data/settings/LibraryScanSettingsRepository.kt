@@ -49,6 +49,15 @@ class LibraryScanSettingsRepository @Inject constructor(
         }
     }
 
+    suspend fun setSelectedFolderUris(uris: List<String>) {
+        dataStore.edit { preferences ->
+            preferences[SELECTED_FOLDER_URIS_KEY] = uris
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .toSet()
+        }
+    }
+
     suspend fun addSelectedFolderUri(folderUri: String) {
         dataStore.edit { preferences ->
             val current = preferences[SELECTED_FOLDER_URIS_KEY]?.toList().orEmpty()

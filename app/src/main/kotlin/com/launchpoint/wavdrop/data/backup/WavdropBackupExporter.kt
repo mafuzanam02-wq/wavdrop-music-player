@@ -125,5 +125,10 @@ object WavdropBackupExporter {
         prefs.homeVisibleSections?.let { sections ->
             put("homeVisibleSections", JSONArray().apply { sections.forEach { put(it) } })
         }
+        prefs.scanMode?.let { put("scanMode", it) }
+        prefs.selectedFolderUris?.let { uris ->
+            put("selectedFolderUris", JSONArray().apply { uris.forEach { put(it) } })
+        }
+        prefs.minimumTrackDurationSeconds?.let { put("minimumTrackDurationSeconds", it) }
     }
 }

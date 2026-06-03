@@ -112,11 +112,15 @@ object WavdropBackupParser {
 
             val preferences = (root["preferences"] as? Map<*, *>)?.let { obj ->
                 BackupPreferences(
-                    startupDestination  = obj["startupDestination"] as? String,
-                    mostPlayedPeriod    = obj["mostPlayedPeriod"] as? String,
-                    mostPlayedLimit     = obj["mostPlayedLimit"] as? String,
-                    homeVisibleSections = (obj["homeVisibleSections"] as? List<*>)
+                    startupDestination          = obj["startupDestination"] as? String,
+                    mostPlayedPeriod            = obj["mostPlayedPeriod"] as? String,
+                    mostPlayedLimit             = obj["mostPlayedLimit"] as? String,
+                    homeVisibleSections         = (obj["homeVisibleSections"] as? List<*>)
                         ?.filterIsInstance<String>(),
+                    scanMode                    = obj["scanMode"] as? String,
+                    selectedFolderUris          = (obj["selectedFolderUris"] as? List<*>)
+                        ?.filterIsInstance<String>(),
+                    minimumTrackDurationSeconds = (obj["minimumTrackDurationSeconds"] as? Long)?.toInt(),
                 )
             }
 

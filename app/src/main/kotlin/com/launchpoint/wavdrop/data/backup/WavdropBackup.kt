@@ -44,6 +44,9 @@ data class BackupPreferences(
     val mostPlayedPeriod: String?,
     val mostPlayedLimit: String?,
     val homeVisibleSections: List<String>?,
+    val scanMode: String?,
+    val selectedFolderUris: List<String>?,
+    val minimumTrackDurationSeconds: Int?,
 )
 
 data class BackupPlaylistSong(
