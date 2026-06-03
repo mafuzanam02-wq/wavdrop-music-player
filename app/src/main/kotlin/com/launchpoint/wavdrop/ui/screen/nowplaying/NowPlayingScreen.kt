@@ -181,6 +181,15 @@ fun NowPlayingScreen(
                                         searchLyricsOnline(context, song)
                                     },
                                 )
+                                if (song.hasKnownArtist()) {
+                                    DropdownMenuItem(
+                                        text = { Text("Search artist online") },
+                                        onClick = {
+                                            showMoreActions = false
+                                            searchArtistOnline(context, song)
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -808,6 +817,16 @@ private fun searchLyricsOnline(context: Context, song: Song) {
         append(" lyrics")
     }
     val url = "https://www.google.com/search?q=${Uri.encode(query)}"
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "No browser found", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun searchArtistOnline(context: Context, song: Song) {
+    val url = "https://www.google.com/search?q=${Uri.encode(song.artist)}"
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
     try {
         context.startActivity(intent)
