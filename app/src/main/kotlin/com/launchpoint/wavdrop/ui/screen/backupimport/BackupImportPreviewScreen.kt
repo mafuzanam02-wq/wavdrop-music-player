@@ -288,7 +288,8 @@ private fun AppliedContent(
                     StatRow("Unmatched tracks", result.unmatchedTracks.toString())
                     StatRow("Plays added",      result.playsAdded.toString())
                     StatRow("Skips added",      result.skipsAdded.toString())
-                    StatRow("Lyrics restored",  result.lyricsRestored.toString())
+                    StatRow("Lyrics restored",    result.lyricsRestored.toString())
+                    StatRow("Favorites restored", result.favoritesRestored.toString())
                 }
             }
             Spacer(Modifier.height(28.dp))
