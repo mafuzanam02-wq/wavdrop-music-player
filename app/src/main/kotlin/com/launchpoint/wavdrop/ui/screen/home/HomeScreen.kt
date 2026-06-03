@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FolderOff
@@ -429,7 +431,7 @@ private fun HomeDashboardContent(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 20.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 18.dp),
     ) {
         if (HomeSectionId.CONTINUE_LISTENING in visibleSections) {
             item {
@@ -437,7 +439,7 @@ private fun HomeDashboardContent(
                     title = nowPlayingTitle,
                     artist = nowPlayingArtist,
                     onClick = onNowPlayingClick,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 )
             }
         }
@@ -482,7 +484,7 @@ private fun HomeDashboardContent(
                     WrappedPreviewCard(
                         wrapped = dashboard.wrapped,
                         onClick = onWrappedClick,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                 }
             }
@@ -506,7 +508,7 @@ private fun HomeDashboardContent(
                 LibraryShortcutCard(
                     totalSongs = dashboard.totalSongs,
                     onClick = onLibraryClick,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                 )
             }
         }
@@ -571,29 +573,45 @@ private fun WrappedPreviewCard(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
         shape = MaterialTheme.shapes.small,
     ) {
         Column {
             Row(
-                modifier = Modifier.padding(start = 14.dp, top = 14.dp, end = 14.dp),
+                modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(26.dp),
-                )
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Wrapped",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "${wrapped.year} - $highlight",
+                        text = wrapped.year.toString(),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = highlight,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                         maxLines = 1,
@@ -608,7 +626,7 @@ private fun WrappedPreviewCard(
                 text = "View your year in music",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
-                modifier = Modifier.padding(start = 52.dp, end = 14.dp, bottom = 14.dp),
+                modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp),
             )
         }
     }
@@ -756,13 +774,13 @@ private fun DashboardListSectionHeader(
     onActionClick: (() -> Unit)? = null,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
             modifier = Modifier.weight(1f),
         )
         if (actionLabel != null && onActionClick != null) {
