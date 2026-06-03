@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -68,6 +70,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -417,55 +422,77 @@ private fun LyricsEditorDialog(
     onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var text by remember(lyrics) {
+    // Initialize once — no reactive key so an in-flight lyricsState update
+    // cannot reset text the user is actively editing.
+    var text by remember {
         mutableStateOf((lyrics as? LyricsResult.Available)?.text.orEmpty())
     }
+    var showClearConfirm by remember { mutableStateOf(false) }
     val canSave = text.isNotBlank()
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit lyrics") },
-        text = {
-            Column {
-                Text(
-                    text = "Unsynced lyrics. Timing and karaoke highlighting are not supported yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
-                )
-                Spacer(Modifier.height(12.dp))
-                TextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(240.dp),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    placeholder = { Text("Lyrics") },
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(text) },
-                enabled = canSave,
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (hasCustomLyrics) {
-                    OutlinedButton(onClick = onClear) {
-                        Text("Clear")
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Remove lyrics?") },
+            text = { Text("Your custom lyrics for this track will be removed.") },
+            confirmButton = {
+                Button(onClick = onClear) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Keep editing") }
+            },
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Edit lyrics") },
+            text = {
+                Column {
+                    Text(
+                        text = "Plain text only. Paste or type lyrics, then tap Save.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    TextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 200.dp, max = 320.dp),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        placeholder = { Text("Lyrics") },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Default,
+                            capitalization = KeyboardCapitalization.Sentences,
+                        ),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { onSave(text) },
+                    enabled = canSave,
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (hasCustomLyrics) {
+                        OutlinedButton(onClick = { showClearConfirm = true }) {
+                            Text("Clear")
+                        }
+                        Spacer(Modifier.size(8.dp))
                     }
-                    Spacer(Modifier.size(8.dp))
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
                 }
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel")
-                }
-            }
-        },
-    )
+            },
+        )
+    }
 }
 
 @Composable
