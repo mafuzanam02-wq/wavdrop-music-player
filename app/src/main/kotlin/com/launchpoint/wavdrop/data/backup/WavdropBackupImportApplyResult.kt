@@ -10,4 +10,6 @@ data class WavdropBackupImportApplyResult(
     val preferencesRestored: Boolean = false,
     val playlistsRestored: Int = 0,
     val playlistSongsRestored: Int = 0,
+    val eventsRestored: Int = 0,
+    val eventsSkipped: Int = 0,
 )

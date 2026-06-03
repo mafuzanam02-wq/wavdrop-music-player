@@ -12,6 +12,15 @@ interface TrackListenEventDao {
     @Insert
     suspend fun insert(event: TrackListenEventEntity)
 
+    @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
+    suspend fun getAllSnapshot(): List<TrackListenEventEntity>
+
+    @Query("""
+        SELECT * FROM track_listen_events
+        WHERE occurredAt >= :fromMs AND occurredAt <= :toMs
+    """)
+    suspend fun getInRangeSnapshot(fromMs: Long, toMs: Long): List<TrackListenEventEntity>
+
     /** All events, most recent first. Use for full-history analytics (Monthly Reports, Wrapped). */
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     fun observeAll(): Flow<List<TrackListenEventEntity>>

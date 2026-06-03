@@ -6,7 +6,9 @@ import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
+import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
@@ -30,6 +32,7 @@ class WavdropBackupRepository @Inject constructor(
     private val importBaselineDao: ImportBaselineDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
     private val playlistDao: PlaylistDao,
+    private val trackListenEventDao: TrackListenEventDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
 ) {
@@ -40,6 +43,24 @@ class WavdropBackupRepository @Inject constructor(
         val lyrics     = lyricsOverrideDao.getAllSnapshot()
 
         val songById = songs.associateBy { it.id }
+
+        val listenEvents = trackListenEventDao.getAllSnapshot()
+            .filter { it.source == TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK }
+            .map { event ->
+                val song = songById[event.songId]
+                BackupListenEvent(
+                    songId     = event.songId,
+                    contentUri = song?.uri ?: "",
+                    title      = song?.title ?: "",
+                    artist     = song?.artist ?: "",
+                    album      = song?.album ?: "",
+                    eventType  = event.eventType,
+                    occurredAt = event.occurredAt,
+                    listenedMs = event.listenedMs,
+                    durationMs = event.durationMs,
+                    source     = event.source,
+                )
+            }
         val playlists = playlistDao.getAllPlaylistsSnapshot().map { playlist ->
             BackupPlaylist(
                 id        = playlist.playlistId,
@@ -78,6 +99,7 @@ class WavdropBackupRepository @Inject constructor(
             lyricsOverrides = lyrics.map(LyricsOverrideEntity::toBackup),
             preferences     = preferences,
             playlists       = playlists,
+            listenEvents    = listenEvents,
         )
 
         val json = WavdropBackupExporter.toJson(backup)

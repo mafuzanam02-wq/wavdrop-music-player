@@ -141,6 +141,22 @@ object WavdropBackupParser {
                     )
                 } ?: emptyList()
 
+            val listenEvents = (root["listenEvents"] as? List<*>)
+                ?.mapObjects("listenEvents") { index, item ->
+                    BackupListenEvent(
+                        songId     = item.requiredLong("listenEvents[$index].songId", "songId"),
+                        contentUri = item.requiredString("listenEvents[$index].contentUri", "contentUri"),
+                        title      = item.requiredString("listenEvents[$index].title", "title"),
+                        artist     = item.requiredString("listenEvents[$index].artist", "artist"),
+                        album      = item.requiredString("listenEvents[$index].album", "album"),
+                        eventType  = item.requiredString("listenEvents[$index].eventType", "eventType"),
+                        occurredAt = item.requiredLong("listenEvents[$index].occurredAt", "occurredAt"),
+                        listenedMs = item.requiredLong("listenEvents[$index].listenedMs", "listenedMs"),
+                        durationMs = item.requiredLong("listenEvents[$index].durationMs", "durationMs"),
+                        source     = item.requiredString("listenEvents[$index].source", "source"),
+                    )
+                } ?: emptyList()
+
             success(
                 WavdropBackup(
                     exportedAt      = root["exportedAt"] as? String ?: "",
@@ -150,6 +166,7 @@ object WavdropBackupParser {
                     lyricsOverrides = lyricsOverrides,
                     preferences     = preferences,
                     playlists       = playlists,
+                    listenEvents    = listenEvents,
                 )
             )
         } catch (e: BackupParseException) {

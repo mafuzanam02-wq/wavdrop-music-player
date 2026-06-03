@@ -63,6 +63,19 @@ data class BackupPlaylist(
     val songs: List<BackupPlaylistSong>,
 )
 
+data class BackupListenEvent(
+    val songId: Long,
+    val contentUri: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val eventType: String,
+    val occurredAt: Long,
+    val listenedMs: Long,
+    val durationMs: Long,
+    val source: String,
+)
+
 data class WavdropBackup(
     val exportedAt: String,
     val songs: List<BackupSong>,
@@ -71,4 +84,5 @@ data class WavdropBackup(
     val lyricsOverrides: List<BackupLyricsOverride> = emptyList(),
     val preferences: BackupPreferences? = null,
     val playlists: List<BackupPlaylist> = emptyList(),
+    val listenEvents: List<BackupListenEvent> = emptyList(),
 )

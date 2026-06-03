@@ -18,6 +18,7 @@ object WavdropBackupExporter {
         put("lyricsOverrides", lyricsOverridesArray(backup.lyricsOverrides))
         backup.preferences?.let { put("preferences", preferencesObject(it)) }
         put("playlists", playlistsArray(backup.playlists))
+        put("listenEvents", listenEventsArray(backup.listenEvents))
     }.toString(2)
 
     private fun songsArray(songs: List<BackupSong>): JSONArray = JSONArray().apply {
@@ -96,6 +97,23 @@ object WavdropBackupExporter {
                 put("title",      s.title)
                 put("artist",     s.artist)
                 put("album",      s.album)
+            })
+        }
+    }
+
+    private fun listenEventsArray(events: List<BackupListenEvent>): JSONArray = JSONArray().apply {
+        events.forEach { e ->
+            put(JSONObject().apply {
+                put("songId",     e.songId)
+                put("contentUri", e.contentUri)
+                put("title",      e.title)
+                put("artist",     e.artist)
+                put("album",      e.album)
+                put("eventType",  e.eventType)
+                put("occurredAt", e.occurredAt)
+                put("listenedMs", e.listenedMs)
+                put("durationMs", e.durationMs)
+                put("source",     e.source)
             })
         }
     }

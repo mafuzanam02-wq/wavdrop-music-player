@@ -210,6 +210,7 @@ private fun PreviewContent(
             StatRow("Lyrics overrides", state.lyricsOverridesCount.toString())
             StatRow("Preferences",      if (state.hasPreferences) "Included" else "Not included")
             StatRow("Playlists",        state.playlistCount.toString())
+            StatRow("Listen events",    state.listenEventsCount.toString())
         }
 
         item { Spacer(Modifier.height(16.dp)) }
@@ -218,7 +219,8 @@ private fun PreviewContent(
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick  = { showDialog = true },
-                enabled  = state.statsCount > 0 || state.lyricsOverridesCount > 0 || state.playlistCount > 0,
+                enabled  = state.statsCount > 0 || state.lyricsOverridesCount > 0
+                        || state.playlistCount > 0 || state.listenEventsCount > 0,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
@@ -298,6 +300,10 @@ private fun AppliedContent(
                     if (result.playlistsRestored > 0 || result.playlistSongsRestored > 0) {
                         StatRow("Playlists created", result.playlistsRestored.toString())
                         StatRow("Playlist songs added", result.playlistSongsRestored.toString())
+                    }
+                    if (result.eventsRestored > 0 || result.eventsSkipped > 0) {
+                        StatRow("Events restored", result.eventsRestored.toString())
+                        StatRow("Events skipped", result.eventsSkipped.toString())
                     }
                 }
             }

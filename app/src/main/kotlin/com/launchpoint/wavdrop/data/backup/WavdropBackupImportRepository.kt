@@ -8,11 +8,13 @@ import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
+import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistSongEntity
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
@@ -32,6 +34,7 @@ class WavdropBackupImportRepository @Inject constructor(
     private val importBaselineDao: ImportBaselineDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
     private val playlistDao: PlaylistDao,
+    private val trackListenEventDao: TrackListenEventDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
 ) {
@@ -194,6 +197,63 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
+            // Listen event restore
+            var eventsRestored = 0
+            var eventsSkipped  = 0
+
+            if (backup.listenEvents.isNotEmpty()) {
+                val validEventTypes = setOf(
+                    TrackListenEventEntity.TYPE_PLAY,
+                    TrackListenEventEntity.TYPE_SKIP,
+                )
+                val minMs = backup.listenEvents.minOf { it.occurredAt }
+                val maxMs = backup.listenEvents.maxOf { it.occurredAt }
+
+                val existingFingerprints = trackListenEventDao
+                    .getInRangeSnapshot(minMs, maxMs)
+                    .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
+                    .toHashSet()
+
+                for (event in backup.listenEvents) {
+                    if (event.eventType !in validEventTypes) {
+                        eventsSkipped++
+                        continue
+                    }
+
+                    val song = byUri[event.contentUri]
+                        ?: byTags[Triple(
+                            event.title.norm(),
+                            event.artist.norm(),
+                            event.album.norm(),
+                        )]
+
+                    if (song == null) {
+                        eventsSkipped++
+                        continue
+                    }
+
+                    val fingerprint = "${song.id}|${event.occurredAt}|${event.eventType}|${event.listenedMs}"
+
+                    if (fingerprint in existingFingerprints) {
+                        eventsSkipped++
+                        continue
+                    }
+
+                    trackListenEventDao.insert(
+                        TrackListenEventEntity(
+                            songId     = song.id,
+                            eventType  = event.eventType,
+                            occurredAt = event.occurredAt,
+                            listenedMs = event.listenedMs,
+                            durationMs = event.durationMs,
+                            source     = TrackListenEventEntity.SOURCE_MANUAL_RESTORE,
+                        )
+                    )
+                    existingFingerprints.add(fingerprint)
+                    eventsRestored++
+                }
+            }
+
             WavdropBackupImportApplyResult(
                 matchedTracks         = match.matchedRows.size,
                 unmatchedTracks       = match.unmatchedCount,
@@ -203,6 +263,8 @@ class WavdropBackupImportRepository @Inject constructor(
                 favoritesRestored     = favoritesRestored,
                 playlistsRestored     = playlistsRestored,
                 playlistSongsRestored = playlistSongsRestored,
+                eventsRestored        = eventsRestored,
+                eventsSkipped         = eventsSkipped,
             )
         }
 
