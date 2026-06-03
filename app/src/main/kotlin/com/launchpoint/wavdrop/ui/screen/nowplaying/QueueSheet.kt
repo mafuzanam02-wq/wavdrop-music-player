@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
@@ -62,6 +63,7 @@ fun QueueSheet(
     ) {
         QueueSheetContent(
             state = state,
+            onDismiss = onDismiss,
             onJumpToItem = onJumpToItem,
             onRemoveItem = onRemoveItem,
             onMoveUp = onMoveUp,
@@ -75,6 +77,7 @@ fun QueueSheet(
 @Composable
 private fun QueueSheetContent(
     state: NowPlayingState,
+    onDismiss: () -> Unit,
     onJumpToItem: (Int) -> Unit,
     onRemoveItem: (Int) -> Unit,
     onMoveUp: (Int) -> Unit,
@@ -105,11 +108,25 @@ private fun QueueSheetContent(
 
     LazyColumn(state = listState) {
         item {
-            Text(
-                text = "Queue",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Queue",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close queue",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    )
+                }
+            }
         }
 
         // ── Previously played ─────────────────────────────────────────────────
