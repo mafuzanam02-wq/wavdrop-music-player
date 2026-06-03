@@ -53,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -542,11 +543,13 @@ private fun ArtworkWithLyricsOverlay(
     onEditLyrics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val currentToggle by rememberUpdatedState(onToggleLyrics)
+    val currentEdit   by rememberUpdatedState(onEditLyrics)
     Box(
-        modifier = modifier.pointerInput(showLyricsOverlay, song.id) {
+        modifier = modifier.pointerInput(song.id) {
             detectTapGestures(
-                onDoubleTap = { onToggleLyrics() },
-                onLongPress = { onEditLyrics() },
+                onDoubleTap = { currentToggle() },
+                onLongPress = { currentEdit() },
             )
         },
     ) {
