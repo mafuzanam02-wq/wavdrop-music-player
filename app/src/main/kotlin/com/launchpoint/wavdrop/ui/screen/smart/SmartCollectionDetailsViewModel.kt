@@ -11,6 +11,7 @@ import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.smart.SmartCollectionBuilder
 import com.launchpoint.wavdrop.data.stats.MostPlayedBuilder
 import com.launchpoint.wavdrop.playback.PlayerController
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -39,6 +41,7 @@ class SmartCollectionDetailsViewModel @Inject constructor(
     private val smartCollectionRepository: SmartCollectionRepository,
     private val statsRepository: StatsRepository,
     private val playerController: PlayerController,
+    private val appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
     val type: SmartCollectionType = SmartCollectionType.valueOf(
@@ -50,6 +53,15 @@ class SmartCollectionDetailsViewModel @Inject constructor(
 
     private val mostPlayedPeriod = MutableStateFlow(MostPlayedPeriod.ALL_TIME)
     private val mostPlayedDisplayLimit = MutableStateFlow(MostPlayedDisplayLimit.TOP_25)
+
+    init {
+        if (type == SmartCollectionType.MOST_PLAYED) {
+            viewModelScope.launch {
+                mostPlayedPeriod.value = appSettingsRepository.mostPlayedPeriod.first()
+                mostPlayedDisplayLimit.value = appSettingsRepository.mostPlayedDisplayLimit.first()
+            }
+        }
+    }
 
     private val mostPlayedSummaries = combine(
         songRepository.songs,
@@ -108,10 +120,12 @@ class SmartCollectionDetailsViewModel @Inject constructor(
 
     fun setMostPlayedPeriod(period: MostPlayedPeriod) {
         mostPlayedPeriod.value = period
+        viewModelScope.launch { appSettingsRepository.setMostPlayedPeriod(period) }
     }
 
     fun setMostPlayedDisplayLimit(limit: MostPlayedDisplayLimit) {
         mostPlayedDisplayLimit.value = limit
+        viewModelScope.launch { appSettingsRepository.setMostPlayedDisplayLimit(limit) }
     }
 
     fun playSong(song: Song) {
