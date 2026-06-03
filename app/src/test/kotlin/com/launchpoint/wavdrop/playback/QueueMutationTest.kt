@@ -134,4 +134,67 @@ class QueueMutationTest {
         val result = QueueMutation.append(queue, song = c)
         assertEquals(listOf(a, b, c, d, e, c), result)
     }
+
+    // ── shiftPlaybackOrderForInsert ──────────────────────────────────────────────
+
+    @Test
+    fun `shiftPlaybackOrderForInsert identity order splices new index after current`() {
+        // [A B C D E], playing B (playbackIndex=1, libraryIndex=1), insert X at libraryIndex=2
+        val result = QueueMutation.shiftPlaybackOrderForInsert(
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            insertLibraryIndex = 2,
+            currentPlaybackIndex = 1,
+        )
+        assertEquals(listOf(0, 1, 2, 3, 4, 5), result)
+    }
+
+    @Test
+    fun `shiftPlaybackOrderForInsert shuffle order inserts after current in playback sequence`() {
+        // libraryQueue=[A,B,C,D,E], shuffled playbackOrder=[1,3,0,4,2] (B,D,A,E,C)
+        // playing B (playbackIndex=0, libraryIndex=1), insert X at libraryIndex=2
+        val result = QueueMutation.shiftPlaybackOrderForInsert(
+            playbackOrder = listOf(1, 3, 0, 4, 2),
+            insertLibraryIndex = 2,
+            currentPlaybackIndex = 0,
+        )
+        // shift: [1,4,0,5,3], then insert 2 at position 1 → [1,2,4,0,5,3]
+        // playback: B(1), X(2), D(4), A(0), E(5), C(3) — X lands right after B
+        assertEquals(listOf(1, 2, 4, 0, 5, 3), result)
+    }
+
+    @Test
+    fun `shiftPlaybackOrderForInsert current is last in playback sequence appends new index`() {
+        // playing E (playbackIndex=4, last), insert X after last library item
+        val result = QueueMutation.shiftPlaybackOrderForInsert(
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            insertLibraryIndex = 5,
+            currentPlaybackIndex = 4,
+        )
+        assertEquals(listOf(0, 1, 2, 3, 4, 5), result)
+    }
+
+    @Test
+    fun `shiftPlaybackOrderForInsert shuffle current is last library item inserts after current`() {
+        // libraryQueue=[A,B,C,D,E], shuffled playbackOrder=[4,2,0,1,3] (E,C,A,B,D)
+        // playing E (playbackIndex=0, libraryIndex=4), insert X at libraryIndex=5
+        val result = QueueMutation.shiftPlaybackOrderForInsert(
+            playbackOrder = listOf(4, 2, 0, 1, 3),
+            insertLibraryIndex = 5,
+            currentPlaybackIndex = 0,
+        )
+        // all entries < 5, no shift; insert 5 at position 1 → [4,5,2,0,1,3]
+        assertEquals(listOf(4, 5, 2, 0, 1, 3), result)
+    }
+
+    @Test
+    fun `shiftPlaybackOrderForInsert insert at library beginning shifts all entries`() {
+        // Insert X at libraryIndex=0, playing B (playbackIndex=1, libraryIndex=1 → now 2)
+        val result = QueueMutation.shiftPlaybackOrderForInsert(
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            insertLibraryIndex = 0,
+            currentPlaybackIndex = 1,
+        )
+        // shift all >= 0 (all): [1,2,3,4,5], insert 0 at position 2 → [1,2,0,3,4,5]
+        assertEquals(listOf(1, 2, 0, 3, 4, 5), result)
+    }
 }

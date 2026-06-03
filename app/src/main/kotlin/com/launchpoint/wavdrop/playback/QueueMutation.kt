@@ -65,6 +65,23 @@ internal object QueueMutation {
         playbackQueue.toMutableList().also { it.add(song) }
 
     /**
+     * Returns an updated [playbackOrder] after a new library item has been inserted at
+     * [insertLibraryIndex].  All existing entries >= [insertLibraryIndex] are incremented
+     * (they shifted up in the library list), and the new index is spliced into the playback
+     * sequence immediately after [currentPlaybackIndex].
+     */
+    fun shiftPlaybackOrderForInsert(
+        playbackOrder: List<Int>,
+        insertLibraryIndex: Int,
+        currentPlaybackIndex: Int,
+    ): List<Int> {
+        val shifted = playbackOrder.map { if (it >= insertLibraryIndex) it + 1 else it }.toMutableList()
+        val insertPlaybackIndex = (currentPlaybackIndex + 1).coerceAtMost(shifted.size)
+        shifted.add(insertPlaybackIndex, insertLibraryIndex)
+        return shifted
+    }
+
+    /**
      * Swaps [playbackIndex] with [otherIndex] in [playbackQueue].
      * Both indices must be strictly after [currentPlaybackIndex] and within bounds.
      * Returns the reordered queue or null if invalid.

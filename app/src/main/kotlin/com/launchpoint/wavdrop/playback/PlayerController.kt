@@ -210,17 +210,32 @@ class PlayerController @Inject constructor(
 
     fun playNext(song: Song) {
         val currentPlaybackIndex = currentPlaybackIndex()
-        val queue = effectiveQueue()
-        if (queue.isEmpty() || currentPlaybackIndex == null) {
+        val libraryIndexOfCurrent = currentQueueIndex()
+
+        if (libraryQueue.isEmpty() || currentPlaybackIndex == null || libraryIndexOfCurrent == null) {
             playSong(song)
             return
         }
-        val newQueue = QueueMutation.insertAfterCurrent(
-            playbackQueue = queue,
-            song = song,
-            currentPlaybackIndex = currentPlaybackIndex,
-        ) ?: return
-        applyQueueMutationByIdentity(newQueue, currentPlaybackIndex)
+
+        // Insert into libraryQueue right after the current library item so the Media3 index
+        // space stays aligned with libraryQueue without touching any earlier items.
+        val insertLibraryIndex = libraryIndexOfCurrent + 1
+        libraryQueue = libraryQueue.toMutableList().also { it.add(insertLibraryIndex, song) }
+        playbackOrder = QueueMutation.shiftPlaybackOrderForInsert(
+            playbackOrder, insertLibraryIndex, currentPlaybackIndex,
+        )
+        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+
+        // addMediaItem does not touch the current item — no setMediaItems/prepare/play needed.
+        mediaController?.addMediaItem(insertLibraryIndex, song.toMediaItem())
+
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = currentPlaybackIndex,
+            )
+        }
+        saveSessionAsync()
     }
 
     fun addToQueue(song: Song) {
