@@ -145,21 +145,24 @@ fun NowPlayingScreen(
                     val context = LocalContext.current
                     val song = state.song
                     if (song != null) {
+                        val isExternalAudio = song.isExternalAudio()
                         val folderKey = song.validFolderKey()
-                        IconButton(onClick = { showAddToPlaylist = true }) {
-                            Icon(
-                                imageVector        = Icons.AutoMirrored.Filled.PlaylistAdd,
-                                contentDescription = "Add to playlist",
-                                tint               = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        IconButton(onClick = viewModel::toggleFavorite) {
-                            Icon(
-                                imageVector        = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = if (isFavorite) "Unfavorite" else "Favorite",
-                                tint               = if (isFavorite) MaterialTheme.colorScheme.primary
-                                                     else MaterialTheme.colorScheme.onSurface,
-                            )
+                        if (!isExternalAudio) {
+                            IconButton(onClick = { showAddToPlaylist = true }) {
+                                Icon(
+                                    imageVector        = Icons.AutoMirrored.Filled.PlaylistAdd,
+                                    contentDescription = "Add to playlist",
+                                    tint               = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            IconButton(onClick = viewModel::toggleFavorite) {
+                                Icon(
+                                    imageVector        = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = if (isFavorite) "Unfavorite" else "Favorite",
+                                    tint               = if (isFavorite) MaterialTheme.colorScheme.primary
+                                                         else MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                         }
                         Box {
                             IconButton(onClick = { showMoreActions = true }) {
@@ -182,13 +185,15 @@ fun NowPlayingScreen(
                                         },
                                     )
                                 }
-                                DropdownMenuItem(
-                                    text = { Text("Stats") },
-                                    onClick = {
-                                        showMoreActions = false
-                                        onOpenStatistics()
-                                    },
-                                )
+                                if (!isExternalAudio) {
+                                    DropdownMenuItem(
+                                        text = { Text("Stats") },
+                                        onClick = {
+                                            showMoreActions = false
+                                            onOpenStatistics()
+                                        },
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = { Text("Sleep Timer: ${sleepTimerState.summary()}") },
                                     onClick = {
@@ -404,7 +409,11 @@ private fun NowPlayingContent(
             onPrevious         = onPrevious,
             onNext             = onNext,
             onEditLyrics       = onEditLyrics,
-            onOpenTrackDetails = { onOpenTrackDetails(song.id) },
+            onOpenTrackDetails = if (!song.isExternalAudio()) {
+                { onOpenTrackDetails(song.id) }
+            } else {
+                null
+            },
             onOpenArtist       = if (song.hasKnownArtist()) {
                 { onOpenArtist(ArtistGrouper.artistKey(song)) }
             } else {
@@ -579,7 +588,7 @@ private fun TrackInfoBlock(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onEditLyrics: () -> Unit,
-    onOpenTrackDetails: () -> Unit,
+    onOpenTrackDetails: (() -> Unit)?,
     onOpenArtist: (() -> Unit)?,
     onOpenAlbum: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -624,7 +633,7 @@ private fun TrackInfoBlock(
             overflow   = TextOverflow.Ellipsis,
             modifier   = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onOpenTrackDetails),
+                .clickableIfNotNull(onOpenTrackDetails),
         )
         Spacer(Modifier.height(6.dp))
         Text(
@@ -831,6 +840,9 @@ private fun Song.hasKnownArtist(): Boolean =
 
 private fun Song.hasKnownAlbum(): Boolean =
     album.hasKnownMetadata(unknownLabel = "Unknown Album")
+
+private fun Song.isExternalAudio(): Boolean =
+    id == Long.MIN_VALUE && album == "External audio"
 
 private fun String.hasKnownMetadata(unknownLabel: String): Boolean {
     val value = trim()

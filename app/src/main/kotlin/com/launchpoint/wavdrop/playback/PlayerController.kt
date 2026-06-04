@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -47,6 +48,7 @@ class PlayerController @Inject constructor(
 ) {
     private companion object {
         const val TAG = "WavStats-PC"
+        const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
 
         // Set to true to enable verbose stats lifecycle logs for on-device debugging.
         // MUST be false (or removed) before a release build.
@@ -56,8 +58,10 @@ class PlayerController @Inject constructor(
     private var mediaController: MediaController? = null
 
     private var pendingPlaybackRequest: PlaybackRequest? = null
+    private var pendingExternalPlaybackRequest: ExternalPlaybackRequest? = null
     private var pendingRestorePositionMs: Long? = null
     private var hasRestoredSession = false
+    private var isExternalPlayback = false
     private var libraryQueue: List<Song> = emptyList()
     private var playbackOrder: List<Int> = emptyList()
     private var playbackQueue: List<Song> = emptyList()
@@ -89,10 +93,14 @@ class PlayerController @Inject constructor(
             }
             syncNowPlayingState()
             if (isPlaying) {
-                statsTracker.onPlaybackStarted()
+                if (!isExternalPlayback) {
+                    statsTracker.onPlaybackStarted()
+                }
                 startPositionTicker()
             } else {
-                statsTracker.onPlaybackPaused()
+                if (!isExternalPlayback) {
+                    statsTracker.onPlaybackPaused()
+                }
                 stopPositionTicker()
                 syncPosition()
                 saveSessionAsync()
@@ -136,9 +144,11 @@ class PlayerController @Inject constructor(
                 lastKnownPositionMs = -1L
                 val song = libraryQueue.getOrNull(newPosition.mediaItemIndex) ?: return
                 if (DEBUG_STATS) Log.d(TAG, "[posDiscontinuity] AUTO_TRANSITION → songId=${song.id}")
-                statsTracker.onSongSelected(song)
-                if (mediaController?.isPlaying == true) {
-                    statsTracker.onPlaybackStarted()
+                if (!isExternalPlayback) {
+                    statsTracker.onSongSelected(song)
+                    if (mediaController?.isPlaying == true) {
+                        statsTracker.onPlaybackStarted()
+                    }
                 }
             }
             syncNowPlayingState(notifyStats = reason != Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
@@ -174,10 +184,16 @@ class PlayerController @Inject constructor(
                     controller.repeatMode = repeatMode.toPlayerRepeatMode()
                     controller.shuffleModeEnabled = false
                     val playRequest = pendingPlaybackRequest
+                    val externalRequest = pendingExternalPlaybackRequest
                     val restorePos = pendingRestorePositionMs
                     pendingPlaybackRequest = null
+                    pendingExternalPlaybackRequest = null
                     pendingRestorePositionMs = null
                     when {
+                        externalRequest != null -> playExternalUri(
+                            uri = externalRequest.uri,
+                            displayName = externalRequest.displayName,
+                        )
                         playRequest != null -> playFromQueue(playRequest.queue, playRequest.startSong)
                         restorePos != null && libraryQueue.isNotEmpty() -> {
                             val startIndex = _nowPlayingState.value.song?.id
@@ -201,7 +217,45 @@ class PlayerController @Inject constructor(
         playFromQueue(queue = listOf(song), startSong = song)
     }
 
+    fun playExternalUri(uri: Uri, displayName: String? = null) {
+        val song = uri.toExternalSong(displayName)
+
+        isExternalPlayback = true
+        libraryQueue = listOf(song)
+        playbackOrder = listOf(0)
+        playbackQueue = libraryQueue
+        lastKnownPositionMs = -1L
+
+        _nowPlayingState.update {
+            it.copy(
+                song = song,
+                queue = playbackQueue,
+                currentIndex = 0,
+                shuffleEnabled = false,
+                repeatMode = repeatMode,
+                positionMs = 0L,
+                durationMs = 0L,
+                bufferedPositionMs = 0L,
+                isSeekable = false,
+            )
+        }
+
+        val controller = mediaController
+        if (controller == null) {
+            pendingExternalPlaybackRequest = ExternalPlaybackRequest(uri, displayName)
+            return
+        }
+
+        controller.repeatMode = repeatMode.toPlayerRepeatMode()
+        controller.shuffleModeEnabled = false
+        controller.setMediaItems(listOf(song.toMediaItem()), 0, 0L)
+        controller.prepare()
+        syncNowPlayingState(notifyStats = false)
+        controller.play()
+    }
+
     fun playFromQueue(queue: List<Song>, startSong: Song) {
+        isExternalPlayback = false
         val normalizedQueue = queue.ifEmpty { listOf(startSong) }
         val originalStartIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
             .takeIf { it >= 0 } ?: 0
@@ -466,7 +520,7 @@ class PlayerController @Inject constructor(
     }
 
     fun restoreSessionIfNeeded(availableSongs: List<Song>) {
-        if (hasRestoredSession) return
+        if (hasRestoredSession || isExternalPlayback) return
         hasRestoredSession = true
         scope.launch {
             val rawSnapshot = sessionRepository.load() ?: return@launch
@@ -651,6 +705,7 @@ class PlayerController @Inject constructor(
     }
 
     private fun saveSessionAsync() {
+        if (isExternalPlayback) return
         if (libraryQueue.isEmpty()) return
         val state = _nowPlayingState.value
         val controller = mediaController
@@ -739,8 +794,10 @@ class PlayerController @Inject constructor(
                     triggerSleepTimer()
                     return
                 }
-                statsTracker.onSongSelected(song)
-                statsTracker.onPlaybackStarted()
+                if (!isExternalPlayback) {
+                    statsTracker.onSongSelected(song)
+                    statsTracker.onPlaybackStarted()
+                }
             }
         }
 
@@ -877,7 +934,7 @@ class PlayerController @Inject constructor(
             Log.d(TAG, "[syncNPS] fromTransition=$fromTransition songChanged=$songChanged currentSongId=${currentSong?.id} prevSongId=${_nowPlayingState.value.song?.id} isPlaying=${controller?.isPlaying}")
         }
 
-        if (notifyStats && currentSong != null && (fromTransition || songChanged)) {
+        if (!isExternalPlayback && notifyStats && currentSong != null && (fromTransition || songChanged)) {
             statsTracker.onSongSelected(currentSong)
             // During auto-advance / repeat the player may stay in isPlaying=true,
             // so onIsPlayingChanged(true) never fires for the new song.
@@ -952,6 +1009,32 @@ class PlayerController @Inject constructor(
             )
             .build()
 
+    private fun Uri.toExternalSong(displayName: String?): Song {
+        val title = displayName
+            ?.substringBeforeLast('.', missingDelimiterValue = displayName)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: lastPathSegment
+                ?.substringBeforeLast('.', missingDelimiterValue = lastPathSegment.orEmpty())
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            ?: "External audio"
+        return Song(
+            id = EXTERNAL_AUDIO_SONG_ID,
+            title = title,
+            artist = "Unknown Artist",
+            album = "External audio",
+            albumId = 0L,
+            duration = 0L,
+            uri = toString(),
+            dateAdded = System.currentTimeMillis() / 1_000L,
+            trackNumber = 0,
+            year = 0,
+            folderPath = null,
+            folderName = null,
+        )
+    }
+
     private fun RepeatMode.toPlayerRepeatMode(): Int = when (this) {
         RepeatMode.OFF -> Player.REPEAT_MODE_OFF
         RepeatMode.ALL -> Player.REPEAT_MODE_ALL
@@ -961,5 +1044,10 @@ class PlayerController @Inject constructor(
     private data class PlaybackRequest(
         val queue: List<Song>,
         val startSong: Song,
+    )
+
+    private data class ExternalPlaybackRequest(
+        val uri: Uri,
+        val displayName: String?,
     )
 }
