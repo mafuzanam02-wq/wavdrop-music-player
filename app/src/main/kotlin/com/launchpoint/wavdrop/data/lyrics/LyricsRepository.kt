@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.data.lyrics
 
 import com.launchpoint.wavdrop.data.model.Song
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -44,6 +45,7 @@ class LyricsRepository @Inject constructor(
      * Use this in ViewModels instead of the one-shot [getLyrics] so that saving or clearing
      * custom lyrics updates the displayed lyrics without requiring a screen reload.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeLyrics(song: Song): Flow<LyricsResult> {
         val overrideFlow = overrideRepository?.observeOverride(song.id) ?: flowOf(null)
         return overrideFlow.flatMapLatest { override ->

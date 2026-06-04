@@ -16,7 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -189,7 +189,7 @@ private val OnboardingPages = listOf(
     OnboardingPage(
         title = "Built for real libraries",
         body = "Browse songs, albums, artists, folders, playlists, smart collections, and accurate listening reports.",
-        icon = Icons.Default.ViewList,
+        icon = Icons.AutoMirrored.Filled.ViewList,
     ),
     OnboardingPage(
         title = "Ready when you are",
