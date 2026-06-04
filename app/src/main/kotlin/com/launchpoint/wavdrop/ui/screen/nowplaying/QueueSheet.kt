@@ -45,8 +45,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -278,11 +281,14 @@ private fun QueueSectionHeader(label: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun QueueNowPlayingRow(song: Song) {
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 8.dp else 12.dp
+    val artworkSize = if (compact) 40.dp else 44.dp
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 16.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -290,6 +296,14 @@ private fun QueueNowPlayingRow(song: Song) {
                 .width(3.dp)
                 .height(40.dp)
                 .background(MaterialTheme.colorScheme.primary),
+        )
+        ArtworkImage(
+            artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+            contentDescription = "Album artwork for ${song.album}",
+            placeholderIcon = Icons.Default.MusicNote,
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .size(artworkSize),
         )
         Column(
             modifier = Modifier
@@ -337,16 +351,27 @@ private fun QueuePreviousItemRow(
     onViewStats: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 8.dp else 10.dp
+    val artworkSize = if (compact) 40.dp else 44.dp
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onJump)
-            .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            .padding(start = 12.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Spacer matches the 20 dp drag-handle icon width in QueueItemRow for visual alignment
         Spacer(Modifier.size(20.dp))
+        ArtworkImage(
+            artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+            contentDescription = "Album artwork for ${song.album}",
+            placeholderIcon = Icons.Default.MusicNote,
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .size(artworkSize),
+        )
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -472,16 +497,27 @@ private fun QueueItemRow(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 8.dp else 10.dp
+    val artworkSize = if (compact) 40.dp else 44.dp
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onJump)
-            .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            .padding(start = 12.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(Modifier.size(20.dp))
+        ArtworkImage(
+            artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+            contentDescription = "Album artwork for ${song.album}",
+            placeholderIcon = Icons.Default.MusicNote,
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .size(artworkSize),
+        )
         Column(
             modifier = Modifier
                 .weight(1f)

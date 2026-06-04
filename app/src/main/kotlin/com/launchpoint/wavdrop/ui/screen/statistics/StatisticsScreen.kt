@@ -151,7 +151,7 @@ private fun DashboardContent(
             title = "Most Played",
             sectionKey = "most_played",
             songs = summary.mostPlayedSongs,
-            emptyMessage = "No plays recorded yet.",
+            emptyMessage = "No plays recorded yet. Play songs to rank this section.",
             metric = { "${it.playCount} plays" },
             onTrackDetailsClick = onTrackDetailsClick,
         )
@@ -160,7 +160,7 @@ private fun DashboardContent(
             title = "Recently Played",
             sectionKey = "recently_played",
             songs = summary.recentlyPlayedSongs,
-            emptyMessage = "No recent plays yet.",
+            emptyMessage = "No recent plays yet. Start playback to build recent activity.",
             metric = { StatisticsFormatters.formatLastPlayed(it.lastPlayedAt) },
             onTrackDetailsClick = onTrackDetailsClick,
         )
@@ -169,7 +169,7 @@ private fun DashboardContent(
             title = "Most Skipped",
             sectionKey = "most_skipped",
             songs = summary.mostSkippedSongs,
-            emptyMessage = "No skips recorded yet.",
+            emptyMessage = "No skips recorded yet. Skipped tracks will appear here.",
             metric = { "${it.skipCount} skips" },
             onTrackDetailsClick = onTrackDetailsClick,
         )

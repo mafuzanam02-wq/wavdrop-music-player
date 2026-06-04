@@ -63,6 +63,8 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
+import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
@@ -133,7 +135,12 @@ fun SmartCollectionDetailsScreen(
             )
         },
     ) { innerPadding ->
-        if (viewModel.type == SmartCollectionType.MOST_PLAYED) {
+        if (state.isLoading) {
+            LoadingStateContent(
+                message = "Loading collection...",
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else if (viewModel.type == SmartCollectionType.MOST_PLAYED) {
             MostPlayedContent(
                 state               = state,
                 onPeriodSelected    = viewModel::setMostPlayedPeriod,
@@ -392,8 +399,8 @@ private fun MostPlayedEmptyRow(
     modifier: Modifier = Modifier,
 ) {
     val message = when (period) {
-        MostPlayedPeriod.ALL_TIME -> "No played songs yet."
-        MostPlayedPeriod.THIS_MONTH -> "No plays recorded this month yet."
+        MostPlayedPeriod.ALL_TIME -> "No played songs yet. Play music to rank your most-played tracks."
+        MostPlayedPeriod.THIS_MONTH -> "No plays recorded this month. Play music in Wavdrop to fill this view."
     }
     Box(
         modifier = modifier
@@ -429,6 +436,9 @@ private fun MostPlayedSongRow(
     val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
     var menuExpanded by remember { mutableStateOf(false) }
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 8.dp else 12.dp
+    val artworkSize = if (compact) 44.dp else 48.dp
 
     Row(
         modifier = modifier
@@ -438,7 +448,7 @@ private fun MostPlayedSongRow(
                 onDoubleClick = onToggleFavorite,
                 onLongClick   = onOpenDetails,
             )
-            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 16.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -453,7 +463,7 @@ private fun MostPlayedSongRow(
             placeholderIcon = Icons.Default.MusicNote,
             modifier = Modifier
                 .padding(start = 12.dp)
-                .size(48.dp),
+                .size(artworkSize),
         )
         Column(
             modifier = Modifier
@@ -561,7 +571,7 @@ private fun EmptyDetailContent(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text      = "No songs in this collection.",
+            text      = "No songs in this collection yet.\nPlay, favorite, skip, or add music that matches this collection.",
             style     = MaterialTheme.typography.bodyLarge,
             color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,

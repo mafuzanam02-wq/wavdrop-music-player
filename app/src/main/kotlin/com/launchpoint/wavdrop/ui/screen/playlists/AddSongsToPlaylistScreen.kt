@@ -193,7 +193,11 @@ private fun EmptySearchContent(
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text      = if (query.isBlank()) "No songs found." else "No results found.",
+            text      = if (query.isBlank()) {
+                "No songs are available to add. Add music to your library first."
+            } else {
+                "No matching songs. Try a different search term."
+            },
             style     = MaterialTheme.typography.bodyLarge,
             color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,

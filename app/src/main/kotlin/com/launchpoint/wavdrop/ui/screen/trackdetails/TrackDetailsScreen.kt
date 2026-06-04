@@ -165,7 +165,7 @@ private fun LoadingContent(modifier: Modifier = Modifier) {
 private fun NotFoundContent(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Text(
-            text      = "Track not found.",
+            text      = "Track not found. It may have been removed from your device; rescan the library to update Wavdrop.",
             style     = MaterialTheme.typography.bodyLarge,
             color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
@@ -423,7 +423,7 @@ private fun LyricsSection(result: LyricsResult) {
         }
         LyricsResult.NotFound -> {
             Text(
-                text     = "No lyrics found for this track.",
+                text     = "No lyrics found for this track. Add custom lyrics, or place an embedded/sidecar lyrics file with the song.",
                 style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -441,7 +441,7 @@ private fun LyricsSection(result: LyricsResult) {
         }
         is LyricsResult.Error -> {
             Text(
-                text     = "No lyrics found for this track.",
+                text     = "Lyrics could not be loaded. Add custom lyrics or check the local lyrics file.",
                 style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

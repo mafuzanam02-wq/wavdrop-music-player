@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class FolderDetailsUiState(
+    val isLoading: Boolean,
     val folderKey: String,
     val displayName: String,
     val songs: List<Song>,
@@ -45,6 +46,7 @@ class FolderDetailsViewModel @Inject constructor(
         playerController.nowPlayingState,
     ) { songs, favorites, nowPlaying ->
         FolderDetailsUiState(
+            isLoading = false,
             folderKey = folderKey,
             displayName = displayNameForFolder(songs),
             songs = songs,
@@ -56,6 +58,7 @@ class FolderDetailsViewModel @Inject constructor(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = FolderDetailsUiState(
+            isLoading = true,
             folderKey = folderKey,
             displayName = folderKey.substringAfterLast('/').substringAfterLast('\\'),
             songs = emptyList(),

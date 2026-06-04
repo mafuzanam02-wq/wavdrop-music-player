@@ -30,6 +30,7 @@ data class PlaylistSongItem(
 )
 
 data class PlaylistDetailsUiState(
+    val isLoading: Boolean,
     val playlist: PlaylistSummary?,
     val entries: List<PlaylistSongItem>,
     val visibleEntries: List<PlaylistSongItem>,
@@ -84,6 +85,7 @@ class PlaylistDetailsViewModel @Inject constructor(
         val visibleSongs = LibrarySearch.filterSongs(entries.map { it.song }, query)
         val visibleSongIds = visibleSongs.mapTo(mutableSetOf()) { it.id }
         PlaylistDetailsUiState(
+            isLoading     = false,
             playlist       = summary,
             entries        = entries,
             visibleEntries = if (query.isBlank()) {
@@ -100,6 +102,7 @@ class PlaylistDetailsViewModel @Inject constructor(
         scope        = viewModelScope,
         started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = PlaylistDetailsUiState(
+            isLoading     = true,
             playlist       = null,
             entries        = emptyList(),
             visibleEntries = emptyList(),

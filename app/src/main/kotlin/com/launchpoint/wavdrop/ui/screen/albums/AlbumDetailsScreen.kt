@@ -1,11 +1,14 @@
 package com.launchpoint.wavdrop.ui.screen.albums
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -33,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -41,6 +45,7 @@ import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.launch
@@ -94,42 +99,56 @@ fun AlbumDetailsScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        LazyColumn(
-            modifier       = Modifier.padding(innerPadding).fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 4.dp),
-        ) {
-            item {
-                AlbumHeader(state = state)
-                HorizontalDivider(
-                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    thickness = 0.5.dp,
-                )
-            }
-            items(state.songs, key = { it.id }) { song ->
-                val isFavorite = song.id in state.favoriteSongIds
-                SongRowWithOverflow(
-                    song             = song,
-                    isCurrent        = song.id == state.currentSongId,
-                    isFavorite       = isFavorite,
-                    onPlay           = { viewModel.playSong(song) },
-                    onPlayNext       = { viewModel.playNext(song) },
-                    onAddToQueue     = { viewModel.addToQueue(song) },
-                    onToggleFavorite = {
-                        viewModel.toggleFavorite(song.id)
-                        coroutineScope.launch {
-                            snackbarHostState.showSnackbar(
-                                if (isFavorite) "Removed from Favorites" else "Added to Favorites",
-                            )
-                        }
-                    },
-                    onAddToPlaylist  = { addToPlaylistSong = song },
-                    onTrackDetails   = { onTrackDetailsClick(song.id) },
-                    modifier         = Modifier.fillMaxWidth(),
-                )
-                HorizontalDivider(
-                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    thickness = 0.5.dp,
-                )
+        if (state.isLoading) {
+            LoadingStateContent(
+                message = "Loading album...",
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else {
+            LazyColumn(
+                modifier       = Modifier.padding(innerPadding).fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 4.dp),
+            ) {
+                item {
+                    AlbumHeader(state = state)
+                    HorizontalDivider(
+                        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        thickness = 0.5.dp,
+                    )
+                }
+                if (state.songs.isEmpty()) {
+                    item {
+                        EmptyAlbumSongs(
+                            modifier = Modifier.fillParentMaxSize(),
+                        )
+                    }
+                }
+                items(state.songs, key = { it.id }) { song ->
+                    val isFavorite = song.id in state.favoriteSongIds
+                    SongRowWithOverflow(
+                        song             = song,
+                        isCurrent        = song.id == state.currentSongId,
+                        isFavorite       = isFavorite,
+                        onPlay           = { viewModel.playSong(song) },
+                        onPlayNext       = { viewModel.playNext(song) },
+                        onAddToQueue     = { viewModel.addToQueue(song) },
+                        onToggleFavorite = {
+                            viewModel.toggleFavorite(song.id)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    if (isFavorite) "Removed from Favorites" else "Added to Favorites",
+                                )
+                            }
+                        },
+                        onAddToPlaylist  = { addToPlaylistSong = song },
+                        onTrackDetails   = { onTrackDetailsClick(song.id) },
+                        modifier         = Modifier.fillMaxWidth(),
+                    )
+                    HorizontalDivider(
+                        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        thickness = 0.5.dp,
+                    )
+                }
             }
         }
     }
@@ -147,6 +166,30 @@ fun AlbumDetailsScreen(
             },
             onDismiss        = { addToPlaylistSong = null },
         )
+    }
+}
+
+@Composable
+private fun EmptyAlbumSongs(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.padding(32.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "No songs found for this album",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "The album may no longer be in your local library. Add its files and rescan.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

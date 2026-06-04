@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -61,14 +62,17 @@ class HomeViewModel @Inject constructor(
 
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
-    private val allSongs: StateFlow<List<Song>> = repository.songs.stateIn(
+    private val allSongs: StateFlow<List<Song>?> = repository.songs
+        .map<List<Song>, List<Song>?> { it }
+        .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = emptyList(),
+        initialValue = null,
     )
 
     val uiState: StateFlow<HomeUiState> = combine(allSongs, _searchQuery) { songs, query ->
         when {
+            songs == null -> HomeUiState.Loading
             songs.isEmpty() -> HomeUiState.Empty
             else            -> HomeUiState.Songs(LibrarySearch.filterSongs(songs, query))
         }
@@ -85,19 +89,20 @@ class HomeViewModel @Inject constructor(
         playlistRepository.observePlaylists(),
         smartCollectionRepository.observeSmartCollections(),
     ) { songs, stats, events, playlists, smartCollections ->
-        val songsById = songs.associateBy { it.id }
+        val loadedSongs = songs.orEmpty()
+        val songsById = loadedSongs.associateBy { it.id }
         val latestWrapped = WrappedBuilder.availableYears(events)
             .firstOrNull()
             ?.let { year ->
                 WrappedBuilder.buildYear(
                     year = year,
-                    songs = songs,
+                    songs = loadedSongs,
                     events = events,
                 )
             }
             ?.takeIf { it.hasActivity && !it.emptyState.isEmpty }
         HomeDashboardUiState(
-            totalSongs = songs.size,
+            totalSongs = loadedSongs.size,
             recentlyPlayed = stats
                 .filter { it.lastPlayedAt > 0 }
                 .sortedByDescending { it.lastPlayedAt }
@@ -183,7 +188,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun playSongFromLibraryQueue(song: Song) {
-        val queue = allSongs.value
+        val queue = allSongs.value.orEmpty()
         playerController.playFromQueue(queue = queue.ifEmpty { listOf(song) }, startSong = song)
     }
 
@@ -203,7 +208,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun toggleFavorite(songId: Long) {
-        val song = allSongs.value.firstOrNull { it.id == songId } ?: return
+        val song = allSongs.value.orEmpty().firstOrNull { it.id == songId } ?: return
         viewModelScope.launch { statsRepository.toggleFavorite(songId, song.uri) }
     }
 

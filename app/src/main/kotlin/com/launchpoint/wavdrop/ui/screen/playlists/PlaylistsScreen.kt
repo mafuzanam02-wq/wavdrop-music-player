@@ -46,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
+import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PlaylistArtworkCollage
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
@@ -62,8 +64,9 @@ fun PlaylistsScreen(
     viewModel: PlaylistsViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
 ) {
-    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val nowPlaying by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
+    val playlists = state.playlists
     var showCreateDialog by remember { mutableStateOf(false) }
     var renameTarget     by remember { mutableStateOf<PlaylistListItem?>(null) }
     var deleteTarget     by remember { mutableStateOf<PlaylistListItem?>(null) }
@@ -104,7 +107,12 @@ fun PlaylistsScreen(
             )
         },
     ) { innerPadding ->
-        if (playlists.isEmpty()) {
+        if (state.isLoading) {
+            LoadingStateContent(
+                message = "Loading playlists...",
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else if (playlists.isEmpty()) {
             EmptyPlaylistsContent(Modifier.padding(innerPadding))
         } else {
             LazyColumn(
@@ -199,12 +207,15 @@ private fun PlaylistRow(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val playlist = item.playlist
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 9.dp else 12.dp
+    val artworkSize = if (compact) 48.dp else 52.dp
 
     Row(
         modifier          = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PlaylistArtworkCollage(
@@ -212,7 +223,7 @@ private fun PlaylistRow(
             contentDescription  = "${playlist.name} artwork",
             modifier            = Modifier
                 .padding(end = 16.dp)
-                .size(52.dp),
+                .size(artworkSize),
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(

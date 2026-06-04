@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.R
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
@@ -68,6 +69,7 @@ import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
@@ -203,23 +205,26 @@ fun HomeScreen(
                         modifier            = Modifier.padding(innerPadding),
                     )
                 } else {
-                    HomeDashboardContent(
-                        dashboard           = dashboardState,
-                        visibleSections     = homeLayout.visibleSections,
-                        currentSongId       = nowPlaying.song?.id,
-                        favoriteSongIds     = favoriteSongIds,
-                        nowPlayingTitle     = nowPlaying.song?.title,
-                        nowPlayingArtist    = nowPlaying.song?.artist,
-                        onNowPlayingClick   = onNowPlayingClick,
-                        onLibraryClick      = onLibraryClick,
-                        onPlaylistsClick    = onPlaylistsClick,
-                        onSmartCollectionsClick = onSmartCollectionsClick,
-                        onWrappedClick      = onWrappedClick,
-                        onSongClick         = viewModel::playSong,
-                        onToggleFavorite    = viewModel::toggleFavorite,
-                        onTrackDetailsClick = onTrackDetailsClick,
-                        modifier            = Modifier.padding(innerPadding),
-                    )
+                    if (uiState == HomeUiState.Loading) {
+                        ScanningContent(Modifier.padding(innerPadding))
+                    } else {
+                        HomeDashboardContent(
+                            dashboard           = dashboardState,
+                            visibleSections     = homeLayout.visibleSections,
+                            currentSongId       = nowPlaying.song?.id,
+                            favoriteSongIds     = favoriteSongIds,
+                        nowPlayingSong      = nowPlaying.song,
+                            onNowPlayingClick   = onNowPlayingClick,
+                            onLibraryClick      = onLibraryClick,
+                            onPlaylistsClick    = onPlaylistsClick,
+                            onSmartCollectionsClick = onSmartCollectionsClick,
+                            onWrappedClick      = onWrappedClick,
+                            onSongClick         = viewModel::playSong,
+                            onToggleFavorite    = viewModel::toggleFavorite,
+                            onTrackDetailsClick = onTrackDetailsClick,
+                            modifier            = Modifier.padding(innerPadding),
+                        )
+                    }
                 }
 
             AudioPermissionStatus.NotRequested ->
@@ -417,8 +422,7 @@ private fun HomeDashboardContent(
     visibleSections: Set<HomeSectionId>,
     currentSongId: Long?,
     favoriteSongIds: Set<Long>,
-    nowPlayingTitle: String?,
-    nowPlayingArtist: String?,
+    nowPlayingSong: Song?,
     onNowPlayingClick: () -> Unit,
     onLibraryClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
@@ -436,8 +440,7 @@ private fun HomeDashboardContent(
         if (HomeSectionId.CONTINUE_LISTENING in visibleSections) {
             item {
                 ContinueListeningCard(
-                    title = nowPlayingTitle,
-                    artist = nowPlayingArtist,
+                    song = nowPlayingSong,
                     onClick = onNowPlayingClick,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 )
@@ -461,7 +464,7 @@ private fun HomeDashboardContent(
             } else {
                 previewTitle = "Most Played"
                 previewSongs = dashboard.mostPlayed
-                previewEmptyText = "Your repeat listens will appear here."
+                previewEmptyText = "No repeat listens yet. Play songs again to build this preview."
             }
 
             if (
@@ -719,15 +722,14 @@ private fun LibraryShortcutCard(
 
 @Composable
 private fun ContinueListeningCard(
-    title: String?,
-    artist: String?,
+    song: Song?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(enabled = title != null, onClick = onClick),
+            .clickable(enabled = song != null, onClick = onClick),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         shape = MaterialTheme.shapes.small,
     ) {
@@ -736,11 +738,11 @@ private fun ContinueListeningCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(
-                imageVector = Icons.Default.MusicNote,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp),
+            ArtworkImage(
+                artworkUri = song?.let { ArtworkResolver.albumArtworkUri(it.albumId) },
+                contentDescription = song?.let { "Album artwork for ${it.album}" },
+                placeholderIcon = Icons.Default.MusicNote,
+                modifier = Modifier.size(44.dp),
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -749,14 +751,14 @@ private fun ContinueListeningCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    text = title ?: "Nothing playing yet",
+                    text = song?.title ?: "Nothing playing yet",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = artist ?: "Pick something from your library when you are ready.",
+                    text = song?.artist ?: "Pick something from your library when you are ready.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     maxLines = 1,
@@ -874,7 +876,7 @@ private fun SongListContent(
     if (songs.isEmpty()) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text  = "No results found.",
+                text  = "No matching songs. Try another search or add music that matches this query.",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )

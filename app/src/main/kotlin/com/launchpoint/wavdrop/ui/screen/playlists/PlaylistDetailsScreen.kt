@@ -59,9 +59,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
+import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PlaylistArtworkCollage
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
@@ -188,7 +192,12 @@ fun PlaylistDetailsScreen(
             )
         },
     ) { innerPadding ->
-        if (state.entries.isEmpty()) {
+        if (state.isLoading) {
+            LoadingStateContent(
+                message = "Loading playlist...",
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else if (state.entries.isEmpty()) {
             EmptyContent(
                 onAddSongsClick = onAddSongsClick,
                 playlistName    = playlistName.ifBlank { "Playlist" },
@@ -377,7 +386,7 @@ private fun PlaylistHeader(
 @Composable
 private fun NoPlaylistSearchResults() {
     Text(
-        text      = "No songs found.",
+        text      = "No matching songs in this playlist. Try a different search or add more songs.",
         style     = MaterialTheme.typography.bodyLarge,
         color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         textAlign = TextAlign.Center,
@@ -430,10 +439,17 @@ private fun EmptyContent(
                 modifier           = Modifier.padding(bottom = 16.dp).size(132.dp),
             )
             Text(
-                text      = "No songs in this playlist.",
+                text      = "No songs in this playlist yet.",
                 style     = MaterialTheme.typography.bodyLarge,
                 color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
+            )
+            Text(
+                text      = "Add songs from your library to start building this playlist.",
+                style     = MaterialTheme.typography.bodyMedium,
+                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                textAlign = TextAlign.Center,
+                modifier  = Modifier.padding(top = 8.dp),
             )
             FilledTonalButton(
                 onClick  = onAddSongsClick,
@@ -470,6 +486,9 @@ private fun PlaylistSongRow(
     val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
     var menuExpanded by remember { mutableStateOf(false) }
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 8.dp else 12.dp
+    val artworkSize = if (compact) 44.dp else 48.dp
 
     Row(
         modifier = modifier
@@ -479,7 +498,7 @@ private fun PlaylistSongRow(
                 onDoubleClick = onToggleFavorite,
                 onLongClick   = onOpenDetails,
             )
-            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 16.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -487,6 +506,14 @@ private fun PlaylistSongRow(
                 .width(3.dp)
                 .height(40.dp)
                 .background(accentColor),
+        )
+        ArtworkImage(
+            artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+            contentDescription = "Album artwork for ${song.album}",
+            placeholderIcon = Icons.Default.MusicNote,
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .size(artworkSize),
         )
         SongText(
             song      = song,

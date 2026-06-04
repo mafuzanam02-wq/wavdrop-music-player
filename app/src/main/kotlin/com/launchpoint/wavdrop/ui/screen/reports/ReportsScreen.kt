@@ -114,7 +114,7 @@ private fun EmptyContent(modifier: Modifier = Modifier) {
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = "Play music to start building your reports.",
+                text = "Play music in Wavdrop to build listening reports from your local history.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -141,7 +141,7 @@ private fun ReportsContent(
         songReportSection(
             title = "Top Songs",
             songs = report.topSongs,
-            emptyMessage = "Top songs will appear as you listen.",
+            emptyMessage = "No top songs yet. Play music to rank tracks by listening activity.",
             metric = { "${it.playCount} plays" },
             onTrackDetailsClick = onTrackDetailsClick,
         )
@@ -149,7 +149,7 @@ private fun ReportsContent(
         artistReportSection(
             title = "Top Artists",
             artists = report.topArtists,
-            emptyMessage = "Top artists will appear as you listen.",
+            emptyMessage = "No top artists yet. Play songs to build artist activity.",
             metric = { "${it.playCount} plays" },
             onArtistClick = onArtistClick,
         )
@@ -157,7 +157,7 @@ private fun ReportsContent(
         albumReportSection(
             title = "Top Albums",
             albums = report.topAlbums,
-            emptyMessage = "Top albums will appear as you listen.",
+            emptyMessage = "No top albums yet. Play songs to build album activity.",
             metric = { "${it.playCount} plays" },
             onAlbumClick = onAlbumClick,
         )
@@ -175,13 +175,13 @@ private fun ReportsContent(
         item { SectionHeader("Recent Activity") }
         songReportRows(
             songs = report.recentlyPlayedSongs,
-            emptyMessage = "Recent plays will appear here.",
+            emptyMessage = "No recent plays yet. Start playback to fill this section.",
             metric = { StatisticsFormatters.formatLastPlayed(it.lastPlayedAt) },
             onTrackDetailsClick = onTrackDetailsClick,
         )
         artistReportRows(
             artists = report.recentlyActiveArtists,
-            emptyMessage = "Recently active artists will appear here.",
+            emptyMessage = "No recently active artists yet. Play songs to update this list.",
             metric = { StatisticsFormatters.formatLastPlayed(it.lastPlayedAt) },
             onArtistClick = onArtistClick,
         )
@@ -295,7 +295,7 @@ private fun HabitsSection(
                 metric = "${track.playCount} plays",
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
-        } ?: EmptySectionRow("Most played track will appear as you listen.")
+        } ?: EmptySectionRow("No most-played track yet. Play music to choose one.")
 
         report.mostPlayedArtist?.let { artist ->
             ReportRow(

@@ -127,7 +127,7 @@ private fun NoDataContent(modifier: Modifier = Modifier) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Play music in Wavdrop to build accurate monthly reports. Imported aggregate counts are kept out of monthly history.",
+                text = "Play music in Wavdrop to create monthly event history. Imported aggregate counts are kept out of monthly reports.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -173,7 +173,7 @@ private fun MonthlyContent(
             subtitle = "Ranked by event-backed plays this month",
             sectionKey = "top_songs",
             songs = report.topSongs,
-            emptyMessage = "No plays recorded for this month.",
+            emptyMessage = "No plays recorded for this month. Play music during this month to rank songs.",
             metric = { "${it.playCount} plays this month" },
             onTrackDetailsClick = onTrackDetailsClick,
         )
@@ -182,7 +182,7 @@ private fun MonthlyContent(
             title = "Top Artists",
             subtitle = "Ranked by event-backed plays this month",
             artists = report.topArtists,
-            emptyMessage = "No artist data for this month.",
+            emptyMessage = "No artist data for this month. Play songs during this month to fill it.",
             metric = { "${it.playCount} plays this month" },
             onArtistClick = onArtistClick,
         )
@@ -191,7 +191,7 @@ private fun MonthlyContent(
             title = "Top Albums",
             subtitle = "Ranked by event-backed plays this month",
             albums = report.topAlbums,
-            emptyMessage = "No album data for this month.",
+            emptyMessage = "No album data for this month. Play songs during this month to fill it.",
             metric = { "${it.playCount} plays this month" },
             onAlbumClick = onAlbumClick,
         )
@@ -208,7 +208,7 @@ private fun MonthlyContent(
         monthSongRows(
             sectionKey = "recent_songs",
             songs = report.recentlyPlayedInMonth,
-            emptyMessage = "No recent plays for this month.",
+            emptyMessage = "No recent plays for this month. Play music during this month to add activity.",
             metric = { StatisticsFormatters.formatLastPlayed(it.lastPlayedAt) },
             onTrackDetailsClick = onTrackDetailsClick,
         )
@@ -423,7 +423,7 @@ private fun HabitsSection(
                 metric = "${track.skipCount} skips this month",
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
-        } ?: EmptySectionRow("No skips recorded for this month.")
+        } ?: EmptySectionRow("No skips recorded for this month. Skips during this month will appear here.")
     }
 }
 

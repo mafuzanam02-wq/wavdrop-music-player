@@ -133,7 +133,7 @@ private fun EmptyContent(modifier: Modifier = Modifier) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Play music in Wavdrop to build yearly listening history. Imported aggregate counts are not used for Wrapped.",
+                text = "Play music in Wavdrop to create yearly event history. Imported aggregate counts are not used for Wrapped.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -174,7 +174,7 @@ private fun WrappedContent(
 
         if (wrapped.emptyState.isEmpty) {
             Text(
-                text = "No matched plays found for ${wrapped.year}. Event history may point to tracks no longer in the library.",
+                text = "No matched plays found for ${wrapped.year}. Event history may point to tracks no longer in the library; play current library songs to rebuild it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
                 modifier = Modifier
@@ -483,7 +483,7 @@ private fun OverviewPage(wrapped: WrappedSummary, modifier: Modifier = Modifier)
 private fun StreaksPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
     InsightCard(label = "Listening Streaks", modifier = modifier) {
         if (wrapped.longestStreak == 0) {
-            NoDataText("No consecutive listening days recorded for this year.")
+            NoDataText("No consecutive listening days recorded for this year. Play on multiple days to build a streak.")
         } else {
             BigStat(
                 value = formatStreak(wrapped.longestStreak),
@@ -500,7 +500,7 @@ private fun PatternsPage(wrapped: WrappedSummary, modifier: Modifier = Modifier)
     InsightCard(label = "Listening Patterns", modifier = modifier) {
         val hasData = wrapped.mostActiveDayOfWeek != null || wrapped.mostActiveHour != null
         if (!hasData) {
-            NoDataText("No listening patterns for this year.")
+            NoDataText("No listening patterns for this year. Play music across days or hours to reveal patterns.")
         } else {
             wrapped.mostActiveDayOfWeek?.let { dow ->
                 BigStat(value = formatDayOfWeek(dow), label = "Most active day")
@@ -530,7 +530,7 @@ private fun TopTrackPage(
     InsightCard(label = "Top Track", modifier = modifier) {
         val song = wrapped.mostPlayedSong
         if (song == null) {
-            NoDataText("No tracks played this year yet.")
+            NoDataText("No tracks played this year yet. Play music in Wavdrop to choose a top track.")
         } else {
             FeaturedTrack(
                 song = song,
@@ -551,7 +551,7 @@ private fun TopArtistPage(
     InsightCard(label = "Top Artist", modifier = modifier) {
         val artist = wrapped.mostPlayedArtist
         if (artist == null) {
-            NoDataText("No artists played this year yet.")
+            NoDataText("No artists played this year yet. Play music in Wavdrop to choose a top artist.")
         } else {
             Text(
                 text = artist.artistKey,
@@ -590,7 +590,7 @@ private fun TopAlbumPage(
     InsightCard(label = "Top Album", modifier = modifier) {
         val album = wrapped.mostPlayedAlbum
         if (album == null) {
-            NoDataText("No albums played this year yet.")
+            NoDataText("No albums played this year yet. Play music in Wavdrop to choose a top album.")
         } else {
             Text(
                 text = album.albumKey,
@@ -631,7 +631,7 @@ private fun MostSkippedPage(
     InsightCard(label = "Most Skipped", modifier = modifier) {
         val track = wrapped.mostSkippedTrack
         if (track == null) {
-            NoDataText("No skips recorded for this year.")
+            NoDataText("No skips recorded for this year. Skips during this year will appear here.")
         } else {
             Text(
                 text = track.song.title,
@@ -671,7 +671,7 @@ private fun RecentPlaysPage(
 ) {
     InsightCard(label = "Recent Plays", modifier = modifier) {
         if (wrapped.recentlyPlayed.isEmpty()) {
-            NoDataText("No recent plays for this year.")
+            NoDataText("No recent plays for this year. Play music during this year to fill this list.")
         } else {
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(

@@ -20,20 +20,25 @@ data class PlaylistListItem(
     val artworkUris: List<String>,
 )
 
+data class PlaylistsUiState(
+    val isLoading: Boolean = false,
+    val playlists: List<PlaylistListItem> = emptyList(),
+)
+
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val songRepository: SongRepository,
 ) : ViewModel() {
 
-    val playlists: StateFlow<List<PlaylistListItem>> = combine(
+    val uiState: StateFlow<PlaylistsUiState> = combine(
         playlistRepository.observePlaylists(),
         playlistRepository.observeAllPlaylistSongs(),
         songRepository.songs,
     ) { playlists, playlistSongs, songs ->
         val songsById = songs.associateBy { it.id }
         val playlistSongsById = playlistSongs.groupBy { it.playlistId }
-        playlists.map { playlist ->
+        val items = playlists.map { playlist ->
             val orderedSongs = playlistSongsById[playlist.id].orEmpty()
                 .sortedBy { it.position }
                 .mapNotNull { playlistSong -> songsById[playlistSong.songId] }
@@ -42,11 +47,12 @@ class PlaylistsViewModel @Inject constructor(
                 artworkUris = PlaylistArtworkBuilder.buildArtworkUris(orderedSongs),
             )
         }
+        PlaylistsUiState(playlists = items)
     }
         .stateIn(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList(),
+            initialValue = PlaylistsUiState(isLoading = true),
         )
 
     fun createPlaylist(name: String, onResult: (PlaylistOperationResult) -> Unit = {}) {

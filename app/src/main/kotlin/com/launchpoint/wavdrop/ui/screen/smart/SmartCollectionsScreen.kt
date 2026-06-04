@@ -42,6 +42,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
+import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 
@@ -54,8 +56,9 @@ fun SmartCollectionsScreen(
     viewModel: SmartCollectionsViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
 ) {
-    val collections by viewModel.collections.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val nowPlaying  by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
+    val collections = state.collections
 
     Scaffold(
         topBar = {
@@ -87,7 +90,12 @@ fun SmartCollectionsScreen(
             )
         },
     ) { innerPadding ->
-        if (collections.isEmpty()) {
+        if (state.isLoading) {
+            LoadingStateContent(
+                message = "Loading smart collections...",
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else if (collections.isEmpty()) {
             EmptyCollectionsContent(Modifier.padding(innerPadding))
         } else {
             LazyColumn(
@@ -117,11 +125,14 @@ private fun SmartCollectionRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 10.dp else 14.dp
+    val iconSize = if (compact) 26.dp else 28.dp
     Row(
         modifier          = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -130,7 +141,7 @@ private fun SmartCollectionRow(
             tint               = MaterialTheme.colorScheme.primary,
             modifier           = Modifier
                 .padding(end = 16.dp)
-                .size(28.dp),
+                .size(iconSize),
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(

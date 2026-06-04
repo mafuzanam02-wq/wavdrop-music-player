@@ -50,6 +50,7 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
@@ -105,12 +106,18 @@ fun ArtistDetailsScreen(
             )
         },
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 24.dp),
-        ) {
+        if (state.isLoading) {
+            LoadingStateContent(
+                message = "Loading artist...",
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 24.dp),
+            ) {
             item {
                 ArtistHeader(
                     artistName = state.artistName,
@@ -134,7 +141,7 @@ fun ArtistDetailsScreen(
             artistSongStatsSection(
                 title = "Top Songs",
                 songs = state.insights.topSongs,
-                emptyMessage = "Top songs will appear as you listen.",
+                emptyMessage = "No top songs yet. Play this artist to rank tracks.",
                 metric = { "${it.playCount} plays" },
                 onSongClick = viewModel::playSong,
             )
@@ -142,21 +149,21 @@ fun ArtistDetailsScreen(
             artistAlbumSection(
                 title = "Top Albums",
                 albums = state.insights.topAlbums,
-                emptyMessage = "Top albums will appear as you listen.",
+                emptyMessage = "No top albums yet. Play this artist to rank albums.",
                 onAlbumClick = onAlbumClick,
             )
 
             artistSongStatsSection(
                 title = "Recent Activity",
                 songs = state.insights.recentActivity,
-                emptyMessage = "Recent plays will appear here.",
+                emptyMessage = "No recent plays for this artist. Play a song to fill this section.",
                 metric = { StatisticsFormatters.formatLastPlayed(it.lastPlayedAt) },
                 onSongClick = viewModel::playSong,
             )
 
             item { SectionHeader("Songs") }
             if (state.songs.isEmpty()) {
-                item { EmptySectionRow("No songs found for this artist.") }
+                item { EmptySectionRow("No songs found for this artist. Add matching local files and rescan your library.") }
             } else {
                 items(state.songs, key = { it.id }) { song ->
                     val isFavorite = song.id in state.favoriteSongIds
@@ -184,6 +191,7 @@ fun ArtistDetailsScreen(
                         thickness = 0.5.dp,
                     )
                 }
+            }
             }
         }
     }
@@ -346,7 +354,7 @@ private fun OverviewCard(
 @Composable
 private fun LowDataMessage() {
     Text(
-        text = "Insights will appear as you listen.",
+        text = "No artist insights yet. Play this artist in Wavdrop to build listening history.",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.64f),
         modifier = Modifier

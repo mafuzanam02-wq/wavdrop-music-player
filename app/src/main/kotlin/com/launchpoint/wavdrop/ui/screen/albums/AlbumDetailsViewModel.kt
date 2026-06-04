@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class AlbumDetailsUiState(
+    val isLoading: Boolean,
     val albumName: String,
     val artist: String,
     val albumId: Long?,
@@ -55,6 +56,7 @@ class AlbumDetailsViewModel @Inject constructor(
             compareBy({ it.trackNumber.takeIf { n -> n > 0 } ?: Int.MAX_VALUE }, { it.title })
         )
         AlbumDetailsUiState(
+            isLoading       = false,
             albumName       = albumKey,
             artist          = artist,
             albumId         = songs.firstOrNull { it.albumId > 0L }?.albumId,
@@ -67,6 +69,7 @@ class AlbumDetailsViewModel @Inject constructor(
         scope        = viewModelScope,
         started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = AlbumDetailsUiState(
+            isLoading       = true,
             albumName       = albumKey,
             artist          = "",
             albumId         = null,

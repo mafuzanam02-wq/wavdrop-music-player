@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ArtistDetailsUiState(
+    val isLoading: Boolean,
     val artistName: String,
     val albumCount: Int,
     val songCount: Int,
@@ -59,6 +60,7 @@ class ArtistDetailsViewModel @Inject constructor(
         )
         val albumCount = songs.map { it.album.trim().ifBlank { "Unknown Album" } }.toSet().size
         ArtistDetailsUiState(
+            isLoading       = false,
             artistName      = artistKey,
             albumCount      = albumCount,
             songCount       = songs.size,
@@ -73,6 +75,7 @@ class ArtistDetailsViewModel @Inject constructor(
         scope        = viewModelScope,
         started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = ArtistDetailsUiState(
+            isLoading       = true,
             artistName      = artistKey,
             albumCount      = 0,
             songCount       = 0,

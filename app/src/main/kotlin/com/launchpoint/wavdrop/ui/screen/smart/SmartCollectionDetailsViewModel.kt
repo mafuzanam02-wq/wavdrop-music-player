@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class SmartCollectionDetailsUiState(
+    val isLoading: Boolean = false,
     val songs: List<Song>,
     val mostPlayedSummaries: List<SongStatsSummary> = emptyList(),
     val mostPlayedPeriod: MostPlayedPeriod = MostPlayedPeriod.ALL_TIME,
@@ -88,6 +89,7 @@ class SmartCollectionDetailsViewModel @Inject constructor(
             playerController.nowPlayingState,
         ) { summaries, period, limit, favorites, nowPlaying ->
             SmartCollectionDetailsUiState(
+                isLoading = false,
                 songs = summaries.map { it.song },
                 mostPlayedSummaries = summaries,
                 mostPlayedPeriod = period,
@@ -103,6 +105,7 @@ class SmartCollectionDetailsViewModel @Inject constructor(
             playerController.nowPlayingState,
         ) { songs, favorites, nowPlaying ->
             SmartCollectionDetailsUiState(
+                isLoading = false,
                 songs = songs,
                 favoriteSongIds = favorites,
                 currentSongId = nowPlaying.song?.id,
@@ -112,6 +115,7 @@ class SmartCollectionDetailsViewModel @Inject constructor(
         scope        = viewModelScope,
         started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = SmartCollectionDetailsUiState(
+            isLoading       = true,
             songs           = emptyList(),
             favoriteSongIds = emptySet(),
             currentSongId   = null,
