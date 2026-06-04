@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
@@ -147,6 +148,13 @@ fun NowPlayingScreen(
                     if (song != null) {
                         val isExternalAudio = song.isExternalAudio()
                         val folderKey = song.validFolderKey()
+                        IconButton(onClick = { showQueueSheet = true }) {
+                            Icon(
+                                imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
+                                contentDescription = "Open queue",
+                                tint               = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                         if (!isExternalAudio) {
                             IconButton(onClick = { showAddToPlaylist = true }) {
                                 Icon(
@@ -176,6 +184,13 @@ fun NowPlayingScreen(
                                 expanded = showMoreActions,
                                 onDismissRequest = { showMoreActions = false },
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("Open Queue") },
+                                    onClick = {
+                                        showMoreActions = false
+                                        showQueueSheet = true
+                                    },
+                                )
                                 if (folderKey != null) {
                                     DropdownMenuItem(
                                         text = { Text("Folder") },
