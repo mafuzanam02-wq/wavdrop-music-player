@@ -55,12 +55,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
@@ -444,6 +446,14 @@ private fun MostPlayedSongRow(
                 .width(3.dp)
                 .height(40.dp)
                 .background(accentColor),
+        )
+        ArtworkImage(
+            artworkUri = ArtworkResolver.albumArtworkUri(summary.song.albumId),
+            contentDescription = "Album artwork for ${summary.song.album}",
+            placeholderIcon = Icons.Default.MusicNote,
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .size(48.dp),
         )
         Column(
             modifier = Modifier

@@ -6,6 +6,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -59,6 +61,13 @@ fun SongRow(
                 .width(3.dp)
                 .height(40.dp)
                 .background(accentColor),
+        )
+        Spacer(Modifier.width(12.dp))
+        ArtworkImage(
+            artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+            contentDescription = "Album artwork for ${song.album}",
+            placeholderIcon = Icons.Default.MusicNote,
+            modifier = Modifier.size(48.dp),
         )
         Column(
             modifier = Modifier

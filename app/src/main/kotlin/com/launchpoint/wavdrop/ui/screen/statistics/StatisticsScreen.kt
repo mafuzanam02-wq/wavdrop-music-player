@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,8 +43,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.model.StatsDashboardSummary
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -333,6 +336,12 @@ private fun SongStatsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        ArtworkImage(
+            artworkUri = ArtworkResolver.albumArtworkUri(summary.song.albumId),
+            contentDescription = "Album artwork for ${summary.song.album}",
+            placeholderIcon = Icons.Default.MusicNote,
+            modifier = Modifier.size(44.dp),
+        )
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = summary.song.title,
