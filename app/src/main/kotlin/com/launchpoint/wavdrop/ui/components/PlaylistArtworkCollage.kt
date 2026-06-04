@@ -20,6 +20,7 @@ fun PlaylistArtworkCollage(
     modifier: Modifier = Modifier,
 ) {
     val uris = artworkUris.filter { it.isNotBlank() }.distinct().take(4)
+    val tileShape = RoundedCornerShape(0.dp)
     Box(modifier = modifier.clip(RoundedCornerShape(8.dp))) {
         when (uris.size) {
             0 -> ArtworkImage(
@@ -43,6 +44,7 @@ fun PlaylistArtworkCollage(
                         artworkUri = uri,
                         contentDescription = contentDescription,
                         placeholderIcon = Icons.AutoMirrored.Filled.QueueMusic,
+                        shape = tileShape,
                         modifier = Modifier.weight(1f).fillMaxSize(),
                     )
                 }
@@ -62,6 +64,7 @@ fun PlaylistArtworkCollage(
                                 artworkUri = uri,
                                 contentDescription = contentDescription,
                                 placeholderIcon = Icons.AutoMirrored.Filled.QueueMusic,
+                                shape = tileShape,
                                 modifier = Modifier.weight(1f).fillMaxSize(),
                             )
                         }
@@ -70,6 +73,7 @@ fun PlaylistArtworkCollage(
                                 artworkUri = null,
                                 contentDescription = null,
                                 placeholderIcon = Icons.AutoMirrored.Filled.QueueMusic,
+                                shape = tileShape,
                                 modifier = Modifier.weight(1f).fillMaxSize(),
                             )
                         }

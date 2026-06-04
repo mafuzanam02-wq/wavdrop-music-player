@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -13,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -26,11 +28,17 @@ fun ArtworkImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     placeholderIcon: ImageVector? = null,
+    shape: Shape = RoundedCornerShape(8.dp),
 ) {
     BoxWithConstraints(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
+            .border(
+                width = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                shape = shape,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         val shortestSide = if (maxWidth < maxHeight) maxWidth else maxHeight

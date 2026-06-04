@@ -44,6 +44,9 @@ fun SongRow(
 ) {
     val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 8.dp else 12.dp
+    val artworkSize = if (compact) 44.dp else 48.dp
 
     Row(
         modifier = modifier
@@ -53,7 +56,7 @@ fun SongRow(
                 onDoubleClick = onToggleFavorite,
                 onLongClick   = onOpenDetails,
             )
-            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 16.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -67,7 +70,7 @@ fun SongRow(
             artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
             contentDescription = "Album artwork for ${song.album}",
             placeholderIcon = Icons.Default.MusicNote,
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(artworkSize),
         )
         Column(
             modifier = Modifier

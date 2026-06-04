@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,13 +17,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -38,11 +42,32 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AlphabetSideIndex(
     activeLetter: Char? = null,
+    listState: LazyListState? = null,
+    autoHide: Boolean = false,
+    keepVisible: Boolean = false,
     onLetterSelected: (Char) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val letters = AlphabetLetters
     var draggedLetter by remember { mutableStateOf<Char?>(null) }
+    var visible by remember(autoHide) { mutableStateOf(true) }
+    val alpha by animateFloatAsState(
+        targetValue = if (!autoHide || visible || draggedLetter != null || keepVisible) 1f else 0f,
+        label = "alphabetIndexAlpha",
+    )
+
+    LaunchedEffect(autoHide, keepVisible, listState?.isScrollInProgress, draggedLetter) {
+        if (!autoHide) {
+            visible = true
+            return@LaunchedEffect
+        }
+        if (keepVisible || listState?.isScrollInProgress == true || draggedLetter != null) {
+            visible = true
+        } else {
+            kotlinx.coroutines.delay(5_000L)
+            visible = false
+        }
+    }
 
     Box(
         modifier = modifier
@@ -63,6 +88,7 @@ fun AlphabetSideIndex(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .alpha(alpha)
                 .padding(vertical = 6.dp)
                 .pointerInput(Unit) {
                     fun letterAt(y: Float): Char {
@@ -73,6 +99,7 @@ fun AlphabetSideIndex(
                     }
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        visible = true
                         var lastLetter = letterAt(down.position.y)
                         draggedLetter = lastLetter
                         onLetterSelected(lastLetter)
