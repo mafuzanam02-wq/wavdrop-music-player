@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
+import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import java.text.NumberFormat
 import java.util.Locale
@@ -97,73 +98,78 @@ fun LibraryScreen(
             }
         },
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentPadding = PaddingValues(vertical = 8.dp),
+        AudioPermissionGate(
+            onPermissionGranted = viewModel::syncIfNeeded,
+            modifier = Modifier.padding(innerPadding),
         ) {
-            item {
-                LibraryIntro(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-            item {
-                LibrarySummaryCard(
-                    summary = summary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                )
-            }
-            item {
-                LibraryNavRow(
-                    title = "Songs",
-                    subtitle = "Browse every track with search and A-Z jump.",
-                    icon = Icons.Default.MusicNote,
-                    onClick = onSongsClick,
-                )
-            }
-            item { SectionDivider() }
-            item {
-                LibraryNavRow(
-                    title = "Albums",
-                    subtitle = "Browse by album.",
-                    icon = Icons.Default.Album,
-                    onClick = onAlbumsClick,
-                )
-            }
-            item { SectionDivider() }
-            item {
-                LibraryNavRow(
-                    title = "Artists",
-                    subtitle = "Browse by artist.",
-                    icon = Icons.Default.Person,
-                    onClick = onArtistsClick,
-                )
-            }
-            item { SectionDivider() }
-            item {
-                LibraryNavRow(
-                    title = "Folders",
-                    subtitle = "Browse by device folder.",
-                    icon = Icons.Default.Folder,
-                    onClick = onFoldersClick,
-                )
-            }
-            item { SectionDivider() }
-            item {
-                LibraryNavRow(
-                    title = "Playlists",
-                    subtitle = "Create and manage local playlists.",
-                    icon = Icons.AutoMirrored.Filled.QueueMusic,
-                    onClick = onPlaylistsClick,
-                )
-            }
-            item { SectionDivider() }
-            item {
-                LibraryNavRow(
-                    title = "Smart Collections",
-                    subtitle = "Automatic mixes from listening history.",
-                    icon = Icons.Default.AutoAwesome,
-                    onClick = onSmartCollectionsClick,
-                )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
+                item {
+                    LibraryIntro(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                item {
+                    LibrarySummaryCard(
+                        summary = summary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                }
+                item {
+                    LibraryNavRow(
+                        title = "Songs",
+                        subtitle = "Browse every track with search and A-Z jump.",
+                        icon = Icons.Default.MusicNote,
+                        onClick = onSongsClick,
+                    )
+                }
+                item { SectionDivider() }
+                item {
+                    LibraryNavRow(
+                        title = "Albums",
+                        subtitle = "Browse by album.",
+                        icon = Icons.Default.Album,
+                        onClick = onAlbumsClick,
+                    )
+                }
+                item { SectionDivider() }
+                item {
+                    LibraryNavRow(
+                        title = "Artists",
+                        subtitle = "Browse by artist.",
+                        icon = Icons.Default.Person,
+                        onClick = onArtistsClick,
+                    )
+                }
+                item { SectionDivider() }
+                item {
+                    LibraryNavRow(
+                        title = "Folders",
+                        subtitle = "Browse by device folder.",
+                        icon = Icons.Default.Folder,
+                        onClick = onFoldersClick,
+                    )
+                }
+                item { SectionDivider() }
+                item {
+                    LibraryNavRow(
+                        title = "Playlists",
+                        subtitle = "Create and manage local playlists.",
+                        icon = Icons.AutoMirrored.Filled.QueueMusic,
+                        onClick = onPlaylistsClick,
+                    )
+                }
+                item { SectionDivider() }
+                item {
+                    LibraryNavRow(
+                        title = "Smart Collections",
+                        subtitle = "Automatic mixes from listening history.",
+                        icon = Icons.Default.AutoAwesome,
+                        onClick = onSmartCollectionsClick,
+                    )
+                }
             }
         }
     }

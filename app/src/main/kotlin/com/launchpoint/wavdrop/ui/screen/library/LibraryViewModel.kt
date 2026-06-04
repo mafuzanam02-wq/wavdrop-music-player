@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class LibrarySummaryUiState(
@@ -24,7 +25,7 @@ data class LibrarySummaryUiState(
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
-    songRepository: SongRepository,
+    private val songRepository: SongRepository,
 ) : ViewModel() {
 
     val summary: StateFlow<LibrarySummaryUiState> = songRepository.songs
@@ -41,4 +42,12 @@ class LibraryViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = LibrarySummaryUiState(isLoading = true),
         )
+
+    private var hasSynced = false
+
+    fun syncIfNeeded() {
+        if (hasSynced) return
+        hasSynced = true
+        viewModelScope.launch { songRepository.sync() }
+    }
 }

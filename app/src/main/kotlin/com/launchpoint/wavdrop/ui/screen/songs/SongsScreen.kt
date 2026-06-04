@@ -55,6 +55,7 @@ import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
+import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
 import com.launchpoint.wavdrop.ui.screen.home.HomeUiState
 import com.launchpoint.wavdrop.ui.screen.home.HomeViewModel
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
@@ -145,35 +146,40 @@ fun SongsScreen(
             }
         },
     ) { innerPadding ->
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh    = viewModel::refreshLibrary,
-            modifier     = Modifier.padding(innerPadding).fillMaxSize(),
+        AudioPermissionGate(
+            onPermissionGranted = viewModel::syncIfNeeded,
+            modifier = Modifier.padding(innerPadding),
         ) {
-            when (val state = uiState) {
-                HomeUiState.Loading -> LoadingSongs()
-                HomeUiState.Empty   -> EmptySongs()
-                is HomeUiState.Songs -> SongListContent(
-                    songs             = state.songs,
-                    showAlphabetIndex = !isSearchActive,
-                    currentSongId     = nowPlaying.song?.id,
-                    favoriteSongIds   = favoriteSongIds,
-                    onSongClick       = viewModel::playSongFromLibraryQueue,
-                    onShuffleAll      = viewModel::shuffleAll,
-                    onPlayNext        = viewModel::playNext,
-                    onAddToQueue      = viewModel::addToQueue,
-                    onToggleFavorite  = { song, wasFavorite ->
-                        viewModel.toggleFavorite(song.id)
-                        coroutineScope.launch {
-                            snackbarHostState.showSnackbar(
-                                if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
-                            )
-                        }
-                    },
-                    onAddToPlaylist   = { song -> addToPlaylistSong = song },
-                    onTrackDetailsClick = onTrackDetailsClick,
-                    onFolderClick     = onFolderClick,
-                )
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh    = viewModel::refreshLibrary,
+                modifier     = Modifier.padding(innerPadding).fillMaxSize(),
+            ) {
+                when (val state = uiState) {
+                    HomeUiState.Loading -> LoadingSongs()
+                    HomeUiState.Empty   -> EmptySongs()
+                    is HomeUiState.Songs -> SongListContent(
+                        songs             = state.songs,
+                        showAlphabetIndex = !isSearchActive,
+                        currentSongId     = nowPlaying.song?.id,
+                        favoriteSongIds   = favoriteSongIds,
+                        onSongClick       = viewModel::playSongFromLibraryQueue,
+                        onShuffleAll      = viewModel::shuffleAll,
+                        onPlayNext        = viewModel::playNext,
+                        onAddToQueue      = viewModel::addToQueue,
+                        onToggleFavorite  = { song, wasFavorite ->
+                            viewModel.toggleFavorite(song.id)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
+                                )
+                            }
+                        },
+                        onAddToPlaylist   = { song -> addToPlaylistSong = song },
+                        onTrackDetailsClick = onTrackDetailsClick,
+                        onFolderClick     = onFolderClick,
+                    )
+                }
             }
         }
     }
