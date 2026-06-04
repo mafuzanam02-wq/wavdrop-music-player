@@ -10,10 +10,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 @HiltViewModel
 class WavdropNavViewModel @Inject constructor(
-    appSettingsRepository: AppSettingsRepository,
+    private val appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
     val startupDestination: StateFlow<StartupDestination?> =
         appSettingsRepository.startupDestination
@@ -23,4 +24,27 @@ class WavdropNavViewModel @Inject constructor(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = null,
             )
+
+    val compactMode: StateFlow<Boolean> =
+        appSettingsRepository.compactMode
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = false,
+            )
+
+    val hasCompletedOnboarding: StateFlow<Boolean?> =
+        appSettingsRepository.hasCompletedOnboarding
+            .map<Boolean, Boolean?> { it }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null,
+            )
+
+    fun completeOnboarding() {
+        viewModelScope.launch {
+            appSettingsRepository.setHasCompletedOnboarding(true)
+        }
+    }
 }

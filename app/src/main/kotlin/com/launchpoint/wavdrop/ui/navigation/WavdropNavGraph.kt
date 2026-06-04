@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +21,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumDetailsScreen
+import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumsScreen
 import com.launchpoint.wavdrop.ui.screen.artists.ArtistDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.artists.ArtistsScreen
@@ -31,6 +33,7 @@ import com.launchpoint.wavdrop.ui.screen.home.HomeCustomizationScreen
 import com.launchpoint.wavdrop.ui.screen.home.HomeScreen
 import com.launchpoint.wavdrop.ui.screen.library.LibraryScreen
 import com.launchpoint.wavdrop.ui.screen.nowplaying.NowPlayingScreen
+import com.launchpoint.wavdrop.ui.screen.onboarding.OnboardingScreen
 import com.launchpoint.wavdrop.ui.screen.playlists.AddSongsToPlaylistScreen
 import com.launchpoint.wavdrop.ui.screen.playlists.PlaylistDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.playlists.PlaylistsScreen
@@ -40,6 +43,7 @@ import com.launchpoint.wavdrop.ui.screen.settings.SettingsAboutScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsAppearanceScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsBackupScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsBluetoothScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsDiagnosticsScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsLibraryScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsPlaybackScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsScreen
@@ -53,6 +57,7 @@ import com.launchpoint.wavdrop.ui.screen.trackdetails.TrackDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.wrapped.WrappedScreen
 
 sealed class Screen(val route: String) {
+    data object Onboarding          : Screen("onboarding")
     data object Home                : Screen("home")
     data object Library             : Screen("library")
     data object Songs               : Screen("songs")
@@ -67,6 +72,7 @@ sealed class Screen(val route: String) {
     data object SettingsAppearance  : Screen("settings/appearance")
     data object SettingsStatistics  : Screen("settings/statistics")
     data object SettingsAbout       : Screen("settings/about")
+    data object SettingsDiagnostics : Screen("settings/about/diagnostics")
     data object HomeCustomization   : Screen("home_customization")
     data object Albums              : Screen("albums")
     data object Artists             : Screen("artists")
@@ -122,11 +128,17 @@ fun WavdropNavGraph(
     viewModel: WavdropNavViewModel = hiltViewModel(),
 ) {
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
+    val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
+    val compactMode by viewModel.compactMode.collectAsStateWithLifecycle()
     var startRoute by rememberSaveable { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(startupDestination) {
-        if (startRoute == null && startupDestination != null) {
-            startRoute = startupDestination!!.toRoute()
+    LaunchedEffect(startupDestination, hasCompletedOnboarding) {
+        if (startRoute == null && startupDestination != null && hasCompletedOnboarding != null) {
+            startRoute = if (hasCompletedOnboarding == true) {
+                startupDestination!!.toRoute()
+            } else {
+                Screen.Onboarding.route
+            }
         }
     }
 
@@ -136,10 +148,22 @@ fun WavdropNavGraph(
         return
     }
 
-    NavHost(
-        navController    = navController,
-        startDestination = resolvedStartRoute,
-    ) {
+    CompositionLocalProvider(LocalCompactMode provides compactMode) {
+        NavHost(
+            navController    = navController,
+            startDestination = resolvedStartRoute,
+        ) {
+        composable(Screen.Onboarding.route) {
+            OnboardingScreen(
+                onComplete = {
+                    viewModel.completeOnboarding()
+                    navController.navigate((startupDestination ?: StartupDestination.SONGS).toRoute()) {
+                        popUpTo(Screen.Onboarding.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+            )
+        }
         composable(Screen.Home.route) {
             HomeScreen(
                 onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
@@ -409,12 +433,19 @@ fun WavdropNavGraph(
             )
         }
         composable(Screen.SettingsAbout.route) {
-            SettingsAboutScreen(onNavigateBack = { navController.popBackStack() })
+            SettingsAboutScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onDiagnosticsClick = { navController.navigate(Screen.SettingsDiagnostics.route) },
+            )
+        }
+        composable(Screen.SettingsDiagnostics.route) {
+            SettingsDiagnosticsScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.HomeCustomization.route) {
             HomeCustomizationScreen(
                 onNavigateBack = { navController.popBackStack() },
             )
+        }
         }
     }
 }

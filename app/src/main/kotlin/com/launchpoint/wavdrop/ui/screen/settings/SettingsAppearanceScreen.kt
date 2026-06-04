@@ -36,6 +36,7 @@ fun SettingsAppearanceScreen(
     val appIconChoice    by viewModel.appIconChoice.collectAsStateWithLifecycle()
     val themeMode        by viewModel.themeMode.collectAsStateWithLifecycle()
     val accentColor      by viewModel.accentColor.collectAsStateWithLifecycle()
+    val compactMode      by viewModel.compactMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -75,6 +76,17 @@ fun SettingsAppearanceScreen(
                     title    = "Home Sections",
                     subtitle = "Choose which sections appear on your Home screen.",
                     onClick  = onHomeCustomizationClick,
+                )
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Display") }
+            item {
+                ToggleSettingsRow(
+                    title = "Compact Mode",
+                    subtitle = "Use denser rows in library lists and queue views.",
+                    checked = compactMode,
+                    onCheckedChange = viewModel::setCompactMode,
                 )
             }
             item { SectionDivider() }

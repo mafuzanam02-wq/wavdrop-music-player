@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
@@ -106,6 +107,30 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val compactMode: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[COMPACT_MODE_KEY] ?: false }
+
+    suspend fun setCompactMode(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[COMPACT_MODE_KEY] = enabled
+        }
+    }
+
+    val hasCompletedOnboarding: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[HAS_COMPLETED_ONBOARDING_KEY] ?: false }
+
+    suspend fun setHasCompletedOnboarding(completed: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[HAS_COMPLETED_ONBOARDING_KEY] = completed
+        }
+    }
+
     private fun String.toStartupDestination(): StartupDestination? =
         runCatching { StartupDestination.valueOf(this) }.getOrNull()
 
@@ -131,5 +156,7 @@ class AppSettingsRepository @Inject constructor(
         val APP_ICON_CHOICE_KEY     = stringPreferencesKey("app_icon_choice")
         val THEME_MODE_KEY          = stringPreferencesKey("theme_mode")
         val ACCENT_COLOR_KEY        = stringPreferencesKey("accent_color")
+        val COMPACT_MODE_KEY        = booleanPreferencesKey("compact_mode")
+        val HAS_COMPLETED_ONBOARDING_KEY = booleanPreferencesKey("has_completed_onboarding")
     }
 }
