@@ -283,6 +283,8 @@ fun NowPlayingScreen(
             onMoveUp     = { viewModel.moveQueueItemUp(it) },
             onMoveDown   = { viewModel.moveQueueItemDown(it) },
             onPlayNext   = { viewModel.moveToPlayNext(it) },
+            onPlaySongNext = { viewModel.playNext(it) },
+            onAddSongToQueue = { viewModel.addToQueue(it) },
             onViewStats  = { songId ->
                 showQueueSheet = false
                 onOpenTrackDetails(songId)

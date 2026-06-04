@@ -254,13 +254,26 @@ class PlayerController @Inject constructor(
 
     fun addToQueue(song: Song) {
         val currentPlaybackIndex = currentPlaybackIndex()
-        val queue = effectiveQueue()
-        if (queue.isEmpty() || currentPlaybackIndex == null) {
+        if (libraryQueue.isEmpty() || currentPlaybackIndex == null) {
             playSong(song)
             return
         }
-        val newQueue = QueueMutation.append(queue, song)
-        applyQueueMutationByIdentity(newQueue, currentPlaybackIndex)
+        val insertLibraryIndex = libraryQueue.size
+        libraryQueue = libraryQueue + song
+        playbackOrder = playbackOrder + insertLibraryIndex
+        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+
+        mediaController?.addMediaItem(song.toMediaItem())
+
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
     }
 
     fun jumpToQueueItem(playbackIndex: Int) {
@@ -271,8 +284,38 @@ class PlayerController @Inject constructor(
 
     fun removeFromQueue(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
-        val mutation = QueueMutation.remove(playbackQueue, playbackIndex, currentPlaybackIndex) ?: return
-        applyQueueMutationByIdentity(mutation.queue, mutation.currentIndex)
+        if (playbackIndex == currentPlaybackIndex) return
+        if (playbackIndex !in playbackQueue.indices) return
+        val removedLibraryIndex = playbackOrder.getOrNull(playbackIndex) ?: return
+        if (removedLibraryIndex !in libraryQueue.indices) return
+
+        libraryQueue = libraryQueue.toMutableList().also {
+            it.removeAt(removedLibraryIndex)
+        }
+        playbackOrder = playbackOrder
+            .filterIndexed { index, _ -> index != playbackIndex }
+            .map { index -> if (index > removedLibraryIndex) index - 1 else index }
+        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+
+        mediaController?.removeMediaItem(removedLibraryIndex)
+
+        val newCurrentPlaybackIndex = if (playbackIndex < currentPlaybackIndex) {
+            currentPlaybackIndex - 1
+        } else {
+            currentPlaybackIndex
+        }.coerceIn(playbackQueue.indices)
+        val currentSong = playbackQueue.getOrNull(newCurrentPlaybackIndex)
+
+        _nowPlayingState.update {
+            it.copy(
+                song = currentSong ?: it.song,
+                queue = playbackQueue,
+                currentIndex = newCurrentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
     }
 
     fun moveQueueItemUp(playbackIndex: Int) {

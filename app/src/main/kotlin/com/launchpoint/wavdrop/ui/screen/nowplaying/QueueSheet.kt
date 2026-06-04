@@ -2,7 +2,6 @@ package com.launchpoint.wavdrop.ui.screen.nowplaying
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,7 +16,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
@@ -38,7 +36,6 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,12 +43,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import kotlinx.coroutines.launch
@@ -66,6 +59,8 @@ fun QueueSheet(
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
     onPlayNext: (Int) -> Unit,
+    onPlaySongNext: (Song) -> Unit,
+    onAddSongToQueue: (Song) -> Unit,
     onViewStats: (Long) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
@@ -82,6 +77,8 @@ fun QueueSheet(
             onMoveUp = onMoveUp,
             onMoveDown = onMoveDown,
             onPlayNext = onPlayNext,
+            onPlaySongNext = onPlaySongNext,
+            onAddSongToQueue = onAddSongToQueue,
             onViewStats = onViewStats,
         )
     }
@@ -96,6 +93,8 @@ private fun QueueSheetContent(
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
     onPlayNext: (Int) -> Unit,
+    onPlaySongNext: (Song) -> Unit,
+    onAddSongToQueue: (Song) -> Unit,
     onViewStats: (Long) -> Unit,
 ) {
     val currentIndex = state.currentIndex
@@ -106,37 +105,11 @@ private fun QueueSheetContent(
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var draggedPlaybackIndex by remember { mutableStateOf<Int?>(null) }
-    var draggedOffsetY by remember { mutableFloatStateOf(0f) }
-    var queueRowHeightPx by remember { mutableFloatStateOf(1f) }
-    val firstUpNextPlaybackIndex = currentIndex + 1
-    val lastUpNextPlaybackIndex = currentIndex + upNextSongs.size
 
     fun showRemovedSnackbar() {
         scope.launch {
             snackbarHostState.showSnackbar("Removed from queue")
         }
-    }
-
-    fun onDraggedBy(deltaY: Float) {
-        val rowHeight = queueRowHeightPx.takeIf { it > 0f } ?: return
-        var activeIndex = draggedPlaybackIndex ?: return
-        var offset = draggedOffsetY + deltaY
-        val threshold = rowHeight * 0.55f
-
-        while (offset > threshold && activeIndex < lastUpNextPlaybackIndex) {
-            onMoveDown(activeIndex)
-            activeIndex += 1
-            offset -= rowHeight
-        }
-        while (offset < -threshold && activeIndex > firstUpNextPlaybackIndex) {
-            onMoveUp(activeIndex)
-            activeIndex -= 1
-            offset += rowHeight
-        }
-
-        draggedPlaybackIndex = activeIndex
-        draggedOffsetY = offset
     }
 
     // Scroll to the "Playing now" section header on open and when the current track changes.
@@ -173,11 +146,13 @@ private fun QueueSheetContent(
             itemsIndexed(
                 items = previousSongs,
                 // key = absolute queue index (0..currentIndex-1), always unique
-                key = { index, _ -> index },
+                key = { index, song -> "previous-${song.id}-$index" },
             ) { index, song ->
                 QueuePreviousItemRow(
                     song = song,
                     onJump = { onJumpToItem(index) },
+                    onPlayNext = { onPlaySongNext(song) },
+                    onAddToQueue = { onAddSongToQueue(song) },
                     onViewStats = { onViewStats(song.id) },
                 )
                 if (index < previousSongs.lastIndex) {
@@ -214,28 +189,15 @@ private fun QueueSheetContent(
             itemsIndexed(
                 items = upNextSongs,
                 // key = absolute queue index (currentIndex+1..), always unique
-                key = { index, _ -> currentIndex + 1 + index },
+                key = { index, song -> "up-next-${song.id}-${currentIndex + 1 + index}" },
             ) { index, song ->
                 val playbackIndex = currentIndex + 1 + index
                 val isFirstUpNext = index == 0
                 val isLastUpNext = index == upNextSongs.lastIndex
                 SwipeableQueueItemRow(
                     song = song,
-                    playbackIndex = playbackIndex,
                     isFirstUpNext = isFirstUpNext,
                     isLastUpNext = isLastUpNext,
-                    isDragging = draggedPlaybackIndex == playbackIndex,
-                    dragOffsetY = if (draggedPlaybackIndex == playbackIndex) draggedOffsetY else 0f,
-                    onRowHeight = { heightPx -> queueRowHeightPx = heightPx.toFloat() },
-                    onDragStart = {
-                        draggedPlaybackIndex = playbackIndex
-                        draggedOffsetY = 0f
-                    },
-                    onDrag = ::onDraggedBy,
-                    onDragEnd = {
-                        draggedPlaybackIndex = null
-                        draggedOffsetY = 0f
-                    },
                     onJump = { onJumpToItem(playbackIndex) },
                     onMoveUp = { onMoveUp(playbackIndex) },
                     onMoveDown = { onMoveDown(playbackIndex) },
@@ -370,6 +332,8 @@ private fun QueueNowPlayingRow(song: Song) {
 private fun QueuePreviousItemRow(
     song: Song,
     onJump: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
     onViewStats: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -421,6 +385,14 @@ private fun QueuePreviousItemRow(
                     onClick = { expanded = false; onJump() },
                 )
                 DropdownMenuItem(
+                    text = { Text("Play next") },
+                    onClick = { expanded = false; onPlayNext() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to queue") },
+                    onClick = { expanded = false; onAddToQueue() },
+                )
+                DropdownMenuItem(
                     text = { Text("View stats") },
                     onClick = { expanded = false; onViewStats() },
                 )
@@ -430,6 +402,61 @@ private fun QueuePreviousItemRow(
 }
 
 // ── Up-next row (full actions) ────────────────────────────────────────────────
+
+@Composable
+private fun SwipeableQueueItemRow(
+    song: Song,
+    isFirstUpNext: Boolean,
+    isLastUpNext: Boolean,
+    onJump: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onPlayNext: () -> Unit,
+    onRemove: () -> Unit,
+    onViewStats: () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value != SwipeToDismissBoxValue.Settled) {
+                onRemove()
+                false
+            } else {
+                true
+            }
+        },
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Text(
+                    text = "Remove",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        },
+    ) {
+        QueueItemRow(
+            song = song,
+            isFirstUpNext = isFirstUpNext,
+            isLastUpNext = isLastUpNext,
+            onJump = onJump,
+            onMoveUp = onMoveUp,
+            onMoveDown = onMoveDown,
+            onPlayNext = onPlayNext,
+            onRemove = onRemove,
+            onViewStats = onViewStats,
+        )
+    }
+}
 
 @Composable
 private fun QueueItemRow(
@@ -442,22 +469,19 @@ private fun QueueItemRow(
     onPlayNext: () -> Unit,
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onJump)
             .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = Icons.Default.DragHandle,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-            modifier = Modifier.size(20.dp),
-        )
+        Spacer(Modifier.size(20.dp))
         Column(
             modifier = Modifier
                 .weight(1f)

@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.ui.screen.nowplaying
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.lyrics.LyricsRepository
 import com.launchpoint.wavdrop.data.lyrics.LyricsResult
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
@@ -111,6 +112,10 @@ class NowPlayingViewModel @Inject constructor(
     fun moveQueueItemDown(playbackIndex: Int) = playerController.moveQueueItemDown(playbackIndex)
 
     fun moveToPlayNext(playbackIndex: Int) = playerController.moveToPlayNext(playbackIndex)
+
+    fun playNext(song: Song) = playerController.playNext(song)
+
+    fun addToQueue(song: Song) = playerController.addToQueue(song)
 
     fun saveCustomLyrics(text: String, onComplete: () -> Unit = {}) {
         val song = nowPlayingState.value.song ?: return
