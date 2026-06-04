@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.ui.screen.trackdetails
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -265,6 +267,8 @@ private fun LyricsEditorDialog(
     var text by remember(lyrics) {
         mutableStateOf((lyrics as? LyricsResult.Available)?.text.orEmpty())
     }
+    var clipboardEmpty by remember { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
     val canSave = text.isNotBlank()
 
     AlertDialog(
@@ -280,13 +284,42 @@ private fun LyricsEditorDialog(
                 Spacer(Modifier.height(12.dp))
                 TextField(
                     value = text,
-                    onValueChange = { text = it },
+                    onValueChange = { text = it; clipboardEmpty = false },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(240.dp),
                     textStyle = MaterialTheme.typography.bodyMedium,
                     placeholder = { Text("Lyrics") },
                 )
+                if (text.isEmpty()) {
+                    Row(
+                        modifier              = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment     = Alignment.CenterVertically,
+                    ) {
+                        if (clipboardEmpty) {
+                            Text(
+                                text     = "Clipboard is empty",
+                                style    = MaterialTheme.typography.bodySmall,
+                                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                val clip = clipboardManager.getText()
+                                if (clip != null && clip.text.isNotBlank()) {
+                                    text = clip.text
+                                    clipboardEmpty = false
+                                } else {
+                                    clipboardEmpty = true
+                                }
+                            },
+                        ) {
+                            Text("Paste")
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
