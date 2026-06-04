@@ -277,34 +277,15 @@ private fun LyricsEditorDialog(
         text = {
             Column {
                 Text(
-                    text = "Unsynced lyrics. Timing and karaoke highlighting are not supported yet.",
+                    text  = "Plain text only. Paste or type lyrics, then tap Save.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
                 )
-                Spacer(Modifier.height(12.dp))
-                TextField(
-                    value = text,
-                    onValueChange = { text = it; clipboardEmpty = false },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(240.dp),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    placeholder = { Text("Lyrics") },
-                )
-                if (text.isEmpty()) {
+                if (text.isBlank()) {
                     Row(
-                        modifier              = Modifier.fillMaxWidth().padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment     = Alignment.CenterVertically,
+                        modifier          = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (clipboardEmpty) {
-                            Text(
-                                text     = "Clipboard is empty",
-                                style    = MaterialTheme.typography.bodySmall,
-                                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                modifier = Modifier.padding(end = 4.dp),
-                            )
-                        }
                         TextButton(
                             onClick = {
                                 val clip = clipboardManager.getText()
@@ -318,8 +299,25 @@ private fun LyricsEditorDialog(
                         ) {
                             Text("Paste")
                         }
+                        if (clipboardEmpty) {
+                            Text(
+                                text  = "Clipboard is empty",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            )
+                        }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value         = text,
+                    onValueChange = { text = it; clipboardEmpty = false },
+                    modifier      = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp),
+                    textStyle   = MaterialTheme.typography.bodyMedium,
+                    placeholder = { Text("Lyrics") },
+                )
             }
         },
         confirmButton = {
