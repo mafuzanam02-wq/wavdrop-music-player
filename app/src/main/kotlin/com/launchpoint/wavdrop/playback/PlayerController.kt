@@ -72,9 +72,13 @@ class PlayerController @Inject constructor(
     private val _nowPlayingState = MutableStateFlow(NowPlayingState())
     val nowPlayingState: StateFlow<NowPlayingState> = _nowPlayingState.asStateFlow()
 
+    private val _sleepTimerState = MutableStateFlow(SleepTimerState())
+    val sleepTimerState: StateFlow<SleepTimerState> = _sleepTimerState.asStateFlow()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var positionTickerJob: Job? = null
     private var wiredResumeJob: Job? = null
+    private var sleepTimerJob: Job? = null
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -99,6 +103,12 @@ class PlayerController @Inject constructor(
             if (DEBUG_STATS) {
                 Log.d(TAG, "[mediaItemTransition] reason=$reason mediaId=${mediaItem?.mediaId} repeatMode=$repeatMode isPlaying=${mediaController?.isPlaying}")
             }
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+                _sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG
+            ) {
+                triggerSleepTimer()
+                return
+            }
             // Reset position tracking so the ticker doesn't mistake the old song's
             // late position for a loop wrap on the new song.
             lastKnownPositionMs = -1L
@@ -118,6 +128,10 @@ class PlayerController @Inject constructor(
                 Log.d(TAG, "[posDiscontinuity] reason=$reason old=${oldPosition.positionMs} new=${newPosition.positionMs} oldIdx=${oldPosition.mediaItemIndex} newIdx=${newPosition.mediaItemIndex} repeatMode=$repeatMode isPlaying=${mediaController?.isPlaying}")
             }
             if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                if (_sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG) {
+                    triggerSleepTimer()
+                    return
+                }
                 // Reset ticker tracking so it doesn't double-detect this same boundary.
                 lastKnownPositionMs = -1L
                 val song = libraryQueue.getOrNull(newPosition.mediaItemIndex) ?: return
@@ -134,6 +148,12 @@ class PlayerController @Inject constructor(
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (DEBUG_STATS) {
                 Log.d(TAG, "[playbackStateChanged] state=$playbackState songId=${_nowPlayingState.value.song?.id} repeatMode=$repeatMode")
+            }
+            if (playbackState == Player.STATE_ENDED &&
+                _sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG
+            ) {
+                triggerSleepTimer()
+                return
             }
             syncNowPlayingState()
         }
@@ -350,6 +370,31 @@ class PlayerController @Inject constructor(
         val controller = mediaController ?: return
         if (controller.isPlaying) controller.pause() else controller.play()
         syncNowPlayingState()
+    }
+
+    fun setSleepTimer(option: SleepTimerOption) {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+
+        if (option == SleepTimerOption.OFF) {
+            _sleepTimerState.value = SleepTimerState()
+            return
+        }
+
+        val nowMs = System.currentTimeMillis()
+        val durationMs = option.durationMs
+        _sleepTimerState.value = SleepTimerState(
+            option = option,
+            startedAtMs = nowMs,
+            endsAtMs = durationMs?.let { nowMs + it },
+        )
+
+        if (durationMs != null) {
+            sleepTimerJob = scope.launch {
+                delay(durationMs)
+                triggerSleepTimer()
+            }
+        }
     }
 
     fun skipToNext() {
@@ -628,6 +673,8 @@ class PlayerController @Inject constructor(
 
     fun release() {
         stopPositionTicker()
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
         scope.cancel()
         mediaController?.removeListener(playerListener)
         mediaController?.release()
@@ -647,6 +694,16 @@ class PlayerController @Inject constructor(
     private fun stopPositionTicker() {
         positionTickerJob?.cancel()
         positionTickerJob = null
+    }
+
+    private fun triggerSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimerState.value = SleepTimerState()
+        mediaController?.pause()
+        syncNowPlayingState()
+        syncPosition()
+        saveSessionAsync()
     }
 
     /**
@@ -678,6 +735,10 @@ class PlayerController @Inject constructor(
             val song = currentQueueIndex()?.let { libraryQueue.getOrNull(it) }
             if (song != null) {
                 if (DEBUG_STATS) Log.d(TAG, "[ticker] LOOP BOUNDARY detected prev=$prev cur=$currentPos songId=${song.id}")
+                if (_sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG) {
+                    triggerSleepTimer()
+                    return
+                }
                 statsTracker.onSongSelected(song)
                 statsTracker.onPlaybackStarted()
             }

@@ -11,6 +11,8 @@ import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
+import com.launchpoint.wavdrop.playback.SleepTimerOption
+import com.launchpoint.wavdrop.playback.SleepTimerState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +39,7 @@ class NowPlayingViewModel @Inject constructor(
 ) : ViewModel() {
 
     val nowPlayingState: StateFlow<NowPlayingState> = playerController.nowPlayingState
+    val sleepTimerState: StateFlow<SleepTimerState> = playerController.sleepTimerState
 
     private val _lyricsState = MutableStateFlow<LyricsResult>(LyricsResult.NotFound)
     val lyricsState: StateFlow<LyricsResult> = _lyricsState.asStateFlow()
@@ -100,6 +103,8 @@ class NowPlayingViewModel @Inject constructor(
     fun toggleShuffle() = playerController.toggleShuffle()
 
     fun cycleRepeatMode() = playerController.cycleRepeatMode()
+
+    fun setSleepTimer(option: SleepTimerOption) = playerController.setSleepTimer(option)
 
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
 

@@ -19,6 +19,9 @@ import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.data.settings.StartupDestination
+import com.launchpoint.wavdrop.playback.PlayerController
+import com.launchpoint.wavdrop.playback.SleepTimerOption
+import com.launchpoint.wavdrop.playback.SleepTimerState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -54,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val scanSettingsRepository: LibraryScanSettingsRepository,
     private val resumeBehaviorRepository: ResumeBehaviorSettingsRepository,
     private val songRepository: SongRepository,
+    private val playerController: PlayerController,
 ) : ViewModel() {
 
     private val _exportUiState = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
@@ -80,6 +84,8 @@ class SettingsViewModel @Inject constructor(
             initialValue = ResumeBehaviorSettings(),
         )
 
+    val sleepTimerState: StateFlow<SleepTimerState> = playerController.sleepTimerState
+
     val appIconChoice: StateFlow<AppIconChoice> =
         appSettingsRepository.appIconChoice.stateIn(
             scope = viewModelScope,
@@ -99,6 +105,13 @@ class SettingsViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = AccentColor.MIDNIGHT_VIOLET,
+        )
+
+    val compactMode: StateFlow<Boolean> =
+        appSettingsRepository.compactMode.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
         )
 
     private val _libraryScanUiState =
@@ -169,6 +182,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { resumeBehaviorRepository.setRestoreQueue(enabled) }
     }
 
+    fun setSleepTimer(option: SleepTimerOption) {
+        playerController.setSleepTimer(option)
+    }
+
     fun setAutoResumeOnBluetooth(enabled: Boolean) {
         viewModelScope.launch { resumeBehaviorRepository.setAutoResumeOnBluetooth(enabled) }
     }
@@ -183,6 +200,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setAccentColor(color: AccentColor) {
         viewModelScope.launch { appSettingsRepository.setAccentColor(color) }
+    }
+
+    fun setCompactMode(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setCompactMode(enabled) }
     }
 
     fun setAppIcon(choice: AppIconChoice) {

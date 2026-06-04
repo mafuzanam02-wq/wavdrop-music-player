@@ -50,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -89,6 +90,8 @@ import com.launchpoint.wavdrop.data.lyrics.LyricsResult
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.RepeatMode
+import com.launchpoint.wavdrop.playback.SleepTimerOption
+import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
@@ -116,12 +119,14 @@ fun NowPlayingScreen(
     val lyricsState       by viewModel.lyricsState.collectAsStateWithLifecycle()
     val isFavorite        by viewModel.isFavorite.collectAsStateWithLifecycle()
     val hasCustomLyrics   by viewModel.hasCustomLyrics.collectAsStateWithLifecycle()
+    val sleepTimerState   by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     val playlists         by viewModel.playlists.collectAsStateWithLifecycle()
     var showAddToPlaylist  by remember { mutableStateOf(false) }
     var showLyricsOverlay  by remember { mutableStateOf(false) }
     var showLyricsEditor   by remember { mutableStateOf(false) }
     var overlayBeforeEdit  by remember { mutableStateOf(false) }
     var showMoreActions    by remember { mutableStateOf(false) }
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
     var showQueueSheet     by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -182,6 +187,13 @@ fun NowPlayingScreen(
                                     onClick = {
                                         showMoreActions = false
                                         onOpenStatistics()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Sleep Timer: ${sleepTimerState.summary()}") },
+                                    onClick = {
+                                        showMoreActions = false
+                                        showSleepTimerDialog = true
                                     },
                                 )
                                 DropdownMenuItem(
@@ -259,6 +271,17 @@ fun NowPlayingScreen(
         )
     }
 
+    if (showSleepTimerDialog) {
+        SleepTimerDialog(
+            selected = sleepTimerState.option,
+            onSelect = { option ->
+                viewModel.setSleepTimer(option)
+                showSleepTimerDialog = false
+            },
+            onDismiss = { showSleepTimerDialog = false },
+        )
+    }
+
     if (showLyricsEditor && state.song != null) {
         LyricsEditorDialog(
             lyrics = lyricsState,
@@ -297,6 +320,48 @@ fun NowPlayingScreen(
         )
     }
 }
+
+@Composable
+private fun SleepTimerDialog(
+    selected: SleepTimerOption,
+    onSelect: (SleepTimerOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sleep Timer") },
+        text = {
+            Column {
+                SleepTimerOption.entries.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(option) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = option == selected,
+                            onClick = { onSelect(option) },
+                        )
+                        Text(
+                            text = option.displayName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+private fun SleepTimerState.summary(): String =
+    if (isActive) option.displayName else SleepTimerOption.OFF.displayName
 
 @Composable
 private fun NowPlayingContent(
@@ -728,7 +793,7 @@ private fun LyricsOverlayContent(
                         textAlign = TextAlign.Center,
                     )
                     Text(
-                        text = "Long-press to add your own",
+                        text = "Long-press to add custom lyrics, or add embedded/sidecar lyrics locally.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.50f),
                         textAlign = TextAlign.Center,
@@ -933,7 +998,7 @@ private fun EmptyNowPlayingContent(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "No track playing",
+            text = "No track playing. Choose a song from your library to start playback.",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.64f),
             textAlign = TextAlign.Center,

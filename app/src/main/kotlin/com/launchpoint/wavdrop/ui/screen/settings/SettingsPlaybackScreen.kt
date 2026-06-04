@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.StartupDestination
+import com.launchpoint.wavdrop.playback.SleepTimerOption
+import com.launchpoint.wavdrop.playback.SleepTimerState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,7 +42,9 @@ fun SettingsPlaybackScreen(
 ) {
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
     val resumeBehavior     by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
+    val sleepTimerState    by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     var showStartupDialog  by remember { mutableStateOf(false) }
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -101,6 +105,16 @@ fun SettingsPlaybackScreen(
                     onCheckedChange = viewModel::setRestoreQueue,
                 )
             }
+            item { SectionDivider() }
+
+            item { SectionHeader("Sleep Timer") }
+            item {
+                ClickableSettingsRow(
+                    title = "Sleep Timer",
+                    subtitle = sleepTimerState.summary(),
+                    onClick = { showSleepTimerDialog = true },
+                )
+            }
         }
     }
 
@@ -112,6 +126,16 @@ fun SettingsPlaybackScreen(
                 showStartupDialog = false
             },
             onDismiss = { showStartupDialog = false },
+        )
+    }
+    if (showSleepTimerDialog) {
+        SleepTimerDialog(
+            selected = sleepTimerState.option,
+            onSelect = { option ->
+                viewModel.setSleepTimer(option)
+                showSleepTimerDialog = false
+            },
+            onDismiss = { showSleepTimerDialog = false },
         )
     }
 }
@@ -154,3 +178,45 @@ private fun StartupDestinationDialog(
         },
     )
 }
+
+@Composable
+private fun SleepTimerDialog(
+    selected: SleepTimerOption,
+    onSelect: (SleepTimerOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sleep Timer") },
+        text = {
+            Column {
+                SleepTimerOption.entries.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(option) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = option == selected,
+                            onClick = { onSelect(option) },
+                        )
+                        Text(
+                            text = option.displayName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+private fun SleepTimerState.summary(): String =
+    if (isActive) option.displayName else SleepTimerOption.OFF.displayName
