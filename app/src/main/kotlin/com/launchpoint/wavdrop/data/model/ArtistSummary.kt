@@ -5,4 +5,5 @@ data class ArtistSummary(
     val songCount: Int,
     val albumCount: Int,        // distinct album keys within this artist
     val totalDurationMs: Long,
+    val artworkUri: String? = null,
 )

@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +49,7 @@ import com.launchpoint.wavdrop.data.model.ArtistInsightsSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
@@ -108,6 +111,16 @@ fun ArtistDetailsScreen(
                 .fillMaxSize(),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
+            item {
+                ArtistHeader(
+                    artistName = state.artistName,
+                    artworkUri = state.artworkUri,
+                    songCount = state.songCount,
+                    albumCount = state.albumCount,
+                    totalDurationMs = state.totalDurationMs,
+                )
+            }
+
             item {
                 OverviewSection(summary = state.insights)
             }
@@ -188,6 +201,53 @@ fun ArtistDetailsScreen(
             },
             onDismiss        = { addToPlaylistSong = null },
         )
+    }
+}
+
+@Composable
+private fun ArtistHeader(
+    artistName: String,
+    artworkUri: String?,
+    songCount: Int,
+    albumCount: Int,
+    totalDurationMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ArtworkImage(
+            artworkUri = artworkUri,
+            contentDescription = "Artist image for $artistName",
+            placeholderIcon = Icons.Default.Person,
+            modifier = Modifier.size(88.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = artistName,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = buildString {
+                    append(artistMeta(songCount, albumCount))
+                    val duration = formatArtistDuration(totalDurationMs)
+                    if (duration.isNotEmpty()) append(" - $duration")
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 }
 
@@ -454,3 +514,16 @@ private fun artistMeta(songCount: Int, albumCount: Int): String =
         if (albumCount > 1) append(" - $albumCount albums")
         if (albumCount == 1) append(" - 1 album")
     }
+
+private fun formatArtistDuration(ms: Long): String {
+    val totalMinutes = ms / 60_000
+    return when {
+        totalMinutes == 0L -> ""
+        totalMinutes < 60 -> "$totalMinutes min"
+        else -> {
+            val hours = totalMinutes / 60
+            val minutes = totalMinutes % 60
+            if (minutes == 0L) "${hours}h" else "${hours}h ${minutes}m"
+        }
+    }
+}

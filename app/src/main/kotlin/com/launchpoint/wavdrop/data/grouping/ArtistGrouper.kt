@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.data.grouping
 
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.Song
 
@@ -23,7 +24,14 @@ object ArtistGrouper {
                     songCount       = group.size,
                     albumCount      = distinctAlbums,
                     totalDurationMs = group.sumOf { it.duration },
+                    artworkUri      = representativeArtworkUri(group),
                 )
             }
             .sortedBy { it.artistKey.lowercase() }
+
+    fun representativeArtworkUri(songs: List<Song>): String? =
+        songs
+            .firstOrNull { it.albumId > 0L }
+            ?.albumId
+            ?.let(ArtworkResolver::albumArtworkUri)
 }
