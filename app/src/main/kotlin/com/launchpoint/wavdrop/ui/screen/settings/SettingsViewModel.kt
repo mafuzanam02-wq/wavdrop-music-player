@@ -187,17 +187,16 @@ class SettingsViewModel @Inject constructor(
             runCatching { applyAppIcon(choice) }
                 .onSuccess { confirmed ->
                     val message = if (confirmed) {
-                        "Icon changed. If your launcher still shows the old icon, " +
-                            "restart the launcher or phone."
+                        "Icon preference saved. Your phone's launcher controls when the icon updates."
                     } else {
-                        "Icon change failed. Please restart the app and try again."
+                        "Icon preference saved, but the launcher icon could not be confirmed."
                     }
                     _iconChangeEvent.tryEmit(message)
                 }
                 .onFailure { e ->
                     Log.e(TAG, "Icon switch failed for ${choice.aliasClassName}", e)
                     _iconChangeEvent.tryEmit(
-                        "Icon change failed. Please restart the app and try again."
+                        "Icon preference saved, but the launcher icon could not be confirmed."
                     )
                 }
         }

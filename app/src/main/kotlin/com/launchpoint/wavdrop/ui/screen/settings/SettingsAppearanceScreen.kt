@@ -104,6 +104,12 @@ fun SettingsAppearanceScreen(
             item { SectionDivider() }
 
             item { SectionHeader("App Icon") }
+            item {
+                SettingsMessageRow(
+                    message = "App icon changes depend on your phone's launcher. On some devices, " +
+                        "the selected icon may not appear immediately or may not update visually.",
+                )
+            }
             AppIconChoice.entries.forEach { choice ->
                 item {
                     IconChoiceRow(
