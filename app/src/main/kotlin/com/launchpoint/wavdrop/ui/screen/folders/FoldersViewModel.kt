@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 sealed interface FoldersUiState {
@@ -33,19 +34,20 @@ class FoldersViewModel @Inject constructor(
         _searchQuery.value = query
     }
 
-    val uiState: StateFlow<FoldersUiState> = combine(songRepository.songs, _searchQuery) { songs, query ->
+    // Grouping runs only when the song list changes, not on every search keystroke.
+    private val allFolders: StateFlow<List<FolderSummary>?> = songRepository.songs
+        .map { songs -> FolderGrouper.groupSongsByFolder(songs) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val uiState: StateFlow<FoldersUiState> = combine(allFolders, _searchQuery) { folders, query ->
         when {
-            songs.isEmpty() -> FoldersUiState.Empty
-            else -> FoldersUiState.Ready(
-                LibrarySearch.filterFolders(
-                    folders = FolderGrouper.groupSongsByFolder(songs),
-                    query = query,
-                )
-            )
+            folders == null   -> FoldersUiState.Loading
+            folders.isEmpty() -> FoldersUiState.Empty
+            else              -> FoldersUiState.Ready(LibrarySearch.filterFolders(folders, query))
         }
     }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
+        scope        = viewModelScope,
+        started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = FoldersUiState.Loading,
     )
 }

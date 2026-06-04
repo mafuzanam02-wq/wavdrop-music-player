@@ -31,9 +31,9 @@ class LibraryViewModel @Inject constructor(
     val summary: StateFlow<LibrarySummaryUiState> = songRepository.songs
         .map { songs ->
             LibrarySummaryUiState(
-                totalSongs = songs.size,
-                totalAlbums = AlbumGrouper.group(songs).size,
-                totalArtists = ArtistGrouper.group(songs).size,
+                totalSongs      = songs.size,
+                totalAlbums     = songs.mapTo(HashSet()) { AlbumGrouper.albumKey(it) }.size,
+                totalArtists    = songs.mapTo(HashSet()) { ArtistGrouper.artistKey(it) }.size,
                 totalDurationMs = songs.sumOf { it.duration },
             )
         }

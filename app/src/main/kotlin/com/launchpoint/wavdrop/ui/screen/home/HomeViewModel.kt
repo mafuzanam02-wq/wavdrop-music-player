@@ -82,25 +82,32 @@ class HomeViewModel @Inject constructor(
         initialValue = HomeUiState.Loading,
     )
 
+    // Wrapped preview only depends on songs + events; isolated so that playlist/stats
+    // changes don't trigger a full WrappedBuilder run on every play or skip.
+    private val wrappedPreview: StateFlow<WrappedSummary?> = combine(
+        allSongs,
+        statsRepository.allListenEvents(),
+    ) { songs, events ->
+        val loadedSongs = songs.orEmpty()
+        WrappedBuilder.availableYears(events)
+            .firstOrNull()
+            ?.let { year -> WrappedBuilder.buildYear(year = year, songs = loadedSongs, events = events) }
+            ?.takeIf { it.hasActivity && !it.emptyState.isEmpty }
+    }.stateIn(
+        scope        = viewModelScope,
+        started      = SharingStarted.WhileSubscribed(5_000),
+        initialValue = null,
+    )
+
     val dashboardState: StateFlow<HomeDashboardUiState> = combine(
         allSongs,
         statsRepository.allTrackStatsEntities(),
-        statsRepository.allListenEvents(),
         playlistRepository.observePlaylists(),
         smartCollectionRepository.observeSmartCollections(),
-    ) { songs, stats, events, playlists, smartCollections ->
+        wrappedPreview,
+    ) { songs, stats, playlists, smartCollections, latestWrapped ->
         val loadedSongs = songs.orEmpty()
         val songsById = loadedSongs.associateBy { it.id }
-        val latestWrapped = WrappedBuilder.availableYears(events)
-            .firstOrNull()
-            ?.let { year ->
-                WrappedBuilder.buildYear(
-                    year = year,
-                    songs = loadedSongs,
-                    events = events,
-                )
-            }
-            ?.takeIf { it.hasActivity && !it.emptyState.isEmpty }
         HomeDashboardUiState(
             totalSongs = loadedSongs.size,
             recentlyPlayed = stats
@@ -124,7 +131,7 @@ class HomeViewModel @Inject constructor(
             wrapped = latestWrapped,
         )
     }.stateIn(
-        scope = viewModelScope,
+        scope   = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = HomeDashboardUiState(),
     )

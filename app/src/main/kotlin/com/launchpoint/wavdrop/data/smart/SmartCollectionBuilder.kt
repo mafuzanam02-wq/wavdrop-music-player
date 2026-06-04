@@ -10,9 +10,11 @@ object SmartCollectionBuilder {
     private const val LONG_TRACK_THRESHOLD_MS  = 7 * 60 * 1_000L   // 7 minutes
     private const val SHORT_TRACK_THRESHOLD_MS = 90 * 1_000L        // 90 seconds
 
-    fun build(songs: List<Song>, stats: List<TrackStatsEntity>): List<SmartCollection> =
-        SmartCollectionType.values().mapNotNull { type ->
-            val filtered = songsFor(type, songs, stats)
+    fun build(songs: List<Song>, stats: List<TrackStatsEntity>): List<SmartCollection> {
+        val songIds   = songs.mapTo(HashSet()) { it.id }
+        val statsById = stats.filter { it.songId in songIds }.associateBy { it.songId }
+        return SmartCollectionType.values().mapNotNull { type ->
+            val filtered = songsForInternal(type, songs, statsById)
             if (filtered.isEmpty()) null
             else SmartCollection(
                 id          = type.name,
@@ -22,75 +24,80 @@ object SmartCollectionBuilder {
                 songCount   = filtered.size,
             )
         }
+    }
 
     fun songsFor(
         type: SmartCollectionType,
         songs: List<Song>,
         stats: List<TrackStatsEntity>,
     ): List<Song> {
-        // only consider stats whose songId is still present in the library
-        val songIds   = songs.map { it.id }.toHashSet()
+        val songIds   = songs.mapTo(HashSet()) { it.id }
         val statsById = stats.filter { it.songId in songIds }.associateBy { it.songId }
+        return songsForInternal(type, songs, statsById)
+    }
 
-        return when (type) {
-            SmartCollectionType.FAVORITES ->
-                songs
-                    .filter { statsById[it.id]?.isFavorite == true }
-                    .sortedWith(compareBy({ it.title }, { it.id }))
+    private fun songsForInternal(
+        type: SmartCollectionType,
+        songs: List<Song>,
+        statsById: Map<Long, TrackStatsEntity>,
+    ): List<Song> = when (type) {
+        SmartCollectionType.FAVORITES ->
+            songs
+                .filter { statsById[it.id]?.isFavorite == true }
+                .sortedWith(compareBy({ it.title }, { it.id }))
 
-            SmartCollectionType.MOST_PLAYED ->
-                songs
-                    .filter { (statsById[it.id]?.playCount ?: 0) > 0 }
-                    .sortedWith(
-                        compareByDescending<Song> { statsById[it.id]?.playCount ?: 0 }
-                            .thenBy { it.id },
-                    )
+        SmartCollectionType.MOST_PLAYED ->
+            songs
+                .filter { (statsById[it.id]?.playCount ?: 0) > 0 }
+                .sortedWith(
+                    compareByDescending<Song> { statsById[it.id]?.playCount ?: 0 }
+                        .thenBy { it.id },
+                )
 
-            SmartCollectionType.RECENTLY_PLAYED ->
-                songs
-                    .filter { (statsById[it.id]?.lastPlayedAt ?: 0L) > 0L }
-                    .sortedWith(
-                        compareByDescending<Song> { statsById[it.id]?.lastPlayedAt ?: 0L }
-                            .thenBy { it.id },
-                    )
+        SmartCollectionType.RECENTLY_PLAYED ->
+            songs
+                .filter { (statsById[it.id]?.lastPlayedAt ?: 0L) > 0L }
+                .sortedWith(
+                    compareByDescending<Song> { statsById[it.id]?.lastPlayedAt ?: 0L }
+                        .thenBy { it.id },
+                )
 
-            SmartCollectionType.NEVER_PLAYED ->
-                songs
-                    .filter { (statsById[it.id]?.playCount ?: 0) == 0 }
-                    .sortedWith(compareBy({ it.title }, { it.id }))
+        SmartCollectionType.NEVER_PLAYED ->
+            songs
+                .filter { (statsById[it.id]?.playCount ?: 0) == 0 }
+                .sortedWith(compareBy({ it.title }, { it.id }))
 
-            SmartCollectionType.RECENTLY_ADDED ->
-                songs
-                    .filter { it.dateAdded > 0L }
-                    .sortedWith(
-                        compareByDescending<Song> { it.dateAdded }
-                            .thenBy { it.id },
-                    )
+        SmartCollectionType.RECENTLY_ADDED ->
+            songs
+                .filter { it.dateAdded > 0L }
+                .sortedWith(
+                    compareByDescending<Song> { it.dateAdded }
+                        .thenBy { it.id },
+                )
 
-            SmartCollectionType.MOST_SKIPPED ->
-                songs
-                    .filter { (statsById[it.id]?.skipCount ?: 0) > 0 }
-                    .sortedWith(
-                        compareByDescending<Song> { statsById[it.id]?.skipCount ?: 0 }
-                            .thenBy { it.id },
-                    )
+        SmartCollectionType.MOST_SKIPPED ->
+            songs
+                .filter { (statsById[it.id]?.skipCount ?: 0) > 0 }
+                .sortedWith(
+                    compareByDescending<Song> { statsById[it.id]?.skipCount ?: 0 }
+                        .thenBy { it.id },
+                )
 
-            SmartCollectionType.LONG_TRACKS ->
-                songs
-                    .filter { it.duration >= LONG_TRACK_THRESHOLD_MS }
-                    .sortedWith(
-                        compareByDescending<Song> { it.duration }
-                            .thenBy { it.id },
-                    )
+        SmartCollectionType.LONG_TRACKS ->
+            songs
+                .filter { it.duration >= LONG_TRACK_THRESHOLD_MS }
+                .sortedWith(
+                    compareByDescending<Song> { it.duration }
+                        .thenBy { it.id },
+                )
 
-            SmartCollectionType.SHORT_TRACKS ->
-                songs
-                    .filter { it.duration <= SHORT_TRACK_THRESHOLD_MS }
-                    .sortedWith(
-                        compareBy<Song> { it.duration }
-                            .thenBy { it.id },
-                    )
-        }
+        SmartCollectionType.SHORT_TRACKS ->
+            songs
+                .filter { it.duration <= SHORT_TRACK_THRESHOLD_MS }
+                .sortedWith(
+                    compareBy<Song> { it.duration }
+                        .thenBy { it.id },
+                )
     }
 
     fun titleFor(type: SmartCollectionType): String = when (type) {

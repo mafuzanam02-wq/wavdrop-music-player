@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
@@ -31,12 +32,16 @@ class AlbumsViewModel @Inject constructor(
 
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
-    val uiState: StateFlow<AlbumsUiState> = combine(songRepository.songs, _searchQuery) { songs, query ->
+    // Grouping runs only when the song list changes, not on every search keystroke.
+    private val allAlbums: StateFlow<List<AlbumSummary>?> = songRepository.songs
+        .map { songs -> AlbumGrouper.group(songs) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val uiState: StateFlow<AlbumsUiState> = combine(allAlbums, _searchQuery) { albums, query ->
         when {
-            songs.isEmpty() -> AlbumsUiState.Empty
-            else            -> AlbumsUiState.Ready(
-                LibrarySearch.filterAlbums(AlbumGrouper.group(songs), query)
-            )
+            albums == null   -> AlbumsUiState.Loading
+            albums.isEmpty() -> AlbumsUiState.Empty
+            else             -> AlbumsUiState.Ready(LibrarySearch.filterAlbums(albums, query))
         }
     }.stateIn(
         scope        = viewModelScope,
