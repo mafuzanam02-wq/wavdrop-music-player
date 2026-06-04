@@ -22,9 +22,12 @@ import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -103,6 +106,9 @@ class SettingsViewModel @Inject constructor(
     val libraryScanUiState: StateFlow<LibraryScanUiState> =
         _libraryScanUiState.asStateFlow()
 
+    private val _iconChangeEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val iconChangeEvent: SharedFlow<String> = _iconChangeEvent.asSharedFlow()
+
     fun exportTo(uri: Uri) {
         _exportUiState.value = ExportUiState.Exporting
         viewModelScope.launch {
@@ -178,36 +184,74 @@ class SettingsViewModel @Inject constructor(
     fun setAppIcon(choice: AppIconChoice) {
         viewModelScope.launch {
             appSettingsRepository.setAppIconChoice(choice)
-            applyAppIcon(choice)
+            runCatching { applyAppIcon(choice) }
+                .onSuccess { confirmed ->
+                    val message = if (confirmed) {
+                        "Icon changed. If your launcher still shows the old icon, " +
+                            "restart the launcher or phone."
+                    } else {
+                        "Icon change failed. Please restart the app and try again."
+                    }
+                    _iconChangeEvent.tryEmit(message)
+                }
+                .onFailure { e ->
+                    Log.e(TAG, "Icon switch failed for ${choice.aliasClassName}", e)
+                    _iconChangeEvent.tryEmit(
+                        "Icon change failed. Please restart the app and try again."
+                    )
+                }
         }
     }
 
-    private fun applyAppIcon(choice: AppIconChoice) {
-        val pm = context.packageName
-        val packageManager = context.packageManager
+    /**
+     * Applies the selected launcher alias using explicit manifest class names.
+     * Enables the chosen alias first (so the launcher always has an active entry),
+     * then disables all others.
+     *
+     * Returns true if getComponentEnabledSetting confirms the selected alias is
+     * COMPONENT_ENABLED_STATE_ENABLED after the switch; false otherwise.
+     */
+    private fun applyAppIcon(choice: AppIconChoice): Boolean {
+        val pkg = context.packageName
+        val pm  = context.packageManager
 
-        // Enable the chosen alias FIRST so the launcher always has an active component.
-        // Disabling the current alias before enabling the replacement can leave a brief
-        // window with no active launcher entry, which causes Samsung/some launchers to
-        // lose the shortcut instead of updating the icon.
-        val enableCn = ComponentName(pm, "$pm.${choice.aliasSimpleName}")
-        packageManager.setComponentEnabledSetting(
+        // Enable chosen alias FIRST — always keep at least one launcher entry active.
+        val enableCn = ComponentName(pkg, choice.aliasClassName)
+        pm.setComponentEnabledSetting(
             enableCn,
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             PackageManager.DONT_KILL_APP,
         )
-        Log.d(TAG, "Icon alias ENABLED: ${choice.aliasSimpleName}")
+        Log.d(TAG, "setComponentEnabledSetting ENABLED → ${choice.aliasClassName}")
 
-        // Disable all other aliases.
-        AppIconChoice.entries.filter { it != choice }.forEach { iconChoice ->
-            val disableCn = ComponentName(pm, "$pm.${iconChoice.aliasSimpleName}")
-            packageManager.setComponentEnabledSetting(
-                disableCn,
+        // Disable all other aliases now that the replacement is active.
+        AppIconChoice.entries.filter { it != choice }.forEach { other ->
+            pm.setComponentEnabledSetting(
+                ComponentName(pkg, other.aliasClassName),
                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 PackageManager.DONT_KILL_APP,
             )
-            Log.d(TAG, "Icon alias DISABLED: ${iconChoice.aliasSimpleName}")
+            Log.d(TAG, "setComponentEnabledSetting DISABLED → ${other.aliasClassName}")
         }
+
+        // Read back actual state for every launcher component and log diagnostics.
+        val mainActivityState = pm.getComponentEnabledSetting(
+            ComponentName(pkg, "com.launchpoint.wavdrop.MainActivity")
+        )
+        Log.d(TAG, "STATE MainActivity                          = $mainActivityState")
+        AppIconChoice.entries.forEach { entry ->
+            val state   = pm.getComponentEnabledSetting(ComponentName(pkg, entry.aliasClassName))
+            val marker  = if (entry == choice) "★" else " "
+            Log.d(TAG, "STATE $marker ${entry.aliasClassName} = $state")
+        }
+
+        // Confirm the selected alias is now explicitly enabled.
+        val selectedState = pm.getComponentEnabledSetting(enableCn)
+        val confirmed     = selectedState == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        if (!confirmed) {
+            Log.w(TAG, "Alias not confirmed enabled after switch: state=$selectedState")
+        }
+        return confirmed
     }
 
     private companion object {

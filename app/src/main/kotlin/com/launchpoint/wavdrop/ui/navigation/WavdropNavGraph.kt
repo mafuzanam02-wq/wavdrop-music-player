@@ -36,7 +36,14 @@ import com.launchpoint.wavdrop.ui.screen.playlists.PlaylistDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.playlists.PlaylistsScreen
 import com.launchpoint.wavdrop.ui.screen.monthlyreports.MonthlyReportsScreen
 import com.launchpoint.wavdrop.ui.screen.reports.ReportsScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsAboutScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsAppearanceScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsBackupScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsBluetoothScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsLibraryScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsPlaybackScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsStatisticsScreen
 import com.launchpoint.wavdrop.ui.screen.smart.SmartCollectionDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.smart.SmartCollectionsScreen
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
@@ -53,6 +60,13 @@ sealed class Screen(val route: String) {
     data object BackupImportPreview : Screen("backup_import_preview")
     data object NowPlaying          : Screen("now_playing")
     data object Settings            : Screen("settings")
+    data object SettingsPlayback    : Screen("settings/playback")
+    data object SettingsBluetooth   : Screen("settings/bluetooth")
+    data object SettingsLibrary     : Screen("settings/library")
+    data object SettingsBackup      : Screen("settings/backup")
+    data object SettingsAppearance  : Screen("settings/appearance")
+    data object SettingsStatistics  : Screen("settings/statistics")
+    data object SettingsAbout       : Screen("settings/about")
     data object HomeCustomization   : Screen("home_customization")
     data object Albums              : Screen("albums")
     data object Artists             : Screen("artists")
@@ -345,23 +359,57 @@ fun WavdropNavGraph(
         }
         composable(Screen.Settings.route) {
             SettingsScreen(
-                onNavigateBack           = { navController.popBackStack() },
-                onHomeClick              = { navController.navigatePrimary(Screen.Home.route) },
-                onSongsClick             = { navController.navigatePrimary(Screen.Songs.route) },
-                onLibraryClick           = { navController.navigatePrimary(Screen.Library.route) },
-                onNowPlayingClick        = { navController.navigateNowPlaying() },
-                onImportClick            = { navController.navigate(Screen.BpstatPreview.route) },
-                onBackupImportClick      = { uri ->
+                onNavigateBack         = { navController.popBackStack() },
+                onHomeClick            = { navController.navigatePrimary(Screen.Home.route) },
+                onSongsClick           = { navController.navigatePrimary(Screen.Songs.route) },
+                onLibraryClick         = { navController.navigatePrimary(Screen.Library.route) },
+                onNowPlayingClick      = { navController.navigateNowPlaying() },
+                onPlaybackClick        = { navController.navigate(Screen.SettingsPlayback.route) },
+                onBluetoothClick       = { navController.navigate(Screen.SettingsBluetooth.route) },
+                onLibrarySettingsClick = { navController.navigate(Screen.SettingsLibrary.route) },
+                onBackupClick          = { navController.navigate(Screen.SettingsBackup.route) },
+                onAppearanceClick      = { navController.navigate(Screen.SettingsAppearance.route) },
+                onStatisticsClick      = { navController.navigate(Screen.SettingsStatistics.route) },
+                onAboutClick           = { navController.navigate(Screen.SettingsAbout.route) },
+            )
+        }
+        composable(Screen.SettingsPlayback.route) {
+            SettingsPlaybackScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.SettingsBluetooth.route) {
+            SettingsBluetoothScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.SettingsLibrary.route) {
+            SettingsLibraryScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.SettingsBackup.route) {
+            SettingsBackupScreen(
+                onNavigateBack      = { navController.popBackStack() },
+                onImportClick       = { navController.navigate(Screen.BpstatPreview.route) },
+                onBackupImportClick = { uri ->
                     navController.navigate(
                         "${Screen.BackupImportPreview.route}?uri=${Uri.encode(uri.toString())}"
                     )
                 },
-                onStatisticsClick        = { navController.navigate(Screen.Statistics.route) },
-                onReportsClick           = { navController.navigate(Screen.Reports.route) },
-                onMonthlyReportsClick    = { navController.navigate(Screen.MonthlyReports.route) },
-                onWrappedClick           = { navController.navigate(Screen.Wrapped.route) },
+            )
+        }
+        composable(Screen.SettingsAppearance.route) {
+            SettingsAppearanceScreen(
+                onNavigateBack           = { navController.popBackStack() },
                 onHomeCustomizationClick = { navController.navigate(Screen.HomeCustomization.route) },
             )
+        }
+        composable(Screen.SettingsStatistics.route) {
+            SettingsStatisticsScreen(
+                onNavigateBack        = { navController.popBackStack() },
+                onStatisticsClick     = { navController.navigate(Screen.Statistics.route) },
+                onReportsClick        = { navController.navigate(Screen.Reports.route) },
+                onMonthlyReportsClick = { navController.navigate(Screen.MonthlyReports.route) },
+                onWrappedClick        = { navController.navigate(Screen.Wrapped.route) },
+            )
+        }
+        composable(Screen.SettingsAbout.route) {
+            SettingsAboutScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.HomeCustomization.route) {
             HomeCustomizationScreen(
