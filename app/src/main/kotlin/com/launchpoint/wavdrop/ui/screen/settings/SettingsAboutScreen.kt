@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +41,7 @@ import com.launchpoint.wavdrop.BuildConfig
 @Composable
 fun SettingsAboutScreen(
     onNavigateBack: () -> Unit,
+    onDiagnosticsClick: () -> Unit,
 ) {
     var showFormatsDialog        by remember { mutableStateOf(false) }
     var showPrivacyPolicyDialog  by remember { mutableStateOf(false) }
@@ -70,26 +72,37 @@ fun SettingsAboutScreen(
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            item { SectionHeader("App Info") }
+            item { SectionHeader("Wavdrop") }
             item { AppIdentityCard() }
+            item { SectionHeader("Privacy") }
             item {
-                AboutInfoRow(label = "Version name", value = BuildConfig.VERSION_NAME)
-                AboutInfoRow(label = "Version code", value = BuildConfig.VERSION_CODE.toString())
-                AboutInfoRow(label = "Package",      value = WavdropAbout.PACKAGE_NAME)
+                AboutPromiseCard(
+                    title = "Offline-first by design",
+                    body = "Wavdrop plays music already on your device. It does not require an account, upload your songs, or sell user data.",
+                )
             }
-            item { SectionDivider() }
+            item {
+                AboutPromiseCard(
+                    title = "Your library stays yours",
+                    body = "Library data, playlists, lyrics overrides, preferences, backups, statistics, and listening history stay local unless you manually export or import backup files.",
+                )
+            }
+            item { SectionHeader("Built By") }
             item {
                 ClickableSettingsRow(
-                    title    = "Powered by LaunchPoint Digital",
+                    title    = "LaunchPoint Digital",
                     subtitle = "Websites, apps and digital tools",
                     onClick  = { context.openWebsite(WavdropAbout.WEBSITE_URL) },
                 )
             }
+            item { SectionDivider() }
+            item { SectionHeader("Support") }
             item {
                 ClickableSettingsRow(
                     title    = "Contact Support",
-                    subtitle = WavdropAbout.CONTACT_EMAIL,
+                    subtitle = "${WavdropAbout.CONTACT_EMAIL} - include your version and Android device",
                     onClick  = {
                         context.openSupportEmail(
                             email   = WavdropAbout.CONTACT_EMAIL,
@@ -99,36 +112,45 @@ fun SettingsAboutScreen(
                 )
             }
             item { SectionDivider() }
+            item { SectionHeader("Tools") }
+            item {
+                ClickableSettingsRow(
+                    title    = "Supported Audio Formats",
+                    subtitle = "Android and Media3 playback support by device",
+                    onClick  = { showFormatsDialog = true },
+                )
+            }
+            item {
+                ClickableSettingsRow(
+                    title    = "Diagnostics",
+                    subtitle = "Read-only tester snapshot with no private library details",
+                    onClick  = onDiagnosticsClick,
+                )
+            }
+            item { SectionDivider() }
+            item { SectionHeader("Legal") }
             item {
                 ClickableSettingsRow(
                     title    = "Privacy Policy",
-                    subtitle = "Offline-first data and permissions",
+                    subtitle = "Offline-first data, local storage, and permissions",
                     onClick  = { showPrivacyPolicyDialog = true },
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Disclaimer",
-                    subtitle = "Independence, imports, formats and content",
+                    subtitle = "Independent player, imports, formats, and user content",
                     onClick  = { showDisclaimerDialog = true },
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Open Source Licenses",
-                    subtitle = "Libraries and technologies used by Wavdrop",
+                    subtitle = "Open-source Android technologies used by Wavdrop",
                     onClick  = { showOpenSourceDialog = true },
                 )
             }
-            item {
-                ClickableSettingsRow(
-                    title    = "Supported Audio Formats",
-                    subtitle = "MP3, AAC, FLAC, OGG, Opus, WAV and more",
-                    onClick  = { showFormatsDialog = true },
-                )
-            }
             item { CopyrightRow() }
-            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 
@@ -165,26 +187,77 @@ private fun AppIdentityCard(modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
         ),
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Text(
-                text  = WavdropAbout.APP_NAME,
+                text  = WavdropAbout.PRODUCT_NAME,
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text  = WavdropAbout.PRODUCT_NAME,
+                text  = "A local music player for your own audio library.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
             )
             Spacer(Modifier.height(12.dp))
-            AboutInfoRow(label = "Package name", value = WavdropAbout.PACKAGE_NAME)
-            AboutInfoRow(label = "Version name", value = BuildConfig.VERSION_NAME)
-            AboutInfoRow(label = "Version code", value = BuildConfig.VERSION_CODE.toString())
+            CompactInfoLine(label = "App", value = WavdropAbout.APP_NAME)
+            CompactInfoLine(label = "Version", value = BuildConfig.VERSION_NAME)
+            CompactInfoLine(label = "Build", value = BuildConfig.VERSION_CODE.toString())
+            CompactInfoLine(label = "Package", value = WavdropAbout.PACKAGE_NAME)
         }
+    }
+}
+
+@Composable
+private fun AboutPromiseCard(
+    title: String,
+    body: String,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        ),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactInfoLine(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
@@ -243,17 +316,17 @@ private fun AudioFormatsDialog(onDismiss: () -> Unit) {
                 Spacer(Modifier.height(14.dp))
                 FormatGroup(
                     title   = "Reliably supported",
-                    formats = "MP3 · AAC / M4A · FLAC · OGG Vorbis · Opus · WAV · AMR · MIDI",
+                    formats = "MP3, AAC / M4A, FLAC, OGG Vorbis, Opus, WAV, AMR, MIDI",
                 )
                 Spacer(Modifier.height(12.dp))
                 FormatGroup(
                     title   = "Device-dependent",
-                    formats = "ALAC · WMA · AC-3 · E-AC-3 · DTS · High-bit-depth WAV",
+                    formats = "ALAC, WMA, AC-3, E-AC-3, DTS, high-bit-depth WAV",
                 )
                 Spacer(Modifier.height(12.dp))
                 FormatGroup(
                     title   = "Not currently supported",
-                    formats = "APE · AIFF · WavPack · Musepack · TTA · DSD / DSF / DFF · RealAudio",
+                    formats = "APE, AIFF, WavPack, Musepack, TTA, DSD / DSF / DFF, RealAudio",
                 )
             }
         },
@@ -309,7 +382,7 @@ private object WavdropAbout {
     val PRIVACY_POLICY = listOf(
         "Wavdrop is an offline-first music player. It does not require an account, does not upload your music files, and does not sell user data.",
         "Music library data, playlists, lyrics overrides, preferences, backups, statistics, and listening history are stored locally on your device unless you manually export or import backup files.",
-        "Android permissions are used only for music/library access and playback-related functionality.",
+        "Android permissions are used only for music library access and playback-related functionality.",
         "If optional cloud backup or sync is added in the future, it must remain opt-in.",
     )
 
@@ -322,8 +395,8 @@ private object WavdropAbout {
     )
 
     val OPEN_SOURCE_LICENSES = listOf(
-        "Wavdrop uses open-source Android libraries and technologies.",
+        "Wavdrop is built with open-source Android libraries and technologies.",
         "Key technologies include Kotlin, Jetpack Compose, Media3 / ExoPlayer, Room, Hilt, and Coil.",
-        "Detailed license information will be added before a full public release. This screen does not claim exact license terms unless they have been verified in project files.",
+        "Detailed license information will be added before a full public release. This screen stays factual and does not claim exact license terms unless they have been verified in project files.",
     )
 }

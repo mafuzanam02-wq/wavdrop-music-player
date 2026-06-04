@@ -11,6 +11,7 @@ import com.launchpoint.wavdrop.data.local.MIGRATION_3_4
 import com.launchpoint.wavdrop.data.local.MIGRATION_4_5
 import com.launchpoint.wavdrop.data.local.MIGRATION_5_6
 import com.launchpoint.wavdrop.data.local.MIGRATION_6_7
+import com.launchpoint.wavdrop.data.local.WAVDROP_DATABASE_NAME
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
@@ -36,7 +37,7 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): WavdropDatabase =
-        Room.databaseBuilder(context, WavdropDatabase::class.java, "wavdrop.db")
+        Room.databaseBuilder(context, WavdropDatabase::class.java, WAVDROP_DATABASE_NAME)
             .addMigrations(
                 MIGRATION_1_2,
                 MIGRATION_2_3,
