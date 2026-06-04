@@ -23,11 +23,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -35,11 +41,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import com.launchpoint.wavdrop.data.model.ArtistAlbumInsight
 import com.launchpoint.wavdrop.data.model.ArtistInsightsSummary
+import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
-import com.launchpoint.wavdrop.ui.components.SongRow
+import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
+import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,10 +58,16 @@ fun ArtistDetailsScreen(
     onTrackDetailsClick: (Long) -> Unit,
     onAlbumClick: (String) -> Unit = {},
     viewModel: ArtistDetailsViewModel = hiltViewModel(),
+    playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state             by viewModel.uiState.collectAsStateWithLifecycle()
+    val playlists         by playlistVm.playlists.collectAsStateWithLifecycle()
+    var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
+    val snackbarHostState  = remember { SnackbarHostState() }
+    val coroutineScope     = rememberCoroutineScope()
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -130,22 +146,48 @@ fun ArtistDetailsScreen(
                 item { EmptySectionRow("No songs found for this artist.") }
             } else {
                 items(state.songs, key = { it.id }) { song ->
-                    SongRow(
-                        song = song,
-                        isCurrent = song.id == state.currentSongId,
-                        isFavorite = song.id in state.favoriteSongIds,
-                        onClick = { viewModel.playSong(song) },
-                        onToggleFavorite = { viewModel.toggleFavorite(song.id) },
-                        onOpenDetails = { onTrackDetailsClick(song.id) },
-                        modifier = Modifier.fillMaxWidth(),
+                    val isFavorite = song.id in state.favoriteSongIds
+                    SongRowWithOverflow(
+                        song             = song,
+                        isCurrent        = song.id == state.currentSongId,
+                        isFavorite       = isFavorite,
+                        onPlay           = { viewModel.playSong(song) },
+                        onPlayNext       = { viewModel.playNext(song) },
+                        onAddToQueue     = { viewModel.addToQueue(song) },
+                        onToggleFavorite = {
+                            viewModel.toggleFavorite(song.id)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    if (isFavorite) "Removed from Favorites" else "Added to Favorites",
+                                )
+                            }
+                        },
+                        onAddToPlaylist  = { addToPlaylistSong = song },
+                        onTrackDetails   = { onTrackDetailsClick(song.id) },
+                        modifier         = Modifier.fillMaxWidth(),
                     )
                     HorizontalDivider(
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                         thickness = 0.5.dp,
                     )
                 }
             }
         }
+    }
+
+    addToPlaylistSong?.let { song ->
+        AddToPlaylistDialog(
+            playlists        = playlists,
+            onSelectPlaylist = { playlistId ->
+                playlistVm.addSongToPlaylist(song.id, playlistId)
+                addToPlaylistSong = null
+            },
+            onCreateAndAdd   = { name ->
+                playlistVm.createPlaylistAndAddSong(name, song.id)
+                addToPlaylistSong = null
+            },
+            onDismiss        = { addToPlaylistSong = null },
+        )
     }
 }
 

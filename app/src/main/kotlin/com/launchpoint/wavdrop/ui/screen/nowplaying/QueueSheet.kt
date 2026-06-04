@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.ui.screen.nowplaying
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,20 +29,32 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +104,40 @@ private fun QueueSheetContent(
     val upNextSongs = if (currentIndex >= 0) state.queue.drop(currentIndex + 1) else emptyList()
 
     val listState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var draggedPlaybackIndex by remember { mutableStateOf<Int?>(null) }
+    var draggedOffsetY by remember { mutableFloatStateOf(0f) }
+    var queueRowHeightPx by remember { mutableFloatStateOf(1f) }
+    val firstUpNextPlaybackIndex = currentIndex + 1
+    val lastUpNextPlaybackIndex = currentIndex + upNextSongs.size
+
+    fun showRemovedSnackbar() {
+        scope.launch {
+            snackbarHostState.showSnackbar("Removed from queue")
+        }
+    }
+
+    fun onDraggedBy(deltaY: Float) {
+        val rowHeight = queueRowHeightPx.takeIf { it > 0f } ?: return
+        var activeIndex = draggedPlaybackIndex ?: return
+        var offset = draggedOffsetY + deltaY
+        val threshold = rowHeight * 0.55f
+
+        while (offset > threshold && activeIndex < lastUpNextPlaybackIndex) {
+            onMoveDown(activeIndex)
+            activeIndex += 1
+            offset -= rowHeight
+        }
+        while (offset < -threshold && activeIndex > firstUpNextPlaybackIndex) {
+            onMoveUp(activeIndex)
+            activeIndex -= 1
+            offset += rowHeight
+        }
+
+        draggedPlaybackIndex = activeIndex
+        draggedOffsetY = offset
+    }
 
     // Scroll to the "Playing now" section header on open and when the current track changes.
     // LazyColumn item layout (0-based):
@@ -105,18 +152,19 @@ private fun QueueSheetContent(
         }
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        QueueSheetHeader(onDismiss = onDismiss)
-        HorizontalDivider(
-            thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-        )
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false),
-        ) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            QueueSheetHeader(onDismiss = onDismiss)
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+            ) {
         // ── Previously played ─────────────────────────────────────────────────
         if (previousSongs.isNotEmpty()) {
             item {
@@ -171,15 +219,31 @@ private fun QueueSheetContent(
                 val playbackIndex = currentIndex + 1 + index
                 val isFirstUpNext = index == 0
                 val isLastUpNext = index == upNextSongs.lastIndex
-                QueueItemRow(
+                SwipeableQueueItemRow(
                     song = song,
+                    playbackIndex = playbackIndex,
                     isFirstUpNext = isFirstUpNext,
                     isLastUpNext = isLastUpNext,
+                    isDragging = draggedPlaybackIndex == playbackIndex,
+                    dragOffsetY = if (draggedPlaybackIndex == playbackIndex) draggedOffsetY else 0f,
+                    onRowHeight = { heightPx -> queueRowHeightPx = heightPx.toFloat() },
+                    onDragStart = {
+                        draggedPlaybackIndex = playbackIndex
+                        draggedOffsetY = 0f
+                    },
+                    onDrag = ::onDraggedBy,
+                    onDragEnd = {
+                        draggedPlaybackIndex = null
+                        draggedOffsetY = 0f
+                    },
                     onJump = { onJumpToItem(playbackIndex) },
                     onMoveUp = { onMoveUp(playbackIndex) },
                     onMoveDown = { onMoveDown(playbackIndex) },
                     onPlayNext = { onPlayNext(playbackIndex) },
-                    onRemove = { onRemoveItem(playbackIndex) },
+                    onRemove = {
+                        onRemoveItem(playbackIndex)
+                        showRemovedSnackbar()
+                    },
                     onViewStats = { onViewStats(song.id) },
                 )
                 if (!isLastUpNext) {
@@ -202,7 +266,14 @@ private fun QueueSheetContent(
         }
 
         item { Spacer(Modifier.height(24.dp)) }
+            }
         }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        )
     }
 }
 

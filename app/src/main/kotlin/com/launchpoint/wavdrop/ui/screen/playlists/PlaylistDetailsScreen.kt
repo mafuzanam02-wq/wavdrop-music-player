@@ -39,6 +39,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -47,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,10 +61,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
+import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PlaylistArtworkCollage
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
+import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,14 +78,19 @@ fun PlaylistDetailsScreen(
     onNowPlayingClick: () -> Unit = {},
     viewModel: PlaylistDetailsViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
+    playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
-    val state        by viewModel.uiState.collectAsStateWithLifecycle()
-    val nowPlaying   by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
-    var showRename   by remember { mutableStateOf(false) }
-    var showDelete   by remember { mutableStateOf(false) }
-    var menuExpanded by remember { mutableStateOf(false) }
-    var renameError  by remember { mutableStateOf<String?>(null) }
-    var searchMode   by remember { mutableStateOf(false) }
+    val state             by viewModel.uiState.collectAsStateWithLifecycle()
+    val nowPlaying        by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
+    val playlists         by playlistVm.playlists.collectAsStateWithLifecycle()
+    var showRename        by remember { mutableStateOf(false) }
+    var showDelete        by remember { mutableStateOf(false) }
+    var menuExpanded      by remember { mutableStateOf(false) }
+    var renameError       by remember { mutableStateOf<String?>(null) }
+    var searchMode        by remember { mutableStateOf(false) }
+    var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
+    val snackbarHostState  = remember { SnackbarHostState() }
+    val coroutineScope     = rememberCoroutineScope()
 
     val playlistName = state.playlist?.name ?: ""
     val songCount    = state.entries.size
@@ -164,6 +175,7 @@ fun PlaylistDetailsScreen(
                 )
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             MiniPlayer(
                 nowPlaying        = nowPlaying,
@@ -212,16 +224,27 @@ fun PlaylistDetailsScreen(
                     item { NoPlaylistSearchResults() }
                 } else {
                     itemsIndexed(state.visibleEntries, key = { _, entry -> "${entry.position}:${entry.songId}" }) { index, entry ->
+                        val isFavorite = entry.songId in state.favoriteSongIds
                         PlaylistSongRow(
                             entry            = entry,
                             isFirst          = index == 0,
                             isLast           = index == state.visibleEntries.lastIndex,
                             allowMove        = !state.isSearchActive,
                             isCurrent        = entry.songId == state.currentSongId,
-                            isFavorite       = entry.songId in state.favoriteSongIds,
+                            isFavorite       = isFavorite,
                             onClick          = { viewModel.playEntry(entry) },
-                            onToggleFavorite = { viewModel.toggleFavorite(entry.songId) },
+                            onToggleFavorite = {
+                                viewModel.toggleFavorite(entry.songId)
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        if (isFavorite) "Removed from Favorites" else "Added to Favorites",
+                                    )
+                                }
+                            },
                             onOpenDetails    = { onTrackDetailsClick(entry.songId) },
+                            onPlayNext       = { viewModel.playNext(entry.song) },
+                            onAddToQueue     = { viewModel.addToQueue(entry.song) },
+                            onAddToPlaylist  = { addToPlaylistSong = entry.song },
                             onRemove         = { viewModel.removeEntry(entry.position) },
                             onMoveUp         = { viewModel.moveEntryUp(entry.position) },
                             onMoveDown       = { viewModel.moveEntryDown(entry.position) },
@@ -235,6 +258,21 @@ fun PlaylistDetailsScreen(
                 }
             }
         }
+    }
+
+    addToPlaylistSong?.let { song ->
+        AddToPlaylistDialog(
+            playlists        = playlists,
+            onSelectPlaylist = { playlistId ->
+                playlistVm.addSongToPlaylist(song.id, playlistId)
+                addToPlaylistSong = null
+            },
+            onCreateAndAdd   = { name ->
+                playlistVm.createPlaylistAndAddSong(name, song.id)
+                addToPlaylistSong = null
+            },
+            onDismiss        = { addToPlaylistSong = null },
+        )
     }
 
     // ── Rename dialog ─────────────────────────────────────────────────────────
@@ -420,6 +458,9 @@ private fun PlaylistSongRow(
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenDetails: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onAddToPlaylist: () -> Unit,
     onRemove: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -471,30 +512,37 @@ private fun PlaylistSongRow(
                 expanded         = menuExpanded,
                 onDismissRequest = { menuExpanded = false },
             ) {
+                DropdownMenuItem(
+                    text    = { Text("Play next") },
+                    onClick = { menuExpanded = false; onPlayNext() },
+                )
+                DropdownMenuItem(
+                    text    = { Text("Add to queue") },
+                    onClick = { menuExpanded = false; onAddToQueue() },
+                )
+                DropdownMenuItem(
+                    text    = { Text("Add to playlist") },
+                    onClick = { menuExpanded = false; onAddToPlaylist() },
+                )
+                DropdownMenuItem(
+                    text    = { Text("Track details") },
+                    onClick = { menuExpanded = false; onOpenDetails() },
+                )
                 if (allowMove) {
                     DropdownMenuItem(
                         text    = { Text("Move up") },
                         enabled = !isFirst,
-                        onClick = {
-                            menuExpanded = false
-                            onMoveUp()
-                        },
+                        onClick = { menuExpanded = false; onMoveUp() },
                     )
                     DropdownMenuItem(
                         text    = { Text("Move down") },
                         enabled = !isLast,
-                        onClick = {
-                            menuExpanded = false
-                            onMoveDown()
-                        },
+                        onClick = { menuExpanded = false; onMoveDown() },
                     )
                 }
                 DropdownMenuItem(
                     text    = { Text("Remove from playlist") },
-                    onClick = {
-                        menuExpanded = false
-                        onRemove()
-                    },
+                    onClick = { menuExpanded = false; onRemove() },
                 )
             }
         }

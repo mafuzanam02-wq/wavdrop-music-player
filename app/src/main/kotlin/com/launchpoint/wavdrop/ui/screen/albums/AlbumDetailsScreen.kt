@@ -19,11 +19,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -32,8 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
+import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
-import com.launchpoint.wavdrop.ui.components.SongRow
+import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
+import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +51,13 @@ fun AlbumDetailsScreen(
     onNavigateBack: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     viewModel: AlbumDetailsViewModel = hiltViewModel(),
+    playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state             by viewModel.uiState.collectAsStateWithLifecycle()
+    val playlists         by playlistVm.playlists.collectAsStateWithLifecycle()
+    var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
+    val snackbarHostState  = remember { SnackbarHostState() }
+    val coroutineScope     = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -68,10 +83,7 @@ fun AlbumDetailsScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -80,11 +92,10 @@ fun AlbumDetailsScreen(
                 ),
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         LazyColumn(
-            modifier       = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
+            modifier       = Modifier.padding(innerPadding).fillMaxSize(),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
             item {
@@ -95,13 +106,24 @@ fun AlbumDetailsScreen(
                 )
             }
             items(state.songs, key = { it.id }) { song ->
-                SongRow(
+                val isFavorite = song.id in state.favoriteSongIds
+                SongRowWithOverflow(
                     song             = song,
                     isCurrent        = song.id == state.currentSongId,
-                    isFavorite       = song.id in state.favoriteSongIds,
-                    onClick          = { viewModel.playSong(song) },
-                    onToggleFavorite = { viewModel.toggleFavorite(song.id) },
-                    onOpenDetails    = { onTrackDetailsClick(song.id) },
+                    isFavorite       = isFavorite,
+                    onPlay           = { viewModel.playSong(song) },
+                    onPlayNext       = { viewModel.playNext(song) },
+                    onAddToQueue     = { viewModel.addToQueue(song) },
+                    onToggleFavorite = {
+                        viewModel.toggleFavorite(song.id)
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (isFavorite) "Removed from Favorites" else "Added to Favorites",
+                            )
+                        }
+                    },
+                    onAddToPlaylist  = { addToPlaylistSong = song },
+                    onTrackDetails   = { onTrackDetailsClick(song.id) },
                     modifier         = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider(
@@ -111,6 +133,21 @@ fun AlbumDetailsScreen(
             }
         }
     }
+
+    addToPlaylistSong?.let { song ->
+        AddToPlaylistDialog(
+            playlists        = playlists,
+            onSelectPlaylist = { playlistId ->
+                playlistVm.addSongToPlaylist(song.id, playlistId)
+                addToPlaylistSong = null
+            },
+            onCreateAndAdd   = { name ->
+                playlistVm.createPlaylistAndAddSong(name, song.id)
+                addToPlaylistSong = null
+            },
+            onDismiss        = { addToPlaylistSong = null },
+        )
+    }
 }
 
 @Composable
@@ -119,41 +156,39 @@ private fun AlbumHeader(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier              = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         ArtworkImage(
-            artworkUri = ArtworkResolver.albumArtworkUri(state.albumId),
+            artworkUri         = ArtworkResolver.albumArtworkUri(state.albumId),
             contentDescription = "Album artwork for ${state.albumName}",
-            placeholderIcon = Icons.Default.Album,
-            modifier = Modifier.size(112.dp),
+            placeholderIcon    = Icons.Default.Album,
+            modifier           = Modifier.size(112.dp),
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = state.albumName,
-                style = MaterialTheme.typography.titleLarge,
+                text       = state.albumName,
+                style      = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                color      = MaterialTheme.colorScheme.onSurface,
+                maxLines   = 2,
+                overflow   = TextOverflow.Ellipsis,
             )
             if (state.artist.isNotBlank()) {
                 Text(
-                    text = state.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                    text     = state.artist,
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
             Text(
-                text = "${state.songs.size} songs - ${formatTotalDuration(state.totalDurationMs)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f),
+                text     = "${state.songs.size} songs - ${formatTotalDuration(state.totalDurationMs)}",
+                style    = MaterialTheme.typography.labelMedium,
+                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f),
                 modifier = Modifier.padding(top = 8.dp),
             )
         }

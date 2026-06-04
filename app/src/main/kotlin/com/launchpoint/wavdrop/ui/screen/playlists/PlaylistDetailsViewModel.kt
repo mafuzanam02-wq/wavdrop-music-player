@@ -118,6 +118,9 @@ class PlaylistDetailsViewModel @Inject constructor(
         searchQuery.value = ""
     }
 
+    fun playNext(song: Song)   = playerController.playNext(song)
+    fun addToQueue(song: Song) = playerController.addToQueue(song)
+
     fun playEntry(entry: PlaylistSongItem, shuffle: Boolean = false) {
         val songs = uiState.value.visibleEntries.map { it.song }
         if (songs.isEmpty()) return

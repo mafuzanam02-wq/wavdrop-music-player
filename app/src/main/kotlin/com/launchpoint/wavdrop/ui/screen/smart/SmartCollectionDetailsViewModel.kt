@@ -134,6 +134,9 @@ class SmartCollectionDetailsViewModel @Inject constructor(
         playerController.playFromQueue(queue = queue, startSong = song)
     }
 
+    fun playNext(song: Song)   = playerController.playNext(song)
+    fun addToQueue(song: Song) = playerController.addToQueue(song)
+
     fun playAll() {
         val songs = uiState.value.songs
         val first = songs.firstOrNull() ?: return
