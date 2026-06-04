@@ -336,7 +336,6 @@ private fun NowPlayingContent(
             lyrics             = lyrics,
             showLyricsOverlay  = showLyricsOverlay,
             onToggleLyrics     = onToggleLyrics,
-            onTogglePlayPause  = onTogglePlayPause,
             onPrevious         = onPrevious,
             onNext             = onNext,
             onEditLyrics       = onEditLyrics,
@@ -512,7 +511,6 @@ private fun TrackInfoBlock(
     lyrics: LyricsResult,
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
-    onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onEditLyrics: () -> Unit,
@@ -526,16 +524,14 @@ private fun TrackInfoBlock(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ArtworkWithLyricsOverlay(
-            song = song,
-            lyrics = lyrics,
+            song              = song,
+            lyrics            = lyrics,
             showLyricsOverlay = showLyricsOverlay,
-            onToggleLyrics = onToggleLyrics,
-            onTogglePlayPause = onTogglePlayPause,
-            onPrevious = onPrevious,
-            onNext = onNext,
-            onEditLyrics = onEditLyrics,
-            onOpenTrackDetails = onOpenTrackDetails,
-            modifier = Modifier
+            onToggleLyrics    = onToggleLyrics,
+            onPrevious        = onPrevious,
+            onNext            = onNext,
+            onEditLyrics      = onEditLyrics,
+            modifier          = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 360.dp)
                 .aspectRatio(1f),
@@ -543,7 +539,7 @@ private fun TrackInfoBlock(
         if (!showLyricsOverlay) {
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Double-tap for lyrics · Long-press for details",
+                text = "Double-tap for lyrics · Long-press to edit lyrics",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
                 textAlign = TextAlign.Center,
@@ -608,74 +604,44 @@ private fun ArtworkWithLyricsOverlay(
     lyrics: LyricsResult,
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
-    onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onEditLyrics: () -> Unit,
-    onOpenTrackDetails: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context       = LocalContext.current
+    val context          = LocalContext.current
     val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
-    val scope = rememberCoroutineScope()
-    var suppressTapAfterSwipe by remember { mutableStateOf(false) }
     val currentToggleLyrics by rememberUpdatedState(onToggleLyrics)
-    val currentTogglePlayPause by rememberUpdatedState(onTogglePlayPause)
-    val currentPrevious by rememberUpdatedState(onPrevious)
-    val currentNext by rememberUpdatedState(onNext)
-    val currentEdit by rememberUpdatedState(onEditLyrics)
-    val currentOpenTrackDetails by rememberUpdatedState(onOpenTrackDetails)
-
-    fun markSwipeHandled() {
-        suppressTapAfterSwipe = true
-        scope.launch {
-            delay(300)
-            suppressTapAfterSwipe = false
-        }
-    }
+    val currentPrevious     by rememberUpdatedState(onPrevious)
+    val currentNext         by rememberUpdatedState(onNext)
+    val currentEdit         by rememberUpdatedState(onEditLyrics)
 
     Box(
         modifier = modifier
-            .pointerInput(song.id, suppressTapAfterSwipe) {
+            .pointerInput(song.id) {
                 detectTapGestures(
-                    onTap = {
-                        if (!suppressTapAfterSwipe) {
-                            currentTogglePlayPause()
-                        }
-                    },
                     onDoubleTap = { currentToggleLyrics() },
-                    onLongPress = {
-                        if (showLyricsOverlay) {
-                            currentEdit()
-                        } else {
-                            currentOpenTrackDetails()
-                        }
-                    },
+                    onLongPress = { currentEdit() },
                 )
             }
             .pointerInput(song.id, showLyricsOverlay, swipeThresholdPx) {
                 if (showLyricsOverlay) return@pointerInput
                 var dragDistance = Offset.Zero
                 detectDragGestures(
-                    onDragStart = { dragDistance = Offset.Zero },
-                    onDrag = { change, dragAmount ->
+                    onDragStart  = { dragDistance = Offset.Zero },
+                    onDrag       = { change, dragAmount ->
                         dragDistance += dragAmount
                         val horizontal = abs(dragDistance.x)
-                        val vertical = abs(dragDistance.y)
+                        val vertical   = abs(dragDistance.y)
                         if (horizontal >= swipeThresholdPx && horizontal > vertical * 1.25f) {
                             change.consume()
                         }
                     },
-                    onDragEnd = {
+                    onDragEnd    = {
                         val horizontal = abs(dragDistance.x)
-                        val vertical = abs(dragDistance.y)
+                        val vertical   = abs(dragDistance.y)
                         if (horizontal >= swipeThresholdPx && horizontal > vertical * 1.25f) {
-                            markSwipeHandled()
-                            if (dragDistance.x < 0f) {
-                                currentNext()
-                            } else {
-                                currentPrevious()
-                            }
+                            if (dragDistance.x < 0f) currentNext() else currentPrevious()
                         }
                         dragDistance = Offset.Zero
                     },
