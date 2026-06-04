@@ -38,15 +38,17 @@ class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    // Fires when an audio device is added to the system (e.g. BT headphones connect).
+    // Fires when an audio device is added to the system (e.g. BT headphones or wired headset connect).
     // Runs on the main thread because registerAudioDeviceCallback is called with null handler.
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) {
-            if (addedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }) {
-                serviceScope.launch {
-                    val songs = songRepository.songs.first()
-                    playerController.resumeForBluetooth(songs)
-                }
+            val hasBluetooth = addedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }
+            val hasWired     = addedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }
+            if (!hasBluetooth && !hasWired) return
+            serviceScope.launch {
+                val songs = songRepository.songs.first()
+                if (hasBluetooth) playerController.resumeForBluetooth(songs)
+                if (hasWired)     playerController.resumeForWiredHeadphones(songs)
             }
         }
     }

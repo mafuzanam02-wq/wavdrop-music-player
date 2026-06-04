@@ -173,6 +173,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { resumeBehaviorRepository.setAutoResumeOnBluetooth(enabled) }
     }
 
+    fun setAutoResumeOnHeadphones(enabled: Boolean) {
+        viewModelScope.launch { resumeBehaviorRepository.setAutoResumeOnHeadphones(enabled) }
+    }
+
     fun setThemeMode(mode: ThemeMode) {
         viewModelScope.launch { appSettingsRepository.setThemeMode(mode) }
     }

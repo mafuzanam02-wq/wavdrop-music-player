@@ -74,6 +74,7 @@ class PlayerController @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var positionTickerJob: Job? = null
+    private var wiredResumeJob: Job? = null
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -465,12 +466,52 @@ class PlayerController @Inject constructor(
                 controller.play()
             } else {
                 // Cold path: load session from scratch before playing.
-                resumeSessionForBluetooth(availableSongs, settings)
+                resumeSessionCold(availableSongs, settings)
             }
         }
     }
 
-    private suspend fun resumeSessionForBluetooth(
+    /**
+     * Resumes the last session and starts playback after wired headphones or a wired headset
+     * connects.
+     *
+     * Guards and timing mirror [resumeForBluetooth]; checks [autoResumeOnHeadphones] instead.
+     * A [wiredResumeJob] guard prevents concurrent resume attempts when multiple
+     * AudioDeviceCallback events fire in quick succession for the same physical device.
+     */
+    fun resumeForWiredHeadphones(availableSongs: List<Song>) {
+        if (wiredResumeJob?.isActive == true) return
+        wiredResumeJob = scope.launch {
+            val settings = resumeBehaviorRepository.settings.first()
+            if (!settings.autoResumeOnHeadphones) return@launch
+            if (!settings.rememberLastTrack) return@launch
+
+            val controller = mediaController ?: return@launch
+            if (controller.isPlaying) return@launch
+
+            delay(1_000L)
+
+            if (controller.isPlaying) return@launch
+
+            val song = _nowPlayingState.value.song
+            if (song != null && libraryQueue.isNotEmpty()) {
+                // Warm path: session already loaded, player is prepared — just start.
+                lastKnownPositionMs = -1L
+                statsTracker.onSongSelected(song)
+                controller.play()
+            } else {
+                // Cold path: load session from scratch before playing.
+                resumeSessionCold(availableSongs, settings)
+            }
+        }
+    }
+
+    /**
+     * Cold-path shared by [resumeForBluetooth] and [resumeForWiredHeadphones].
+     * Loads the saved session snapshot, applies resume-behavior rules, rebuilds the queue,
+     * and starts playback.
+     */
+    private suspend fun resumeSessionCold(
         availableSongs: List<Song>,
         settings: ResumeBehaviorSettings,
     ) {

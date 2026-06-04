@@ -65,19 +65,18 @@ fun SettingsBluetoothScreen(
             item { SectionHeader("Auto Resume") }
             item {
                 ToggleSettingsRow(
-                    title           = "Auto Resume on wired headphones",
-                    subtitle        = "Resume playback when wired headphones are connected. Not yet available.",
-                    checked         = resumeBehavior.autoResumeOnHeadphones,
-                    onCheckedChange = {},
-                    enabled         = false,
+                    title           = "Auto Resume on Bluetooth",
+                    subtitle        = "Resume your last session when a Bluetooth audio device connects.",
+                    checked         = resumeBehavior.autoResumeOnBluetooth,
+                    onCheckedChange = viewModel::setAutoResumeOnBluetooth,
                 )
             }
             item {
                 ToggleSettingsRow(
-                    title           = "Auto Resume on Bluetooth",
-                    subtitle        = "Resume playback when a Bluetooth audio device connects.",
-                    checked         = resumeBehavior.autoResumeOnBluetooth,
-                    onCheckedChange = viewModel::setAutoResumeOnBluetooth,
+                    title           = "Wired headphone auto-resume",
+                    subtitle        = "Resume your last session when wired headphones are connected.",
+                    checked         = resumeBehavior.autoResumeOnHeadphones,
+                    onCheckedChange = viewModel::setAutoResumeOnHeadphones,
                 )
             }
         }
