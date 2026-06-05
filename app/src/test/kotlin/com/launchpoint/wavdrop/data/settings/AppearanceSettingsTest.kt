@@ -52,8 +52,8 @@ class AppearanceSettingsTest {
     // ── AccentColor ───────────────────────────────────────────────────────────
 
     @Test
-    fun `AccentColor has exactly three entries`() {
-        assertEquals(3, AccentColor.entries.size)
+    fun `AccentColor has exactly nine entries`() {
+        assertEquals(9, AccentColor.entries.size)
     }
 
     @Test
@@ -90,14 +90,37 @@ class AppearanceSettingsTest {
         assertEquals("Deep Teal", AccentColor.DEEP_TEAL.displayName)
     }
 
+    @Test
+    fun `AccentColor display names match supported accent order`() {
+        assertEquals(
+            listOf(
+                "Midnight Violet",
+                "Clean Purple",
+                "Deep Teal",
+                "Ocean Blue",
+                "Emerald Green",
+                "Amber Gold",
+                "Crimson Red",
+                "Rose Pink",
+                "Slate Gray",
+            ),
+            AccentColor.entries.map { it.displayName },
+        )
+    }
+
     // ── Cross-enum consistency ────────────────────────────────────────────────
 
     @Test
-    fun `AccentColor display names match AppIconChoice display names`() {
+    fun `AccentColor display names match original AppIconChoice display names`() {
         // Accent and icon choices share names so users can match icon and in-app color easily
-        val accentNames = AccentColor.entries.map { it.displayName }
-        val iconNames   = AppIconChoice.entries.map { it.displayName }
+        val accentNames = AccentColor.entries.take(3).map { it.displayName }
+        val iconNames   = AppIconChoice.entries.take(3).map { it.displayName }
         assertEquals(accentNames, iconNames)
+    }
+
+    @Test
+    fun `AppIconChoice has six launcher icon choices`() {
+        assertEquals(6, AppIconChoice.entries.size)
     }
 
     @Test
@@ -118,6 +141,9 @@ class AppearanceSettingsTest {
                 "com.launchpoint.wavdrop.MainActivityAliasMidnightViolet",
                 "com.launchpoint.wavdrop.MainActivityAliasCleanPurple",
                 "com.launchpoint.wavdrop.MainActivityAliasDeepTeal",
+                "com.launchpoint.wavdrop.MainActivityAliasObsidianBlack",
+                "com.launchpoint.wavdrop.MainActivityAliasOceanBlue",
+                "com.launchpoint.wavdrop.MainActivityAliasSunsetOrange",
             ),
             aliases,
         )

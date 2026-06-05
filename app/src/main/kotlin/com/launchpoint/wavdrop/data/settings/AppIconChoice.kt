@@ -13,6 +13,18 @@ enum class AppIconChoice(val displayName: String, val aliasClassName: String) {
         displayName    = "Deep Teal",
         aliasClassName = "com.launchpoint.wavdrop.MainActivityAliasDeepTeal",
     ),
+    OBSIDIAN_BLACK(
+        displayName    = "Obsidian Black",
+        aliasClassName = "com.launchpoint.wavdrop.MainActivityAliasObsidianBlack",
+    ),
+    OCEAN_BLUE(
+        displayName    = "Ocean Blue",
+        aliasClassName = "com.launchpoint.wavdrop.MainActivityAliasOceanBlue",
+    ),
+    SUNSET_ORANGE(
+        displayName    = "Sunset Orange",
+        aliasClassName = "com.launchpoint.wavdrop.MainActivityAliasSunsetOrange",
+    ),
     ;
 
     companion object {

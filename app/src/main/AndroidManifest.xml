@@ -98,6 +98,51 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- Obsidian Black - disabled until the user switches to it -->
+        <activity-alias
+            android:name=".MainActivityAliasObsidianBlack"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/launcher_label"
+            android:icon="@mipmap/wavdrop_icon_obsidian_black"
+            android:roundIcon="@mipmap/wavdrop_icon_obsidian_black_round">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Ocean Blue - disabled until the user switches to it -->
+        <activity-alias
+            android:name=".MainActivityAliasOceanBlue"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/launcher_label"
+            android:icon="@mipmap/wavdrop_icon_ocean_blue"
+            android:roundIcon="@mipmap/wavdrop_icon_ocean_blue_round">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Sunset Orange - disabled until the user switches to it -->
+        <activity-alias
+            android:name=".MainActivityAliasSunsetOrange"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/launcher_label"
+            android:icon="@mipmap/wavdrop_icon_sunset_orange"
+            android:roundIcon="@mipmap/wavdrop_icon_sunset_orange_round">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!--
             PlaybackService: MediaSessionService that owns ExoPlayer + MediaSession.
             exported=true is required so that media controllers (and the system
