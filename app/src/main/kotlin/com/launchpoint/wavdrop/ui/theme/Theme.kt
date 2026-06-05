@@ -48,6 +48,54 @@ private fun AccentColor.toPrimaryColors() = when (this) {
         onContainerDark   = DeepTealOnContainerDark,
         onContainerLight  = DeepTealOnContainerLight,
     )
+    AccentColor.OCEAN_BLUE -> PrimaryColors(
+        primary           = OceanBluePrimary,
+        containerDark     = OceanBlueContainerDark,
+        containerLight    = OceanBlueContainerLight,
+        onPrimary         = Color.White,
+        onContainerDark   = OceanBlueOnContainerDark,
+        onContainerLight  = OceanBlueOnContainerLight,
+    )
+    AccentColor.EMERALD_GREEN -> PrimaryColors(
+        primary           = EmeraldGreenPrimary,
+        containerDark     = EmeraldGreenContainerDark,
+        containerLight    = EmeraldGreenContainerLight,
+        onPrimary         = Color.White,
+        onContainerDark   = EmeraldGreenOnContainerDark,
+        onContainerLight  = EmeraldGreenOnContainerLight,
+    )
+    AccentColor.AMBER_GOLD -> PrimaryColors(
+        primary           = AmberGoldPrimary,
+        containerDark     = AmberGoldContainerDark,
+        containerLight    = AmberGoldContainerLight,
+        onPrimary         = Color.White,
+        onContainerDark   = AmberGoldOnContainerDark,
+        onContainerLight  = AmberGoldOnContainerLight,
+    )
+    AccentColor.CRIMSON_RED -> PrimaryColors(
+        primary           = CrimsonRedPrimary,
+        containerDark     = CrimsonRedContainerDark,
+        containerLight    = CrimsonRedContainerLight,
+        onPrimary         = Color.White,
+        onContainerDark   = CrimsonRedOnContainerDark,
+        onContainerLight  = CrimsonRedOnContainerLight,
+    )
+    AccentColor.ROSE_PINK -> PrimaryColors(
+        primary           = RosePinkPrimary,
+        containerDark     = RosePinkContainerDark,
+        containerLight    = RosePinkContainerLight,
+        onPrimary         = Color.White,
+        onContainerDark   = RosePinkOnContainerDark,
+        onContainerLight  = RosePinkOnContainerLight,
+    )
+    AccentColor.SLATE_GRAY -> PrimaryColors(
+        primary           = SlateGrayPrimary,
+        containerDark     = SlateGrayContainerDark,
+        containerLight    = SlateGrayContainerLight,
+        onPrimary         = Color.White,
+        onContainerDark   = SlateGrayOnContainerDark,
+        onContainerLight  = SlateGrayOnContainerLight,
+    )
 }
 
 @Composable

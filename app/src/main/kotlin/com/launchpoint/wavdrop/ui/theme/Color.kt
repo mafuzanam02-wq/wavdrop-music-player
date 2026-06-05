@@ -31,3 +31,45 @@ val DeepTealContainerDark         = Color(0xFF134E4A)
 val DeepTealContainerLight        = Color(0xFFCCFBF1)
 val DeepTealOnContainerDark       = Color(0xFFCCFBF1)
 val DeepTealOnContainerLight      = Color(0xFF134E4A)
+
+// Ocean Blue accent
+val OceanBluePrimary              = Color(0xFF2563EB)
+val OceanBlueContainerDark        = Color(0xFF1E3A8A)
+val OceanBlueContainerLight       = Color(0xFFDBEAFE)
+val OceanBlueOnContainerDark      = Color(0xFFDBEAFE)
+val OceanBlueOnContainerLight     = Color(0xFF1E3A8A)
+
+// Emerald Green accent
+val EmeraldGreenPrimary           = Color(0xFF059669)
+val EmeraldGreenContainerDark     = Color(0xFF064E3B)
+val EmeraldGreenContainerLight    = Color(0xFFD1FAE5)
+val EmeraldGreenOnContainerDark   = Color(0xFFD1FAE5)
+val EmeraldGreenOnContainerLight  = Color(0xFF064E3B)
+
+// Amber Gold accent
+val AmberGoldPrimary              = Color(0xFFB45309)
+val AmberGoldContainerDark        = Color(0xFF78350F)
+val AmberGoldContainerLight       = Color(0xFFFEF3C7)
+val AmberGoldOnContainerDark      = Color(0xFFFEF3C7)
+val AmberGoldOnContainerLight     = Color(0xFF78350F)
+
+// Crimson Red accent
+val CrimsonRedPrimary             = Color(0xFFB91C1C)
+val CrimsonRedContainerDark       = Color(0xFF7F1D1D)
+val CrimsonRedContainerLight      = Color(0xFFFEE2E2)
+val CrimsonRedOnContainerDark     = Color(0xFFFEE2E2)
+val CrimsonRedOnContainerLight    = Color(0xFF7F1D1D)
+
+// Rose Pink accent
+val RosePinkPrimary               = Color(0xFFBE185D)
+val RosePinkContainerDark         = Color(0xFF831843)
+val RosePinkContainerLight        = Color(0xFFFCE7F3)
+val RosePinkOnContainerDark       = Color(0xFFFCE7F3)
+val RosePinkOnContainerLight      = Color(0xFF831843)
+
+// Slate Gray accent
+val SlateGrayPrimary              = Color(0xFF475569)
+val SlateGrayContainerDark        = Color(0xFF334155)
+val SlateGrayContainerLight       = Color(0xFFE2E8F0)
+val SlateGrayOnContainerDark      = Color(0xFFE2E8F0)
+val SlateGrayOnContainerLight     = Color(0xFF1E293B)

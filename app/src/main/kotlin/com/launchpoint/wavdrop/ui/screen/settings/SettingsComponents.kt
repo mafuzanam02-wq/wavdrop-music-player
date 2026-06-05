@@ -1,7 +1,10 @@
 package com.launchpoint.wavdrop.ui.screen.settings
 
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
@@ -133,6 +138,7 @@ internal fun IconChoiceRow(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    swatchColor: Color? = null,
 ) {
     Row(
         modifier          = modifier
@@ -142,6 +148,20 @@ internal fun IconChoiceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onClick)
+        if (swatchColor != null) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .size(18.dp)
+                    .background(swatchColor, CircleShape)
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
+                        shape = CircleShape,
+                    ),
+            )
+        }
         Text(
             text     = name,
             style    = MaterialTheme.typography.bodyLarge,

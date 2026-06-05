@@ -20,11 +20,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.ThemeMode
+import com.launchpoint.wavdrop.ui.theme.AmberGoldPrimary
+import com.launchpoint.wavdrop.ui.theme.CleanPurplePrimary
+import com.launchpoint.wavdrop.ui.theme.CrimsonRedPrimary
+import com.launchpoint.wavdrop.ui.theme.DeepTealPrimary
+import com.launchpoint.wavdrop.ui.theme.EmeraldGreenPrimary
+import com.launchpoint.wavdrop.ui.theme.OceanBluePrimary
+import com.launchpoint.wavdrop.ui.theme.PrimaryViolet
+import com.launchpoint.wavdrop.ui.theme.RosePinkPrimary
+import com.launchpoint.wavdrop.ui.theme.SlateGrayPrimary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,9 +117,10 @@ fun SettingsAppearanceScreen(
             AccentColor.entries.forEach { color ->
                 item {
                     IconChoiceRow(
-                        name     = color.displayName,
-                        selected = accentColor == color,
-                        onClick  = { viewModel.setAccentColor(color) },
+                        name        = color.displayName,
+                        selected    = accentColor == color,
+                        onClick     = { viewModel.setAccentColor(color) },
+                        swatchColor = color.previewColor(),
                     )
                 }
             }
@@ -132,4 +143,16 @@ fun SettingsAppearanceScreen(
             }
         }
     }
+}
+
+private fun AccentColor.previewColor(): Color = when (this) {
+    AccentColor.MIDNIGHT_VIOLET -> PrimaryViolet
+    AccentColor.CLEAN_PURPLE    -> CleanPurplePrimary
+    AccentColor.DEEP_TEAL       -> DeepTealPrimary
+    AccentColor.OCEAN_BLUE      -> OceanBluePrimary
+    AccentColor.EMERALD_GREEN   -> EmeraldGreenPrimary
+    AccentColor.AMBER_GOLD      -> AmberGoldPrimary
+    AccentColor.CRIMSON_RED     -> CrimsonRedPrimary
+    AccentColor.ROSE_PINK       -> RosePinkPrimary
+    AccentColor.SLATE_GRAY      -> SlateGrayPrimary
 }
