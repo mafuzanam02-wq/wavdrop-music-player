@@ -148,9 +148,9 @@ class SmartCollectionDetailsViewModel @Inject constructor(
     }
 
     fun shufflePlay() {
-        val songs = uiState.value.songs.shuffled()
-        val first = songs.firstOrNull() ?: return
-        playerController.playFromQueue(queue = songs, startSong = first)
+        val songs = uiState.value.songs
+        if (songs.isEmpty()) return
+        playerController.playFromQueueShuffled(queue = songs)
     }
 
     fun toggleFavorite(songId: Long) {

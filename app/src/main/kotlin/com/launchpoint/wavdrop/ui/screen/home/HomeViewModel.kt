@@ -210,8 +210,7 @@ class HomeViewModel @Inject constructor(
     fun shuffleAll() {
         val songs = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
         if (songs.isEmpty()) return
-        val shuffled = songs.shuffled()
-        playerController.playFromQueue(queue = shuffled, startSong = shuffled.first())
+        playerController.playFromQueueShuffled(queue = songs)
     }
 
     fun toggleFavorite(songId: Long) {

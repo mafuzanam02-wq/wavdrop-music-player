@@ -127,8 +127,11 @@ class PlaylistDetailsViewModel @Inject constructor(
     fun playEntry(entry: PlaylistSongItem, shuffle: Boolean = false) {
         val songs = uiState.value.visibleEntries.map { it.song }
         if (songs.isEmpty()) return
-        if (shuffle) playerController.toggleShuffle()
-        playerController.playFromQueue(queue = songs, startSong = entry.song)
+        if (shuffle) {
+            playerController.playFromQueueShuffled(queue = songs)
+        } else {
+            playerController.playFromQueue(queue = songs, startSong = entry.song)
+        }
     }
 
     fun playAll() {
@@ -138,9 +141,9 @@ class PlaylistDetailsViewModel @Inject constructor(
     }
 
     fun shufflePlay() {
-        val songs = uiState.value.visibleEntries.map { it.song }.shuffled()
-        val first = songs.firstOrNull() ?: return
-        playerController.playFromQueue(queue = songs, startSong = first)
+        val songs = uiState.value.visibleEntries.map { it.song }
+        if (songs.isEmpty()) return
+        playerController.playFromQueueShuffled(queue = songs)
     }
 
     fun toggleFavorite(songId: Long) {

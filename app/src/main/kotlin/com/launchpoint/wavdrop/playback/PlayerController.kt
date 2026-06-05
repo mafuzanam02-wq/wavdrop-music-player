@@ -39,6 +39,19 @@ import javax.inject.Singleton
  * Connects to PlaybackService via MediaController asynchronously on first
  * instantiation. Any playSong() call received before the connection is
  * ready is queued and executed once the controller is available.
+ *
+ * Queue model
+ * -----------
+ * libraryQueue   – songs in their original source order (playlist / album / all-songs).
+ *                  Used for session persistence and as the authoritative song list.
+ * playbackOrder  – indices into libraryQueue that define the playback sequence.
+ *                  Identity [0,1,2,...] when shuffle is OFF; shuffled when ON.
+ * playbackQueue  – songs in playback order (derived: playbackOrder.map { libraryQueue[it] }).
+ *                  THIS is what ExoPlayer is always loaded with.
+ *
+ * Because ExoPlayer holds playbackQueue, controller.currentMediaItemIndex equals the
+ * playback index directly. Auto-transitions therefore follow the shuffle order naturally.
+ * Manual seekTo(playbackIndex, 0L) also requires no conversion.
  */
 @Singleton
 class PlayerController @Inject constructor(
@@ -63,6 +76,10 @@ class PlayerController @Inject constructor(
     private var pendingRestorePositionMs: Long? = null
     private var hasRestoredSession = false
     private var isExternalPlayback = false
+
+    // libraryQueue: source order. playbackOrder: indices into libraryQueue (identity or shuffled).
+    // playbackQueue: songs in playback order = playbackOrder.map { libraryQueue[it] }.
+    // ExoPlayer is ALWAYS loaded with playbackQueue, so currentMediaItemIndex == playback index.
     private var libraryQueue: List<Song> = emptyList()
     private var playbackOrder: List<Int> = emptyList()
     private var playbackQueue: List<Song> = emptyList()
@@ -149,7 +166,8 @@ class PlayerController @Inject constructor(
                 }
                 // Reset ticker tracking so it doesn't double-detect this same boundary.
                 lastKnownPositionMs = -1L
-                val song = libraryQueue.getOrNull(newPosition.mediaItemIndex) ?: return
+                // newPosition.mediaItemIndex is a playback index (ExoPlayer holds playbackQueue).
+                val song = playbackQueue.getOrNull(newPosition.mediaItemIndex) ?: return
                 if (DEBUG_STATS) Log.d(TAG, "[posDiscontinuity] AUTO_TRANSITION → songId=${song.id}")
                 if (!isExternalPlayback) {
                     statsTracker.onSongSelected(song)
@@ -203,12 +221,21 @@ class PlayerController @Inject constructor(
                         )
                         playRequest != null -> playFromQueue(playRequest.queue, playRequest.startSong)
                         restorePos != null && libraryQueue.isNotEmpty() -> {
-                            val startIndex = _nowPlayingState.value.song?.id
+                            // libraryQueue/playbackOrder/playbackQueue were set by
+                            // restoreSessionIfNeeded; ExoPlayer was not ready at that time.
+                            val startLibraryIndex = _nowPlayingState.value.song?.id
                                 ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
                                 ?.takeIf { it >= 0 } ?: 0
+                            val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex)
+                                .takeIf { it >= 0 } ?: 0
                             controller.repeatMode = repeatMode.toPlayerRepeatMode()
                             controller.shuffleModeEnabled = false
-                            controller.setMediaItems(libraryQueue.map { it.toMediaItem() }, startIndex, restorePos)
+                            // Load ExoPlayer with playbackQueue (shuffle order).
+                            controller.setMediaItems(
+                                playbackQueue.map { it.toMediaItem() },
+                                startPlaybackIndex,
+                                restorePos,
+                            )
                             controller.prepare()
                             syncNowPlayingState()
                         }
@@ -269,10 +296,10 @@ class PlayerController @Inject constructor(
 
         libraryQueue = normalizedQueue
         rebuildPlaybackQueue(currentQueueIndex = originalStartIndex)
-        val playbackStartIndex = playbackOrder.indexOf(originalStartIndex)
-            .takeIf { it >= 0 } ?: 0
+        // When shuffle is OFF, playbackOrder is identity so playbackStartIndex == originalStartIndex.
+        // When shuffle is ON, buildPlaybackOrder places the start song at position 0.
+        val playbackStartIndex = playbackOrder.indexOf(originalStartIndex).takeIf { it >= 0 } ?: 0
 
-        // Reset position tracking so the ticker doesn't see the old position as a loop wrap.
         lastKnownPositionMs = -1L
         statsTracker.onSongSelected(startSong)
         _nowPlayingState.update {
@@ -296,39 +323,45 @@ class PlayerController @Inject constructor(
         }
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
-        controller.setMediaItems(libraryQueue.map { it.toMediaItem() }, originalStartIndex, 0L)
+        // ExoPlayer is loaded with playbackQueue so auto-transitions follow shuffle order.
+        controller.setMediaItems(playbackQueue.map { it.toMediaItem() }, playbackStartIndex, 0L)
         controller.prepare()
         syncNowPlayingState()
         controller.play()
         saveSessionAsync()
     }
 
+    fun playFromQueueShuffled(queue: List<Song>) {
+        val normalizedQueue = queue.ifEmpty { return }
+        shuffleEnabled = true
+        playFromQueue(
+            queue = normalizedQueue,
+            startSong = normalizedQueue.random(),
+        )
+    }
+
     fun playNext(song: Song) {
         val currentPlaybackIndex = currentPlaybackIndex()
-        val libraryIndexOfCurrent = currentQueueIndex()
-
-        if (libraryQueue.isEmpty() || currentPlaybackIndex == null || libraryIndexOfCurrent == null) {
+        if (libraryQueue.isEmpty() || currentPlaybackIndex == null) {
             playSong(song)
             return
         }
 
-        // Insert into libraryQueue right after the current library item so the Media3 index
-        // space stays aligned with libraryQueue without touching any earlier items.
-        val insertLibraryIndex = libraryIndexOfCurrent + 1
-        libraryQueue = libraryQueue.toMutableList().also { it.add(insertLibraryIndex, song) }
-        playbackOrder = QueueMutation.shiftPlaybackOrderForInsert(
-            playbackOrder, insertLibraryIndex, currentPlaybackIndex,
-        )
+        // Append the new song to the library queue and insert its index into playbackOrder
+        // immediately after the current playback position.
+        val newLibraryIndex = libraryQueue.size
+        libraryQueue = libraryQueue + song
+        val insertPlaybackIndex = currentPlaybackIndex + 1
+        val newOrder = playbackOrder.toMutableList()
+        newOrder.add(insertPlaybackIndex, newLibraryIndex)
+        playbackOrder = newOrder
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
 
-        // addMediaItem does not touch the current item — no setMediaItems/prepare/play needed.
-        mediaController?.addMediaItem(insertLibraryIndex, song.toMediaItem())
+        // addMediaItem at playback position — no setMediaItems/prepare/play needed.
+        mediaController?.addMediaItem(insertPlaybackIndex, song.toMediaItem())
 
         _nowPlayingState.update {
-            it.copy(
-                queue = playbackQueue,
-                currentIndex = currentPlaybackIndex,
-            )
+            it.copy(queue = playbackQueue, currentIndex = currentPlaybackIndex)
         }
         saveSessionAsync()
     }
@@ -339,11 +372,12 @@ class PlayerController @Inject constructor(
             playSong(song)
             return
         }
-        val insertLibraryIndex = libraryQueue.size
+        val newLibraryIndex = libraryQueue.size
         libraryQueue = libraryQueue + song
-        playbackOrder = playbackOrder + insertLibraryIndex
+        playbackOrder = playbackOrder + newLibraryIndex
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
 
+        // Appends to the end of the ExoPlayer playlist (playbackQueue).
         mediaController?.addMediaItem(song.toMediaItem())
 
         _nowPlayingState.update {
@@ -359,8 +393,9 @@ class PlayerController @Inject constructor(
 
     fun jumpToQueueItem(playbackIndex: Int) {
         val controller = mediaController ?: return
-        val libraryIndex = playbackOrder.getOrNull(playbackIndex) ?: return
-        seekToQueueIndex(controller, libraryIndex)
+        if (playbackIndex !in playbackQueue.indices) return
+        // playbackIndex is directly the ExoPlayer media item index since ExoPlayer holds playbackQueue.
+        seekToPlaybackIndex(controller, playbackIndex)
     }
 
     fun removeFromQueue(playbackIndex: Int) {
@@ -370,15 +405,15 @@ class PlayerController @Inject constructor(
         val removedLibraryIndex = playbackOrder.getOrNull(playbackIndex) ?: return
         if (removedLibraryIndex !in libraryQueue.indices) return
 
-        libraryQueue = libraryQueue.toMutableList().also {
-            it.removeAt(removedLibraryIndex)
-        }
+        // Remove from library queue and decrement any playback order entries above the gap.
+        libraryQueue = libraryQueue.toMutableList().also { it.removeAt(removedLibraryIndex) }
         playbackOrder = playbackOrder
             .filterIndexed { index, _ -> index != playbackIndex }
             .map { index -> if (index > removedLibraryIndex) index - 1 else index }
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
 
-        mediaController?.removeMediaItem(removedLibraryIndex)
+        // playbackIndex is the ExoPlayer media item index.
+        mediaController?.removeMediaItem(playbackIndex)
 
         val newCurrentPlaybackIndex = if (playbackIndex < currentPlaybackIndex) {
             currentPlaybackIndex - 1
@@ -402,29 +437,41 @@ class PlayerController @Inject constructor(
     fun moveQueueItemUp(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex <= currentPlaybackIndex || playbackIndex <= 0) return
-        moveQueueItemWithNativePlaylistMove(
-            playbackIndex = playbackIndex,
-            otherIndex = playbackIndex - 1,
-            currentPlaybackIndex = currentPlaybackIndex,
-        )
+        swapPlaybackItems(playbackIndex, playbackIndex - 1, currentPlaybackIndex)
     }
 
     fun moveQueueItemDown(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex <= currentPlaybackIndex || playbackIndex >= playbackQueue.size - 1) return
-        moveQueueItemWithNativePlaylistMove(
-            playbackIndex = playbackIndex,
-            otherIndex = playbackIndex + 1,
-            currentPlaybackIndex = currentPlaybackIndex,
-        )
+        swapPlaybackItems(playbackIndex, playbackIndex + 1, currentPlaybackIndex)
     }
 
     fun moveToPlayNext(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
-        val newQueue = QueueMutation.moveToPlayNext(
-            playbackQueue, playbackIndex, currentPlaybackIndex,
-        ) ?: return
-        applyQueueMutationByIdentity(newQueue, currentPlaybackIndex)
+        val immediateNextIndex = currentPlaybackIndex + 1
+        if (playbackIndex <= currentPlaybackIndex) return
+        if (playbackIndex == immediateNextIndex) return
+        if (playbackIndex !in playbackOrder.indices) return
+
+        // Lift the entry out of playbackOrder and re-insert right after current.
+        val newOrder = playbackOrder.toMutableList()
+        val libraryIndex = newOrder.removeAt(playbackIndex)
+        newOrder.add(immediateNextIndex, libraryIndex)
+        playbackOrder = newOrder
+        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+
+        // Move the item in ExoPlayer's playlist using playback indices.
+        mediaController?.moveMediaItem(playbackIndex, immediateNextIndex)
+
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
     }
 
     fun togglePlayPause() {
@@ -460,23 +507,25 @@ class PlayerController @Inject constructor(
 
     fun skipToNext() {
         val controller = mediaController ?: return
-        val nextIndex = QueueNavigator.nextQueueIndex(
-            playbackOrder = playbackOrder,
-            currentQueueIndex = controller.currentMediaItemIndex,
+        val currentPlaybackIndex = controller.currentMediaItemIndex
+        val nextPlaybackIndex = QueueNavigator.nextIndex(
+            queueSize = playbackQueue.size,
+            currentIndex = currentPlaybackIndex,
             repeatMode = repeatMode,
         ) ?: return
-        seekToQueueIndex(controller, nextIndex)
+        seekToPlaybackIndex(controller, nextPlaybackIndex)
     }
 
     fun skipToPrevious() {
         val controller = mediaController ?: return
-        when (val action = QueueNavigator.previousQueueAction(
-            playbackOrder = playbackOrder,
-            currentQueueIndex = controller.currentMediaItemIndex,
+        val currentPlaybackIndex = controller.currentMediaItemIndex
+        when (val action = QueueNavigator.previousAction(
+            queueSize = playbackQueue.size,
+            currentIndex = currentPlaybackIndex,
             currentPositionMs = controller.currentPosition,
             repeatMode = repeatMode,
         )) {
-            is PreviousQueueAction.MoveTo -> seekToQueueIndex(controller, action.index)
+            is PreviousQueueAction.MoveTo -> seekToPlaybackIndex(controller, action.index)
             PreviousQueueAction.RestartCurrent -> {
                 controller.seekTo(0L)
                 syncPosition()
@@ -487,19 +536,42 @@ class PlayerController @Inject constructor(
     }
 
     fun toggleShuffle() {
-        val currentQueueIndex = currentQueueIndex() ?: return
+        val controller = mediaController
+        val currentSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
+            ?: _nowPlayingState.value.song?.id
+        val currentQueueIndex = currentSongId
+            ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+            ?: currentQueueIndex()
+            ?: return
         val currentSong = libraryQueue.getOrNull(currentQueueIndex) ?: return
+        val positionMs = controller?.currentPosition?.coerceAtLeast(0L)
+            ?: _nowPlayingState.value.positionMs.coerceAtLeast(0L)
+        val wasPlaying = controller?.isPlaying == true
 
         shuffleEnabled = !shuffleEnabled
         rebuildPlaybackQueue(currentQueueIndex = currentQueueIndex)
-        val playbackIndex = playbackOrder.indexOf(currentQueueIndex)
-            .takeIf { it >= 0 } ?: 0
+        val newPlaybackIndex = playbackOrder.indexOf(currentQueueIndex).takeIf { it >= 0 } ?: 0
+
+        if (controller != null) {
+            val mediaItems = playbackQueue.map { it.toMediaItem() }
+            if (controller.mediaItemCount == mediaItems.size &&
+                controller.playbackState != Player.STATE_IDLE
+            ) {
+                controller.replaceMediaItems(0, controller.mediaItemCount, mediaItems)
+                controller.seekTo(newPlaybackIndex, positionMs)
+            } else {
+                controller.setMediaItems(mediaItems, newPlaybackIndex, positionMs)
+                controller.prepare()
+            }
+            if (wasPlaying) controller.play()
+        }
 
         _nowPlayingState.update {
             it.copy(
                 song = currentSong,
                 queue = playbackQueue,
-                currentIndex = playbackIndex,
+                currentIndex = newPlaybackIndex,
                 shuffleEnabled = shuffleEnabled,
             )
         }
@@ -546,14 +618,15 @@ class PlayerController @Inject constructor(
             libraryQueue   = mappedQueue
             shuffleEnabled = snapshot.shuffleEnabled
             repeatMode     = snapshot.repeatMode
-            rebuildPlaybackQueue(currentQueueIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0))
-            val playbackIndex = playbackOrder.indexOf(mappedQueue.indexOf(startSong)).takeIf { it >= 0 } ?: 0
+            val startLibraryIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0)
+            rebuildPlaybackQueue(currentQueueIndex = startLibraryIndex)
+            val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex).takeIf { it >= 0 } ?: 0
 
             _nowPlayingState.update {
                 it.copy(
                     song               = startSong,
                     queue              = playbackQueue,
-                    currentIndex       = playbackIndex,
+                    currentIndex       = startPlaybackIndex,
                     shuffleEnabled     = shuffleEnabled,
                     repeatMode         = repeatMode,
                     positionMs         = snapshot.positionMs,
@@ -571,8 +644,8 @@ class PlayerController @Inject constructor(
             controller.repeatMode         = repeatMode.toPlayerRepeatMode()
             controller.shuffleModeEnabled = false
             controller.setMediaItems(
-                libraryQueue.map { it.toMediaItem() },
-                mappedQueue.indexOf(startSong).coerceAtLeast(0),
+                playbackQueue.map { it.toMediaItem() },
+                startPlaybackIndex,
                 snapshot.positionMs,
             )
             controller.prepare()
@@ -600,23 +673,12 @@ class PlayerController @Inject constructor(
 
     /**
      * Resumes the last session and starts playback after a Bluetooth audio device connects.
-     *
-     * Guards checked (in order):
-     * 1. bluetoothResumeMode determines whether to resume at all (see [HeadphoneResumeMode]).
-     * 2. rememberLastTrack must be ON.
-     * 3. Playback must not already be active.
-     * 4. A ~1 s delay lets the BT audio route stabilize; playback is re-checked after.
-     *
-     * Warm path (HomeViewModel already called restoreSessionIfNeeded): the session is loaded
-     * and the player is prepared; this just calls play().
-     * Cold path (service restarted before HomeViewModel): loads and prepares the session,
-     * then calls play().
      */
     fun resumeForBluetooth(availableSongs: List<Song>) {
         scope.launch {
             val settings = resumeBehaviorRepository.settings.first()
             val interrupted = wasInterruptedByBluetooth
-            wasInterruptedByBluetooth = false  // consume: one disconnect → at most one resume
+            wasInterruptedByBluetooth = false
             if (!settings.bluetoothResumeMode.shouldResume(interrupted)) return@launch
             if (!settings.rememberLastTrack) return@launch
 
@@ -629,31 +691,24 @@ class PlayerController @Inject constructor(
 
             val song = _nowPlayingState.value.song
             if (song != null && libraryQueue.isNotEmpty()) {
-                // Warm path: session already loaded, player is prepared — just start.
                 lastKnownPositionMs = -1L
                 statsTracker.onSongSelected(song)
                 controller.play()
             } else {
-                // Cold path: load session from scratch before playing.
                 resumeSessionCold(availableSongs, settings)
             }
         }
     }
 
     /**
-     * Resumes the last session and starts playback after wired headphones or a wired headset
-     * connects.
-     *
-     * Guards and timing mirror [resumeForBluetooth]; checks [wiredResumeMode] instead.
-     * A [wiredResumeJob] guard prevents concurrent resume attempts when multiple
-     * AudioDeviceCallback events fire in quick succession for the same physical device.
+     * Resumes the last session and starts playback after wired headphones connect.
      */
     fun resumeForWiredHeadphones(availableSongs: List<Song>) {
         if (wiredResumeJob?.isActive == true) return
         wiredResumeJob = scope.launch {
             val settings = resumeBehaviorRepository.settings.first()
             val interrupted = wasInterruptedByWired
-            wasInterruptedByWired = false  // consume: one disconnect → at most one resume
+            wasInterruptedByWired = false
             if (!settings.wiredResumeMode.shouldResume(interrupted)) return@launch
             if (!settings.rememberLastTrack) return@launch
 
@@ -666,22 +721,15 @@ class PlayerController @Inject constructor(
 
             val song = _nowPlayingState.value.song
             if (song != null && libraryQueue.isNotEmpty()) {
-                // Warm path: session already loaded, player is prepared — just start.
                 lastKnownPositionMs = -1L
                 statsTracker.onSongSelected(song)
                 controller.play()
             } else {
-                // Cold path: load session from scratch before playing.
                 resumeSessionCold(availableSongs, settings)
             }
         }
     }
 
-    /**
-     * Cold-path shared by [resumeForBluetooth] and [resumeForWiredHeadphones].
-     * Loads the saved session snapshot, applies resume-behavior rules, rebuilds the queue,
-     * and starts playback.
-     */
     private suspend fun resumeSessionCold(
         availableSongs: List<Song>,
         settings: ResumeBehaviorSettings,
@@ -700,8 +748,9 @@ class PlayerController @Inject constructor(
         libraryQueue   = mappedQueue
         shuffleEnabled = snapshot.shuffleEnabled
         repeatMode     = snapshot.repeatMode
-        rebuildPlaybackQueue(currentQueueIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0))
-        val playbackIndex = playbackOrder.indexOf(mappedQueue.indexOf(startSong)).takeIf { it >= 0 } ?: 0
+        val startLibraryIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0)
+        rebuildPlaybackQueue(currentQueueIndex = startLibraryIndex)
+        val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex).takeIf { it >= 0 } ?: 0
 
         lastKnownPositionMs = -1L
         statsTracker.onSongSelected(startSong)
@@ -710,7 +759,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song               = startSong,
                 queue              = playbackQueue,
-                currentIndex       = playbackIndex,
+                currentIndex       = startPlaybackIndex,
                 shuffleEnabled     = shuffleEnabled,
                 repeatMode         = repeatMode,
                 positionMs         = snapshot.positionMs,
@@ -724,8 +773,8 @@ class PlayerController @Inject constructor(
         controller.repeatMode         = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         controller.setMediaItems(
-            libraryQueue.map { it.toMediaItem() },
-            mappedQueue.indexOf(startSong).coerceAtLeast(0),
+            playbackQueue.map { it.toMediaItem() },
+            startPlaybackIndex,
             snapshot.positionMs,
         )
         controller.prepare()
@@ -739,10 +788,15 @@ class PlayerController @Inject constructor(
         val state = _nowPlayingState.value
         val controller = mediaController
         val positionMs = controller?.currentPosition?.coerceAtLeast(0L) ?: state.positionMs
-        val currentLibraryIndex = controller?.currentMediaItemIndex
-            ?.takeIf { it in libraryQueue.indices }
+
+        // controller.currentMediaItemIndex is a playback index; convert to library index.
+        val currentPlaybackIndex = controller?.currentMediaItemIndex
+            ?.takeIf { it in playbackOrder.indices }
+        val currentLibraryIndex = currentPlaybackIndex
+            ?.let { playbackOrder.getOrNull(it) }
             ?: libraryQueue.indexOfFirst { it.id == state.song?.id }.takeIf { it >= 0 }
             ?: 0
+
         val snapshot = PlaybackSessionSnapshot(
             queueSongIds   = libraryQueue.map { it.id },
             currentSongId  = state.song?.id,
@@ -792,16 +846,6 @@ class PlayerController @Inject constructor(
 
     /**
      * Called by the 500 ms position ticker while playing.
-     *
-     * Handles two responsibilities:
-     * 1. Update NowPlayingState with the latest position/duration from the controller.
-     * 2. Detect REPEAT_ONE loop boundaries when Media3 callbacks (onMediaItemTransition,
-     *    onPositionDiscontinuity) are not delivered reliably over IPC.
-     *
-     * The detection is position-based: if the previous observed position was at least
-     * [LoopBoundaryDetector.LOOP_MIN_PREV_POS_MS] and the current position is under
-     * [LoopBoundaryDetector.LOOP_NEAR_START_MS], the song looped back to the start.
-     * Only active when [repeatMode] == [RepeatMode.ONE].
      */
     private fun tickAndCheckLoopBoundary() {
         val controller = mediaController ?: return
@@ -816,7 +860,8 @@ class PlayerController @Inject constructor(
         }
 
         if (LoopBoundaryDetector.isLoopBoundary(prev, currentPos, repeatMode)) {
-            val song = currentQueueIndex()?.let { libraryQueue.getOrNull(it) }
+            // currentMediaItemIndex is a playback index.
+            val song = playbackQueue.getOrNull(controller.currentMediaItemIndex)
             if (song != null) {
                 if (DEBUG_STATS) Log.d(TAG, "[ticker] LOOP BOUNDARY detected prev=$prev cur=$currentPos songId=${song.id}")
                 if (_sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG) {
@@ -840,7 +885,6 @@ class PlayerController @Inject constructor(
         }
     }
 
-    /** One-shot position sync with no loop-detection side effect (used on pause). */
     private fun syncPosition(positionOverrideMs: Long? = null) {
         val controller = mediaController ?: return
         _nowPlayingState.update {
@@ -855,12 +899,11 @@ class PlayerController @Inject constructor(
         }
     }
 
-    private fun seekToQueueIndex(controller: MediaController, index: Int) {
-        // Reset position tracking: after the seek the ticker should not see the old
-        // song's position as a loop wrap when the new item starts near 0.
+    // Seek to a playback index (position in playbackQueue / ExoPlayer playlist).
+    private fun seekToPlaybackIndex(controller: MediaController, playbackIndex: Int) {
         lastKnownPositionMs = -1L
         val shouldPlay = controller.isPlaying
-        controller.seekTo(index, 0L)
+        controller.seekTo(playbackIndex, 0L)
         if (shouldPlay) controller.play()
         syncNowPlayingState()
         saveSessionAsync()
@@ -875,27 +918,20 @@ class PlayerController @Inject constructor(
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
     }
 
-    private fun moveQueueItemWithNativePlaylistMove(
-        playbackIndex: Int,
-        otherIndex: Int,
-        currentPlaybackIndex: Int,
-    ) {
-        val nativeMove = QueueMutation.playbackOrderAfterNativeMove(
-            playbackOrder = playbackOrder,
-            playbackIndex = playbackIndex,
-            otherIndex = otherIndex,
-            currentPlaybackIndex = currentPlaybackIndex,
-        ) ?: return
-        val newLibraryQueue = libraryQueue.moveItem(
-            fromIndex = nativeMove.fromLibraryIndex,
-            toIndex = nativeMove.toLibraryIndex,
-        ) ?: return
+    // Swap two items in playbackOrder (both must be strictly after current).
+    // Calls moveMediaItem on the controller using playback indices.
+    private fun swapPlaybackItems(fromIndex: Int, toIndex: Int, currentPlaybackIndex: Int) {
+        if (fromIndex <= currentPlaybackIndex || toIndex <= currentPlaybackIndex) return
+        if (fromIndex !in playbackOrder.indices || toIndex !in playbackOrder.indices) return
 
-        libraryQueue = newLibraryQueue
-        playbackOrder = nativeMove.playbackOrder
+        val newOrder = playbackOrder.toMutableList()
+        val tmp = newOrder[fromIndex]
+        newOrder[fromIndex] = newOrder[toIndex]
+        newOrder[toIndex] = tmp
+        playbackOrder = newOrder
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
 
-        mediaController?.moveMediaItem(nativeMove.fromLibraryIndex, nativeMove.toLibraryIndex)
+        mediaController?.moveMediaItem(fromIndex, toIndex)
 
         _nowPlayingState.update {
             it.copy(
@@ -908,55 +944,14 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
-    private fun List<Song>.moveItem(fromIndex: Int, toIndex: Int): List<Song>? {
-        if (fromIndex !in indices || toIndex !in indices) return null
-        if (fromIndex == toIndex) return this
-        val moved = toMutableList()
-        val item = moved.removeAt(fromIndex)
-        moved.add(toIndex, item)
-        return moved
-    }
-
-    private fun applyQueueMutationByIdentity(
-        newPlaybackQueue: List<Song>,
-        currentPlaybackIndex: Int,
-    ) {
-        if (newPlaybackQueue.isEmpty()) return
-        val safeCurrentPlaybackIndex = currentPlaybackIndex.coerceIn(newPlaybackQueue.indices)
-        val currentSong = newPlaybackQueue.getOrNull(safeCurrentPlaybackIndex)
-
-        libraryQueue = newPlaybackQueue
-        playbackOrder = libraryQueue.indices.toList()
-        playbackQueue = libraryQueue
-
-        mediaController?.let { controller ->
-            val positionMs = controller.currentPosition.coerceAtLeast(0L)
-            val wasPlaying = controller.isPlaying
-            controller.setMediaItems(libraryQueue.map { it.toMediaItem() }, safeCurrentPlaybackIndex, positionMs)
-            controller.prepare()
-            if (wasPlaying) controller.play()
-        }
-
-        _nowPlayingState.update {
-            it.copy(
-                song = currentSong ?: it.song,
-                queue = playbackQueue,
-                currentIndex = safeCurrentPlaybackIndex,
-                shuffleEnabled = shuffleEnabled,
-                repeatMode = repeatMode,
-            )
-        }
-        saveSessionAsync()
-    }
-
     private fun syncNowPlayingState(fromTransition: Boolean = false, notifyStats: Boolean = true) {
         val controller = mediaController
-        val currentQueueIndex = controller?.currentMediaItemIndex ?: currentQueueIndex()
-        val currentSong = currentQueueIndex?.let { libraryQueue.getOrNull(it) }
-        val currentPlaybackIndex = currentQueueIndex
-            ?.let(playbackOrder::indexOf)
-            ?.takeIf { it >= 0 }
-            ?: _nowPlayingState.value.currentIndex
+        // controller.currentMediaItemIndex is a playback index (ExoPlayer holds playbackQueue).
+        val currentPlaybackIndex = controller?.currentMediaItemIndex
+            ?.takeIf { it in playbackQueue.indices }
+            ?: _nowPlayingState.value.currentIndex.takeIf { it in playbackQueue.indices }
+            ?: 0
+        val currentSong = playbackQueue.getOrNull(currentPlaybackIndex)
 
         val songChanged = currentSong != null && currentSong.id != _nowPlayingState.value.song?.id
         if (DEBUG_STATS && (fromTransition || songChanged)) {
@@ -965,8 +960,6 @@ class PlayerController @Inject constructor(
 
         if (!isExternalPlayback && notifyStats && currentSong != null && (fromTransition || songChanged)) {
             statsTracker.onSongSelected(currentSong)
-            // During auto-advance / repeat the player may stay in isPlaying=true,
-            // so onIsPlayingChanged(true) never fires for the new song.
             if (controller?.isPlaying == true) {
                 statsTracker.onPlaybackStarted()
             }
@@ -1002,14 +995,15 @@ class PlayerController @Inject constructor(
     private fun Long.coerceForDuration(durationMs: Long): Long =
         if (durationMs > 0L) coerceIn(0L, durationMs) else coerceAtLeast(0L)
 
+    // Returns the library index of the current song.
+    // controller.currentMediaItemIndex is a playback index; map via playbackOrder.
     private fun currentQueueIndex(): Int? {
-        mediaController?.currentMediaItemIndex
-            ?.takeIf { it in libraryQueue.indices }
-            ?.let { return it }
+        val playbackIdx = mediaController?.currentMediaItemIndex
+            ?.takeIf { it in playbackOrder.indices }
+        if (playbackIdx != null) return playbackOrder.getOrNull(playbackIdx)
 
         val currentSongId = _nowPlayingState.value.song?.id ?: return null
-        return libraryQueue.indexOfFirst { it.id == currentSongId }
-            .takeIf { it >= 0 }
+        return libraryQueue.indexOfFirst { it.id == currentSongId }.takeIf { it >= 0 }
     }
 
     private fun currentPlaybackIndex(): Int? {
@@ -1018,12 +1012,8 @@ class PlayerController @Inject constructor(
             ?.let { return it }
 
         val currentSongId = _nowPlayingState.value.song?.id ?: return null
-        return playbackQueue.indexOfFirst { it.id == currentSongId }
-            .takeIf { it >= 0 }
+        return playbackQueue.indexOfFirst { it.id == currentSongId }.takeIf { it >= 0 }
     }
-
-    private fun effectiveQueue(): List<Song> =
-        playbackQueue.ifEmpty { libraryQueue }
 
     private fun Song.toMediaItem(): MediaItem =
         MediaItem.Builder()
