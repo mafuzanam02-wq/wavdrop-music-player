@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -59,6 +60,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,7 +94,6 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.RepeatMode
 import com.launchpoint.wavdrop.playback.SleepTimerOption
-import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
@@ -129,6 +130,24 @@ fun NowPlayingScreen(
     var showMoreActions    by remember { mutableStateOf(false) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     var showQueueSheet     by remember { mutableStateOf(false) }
+
+    // Tick every second while a duration-based timer is counting down.
+    var sleepTimerNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(sleepTimerState.isActive, sleepTimerState.endsAtMs) {
+        if (!sleepTimerState.isActive || sleepTimerState.endsAtMs == null) return@LaunchedEffect
+        while (true) {
+            sleepTimerNowMs = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+    val sleepTimerLabel: String? = when {
+        !sleepTimerState.isActive -> null
+        sleepTimerState.option == SleepTimerOption.END_OF_CURRENT_SONG -> "Sleep Timer: End of song"
+        else -> sleepTimerState.endsAtMs?.let { endsAtMs ->
+            val remaining = (endsAtMs - sleepTimerNowMs).coerceAtLeast(0L)
+            "Sleep Timer: %d:%02d".format(remaining / 60_000L, (remaining % 60_000L) / 1_000L)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -172,6 +191,16 @@ fun NowPlayingScreen(
                                 )
                             }
                         }
+                        IconButton(onClick = { showSleepTimerDialog = true }) {
+                            Icon(
+                                imageVector        = Icons.Default.Timer,
+                                contentDescription = if (sleepTimerState.isActive) "Sleep Timer active"
+                                                     else "Sleep Timer",
+                                tint               = if (sleepTimerState.isActive)
+                                                         MaterialTheme.colorScheme.primary
+                                                     else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                         Box {
                             IconButton(onClick = { showMoreActions = true }) {
                                 Icon(
@@ -209,13 +238,6 @@ fun NowPlayingScreen(
                                         },
                                     )
                                 }
-                                DropdownMenuItem(
-                                    text = { Text("Sleep Timer: ${sleepTimerState.summary()}") },
-                                    onClick = {
-                                        showMoreActions = false
-                                        showSleepTimerDialog = true
-                                    },
-                                )
                                 DropdownMenuItem(
                                     text = { Text("Search lyrics online") },
                                     onClick = {
@@ -271,6 +293,7 @@ fun NowPlayingScreen(
                 onOpenAlbum        = onOpenAlbum,
                 onOpenArtist       = onOpenArtist,
                 onOpenQueue       = { showQueueSheet = true },
+                sleepTimerLabel   = sleepTimerLabel,
                 modifier          = Modifier.padding(innerPadding),
             )
         }
@@ -380,9 +403,6 @@ private fun SleepTimerDialog(
     )
 }
 
-private fun SleepTimerState.summary(): String =
-    if (isActive) option.displayName else SleepTimerOption.OFF.displayName
-
 @Composable
 private fun NowPlayingContent(
     state: NowPlayingState,
@@ -400,6 +420,7 @@ private fun NowPlayingContent(
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
     onOpenQueue: () -> Unit,
+    sleepTimerLabel: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val song = state.song ?: return
@@ -448,6 +469,17 @@ private fun NowPlayingContent(
             isSeekable = state.isSeekable,
             onSeek = onSeek,
         )
+
+        if (sleepTimerLabel != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text      = sleepTimerLabel,
+                style     = MaterialTheme.typography.bodySmall,
+                color     = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                modifier  = Modifier.fillMaxWidth(),
+            )
+        }
 
         Spacer(Modifier.weight(1f))
         Row(
