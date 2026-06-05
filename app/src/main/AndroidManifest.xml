@@ -16,9 +16,9 @@
     <application
         android:name=".WavdropApp"
         android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/wavdrop_icon_midnight_violet"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/wavdrop_icon_midnight_violet_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Wavdrop">
 
@@ -60,8 +60,8 @@
             android:enabled="true"
             android:exported="true"
             android:label="@string/launcher_label"
-            android:icon="@mipmap/ic_launcher"
-            android:roundIcon="@mipmap/ic_launcher_round">
+            android:icon="@mipmap/wavdrop_icon_midnight_violet"
+            android:roundIcon="@mipmap/wavdrop_icon_midnight_violet_round">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -75,8 +75,8 @@
             android:enabled="false"
             android:exported="true"
             android:label="@string/launcher_label"
-            android:icon="@mipmap/ic_launcher_clean_purple"
-            android:roundIcon="@mipmap/ic_launcher_clean_purple_round">
+            android:icon="@mipmap/wavdrop_icon_clean_purple"
+            android:roundIcon="@mipmap/wavdrop_icon_clean_purple_round">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -90,8 +90,8 @@
             android:enabled="false"
             android:exported="true"
             android:label="@string/launcher_label"
-            android:icon="@mipmap/ic_launcher_deep_teal"
-            android:roundIcon="@mipmap/ic_launcher_deep_teal_round">
+            android:icon="@mipmap/wavdrop_icon_deep_teal"
+            android:roundIcon="@mipmap/wavdrop_icon_deep_teal_round">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

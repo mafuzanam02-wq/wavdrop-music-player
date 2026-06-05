@@ -2,6 +2,8 @@ package com.launchpoint.wavdrop.data.settings
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppearanceSettingsTest {
@@ -96,5 +98,42 @@ class AppearanceSettingsTest {
         val accentNames = AccentColor.entries.map { it.displayName }
         val iconNames   = AppIconChoice.entries.map { it.displayName }
         assertEquals(accentNames, iconNames)
+    }
+
+    @Test
+    fun `AppIconChoice parses known stored names and rejects unknown values`() {
+        AppIconChoice.entries.forEach { choice ->
+            assertEquals(choice, AppIconChoice.fromStoredName(choice.name))
+        }
+        assertNull(AppIconChoice.fromStoredName("RAINBOW"))
+        assertNull(AppIconChoice.fromStoredName(null))
+    }
+
+    @Test
+    fun `AppIconChoice aliases are distinct manifest class names`() {
+        val aliases = AppIconChoice.entries.map { it.aliasClassName }
+        assertEquals(AppIconChoice.entries.size, aliases.distinct().size)
+        assertEquals(
+            listOf(
+                "com.launchpoint.wavdrop.MainActivityAliasMidnightViolet",
+                "com.launchpoint.wavdrop.MainActivityAliasCleanPurple",
+                "com.launchpoint.wavdrop.MainActivityAliasDeepTeal",
+            ),
+            aliases,
+        )
+    }
+
+    @Test
+    fun `AppIconAliasRules enables selected alias before disabling others`() {
+        val selected = AppIconChoice.DEEP_TEAL
+        val plan = AppIconAliasRules.switchPlan(selected)
+
+        assertEquals(AppIconAliasStateChange(selected, enabled = true), plan.first())
+        assertEquals(AppIconChoice.entries.size, plan.size)
+        assertEquals(
+            AppIconChoice.entries.filterNot { it == selected }.toSet(),
+            plan.drop(1).map { it.choice }.toSet(),
+        )
+        assertTrue(plan.drop(1).all { !it.enabled })
     }
 }
