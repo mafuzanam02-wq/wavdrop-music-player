@@ -2,8 +2,10 @@ package com.launchpoint.wavdrop.playback
 
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
+import kotlin.random.Random
 
 class QueueMutationTest {
 
@@ -19,6 +21,67 @@ class QueueMutationTest {
     private val d = song(4)
     private val e = song(5)
     private val queue = listOf(a, b, c, d, e)
+
+    @Test
+    fun `shuffle toggle model preserves current song identity`() {
+        val result = QueueMutation.shuffleToggleModel(
+            libraryQueue = queue,
+            currentSongId = c.id,
+            shuffleEnabled = true,
+            random = Random(7),
+        )!!
+
+        assertEquals(c, result.currentSong)
+        assertEquals(c.id, result.playbackQueue[result.currentPlaybackIndex].id)
+    }
+
+    @Test
+    fun `shuffle toggle model does not require replacing current item`() {
+        val result = QueueMutation.shuffleToggleModel(
+            libraryQueue = queue,
+            currentSongId = c.id,
+            shuffleEnabled = true,
+            random = Random(7),
+        )!!
+
+        assertFalse(result.requiresCurrentItemReplacement)
+    }
+
+    @Test
+    fun `next after shuffle follows shuffled order`() {
+        val result = QueueMutation.shuffleToggleModel(
+            libraryQueue = queue,
+            currentSongId = c.id,
+            shuffleEnabled = true,
+            random = Random(7),
+        )!!
+        val nextPlaybackIndex = QueueNavigator.nextIndex(
+            queueSize = result.playbackQueue.size,
+            currentIndex = result.currentPlaybackIndex,
+            repeatMode = RepeatMode.OFF,
+        )!!
+
+        assertEquals(result.playbackOrder[1], result.playbackOrder[nextPlaybackIndex])
+        assertEquals(result.playbackQueue[1], result.playbackQueue[nextPlaybackIndex])
+    }
+
+    @Test
+    fun `next after shuffle off follows source order`() {
+        val result = QueueMutation.shuffleToggleModel(
+            libraryQueue = queue,
+            currentSongId = c.id,
+            shuffleEnabled = false,
+            random = Random(7),
+        )!!
+        val nextPlaybackIndex = QueueNavigator.nextIndex(
+            queueSize = result.playbackQueue.size,
+            currentIndex = result.currentPlaybackIndex,
+            repeatMode = RepeatMode.OFF,
+        )!!
+
+        assertEquals(listOf(a, b, c, d, e), result.playbackQueue)
+        assertEquals(d, result.playbackQueue[nextPlaybackIndex])
+    }
 
     // ── remove ──────────────────────────────────────────────────────────────────
 

@@ -6,11 +6,47 @@ import com.launchpoint.wavdrop.data.model.Song
 internal object QueueMutation {
 
     data class RemoveResult(val queue: List<Song>, val currentIndex: Int)
+    data class ShuffleToggleResult(
+        val playbackOrder: List<Int>,
+        val playbackQueue: List<Song>,
+        val currentPlaybackIndex: Int,
+        val currentSong: Song,
+        val requiresCurrentItemReplacement: Boolean,
+    )
     data class NativeMoveResult(
         val playbackOrder: List<Int>,
         val fromLibraryIndex: Int,
         val toLibraryIndex: Int,
     )
+
+    fun shuffleToggleModel(
+        libraryQueue: List<Song>,
+        currentSongId: Long,
+        shuffleEnabled: Boolean,
+        random: kotlin.random.Random = kotlin.random.Random.Default,
+    ): ShuffleToggleResult? {
+        val currentSourceIndex = libraryQueue.indexOfFirst { it.id == currentSongId }
+            .takeIf { it >= 0 }
+            ?: return null
+        val playbackOrder = QueueNavigator.buildPlaybackOrder(
+            queueSize = libraryQueue.size,
+            currentIndex = currentSourceIndex,
+            shuffleEnabled = shuffleEnabled,
+            random = random,
+        )
+        val playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+        val currentPlaybackIndex = playbackOrder.indexOf(currentSourceIndex)
+            .takeIf { it >= 0 }
+            ?: return null
+
+        return ShuffleToggleResult(
+            playbackOrder = playbackOrder,
+            playbackQueue = playbackQueue,
+            currentPlaybackIndex = currentPlaybackIndex,
+            currentSong = libraryQueue[currentSourceIndex],
+            requiresCurrentItemReplacement = false,
+        )
+    }
 
     /**
      * Removes the item at [playbackIndex] from [playbackQueue].
