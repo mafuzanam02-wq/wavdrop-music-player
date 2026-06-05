@@ -130,5 +130,9 @@ object WavdropBackupExporter {
             put("selectedFolderUris", JSONArray().apply { uris.forEach { put(it) } })
         }
         prefs.minimumTrackDurationSeconds?.let { put("minimumTrackDurationSeconds", it) }
+        prefs.themeMode?.let    { put("themeMode",    it) }
+        prefs.accentColor?.let  { put("accentColor",  it) }
+        prefs.launcherIcon?.let { put("launcherIcon", it) }
+        prefs.compactMode?.let  { put("compactMode",  it) }
     }
 }

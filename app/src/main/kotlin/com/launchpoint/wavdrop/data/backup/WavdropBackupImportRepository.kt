@@ -19,12 +19,15 @@ import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.settings.AccentColor
+import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import com.launchpoint.wavdrop.data.settings.StartupDestination
+import com.launchpoint.wavdrop.data.settings.ThemeMode
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -303,6 +306,25 @@ class WavdropBackupImportRepository @Inject constructor(
                 libraryScanSettingsRepository.setSelectedFolderUris(folderUris)
                 preferencesRestored = true
             }
+
+            prefs.themeMode
+                ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setThemeMode(it); preferencesRestored = true }
+
+            prefs.accentColor
+                ?.let { runCatching { AccentColor.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setAccentColor(it); preferencesRestored = true }
+
+            // Restores the icon preference in DataStore only. The launcher icon visual change
+            // requires activity alias switching (PackageManager), which only happens through
+            // the Appearance settings screen. The preference is preserved and will take effect
+            // the next time the user visits Settings → Appearance, or on reinstall.
+            prefs.launcherIcon
+                ?.let { runCatching { AppIconChoice.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setAppIconChoice(it); preferencesRestored = true }
+
+            prefs.compactMode
+                ?.let { appSettingsRepository.setCompactMode(it); preferencesRestored = true }
         }
 
         return dbResult.copy(preferencesRestored = preferencesRestored)

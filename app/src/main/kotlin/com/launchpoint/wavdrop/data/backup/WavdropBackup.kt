@@ -47,6 +47,10 @@ data class BackupPreferences(
     val scanMode: String?,
     val selectedFolderUris: List<String>?,
     val minimumTrackDurationSeconds: Int?,
+    val themeMode: String? = null,
+    val accentColor: String? = null,
+    val launcherIcon: String? = null,
+    val compactMode: Boolean? = null,
 )
 
 data class BackupPlaylistSong(

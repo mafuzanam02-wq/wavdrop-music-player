@@ -95,6 +95,10 @@ class WavdropBackupRepository @Inject constructor(
             scanMode                    = scanSettings.scanMode.name,
             selectedFolderUris          = scanSettings.selectedFolderUris.takeIf { it.isNotEmpty() },
             minimumTrackDurationSeconds = scanSettings.minimumTrackDurationSeconds,
+            themeMode                   = appSettingsRepository.themeMode.first().name,
+            accentColor                 = appSettingsRepository.accentColor.first().name,
+            launcherIcon                = appSettingsRepository.appIconChoice.first().name,
+            compactMode                 = appSettingsRepository.compactMode.first(),
         )
 
         val backup = WavdropBackup(

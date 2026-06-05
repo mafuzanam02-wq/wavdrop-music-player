@@ -121,6 +121,10 @@ object WavdropBackupParser {
                     selectedFolderUris          = (obj["selectedFolderUris"] as? List<*>)
                         ?.filterIsInstance<String>(),
                     minimumTrackDurationSeconds = (obj["minimumTrackDurationSeconds"] as? Long)?.toInt(),
+                    themeMode                   = obj["themeMode"] as? String,
+                    accentColor                 = obj["accentColor"] as? String,
+                    launcherIcon                = obj["launcherIcon"] as? String,
+                    compactMode                 = obj["compactMode"] as? Boolean,
                 )
             }
 
