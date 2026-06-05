@@ -13,4 +13,10 @@ enum class AppIconChoice(val displayName: String, val aliasClassName: String) {
         displayName    = "Deep Teal",
         aliasClassName = "com.launchpoint.wavdrop.MainActivityAliasDeepTeal",
     ),
+    ;
+
+    companion object {
+        fun fromStoredName(raw: String?): AppIconChoice? =
+            raw?.let { value -> entries.firstOrNull { it.name == value } }
+    }
 }

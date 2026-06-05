@@ -1,8 +1,5 @@
 package com.launchpoint.wavdrop.ui.screen.settings
 
-import android.content.ComponentName
-import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -10,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
+import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
@@ -25,7 +23,6 @@ import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,9 +50,9 @@ sealed interface LibraryScanUiState {
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val backupRepository: WavdropBackupRepository,
     private val appSettingsRepository: AppSettingsRepository,
+    private val appIconAliasManager: AppIconAliasManager,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
     private val resumeBehaviorRepository: ResumeBehaviorSettingsRepository,
     private val songRepository: SongRepository,
@@ -222,9 +219,9 @@ class SettingsViewModel @Inject constructor(
     fun setAppIcon(choice: AppIconChoice) {
         viewModelScope.launch {
             appSettingsRepository.setAppIconChoice(choice)
-            runCatching { applyAppIcon(choice) }
-                .onSuccess { confirmed ->
-                    val message = if (confirmed) {
+            runCatching { appIconAliasManager.apply(choice) }
+                .onSuccess { result ->
+                    val message = if (result.confirmed) {
                         "Icon preference saved. Your phone's launcher controls when the icon updates."
                     } else {
                         "Icon preference saved, but the launcher icon could not be confirmed."
@@ -238,57 +235,6 @@ class SettingsViewModel @Inject constructor(
                     )
                 }
         }
-    }
-
-    /**
-     * Applies the selected launcher alias using explicit manifest class names.
-     * Enables the chosen alias first (so the launcher always has an active entry),
-     * then disables all others.
-     *
-     * Returns true if getComponentEnabledSetting confirms the selected alias is
-     * COMPONENT_ENABLED_STATE_ENABLED after the switch; false otherwise.
-     */
-    private fun applyAppIcon(choice: AppIconChoice): Boolean {
-        val pkg = context.packageName
-        val pm  = context.packageManager
-
-        // Enable chosen alias FIRST — always keep at least one launcher entry active.
-        val enableCn = ComponentName(pkg, choice.aliasClassName)
-        pm.setComponentEnabledSetting(
-            enableCn,
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-            PackageManager.DONT_KILL_APP,
-        )
-        Log.d(TAG, "setComponentEnabledSetting ENABLED → ${choice.aliasClassName}")
-
-        // Disable all other aliases now that the replacement is active.
-        AppIconChoice.entries.filter { it != choice }.forEach { other ->
-            pm.setComponentEnabledSetting(
-                ComponentName(pkg, other.aliasClassName),
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                PackageManager.DONT_KILL_APP,
-            )
-            Log.d(TAG, "setComponentEnabledSetting DISABLED → ${other.aliasClassName}")
-        }
-
-        // Read back actual state for every launcher component and log diagnostics.
-        val mainActivityState = pm.getComponentEnabledSetting(
-            ComponentName(pkg, "com.launchpoint.wavdrop.MainActivity")
-        )
-        Log.d(TAG, "STATE MainActivity                          = $mainActivityState")
-        AppIconChoice.entries.forEach { entry ->
-            val state   = pm.getComponentEnabledSetting(ComponentName(pkg, entry.aliasClassName))
-            val marker  = if (entry == choice) "★" else " "
-            Log.d(TAG, "STATE $marker ${entry.aliasClassName} = $state")
-        }
-
-        // Confirm the selected alias is now explicitly enabled.
-        val selectedState = pm.getComponentEnabledSetting(enableCn)
-        val confirmed     = selectedState == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-        if (!confirmed) {
-            Log.w(TAG, "Alias not confirmed enabled after switch: state=$selectedState")
-        }
-        return confirmed
     }
 
     private companion object {

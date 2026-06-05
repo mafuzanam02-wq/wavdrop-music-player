@@ -20,6 +20,7 @@ import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.settings.AccentColor
+import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
@@ -41,6 +42,7 @@ class WavdropBackupImportRepository @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val trackListenEventDao: TrackListenEventDao,
     private val appSettingsRepository: AppSettingsRepository,
+    private val appIconAliasManager: AppIconAliasManager,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
     private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
 ) {
@@ -320,8 +322,12 @@ class WavdropBackupImportRepository @Inject constructor(
             // the Appearance settings screen. The preference is preserved and will take effect
             // the next time the user visits Settings → Appearance, or on reinstall.
             prefs.launcherIcon
-                ?.let { runCatching { AppIconChoice.valueOf(it) }.getOrNull() }
-                ?.let { appSettingsRepository.setAppIconChoice(it); preferencesRestored = true }
+                ?.let { AppIconChoice.fromStoredName(it) }
+                ?.let {
+                    appSettingsRepository.setAppIconChoice(it)
+                    runCatching { appIconAliasManager.apply(it) }
+                    preferencesRestored = true
+                }
 
             prefs.compactMode
                 ?.let { appSettingsRepository.setCompactMode(it); preferencesRestored = true }
