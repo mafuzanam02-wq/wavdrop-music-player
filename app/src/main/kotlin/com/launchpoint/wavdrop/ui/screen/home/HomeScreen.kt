@@ -34,6 +34,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -66,6 +68,8 @@ import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
+import com.launchpoint.wavdrop.data.library.FolderGrouper
+import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
@@ -73,7 +77,9 @@ import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.components.SongRow
+import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
+import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -85,10 +91,12 @@ fun HomeScreen(
     onLibraryClick: () -> Unit = {},
     onNowPlayingClick: () -> Unit = {},
     onTrackDetailsClick: (Long) -> Unit = {},
+    onFolderClick: (String) -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
     onSmartCollectionsClick: () -> Unit = {},
     onWrappedClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
+    playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
     // ── Permission state ──────────────────────────────────────────────────────
     // ── Playback + library state ──────────────────────────────────────────────
@@ -101,8 +109,12 @@ fun HomeScreen(
     val appIconChoice   by viewModel.appIconChoice.collectAsStateWithLifecycle()
     val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
 
-    var isSearchActive by remember { mutableStateOf(false) }
-    var sleepTimerNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope    = rememberCoroutineScope()
+    var isSearchActive   by remember { mutableStateOf(false) }
+    var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
+    var sleepTimerNowMs  by remember { mutableStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(sleepTimerState.isActive, sleepTimerState.endsAtMs) {
         if (!sleepTimerState.isActive || sleepTimerState.endsAtMs == null) return@LaunchedEffect
@@ -121,6 +133,7 @@ fun HomeScreen(
 
     // ── Layout ────────────────────────────────────────────────────────────────
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (isSearchActive) {
                 SearchTopAppBar(
@@ -192,8 +205,19 @@ fun HomeScreen(
                     favoriteSongIds     = favoriteSongIds,
                     onSongClick         = viewModel::playSong,
                     onShuffleAll        = viewModel::shuffleAll,
-                    onToggleFavorite    = viewModel::toggleFavorite,
+                    onPlayNext          = viewModel::playNext,
+                    onAddToQueue        = viewModel::addToQueue,
+                    onToggleFavorite    = { song, wasFavorite ->
+                        viewModel.toggleFavorite(song.id)
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
+                            )
+                        }
+                    },
+                    onAddToPlaylist     = { song -> addToPlaylistSong = song },
                     onTrackDetailsClick = onTrackDetailsClick,
+                    onFolderClick       = onFolderClick,
                     modifier            = Modifier.padding(innerPadding),
                 )
             } else {
@@ -219,6 +243,21 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    addToPlaylistSong?.let { song ->
+        AddToPlaylistDialog(
+            playlists        = playlists,
+            onSelectPlaylist = { playlistId ->
+                playlistVm.addSongToPlaylist(song.id, playlistId)
+                addToPlaylistSong = null
+            },
+            onCreateAndAdd   = { name ->
+                playlistVm.createPlaylistAndAddSong(name, song.id)
+                addToPlaylistSong = null
+            },
+            onDismiss        = { addToPlaylistSong = null },
+        )
     }
 }
 
@@ -322,8 +361,12 @@ private fun LibraryContent(
     favoriteSongIds: Set<Long>,
     onSongClick: (Song) -> Unit,
     onShuffleAll: () -> Unit,
-    onToggleFavorite: (Long) -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
+    onToggleFavorite: (Song, Boolean) -> Unit,
+    onAddToPlaylist: (Song) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onFolderClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (uiState) {
@@ -335,8 +378,12 @@ private fun LibraryContent(
             favoriteSongIds     = favoriteSongIds,
             onSongClick         = onSongClick,
             onShuffleAll        = onShuffleAll,
+            onPlayNext          = onPlayNext,
+            onAddToQueue        = onAddToQueue,
             onToggleFavorite    = onToggleFavorite,
+            onAddToPlaylist     = onAddToPlaylist,
             onTrackDetailsClick = onTrackDetailsClick,
+            onFolderClick       = onFolderClick,
             modifier            = modifier,
         )
     }
@@ -833,8 +880,12 @@ private fun SongListContent(
     favoriteSongIds: Set<Long>,
     onSongClick: (Song) -> Unit,
     onShuffleAll: () -> Unit,
-    onToggleFavorite: (Long) -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
+    onToggleFavorite: (Song, Boolean) -> Unit,
+    onAddToPlaylist: (Song) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onFolderClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (songs.isEmpty()) {
@@ -847,7 +898,7 @@ private fun SongListContent(
         }
         return
     }
-    val listState = rememberLazyListState()
+    val listState      = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
     Box(modifier.fillMaxSize()) {
@@ -872,8 +923,8 @@ private fun SongListContent(
                                 .padding(end = 2.dp),
                         )
                         Text(
-                            text  = "Shuffle ${songs.size} songs",
-                            style = MaterialTheme.typography.labelLarge,
+                            text     = "Shuffle ${songs.size} songs",
+                            style    = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(start = 6.dp),
                         )
                     }
@@ -884,13 +935,18 @@ private fun SongListContent(
                 )
             }
             items(songs, key = { it.id }) { song ->
-                SongRow(
+                val isFavorite = song.id in favoriteSongIds
+                SongRowWithOverflow(
                     song             = song,
                     isCurrent        = song.id == currentSongId,
-                    isFavorite       = song.id in favoriteSongIds,
-                    onClick          = { onSongClick(song) },
-                    onToggleFavorite = { onToggleFavorite(song.id) },
-                    onOpenDetails    = { onTrackDetailsClick(song.id) },
+                    isFavorite       = isFavorite,
+                    onPlay           = { onSongClick(song) },
+                    onPlayNext       = { onPlayNext(song) },
+                    onAddToQueue     = { onAddToQueue(song) },
+                    onToggleFavorite = { onToggleFavorite(song, isFavorite) },
+                    onAddToPlaylist  = { onAddToPlaylist(song) },
+                    onTrackDetails   = { onTrackDetailsClick(song.id) },
+                    onViewFolder     = song.validFolderKey()?.let { key -> { onFolderClick(key) } },
                     modifier         = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider(
@@ -909,6 +965,17 @@ private fun SongListContent(
             modifier = Modifier.align(Alignment.CenterEnd),
         )
     }
+}
+
+private fun Song.validFolderKey(): String? {
+    val hasFolderMetadata = !folderPath
+        ?.trim()
+        ?.trim('/', '\\')
+        .isNullOrBlank()
+    if (!hasFolderMetadata) return null
+    return FolderGrouper.folderKey(this)
+        .takeUnless { it == FolderGrouper.UNKNOWN_FOLDER }
+        ?.takeIf { it.isNotBlank() }
 }
 
 // ── Shared layout helper ──────────────────────────────────────────────────────
