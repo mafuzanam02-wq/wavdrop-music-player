@@ -11,11 +11,14 @@ import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.search.LibrarySearch
+import com.launchpoint.wavdrop.data.settings.AppIconChoice
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettings
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
+import com.launchpoint.wavdrop.playback.SleepTimerState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -55,6 +58,7 @@ class HomeViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val smartCollectionRepository: SmartCollectionRepository,
     private val homeLayoutRepository: HomeLayoutSettingsRepository,
+    appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -143,6 +147,14 @@ class HomeViewModel @Inject constructor(
     )
 
     val nowPlayingState: StateFlow<NowPlayingState> = playerController.nowPlayingState
+
+    val sleepTimerState: StateFlow<SleepTimerState> = playerController.sleepTimerState
+
+    val appIconChoice: StateFlow<AppIconChoice> = appSettingsRepository.appIconChoice.stateIn(
+        scope        = viewModelScope,
+        started      = SharingStarted.WhileSubscribed(5_000),
+        initialValue = AppIconChoice.MIDNIGHT_VIOLET,
+    )
 
     val statsMap: StateFlow<Map<Long, Int>> = statsRepository.allPlayCounts()
         .stateIn(

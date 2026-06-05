@@ -19,12 +19,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,7 +62,10 @@ import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
+import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
+import com.launchpoint.wavdrop.playback.SleepTimerOption
+import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
@@ -67,6 +74,7 @@ import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.components.SongRow
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,8 +98,21 @@ fun HomeScreen(
     val nowPlaying      by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val favoriteSongIds by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val searchQuery     by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val appIconChoice   by viewModel.appIconChoice.collectAsStateWithLifecycle()
+    val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
 
     var isSearchActive by remember { mutableStateOf(false) }
+    var sleepTimerNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(sleepTimerState.isActive, sleepTimerState.endsAtMs) {
+        if (!sleepTimerState.isActive || sleepTimerState.endsAtMs == null) return@LaunchedEffect
+        while (true) {
+            sleepTimerNowMs = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+
+    val sleepTimerLabel = sleepTimerState.homeHeaderLabel(sleepTimerNowMs)
 
     BackHandler(enabled = isSearchActive) {
         isSearchActive = false
@@ -101,7 +122,7 @@ fun HomeScreen(
     // ── Layout ────────────────────────────────────────────────────────────────
     Scaffold(
         topBar = {
-            if (false) {
+            if (isSearchActive) {
                 SearchTopAppBar(
                     query        = searchQuery,
                     onQueryChange = viewModel::setSearchQuery,
@@ -114,11 +135,22 @@ fun HomeScreen(
             } else {
                 TopAppBar(
                     title = {
-                        Image(
-                            painter            = painterResource(R.drawable.wavdrop_wave_mark),
-                            contentDescription = "Wavdrop",
-                            modifier           = Modifier.size(48.dp),
+                        HomeHeaderTitle(
+                            appIconChoice = appIconChoice,
+                            subtitle = dashboardState.librarySummary(),
                         )
+                    },
+                    actions = {
+                        if (sleepTimerLabel != null) {
+                            SleepTimerChip(label = sleepTimerLabel)
+                        }
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(
+                                imageVector        = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint               = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor    = MaterialTheme.colorScheme.surface,
@@ -153,7 +185,7 @@ fun HomeScreen(
             onPermissionGranted = viewModel::syncIfNeeded,
             modifier = Modifier.padding(innerPadding),
         ) {
-            if (false) {
+            if (isSearchActive) {
                 LibraryContent(
                     uiState             = uiState,
                     currentSongId       = nowPlaying.song?.id,
@@ -188,6 +220,95 @@ fun HomeScreen(
             }
         }
     }
+}
+
+@Composable
+private fun HomeHeaderTitle(
+    appIconChoice: AppIconChoice,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Image(
+            painter = painterResource(appIconChoice.homeHeaderIconResId()),
+            contentDescription = "Selected Wavdrop icon",
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp)),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Wavdrop",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SleepTimerChip(
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.padding(end = 2.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = CircleShape,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Timer,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private fun HomeDashboardUiState.librarySummary(): String =
+    if (totalSongs > 0) "$totalSongs local songs" else "Your local music library"
+
+private fun SleepTimerState.homeHeaderLabel(nowMs: Long): String? = when {
+    !isActive -> null
+    option == SleepTimerOption.END_OF_CURRENT_SONG -> "Timer: End of song"
+    else -> endsAtMs?.let { endsAt ->
+        val remaining = (endsAt - nowMs).coerceAtLeast(0L)
+        "Timer %d:%02d".format(remaining / 60_000L, (remaining % 60_000L) / 1_000L)
+    }
+}
+
+private fun AppIconChoice.homeHeaderIconResId(): Int = when (this) {
+    AppIconChoice.MIDNIGHT_VIOLET -> R.mipmap.wavdrop_icon_midnight_violet
+    AppIconChoice.CLEAN_PURPLE    -> R.mipmap.wavdrop_icon_clean_purple
+    AppIconChoice.DEEP_TEAL       -> R.mipmap.wavdrop_icon_deep_teal
+    AppIconChoice.OBSIDIAN_BLACK  -> R.mipmap.wavdrop_icon_obsidian_black
+    AppIconChoice.OCEAN_BLUE      -> R.mipmap.wavdrop_icon_ocean_blue
+    AppIconChoice.SUNSET_ORANGE   -> R.mipmap.wavdrop_icon_sunset_orange
 }
 
 // ── Permission screens ────────────────────────────────────────────────────────
