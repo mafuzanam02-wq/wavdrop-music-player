@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,22 +63,39 @@ fun SettingsBluetoothScreen(
             }
             item { SectionDivider() }
 
-            item { SectionHeader("Auto Resume") }
+            item { SectionHeader("Bluetooth Auto Resume") }
             item {
-                ToggleSettingsRow(
-                    title           = "Auto Resume on Bluetooth",
-                    subtitle        = "Resume your last session when a Bluetooth audio device connects.",
-                    checked         = resumeBehavior.autoResumeOnBluetooth,
-                    onCheckedChange = viewModel::setAutoResumeOnBluetooth,
+                SettingsMessageRow(
+                    message = "Choose how Wavdrop behaves when Bluetooth reconnects.",
                 )
             }
+            HeadphoneResumeMode.entries.forEach { mode ->
+                item {
+                    ScanModeRow(
+                        title    = mode.displayName,
+                        subtitle = mode.description,
+                        selected = resumeBehavior.bluetoothResumeMode == mode,
+                        onClick  = { viewModel.setBluetoothResumeMode(mode) },
+                    )
+                }
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Wired Headphone Auto Resume") }
             item {
-                ToggleSettingsRow(
-                    title           = "Wired headphone auto-resume",
-                    subtitle        = "Resume your last session when wired headphones are connected.",
-                    checked         = resumeBehavior.autoResumeOnHeadphones,
-                    onCheckedChange = viewModel::setAutoResumeOnHeadphones,
+                SettingsMessageRow(
+                    message = "Choose how Wavdrop behaves when wired headphones reconnect.",
                 )
+            }
+            HeadphoneResumeMode.entries.forEach { mode ->
+                item {
+                    ScanModeRow(
+                        title    = mode.displayName,
+                        subtitle = mode.description,
+                        selected = resumeBehavior.wiredResumeMode == mode,
+                        onClick  = { viewModel.setWiredResumeMode(mode) },
+                    )
+                }
             }
         }
     }

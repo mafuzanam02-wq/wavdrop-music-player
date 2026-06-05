@@ -14,6 +14,7 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRules
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionSnapshot
+import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -78,6 +79,12 @@ class PlayerController @Inject constructor(
 
     private val _sleepTimerState = MutableStateFlow(SleepTimerState())
     val sleepTimerState: StateFlow<SleepTimerState> = _sleepTimerState.asStateFlow()
+
+    // Set to true by onBluetoothDeviceRemoved / onWiredDeviceRemoved when the device
+    // disconnects while playback is active. Consumed (cleared) at the start of each
+    // resume attempt so a single disconnect triggers at most one resume.
+    private var wasInterruptedByBluetooth = false
+    private var wasInterruptedByWired = false
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var positionTickerJob: Job? = null
@@ -574,10 +581,28 @@ class PlayerController @Inject constructor(
     }
 
     /**
+     * Called by PlaybackService when a Bluetooth audio device is removed.
+     * Records whether playback was active at that moment so [resumeForBluetooth] can
+     * honour the RESUME_IF_INTERRUPTED mode.
+     */
+    fun onBluetoothDeviceRemoved() {
+        wasInterruptedByBluetooth = mediaController?.isPlaying == true
+    }
+
+    /**
+     * Called by PlaybackService when a wired audio output is removed.
+     * Records whether playback was active at that moment so [resumeForWiredHeadphones] can
+     * honour the RESUME_IF_INTERRUPTED mode.
+     */
+    fun onWiredDeviceRemoved() {
+        wasInterruptedByWired = mediaController?.isPlaying == true
+    }
+
+    /**
      * Resumes the last session and starts playback after a Bluetooth audio device connects.
      *
      * Guards checked (in order):
-     * 1. autoResumeOnBluetooth setting must be ON.
+     * 1. bluetoothResumeMode determines whether to resume at all (see [HeadphoneResumeMode]).
      * 2. rememberLastTrack must be ON.
      * 3. Playback must not already be active.
      * 4. A ~1 s delay lets the BT audio route stabilize; playback is re-checked after.
@@ -590,7 +615,9 @@ class PlayerController @Inject constructor(
     fun resumeForBluetooth(availableSongs: List<Song>) {
         scope.launch {
             val settings = resumeBehaviorRepository.settings.first()
-            if (!settings.autoResumeOnBluetooth) return@launch
+            val interrupted = wasInterruptedByBluetooth
+            wasInterruptedByBluetooth = false  // consume: one disconnect → at most one resume
+            if (!settings.bluetoothResumeMode.shouldResume(interrupted)) return@launch
             if (!settings.rememberLastTrack) return@launch
 
             val controller = mediaController ?: return@launch
@@ -617,7 +644,7 @@ class PlayerController @Inject constructor(
      * Resumes the last session and starts playback after wired headphones or a wired headset
      * connects.
      *
-     * Guards and timing mirror [resumeForBluetooth]; checks [autoResumeOnHeadphones] instead.
+     * Guards and timing mirror [resumeForBluetooth]; checks [wiredResumeMode] instead.
      * A [wiredResumeJob] guard prevents concurrent resume attempts when multiple
      * AudioDeviceCallback events fire in quick succession for the same physical device.
      */
@@ -625,7 +652,9 @@ class PlayerController @Inject constructor(
         if (wiredResumeJob?.isActive == true) return
         wiredResumeJob = scope.launch {
             val settings = resumeBehaviorRepository.settings.first()
-            if (!settings.autoResumeOnHeadphones) return@launch
+            val interrupted = wasInterruptedByWired
+            wasInterruptedByWired = false  // consume: one disconnect → at most one resume
+            if (!settings.wiredResumeMode.shouldResume(interrupted)) return@launch
             if (!settings.rememberLastTrack) return@launch
 
             val controller = mediaController ?: return@launch

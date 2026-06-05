@@ -12,6 +12,7 @@ import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
@@ -186,12 +187,12 @@ class SettingsViewModel @Inject constructor(
         playerController.setSleepTimer(option)
     }
 
-    fun setAutoResumeOnBluetooth(enabled: Boolean) {
-        viewModelScope.launch { resumeBehaviorRepository.setAutoResumeOnBluetooth(enabled) }
+    fun setBluetoothResumeMode(mode: HeadphoneResumeMode) {
+        viewModelScope.launch { resumeBehaviorRepository.setBluetoothResumeMode(mode) }
     }
 
-    fun setAutoResumeOnHeadphones(enabled: Boolean) {
-        viewModelScope.launch { resumeBehaviorRepository.setAutoResumeOnHeadphones(enabled) }
+    fun setWiredResumeMode(mode: HeadphoneResumeMode) {
+        viewModelScope.launch { resumeBehaviorRepository.setWiredResumeMode(mode) }
     }
 
     fun setThemeMode(mode: ThemeMode) {

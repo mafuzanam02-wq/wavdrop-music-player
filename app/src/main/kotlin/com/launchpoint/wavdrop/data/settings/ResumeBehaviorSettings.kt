@@ -5,6 +5,6 @@ data class ResumeBehaviorSettings(
     val rememberLastTrack: Boolean = true,
     val rememberPosition: Boolean = true,
     val restoreQueue: Boolean = true,
-    val autoResumeOnHeadphones: Boolean = false,
-    val autoResumeOnBluetooth: Boolean = false,
+    val bluetoothResumeMode: HeadphoneResumeMode = HeadphoneResumeMode.RESUME_IF_INTERRUPTED,
+    val wiredResumeMode: HeadphoneResumeMode = HeadphoneResumeMode.RESUME_IF_INTERRUPTED,
 )
