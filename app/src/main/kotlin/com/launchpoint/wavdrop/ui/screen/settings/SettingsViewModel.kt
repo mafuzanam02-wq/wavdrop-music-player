@@ -13,6 +13,7 @@ import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
+import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
@@ -86,6 +87,13 @@ class SettingsViewModel @Inject constructor(
         )
 
     val sleepTimerState: StateFlow<SleepTimerState> = playerController.sleepTimerState
+
+    val notificationControlsSetting: StateFlow<NotificationControlsSetting> =
+        appSettingsRepository.notificationControlsSetting.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = NotificationControlsSetting.STANDARD,
+        )
 
     val appIconChoice: StateFlow<AppIconChoice> =
         appSettingsRepository.appIconChoice.stateIn(
@@ -185,6 +193,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setSleepTimer(option: SleepTimerOption) {
         playerController.setSleepTimer(option)
+    }
+
+    fun setNotificationControlsSetting(setting: NotificationControlsSetting) {
+        viewModelScope.launch { appSettingsRepository.setNotificationControlsSetting(setting) }
     }
 
     fun setBluetoothResumeMode(mode: HeadphoneResumeMode) {

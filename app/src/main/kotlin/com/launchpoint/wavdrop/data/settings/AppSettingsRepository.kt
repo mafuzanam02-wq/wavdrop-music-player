@@ -131,6 +131,22 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val notificationControlsSetting: Flow<NotificationControlsSetting> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[NOTIFICATION_CONTROLS_KEY]
+                ?.let { runCatching { NotificationControlsSetting.valueOf(it) }.getOrNull() }
+                ?: NotificationControlsSetting.STANDARD
+        }
+
+    suspend fun setNotificationControlsSetting(setting: NotificationControlsSetting) {
+        dataStore.edit { preferences ->
+            preferences[NOTIFICATION_CONTROLS_KEY] = setting.name
+        }
+    }
+
     private fun String.toStartupDestination(): StartupDestination? =
         runCatching { StartupDestination.valueOf(this) }.getOrNull()
 
@@ -153,10 +169,11 @@ class AppSettingsRepository @Inject constructor(
         val STARTUP_DESTINATION_KEY = stringPreferencesKey("startup_destination")
         val MOST_PLAYED_PERIOD_KEY  = stringPreferencesKey("most_played_period")
         val MOST_PLAYED_LIMIT_KEY   = stringPreferencesKey("most_played_limit")
-        val APP_ICON_CHOICE_KEY     = stringPreferencesKey("app_icon_choice")
-        val THEME_MODE_KEY          = stringPreferencesKey("theme_mode")
-        val ACCENT_COLOR_KEY        = stringPreferencesKey("accent_color")
-        val COMPACT_MODE_KEY        = booleanPreferencesKey("compact_mode")
+        val APP_ICON_CHOICE_KEY          = stringPreferencesKey("app_icon_choice")
+        val THEME_MODE_KEY               = stringPreferencesKey("theme_mode")
+        val ACCENT_COLOR_KEY             = stringPreferencesKey("accent_color")
+        val COMPACT_MODE_KEY             = booleanPreferencesKey("compact_mode")
         val HAS_COMPLETED_ONBOARDING_KEY = booleanPreferencesKey("has_completed_onboarding")
+        val NOTIFICATION_CONTROLS_KEY    = stringPreferencesKey("notification_controls")
     }
 }

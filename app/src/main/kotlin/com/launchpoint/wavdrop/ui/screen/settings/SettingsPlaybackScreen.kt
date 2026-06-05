@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -40,9 +41,10 @@ fun SettingsPlaybackScreen(
     onNavigateBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
-    val resumeBehavior     by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
-    val sleepTimerState    by viewModel.sleepTimerState.collectAsStateWithLifecycle()
+    val startupDestination          by viewModel.startupDestination.collectAsStateWithLifecycle()
+    val resumeBehavior              by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
+    val sleepTimerState             by viewModel.sleepTimerState.collectAsStateWithLifecycle()
+    val notificationControlsSetting by viewModel.notificationControlsSetting.collectAsStateWithLifecycle()
     var showStartupDialog  by remember { mutableStateOf(false) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
 
@@ -114,6 +116,23 @@ fun SettingsPlaybackScreen(
                     subtitle = sleepTimerState.summary(),
                     onClick = { showSleepTimerDialog = true },
                 )
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Notification Controls") }
+            item {
+                SettingsMessageRow(
+                    message = "Additional controls appear when supported by your device.",
+                )
+            }
+            NotificationControlsSetting.entries.forEach { setting ->
+                item {
+                    IconChoiceRow(
+                        name     = setting.displayName,
+                        selected = notificationControlsSetting == setting,
+                        onClick  = { viewModel.setNotificationControlsSetting(setting) },
+                    )
+                }
             }
         }
     }
