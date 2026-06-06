@@ -52,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,6 +71,7 @@ import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
@@ -113,6 +115,7 @@ fun HomeScreen(
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope    = rememberCoroutineScope()
+    val context           = LocalContext.current
     var isSearchActive   by remember { mutableStateOf(false) }
     var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
     var sleepTimerNowMs  by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -219,6 +222,13 @@ fun HomeScreen(
                     onAddToPlaylist     = { song -> addToPlaylistSong = song },
                     onTrackDetailsClick = onTrackDetailsClick,
                     onFolderClick       = onFolderClick,
+                    onShare             = { song ->
+                        shareSong(context, song) {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Could not share this track")
+                            }
+                        }
+                    },
                     modifier            = Modifier.padding(innerPadding),
                 )
             } else {
@@ -376,6 +386,7 @@ private fun LibraryContent(
     onAddToPlaylist: (Song) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
+    onShare: (Song) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (uiState) {
@@ -393,6 +404,7 @@ private fun LibraryContent(
             onAddToPlaylist     = onAddToPlaylist,
             onTrackDetailsClick = onTrackDetailsClick,
             onFolderClick       = onFolderClick,
+            onShare             = onShare,
             modifier            = modifier,
         )
     }
@@ -895,6 +907,7 @@ private fun SongListContent(
     onAddToPlaylist: (Song) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
+    onShare: (Song) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (songs.isEmpty()) {
@@ -956,6 +969,7 @@ private fun SongListContent(
                     onAddToPlaylist  = { onAddToPlaylist(song) },
                     onTrackDetails   = { onTrackDetailsClick(song.id) },
                     onViewFolder     = song.validFolderKey()?.let { key -> { onFolderClick(key) } },
+                    onShare          = { onShare(song) },
                     modifier         = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider(

@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -54,6 +55,7 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.TrackStats
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.screen.lyrics.LyricsViewModel
 import kotlinx.coroutines.launch
 
@@ -73,6 +75,7 @@ fun TrackDetailsScreen(
     var showLyricsEditor  by remember { mutableStateOf(false) }
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
+    val context            = LocalContext.current
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -117,6 +120,13 @@ fun TrackDetailsScreen(
                 lyrics            = lyricsState,
                 hasCustomLyrics   = hasCustomLyrics,
                 onAddToPlaylist   = { showAddToPlaylist = true },
+                onShare           = {
+                    shareSong(context, state.song) {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Could not share this track")
+                        }
+                    }
+                },
                 onEditLyrics      = { showLyricsEditor = true },
                 onClearLyrics     = { lyricsViewModel.clearCustomLyrics() },
                 modifier          = Modifier.padding(innerPadding),
@@ -201,6 +211,7 @@ private fun ReadyContent(
     lyrics: LyricsResult,
     hasCustomLyrics: Boolean,
     onAddToPlaylist: () -> Unit,
+    onShare: () -> Unit,
     onEditLyrics: () -> Unit,
     onClearLyrics: () -> Unit,
     modifier: Modifier = Modifier,
@@ -266,6 +277,10 @@ private fun ReadyContent(
             onClick  = onAddToPlaylist,
             modifier = Modifier.padding(horizontal = 8.dp),
         ) { Text("Add to playlist") }
+        TextButton(
+            onClick  = onShare,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        ) { Text("Share") }
 
         SectionDivider()
 

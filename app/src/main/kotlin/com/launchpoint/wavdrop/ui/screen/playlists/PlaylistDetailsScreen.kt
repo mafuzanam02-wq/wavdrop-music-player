@@ -66,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,6 +80,7 @@ import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
@@ -119,6 +121,7 @@ fun PlaylistDetailsScreen(
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
     val autoScrollScope    = rememberCoroutineScope()
+    val context            = LocalContext.current
 
     LaunchedEffect(pendingMessage) {
         if (pendingMessage != null) {
@@ -388,6 +391,13 @@ fun PlaylistDetailsScreen(
                             onPlayNext       = { viewModel.playNext(entry.song) },
                             onAddToQueue     = { viewModel.addToQueue(entry.song) },
                             onAddToPlaylist  = { addToPlaylistSong = entry.song },
+                            onShare          = {
+                                shareSong(context, entry.song) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Could not share this track")
+                                    }
+                                }
+                            },
                             onRemove         = { viewModel.removeEntry(entry.position) },
                             onMoveUp         = { viewModel.moveEntryUp(entry.position) },
                             onMoveDown       = { viewModel.moveEntryDown(entry.position) },
@@ -487,6 +497,7 @@ fun PlaylistDetailsScreen(
                         onPlayNext = {},
                         onAddToQueue = {},
                         onAddToPlaylist = {},
+                        onShare = {},
                         onRemove = {},
                         onMoveUp = {},
                         onMoveDown = {},
@@ -729,6 +740,7 @@ private fun PlaylistSongRow(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onShare: () -> Unit,
     onRemove: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -872,6 +884,10 @@ private fun PlaylistSongRow(
                 DropdownMenuItem(
                     text    = { Text("Track details") },
                     onClick = { menuExpanded = false; onOpenDetails() },
+                )
+                DropdownMenuItem(
+                    text    = { Text("Share") },
+                    onClick = { menuExpanded = false; onShare() },
                 )
                 if (allowMove) {
                     DropdownMenuItem(

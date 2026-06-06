@@ -41,6 +41,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -49,6 +50,7 @@ import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
@@ -85,6 +87,7 @@ fun SongsScreen(
     var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope    = rememberCoroutineScope()
+    val context           = LocalContext.current
 
     BackHandler(enabled = isSearchActive) {
         isSearchActive = false
@@ -179,6 +182,13 @@ fun SongsScreen(
                         onAddToPlaylist   = { song -> addToPlaylistSong = song },
                         onTrackDetailsClick = onTrackDetailsClick,
                         onFolderClick     = onFolderClick,
+                        onShare           = { song ->
+                            shareSong(context, song) {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("Could not share this track")
+                                }
+                            }
+                        },
                     )
                 }
             }
@@ -223,6 +233,7 @@ private fun SongListContent(
     onAddToPlaylist: (Song) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
+    onShare: (Song) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (songs.isEmpty()) {
@@ -296,6 +307,7 @@ private fun SongListContent(
                     onAddToPlaylist  = { onAddToPlaylist(song) },
                     onTrackDetails   = { onTrackDetailsClick(song.id) },
                     onViewFolder     = song.validFolderKey()?.let { key -> { onFolderClick(key) } },
+                    onShare          = { onShare(song) },
                     modifier         = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider(

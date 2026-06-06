@@ -21,6 +21,7 @@ Historical record of completed and shipped work. Newest changes first.
   Details) now show "Added to playlist" or "Already in playlist" after every add action.
 
 ### Added
+- Added native Android Share action for local audio tracks.
 - Library & Scanning setting: **Include WhatsApp voice notes** (default OFF). When off, files inside
   WhatsApp Voice Notes and WhatsApp Business Voice Notes folders are excluded from the library,
   keeping them out of Songs, playlists, search, reports, and Wrapped. WhatsApp Audio and

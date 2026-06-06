@@ -63,11 +63,13 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
+import androidx.compose.ui.platform.LocalContext
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
+import com.launchpoint.wavdrop.ui.components.shareSong
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -130,6 +132,12 @@ private fun QueueSheetContent(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val autoScrollScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val onShareSong: (Song) -> Unit = { song ->
+        shareSong(context, song) {
+            scope.launch { snackbarHostState.showSnackbar("Could not share this track") }
+        }
+    }
 
     var draggingPlaybackIndex  by remember { mutableStateOf<Int?>(null) }
     var draggingSongId         by remember { mutableStateOf<Long?>(null) }
@@ -276,6 +284,7 @@ private fun QueueSheetContent(
                     onPlayNext = { onPlaySongNext(song) },
                     onAddToQueue = { onAddSongToQueue(song) },
                     onViewStats = { onViewStats(song.id) },
+                    onShare = { onShareSong(song) },
                 )
                 if (index < previousSongs.lastIndex) {
                     HorizontalDivider(
@@ -332,6 +341,7 @@ private fun QueueSheetContent(
                         showRemovedSnackbar()
                     },
                     onViewStats = { onViewStats(song.id) },
+                    onShare = { onShareSong(song) },
                     onDragStart = {
                         draggingPlaybackIndex  = playbackIndex
                         draggingSongId         = song.id
@@ -429,6 +439,7 @@ private fun QueueSheetContent(
                         onPlayNext = {},
                         onRemove = {},
                         onViewStats = {},
+                        onShare = {},
                         onDragStart = {},
                         onDragDelta = {},
                         onDragEnd = {},
@@ -562,6 +573,7 @@ private fun QueuePreviousItemRow(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onViewStats: () -> Unit,
+    onShare: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val compact = LocalCompactMode.current
@@ -634,6 +646,10 @@ private fun QueuePreviousItemRow(
                     text = { Text("View stats") },
                     onClick = { expanded = false; onViewStats() },
                 )
+                DropdownMenuItem(
+                    text = { Text("Share") },
+                    onClick = { expanded = false; onShare() },
+                )
             }
         }
     }
@@ -654,6 +670,7 @@ private fun SwipeableQueueItemRow(
     onPlayNext: () -> Unit,
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
+    onShare: () -> Unit,
     onDragStart: () -> Unit,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -708,6 +725,7 @@ private fun SwipeableQueueItemRow(
             onPlayNext = onPlayNext,
             onRemove = onRemove,
             onViewStats = onViewStats,
+            onShare = onShare,
             onDragStart = onDragStart,
             onDragDelta = onDragDelta,
             onDragEnd = onDragEnd,
@@ -730,6 +748,7 @@ private fun QueueItemRow(
     onPlayNext: () -> Unit,
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
+    onShare: () -> Unit,
     onDragStart: () -> Unit,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -867,6 +886,10 @@ private fun QueueItemRow(
                 DropdownMenuItem(
                     text = { Text("View stats") },
                     onClick = { expanded = false; onViewStats() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Share") },
+                    onClick = { expanded = false; onShare() },
                 )
             }
         }

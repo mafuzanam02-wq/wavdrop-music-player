@@ -97,6 +97,7 @@ import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.RepeatMode
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
@@ -128,6 +129,7 @@ fun NowPlayingScreen(
     val allPlaylistSongs  by viewModel.allPlaylistSongs.collectAsStateWithLifecycle()
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
+    val context            = LocalContext.current
     var showAddToPlaylist  by remember { mutableStateOf(false) }
     var showLyricsOverlay  by remember { mutableStateOf(false) }
     var showLyricsEditor   by remember { mutableStateOf(false) }
@@ -168,7 +170,6 @@ fun NowPlayingScreen(
                     }
                 },
                 actions = {
-                    val context = LocalContext.current
                     val song = state.song
                     if (song != null) {
                         val isExternalAudio = song.isExternalAudio()
@@ -224,6 +225,17 @@ fun NowPlayingScreen(
                                     onClick = {
                                         showMoreActions = false
                                         showQueueSheet = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Share") },
+                                    onClick = {
+                                        showMoreActions = false
+                                        shareSong(context, song) {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Could not share this track")
+                                            }
+                                        }
                                     },
                                 )
                                 if (folderKey != null) {

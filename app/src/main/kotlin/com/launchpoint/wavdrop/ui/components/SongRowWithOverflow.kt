@@ -32,6 +32,7 @@ fun SongRowWithOverflow(
     onTrackDetails: () -> Unit,
     onRemove: (() -> Unit)? = null,
     onViewFolder: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -76,6 +77,12 @@ fun SongRowWithOverflow(
                 text    = { Text("Track details") },
                 onClick = { expanded = false; onTrackDetails() },
             )
+            if (onShare != null) {
+                DropdownMenuItem(
+                    text    = { Text("Share") },
+                    onClick = { expanded = false; onShare() },
+                )
+            }
             if (onRemove != null) {
                 DropdownMenuItem(
                     text    = { Text("Remove") },
