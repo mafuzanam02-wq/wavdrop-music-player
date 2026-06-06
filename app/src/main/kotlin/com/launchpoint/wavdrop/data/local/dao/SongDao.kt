@@ -31,6 +31,9 @@ interface SongDao {
     @Query("DELETE FROM songs WHERE id NOT IN (:activeIds)")
     suspend fun pruneDeleted(activeIds: List<Long>)
 
+    @Query("DELETE FROM songs WHERE id = :songId")
+    suspend fun deleteSong(songId: Long)
+
     @Query("DELETE FROM songs")
     suspend fun deleteAll()
 }

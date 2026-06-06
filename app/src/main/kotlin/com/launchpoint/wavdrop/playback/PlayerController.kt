@@ -449,6 +449,36 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    fun handleSongDeleted(songId: Long) {
+        val currentSong = _nowPlayingState.value.song
+        if (currentSong?.id == songId) {
+            // Current song deleted — stop ExoPlayer and clear all queue state.
+            mediaController?.pause()
+            mediaController?.clearMediaItems()
+            libraryQueue = emptyList()
+            playbackOrder = emptyList()
+            playbackQueue = emptyList()
+            lastKnownPositionMs = -1L
+            _nowPlayingState.update {
+                it.copy(
+                    song         = null,
+                    isPlaying    = false,
+                    queue        = emptyList(),
+                    currentIndex = 0,
+                    positionMs   = 0L,
+                    durationMs   = 0L,
+                )
+            }
+            saveSessionAsync()
+        } else {
+            // Song is queued but not playing — remove from all non-current positions.
+            val indicesToRemove = playbackQueue.indices
+                .filter { playbackQueue[it].id == songId }
+                .sortedDescending()
+            indicesToRemove.forEach { removeFromQueue(it) }
+        }
+    }
+
     fun moveQueueItemUp(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex <= currentPlaybackIndex || playbackIndex <= 0) return

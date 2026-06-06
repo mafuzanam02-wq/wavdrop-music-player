@@ -7,6 +7,12 @@ Historical record of completed and shipped work. Newest changes first.
 ## Unreleased
 
 ### Added
+- Delete from device on Track Details for Android 11+. A "Delete from device" button appears
+  on Track Details for library tracks on Android 11+ (API 30+). Tapping it shows a Wavdrop
+  confirmation dialog, then the Android system consent dialog. On approval: the file is removed
+  from the device, the track is removed from all playlists, any custom lyrics override is
+  deleted, playback is stopped if the deleted song was playing, and Track Details navigates
+  back. Stats and listening history are retained. Not shown for externally opened audio files.
 - Native Android share action for local audio tracks. Share appears in every song-row overflow menu
   (Songs, Home, Album, Artist, Folder, Smart Collection, Playlist Details, Queue Sheet), in the Now
   Playing overflow, and in Track Details. The system share sheet is opened via `ACTION_SEND` with

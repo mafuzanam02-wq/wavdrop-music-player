@@ -25,6 +25,10 @@ class SongRepository @Inject constructor(
     fun observeSongById(songId: Long): Flow<Song?> =
         dao.observeSongById(songId).map { it?.toDomain() }
 
+    suspend fun pruneSong(songId: Long) {
+        dao.deleteSong(songId)
+    }
+
     suspend fun sync() = withContext(Dispatchers.IO) {
         val scanSettings = scanSettingsRepository.settings.first()
         val found = scanner.scanSongs(scanSettings)

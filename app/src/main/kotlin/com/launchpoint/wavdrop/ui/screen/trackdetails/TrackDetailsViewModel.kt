@@ -1,23 +1,31 @@
 package com.launchpoint.wavdrop.ui.screen.trackdetails
 
+import android.content.Context
+import android.content.IntentSender
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.model.PlaylistSong
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.TrackStats
 import com.launchpoint.wavdrop.data.repository.AddToPlaylistResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
+import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
+import com.launchpoint.wavdrop.playback.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import javax.inject.Inject
 
 sealed interface TrackDetailsUiState {
@@ -33,9 +41,12 @@ sealed interface TrackDetailsUiState {
 @HiltViewModel
 class TrackDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val context: Context,
     private val songRepository: SongRepository,
     private val statsRepository: StatsRepository,
     private val playlistRepository: PlaylistRepository,
+    private val playerController: PlayerController,
+    private val lyricsOverrideDao: LyricsOverrideDao,
 ) : ViewModel() {
 
     private val songId: Long = checkNotNull(savedStateHandle["songId"])
@@ -94,6 +105,31 @@ class TrackDetailsViewModel @Inject constructor(
                 playlistRepository.addSongToPlaylist(song.id, result.playlistId)
             }
             onResult(result)
+        }
+    }
+
+    fun deleteFromDevice(
+        song: Song,
+        onDeleteRequested: (IntentSender) -> Unit,
+        onFailed: () -> Unit,
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) { onFailed(); return }
+        runCatching {
+            val pendingIntent = MediaStore.createDeleteRequest(
+                context.contentResolver,
+                listOf(Uri.parse(song.uri)),
+            )
+            onDeleteRequested(pendingIntent.intentSender)
+        }.onFailure { onFailed() }
+    }
+
+    fun onDeleteApproved(song: Song, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            playerController.handleSongDeleted(song.id)
+            runCatching { songRepository.pruneSong(song.id) }
+            runCatching { playlistRepository.removeSongFromAllPlaylists(song.id) }
+            runCatching { lyricsOverrideDao.deleteForSong(song.id, song.uri) }
+            onComplete()
         }
     }
 }

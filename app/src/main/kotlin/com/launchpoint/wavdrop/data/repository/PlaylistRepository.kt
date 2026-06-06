@@ -89,6 +89,10 @@ class PlaylistRepository @Inject constructor(
         dao.deletePlaylist(id)
     }
 
+    suspend fun removeSongFromAllPlaylists(songId: Long) {
+        dao.removeAllEntriesForSong(songId)
+    }
+
     suspend fun addSongToPlaylist(songId: Long, playlistId: Long): AddToPlaylistResult =
         addSongsToPlaylist(playlistId = playlistId, songIds = listOf(songId))
 

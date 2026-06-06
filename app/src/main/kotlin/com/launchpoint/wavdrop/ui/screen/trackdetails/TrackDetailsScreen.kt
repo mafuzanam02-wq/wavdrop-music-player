@@ -1,5 +1,10 @@
 package com.launchpoint.wavdrop.ui.screen.trackdetails
 
+import android.app.Activity
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,16 +71,26 @@ fun TrackDetailsScreen(
     viewModel: TrackDetailsViewModel = hiltViewModel(),
     lyricsViewModel: LyricsViewModel = hiltViewModel(),
 ) {
-    val uiState           by viewModel.uiState.collectAsStateWithLifecycle()
-    val lyricsState       by lyricsViewModel.lyricsState.collectAsStateWithLifecycle()
-    val hasCustomLyrics   by lyricsViewModel.hasCustomLyrics.collectAsStateWithLifecycle()
-    val playlists         by viewModel.playlists.collectAsStateWithLifecycle()
-    val allPlaylistSongs  by viewModel.allPlaylistSongs.collectAsStateWithLifecycle()
-    var showAddToPlaylist by remember { mutableStateOf(false) }
-    var showLyricsEditor  by remember { mutableStateOf(false) }
-    val snackbarHostState  = remember { SnackbarHostState() }
-    val coroutineScope     = rememberCoroutineScope()
-    val context            = LocalContext.current
+    val uiState              by viewModel.uiState.collectAsStateWithLifecycle()
+    val lyricsState          by lyricsViewModel.lyricsState.collectAsStateWithLifecycle()
+    val hasCustomLyrics      by lyricsViewModel.hasCustomLyrics.collectAsStateWithLifecycle()
+    val playlists            by viewModel.playlists.collectAsStateWithLifecycle()
+    val allPlaylistSongs     by viewModel.allPlaylistSongs.collectAsStateWithLifecycle()
+    var showAddToPlaylist    by remember { mutableStateOf(false) }
+    var showLyricsEditor     by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    val snackbarHostState    = remember { SnackbarHostState() }
+    val coroutineScope       = rememberCoroutineScope()
+    val context              = LocalContext.current
+
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val song = (uiState as? TrackDetailsUiState.Ready)?.song ?: return@rememberLauncherForActivityResult
+            viewModel.onDeleteApproved(song) { onNavigateBack() }
+        }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -127,6 +142,12 @@ fun TrackDetailsScreen(
                         }
                     }
                 },
+                onDeleteFromDevice = if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    state.song.id != Long.MIN_VALUE
+                ) {
+                    { showDeleteConfirmation = true }
+                } else null,
                 onEditLyrics      = { showLyricsEditor = true },
                 onClearLyrics     = { lyricsViewModel.clearCustomLyrics() },
                 modifier          = Modifier.padding(innerPadding),
@@ -177,6 +198,32 @@ fun TrackDetailsScreen(
             onDismiss = { showLyricsEditor = false },
         )
     }
+
+    if (showDeleteConfirmation) {
+        val song = (uiState as? TrackDetailsUiState.Ready)?.song
+        if (song != null) {
+            DeleteConfirmationDialog(
+                songTitle = song.title,
+                onConfirm = {
+                    showDeleteConfirmation = false
+                    viewModel.deleteFromDevice(
+                        song              = song,
+                        onDeleteRequested = { intentSender ->
+                            deleteLauncher.launch(
+                                IntentSenderRequest.Builder(intentSender).build()
+                            )
+                        },
+                        onFailed          = {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Could not delete this track")
+                            }
+                        },
+                    )
+                },
+                onDismiss = { showDeleteConfirmation = false },
+            )
+        }
+    }
 }
 
 // ── Loading ───────────────────────────────────────────────────────────────────
@@ -212,6 +259,7 @@ private fun ReadyContent(
     hasCustomLyrics: Boolean,
     onAddToPlaylist: () -> Unit,
     onShare: () -> Unit,
+    onDeleteFromDevice: (() -> Unit)? = null,
     onEditLyrics: () -> Unit,
     onClearLyrics: () -> Unit,
     modifier: Modifier = Modifier,
@@ -281,6 +329,17 @@ private fun ReadyContent(
             onClick  = onShare,
             modifier = Modifier.padding(horizontal = 8.dp),
         ) { Text("Share") }
+
+        if (onDeleteFromDevice != null) {
+            SectionDivider()
+
+            // ── Remove section ───────────────────────────────────────────────
+            SectionHeader("Remove")
+            TextButton(
+                onClick  = onDeleteFromDevice,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) { Text("Delete from device", color = MaterialTheme.colorScheme.error) }
+        }
 
         SectionDivider()
 
@@ -374,6 +433,31 @@ private fun LyricsEditorDialog(
                     Text("Cancel")
                 }
             }
+        },
+    )
+}
+
+// ── Delete confirmation dialog ────────────────────────────────────────────────
+
+@Composable
+private fun DeleteConfirmationDialog(
+    songTitle: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title            = { Text("Delete from device") },
+        text             = {
+            Text("Delete \"$songTitle\"? This removes the audio file from your device. This cannot be undone.")
+        },
+        confirmButton    = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete from device", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton    = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
 }

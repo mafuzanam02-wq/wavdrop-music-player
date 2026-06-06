@@ -7,41 +7,6 @@ When work ships, move it to RELEASE_NOTES.md and remove it here.
 
 ## Approved
 
-### Delete from Device — Phase 1
-
-Track Details screen only. Android 11+ (API 30+) only.
-
-**Scope:**
-- Add a "Delete from device" action in Track Details. Not added to song-row overflow menus,
-  Queue Sheet, or Playlist Details in this phase.
-- Never shown for externally opened audio files (`song.id == Long.MIN_VALUE`).
-- Only visible on Android 11+ (API 30+). On Android 10 and below, hide the action or show a
-  message: "Deleting from device requires Android 11 or later."
-
-**Deletion mechanism:**
-- Use `MediaStore.createDeleteRequest(contentResolver, listOf(Uri.parse(song.uri)))` and launch
-  via `ActivityResultLauncher<IntentSenderRequest>`.
-- Show a Wavdrop `AlertDialog` ("Delete from device" / "This removes the audio file from your
-  device. This cannot be undone.") before the system consent dialog. The system dialog is the
-  second confirmation gate.
-
-**After successful deletion:**
-- Prune the song from the Room `songs` table immediately, or trigger `SongRepository.sync()`.
-- Remove all `playlist_songs` entries referencing the deleted song across all playlists via a new
-  `PlaylistDao` query (`DELETE FROM playlist_songs WHERE songId = :songId`).
-- Remove the `lyrics_overrides` entry for the deleted song.
-- Retain `track_stats` and `track_listen_events` rows — historical data is preserved.
-- If the deleted song is currently playing: stop or skip to next before committing the delete.
-- Navigate back to the previous screen after deletion.
-
-**Must not:**
-- Delete silently without Wavdrop or system confirmation.
-- Delete externally opened audio files (those are not Wavdrop library files).
-- Wipe `track_stats` or `track_listen_events` when deleting a file.
-- Add Delete to song-row overflow menus in this phase.
-- Add Delete to Queue Sheet.
-- Be labelled or confused with "Remove from playlist."
-
 ### Future Scan Exclusions
 
 Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped or prioritised).
@@ -103,8 +68,9 @@ Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped o
   Nearby Share / Quick Share, and OEM-customized share sheets (Samsung OneUI, Xiaomi MIUI,
   etc.) to confirm the `audio/*` MIME type and `FLAG_GRANT_READ_URI_PERMISSION` combination
   behaves correctly across apps and Android versions.
-- **Delete from device**: fully designed and documented but not yet implemented. See Approved
-  section above for the planned approach.
+- **Delete from device Phase 1**: implemented on Track Details for Android 11+. Needs real-device
+  QA: delete non-playing track, delete currently playing track, cancel at each confirmation stage,
+  verify playlist/lyrics cleanup, verify stats are retained.
 - **Bluetooth / wired headphone resume**: auto-resume on device connect needs real-device
   validation across a broader range of headphone models, Bluetooth speakers, and car audio
   systems. Behavior depends on Android version and OEM audio-focus handling.
