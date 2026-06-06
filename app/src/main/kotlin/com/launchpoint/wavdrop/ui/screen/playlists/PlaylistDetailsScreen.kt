@@ -3,7 +3,11 @@ package com.launchpoint.wavdrop.ui.screen.playlists
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -49,8 +54,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,7 +68,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -79,7 +86,11 @@ import com.launchpoint.wavdrop.ui.components.PlaylistArtworkCollage
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.pointer.positionChange
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,14 +114,102 @@ fun PlaylistDetailsScreen(
     var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
+    val autoScrollScope    = rememberCoroutineScope()
 
     var draggingPosition  by remember { mutableStateOf<Int?>(null) }
+    var draggingSongId    by remember { mutableStateOf<Long?>(null) }
     var dragStartPosition by remember { mutableStateOf(0) }
-    var dragOffsetPx      by remember { mutableFloatStateOf(0f) }
-    val anyDragging        = draggingPosition != null
+    var dragTargetPosition by remember { mutableStateOf<Int?>(null) }
+    var pointerViewportY  by remember { mutableStateOf<Float?>(null) }
+    var isDragActive      by remember { mutableStateOf(false) }
+    var autoScrollJob     by remember { mutableStateOf<Job?>(null) }
+    val anyDragging        = isDragActive && draggingPosition != null && pointerViewportY != null
     val compact            = LocalCompactMode.current
     val density            = LocalDensity.current
     val rowHeightPx        = with(density) { if (compact) 60.dp.toPx() else 72.dp.toPx() }
+    val lazyListState      = rememberLazyListState()
+
+    fun stopAutoScroll() {
+        autoScrollJob?.cancel()
+        autoScrollJob = null
+    }
+
+    fun clearDragState() {
+        stopAutoScroll()
+        isDragActive      = false
+        draggingPosition  = null
+        draggingSongId    = null
+        dragStartPosition = 0
+        dragTargetPosition = null
+        pointerViewportY  = null
+    }
+
+    fun updateDragTarget(pointerY: Float) {
+        val playlistItems = lazyListState.layoutInfo.visibleItemsInfo
+            .mapNotNull { item ->
+                val key = item.key as? String ?: return@mapNotNull null
+                val position = key.substringBefore(":").toIntOrNull() ?: return@mapNotNull null
+                if (state.visibleEntries.none { it.position == position }) return@mapNotNull null
+                item to position
+            }
+            .sortedBy { it.first.offset }
+        if (playlistItems.isEmpty()) return
+
+        dragTargetPosition = playlistItems.firstOrNull { (item, _) ->
+            pointerY < item.offset + item.size / 2f
+        }?.second ?: playlistItems.last().second
+    }
+
+    suspend fun runAutoScrollFrame(): Boolean {
+        val position = draggingPosition
+        val songId = draggingSongId
+        val pointerY = pointerViewportY
+        if (!isDragActive || position == null || songId == null || pointerY == null) return false
+        val draggedItemStillExists = state.entries.any {
+            it.position == position && it.songId == songId
+        }
+        if (!draggedItemStillExists) {
+            clearDragState()
+            return false
+        }
+
+        val edgePx      = with(density) { 80.dp.toPx() }
+        val scrollSpeed = with(density) { 8.dp.toPx() }
+        val viewport = lazyListState.layoutInfo.viewportSize.height.toFloat()
+        val scrollAmount = if (viewport > 0f) {
+            when {
+                pointerY < edgePx            -> -scrollSpeed
+                pointerY > viewport - edgePx ->  scrollSpeed
+                else                         ->  0f
+            }
+        } else {
+            0f
+        }
+
+        if (scrollAmount != 0f && isDragActive) {
+            lazyListState.scrollBy(scrollAmount)
+            if (isDragActive) {
+                updateDragTarget(pointerY)
+            }
+        }
+        return true
+    }
+
+    fun startAutoScroll() {
+        stopAutoScroll()
+        autoScrollJob = autoScrollScope.launch {
+            while (isActive) {
+                if (!runAutoScrollFrame()) break
+                delay(16L)
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            clearDragState()
+        }
+    }
 
     val playlistName = state.playlist?.name ?: ""
     val songCount    = state.entries.size
@@ -221,12 +320,16 @@ fun PlaylistDetailsScreen(
                 modifier        = Modifier.padding(innerPadding),
             )
         } else {
-            LazyColumn(
-                modifier       = Modifier
+            Box(
+                modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(bottom = 88.dp),
             ) {
+                LazyColumn(
+                    state          = lazyListState,
+                    modifier       = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 88.dp),
+                ) {
                 item {
                     PlaylistHeader(
                         playlistName = playlistName.ifBlank { "Playlist" },
@@ -259,8 +362,8 @@ fun PlaylistDetailsScreen(
                             isCurrent        = entry.songId == state.currentSongId,
                             isFavorite       = isFavorite,
                             isDragging       = isDragging,
-                            dragOffsetPx     = if (isDragging) dragOffsetPx else 0f,
                             isDimmed         = anyDragging && !isDragging,
+                            isDragPreview    = false,
                             onClick          = { viewModel.playEntry(entry) },
                             onToggleFavorite = {
                                 viewModel.toggleFavorite(entry.songId)
@@ -279,26 +382,68 @@ fun PlaylistDetailsScreen(
                             onMoveDown       = { viewModel.moveEntryDown(entry.position) },
                             onDragStart      = {
                                 draggingPosition  = entry.position
+                                draggingSongId    = entry.songId
                                 dragStartPosition = entry.position
-                                dragOffsetPx      = 0f
+                                dragTargetPosition = entry.position
+                                val key = "${entry.position}:${entry.songId}"
+                                val itemOffset = lazyListState.layoutInfo.visibleItemsInfo
+                                    .firstOrNull { it.key == key }?.offset ?: 0
+                                val viewport = lazyListState.layoutInfo.viewportSize.height.toFloat()
+                                val startPointerY = itemOffset.toFloat() + rowHeightPx / 2
+                                pointerViewportY = if (viewport > 0f) {
+                                    startPointerY.coerceIn(0f, viewport)
+                                } else {
+                                    startPointerY
+                                }
+                                updateDragTarget(pointerViewportY ?: startPointerY)
+                                isDragActive = true
+                                startAutoScroll()
                             },
-                            onDragDelta      = { dy -> dragOffsetPx += dy },
+                            onDragDelta      = onDragDelta@ { dy ->
+                                if (!isDragActive) return@onDragDelta
+                                val pointerY = pointerViewportY ?: return@onDragDelta
+                                val viewport = lazyListState.layoutInfo.viewportSize.height.toFloat()
+                                val nextPointerY = if (viewport > 0f) {
+                                    (pointerY + dy).coerceIn(0f, viewport)
+                                } else {
+                                    pointerY + dy
+                                }
+                                pointerViewportY = nextPointerY
+                                updateDragTarget(nextPointerY)
+                            },
                             onDragEnd        = {
+                                stopAutoScroll()
+                                isDragActive = false
                                 val from    = dragStartPosition
                                 val entries = state.visibleEntries
                                 val fromIdx = entries.indexOfFirst { it.position == from }
-                                if (fromIdx >= 0) {
-                                    val steps = (dragOffsetPx / rowHeightPx).roundToInt()
-                                    val toIdx = (fromIdx + steps).coerceIn(0, entries.lastIndex)
-                                    if (toIdx != fromIdx) {
-                                        viewModel.moveToPosition(
-                                            fromPosition = from,
-                                            toPosition   = entries[toIdx].position,
-                                        )
-                                    }
+                                val to = dragTargetPosition
+                                val draggedStillExists = draggingSongId != null &&
+                                    entries.getOrNull(fromIdx)?.songId == draggingSongId
+                                if (draggedStillExists && fromIdx >= 0 && to != null && to != from) {
+                                    viewModel.moveToPosition(
+                                        fromPosition = from,
+                                        toPosition   = to,
+                                    )
                                 }
-                                draggingPosition = null
-                                dragOffsetPx     = 0f
+                                clearDragState()
+                            },
+                            onDragCancel     = {
+                                stopAutoScroll()
+                                isDragActive = false
+                                val from    = dragStartPosition
+                                val entries = state.visibleEntries
+                                val fromIdx = entries.indexOfFirst { it.position == from }
+                                val to = dragTargetPosition
+                                val draggedStillExists = draggingSongId != null &&
+                                    entries.getOrNull(fromIdx)?.songId == draggingSongId
+                                if (draggedStillExists && fromIdx >= 0 && to != null && to != from) {
+                                    viewModel.moveToPosition(
+                                        fromPosition = from,
+                                        toPosition   = to,
+                                    )
+                                }
+                                clearDragState()
                             },
                             modifier         = Modifier.fillMaxWidth(),
                         )
@@ -307,6 +452,47 @@ fun PlaylistDetailsScreen(
                             thickness = 0.5.dp,
                         )
                     }
+                }
+                }
+                val previewEntry = draggingPosition?.let { position ->
+                    state.entries.firstOrNull { it.position == position && it.songId == draggingSongId }
+                }
+                val previewY = pointerViewportY
+                if (anyDragging && previewEntry != null && previewY != null) {
+                    PlaylistSongRow(
+                        entry = previewEntry,
+                        isFirst = false,
+                        isLast = false,
+                        allowMove = true,
+                        isCurrent = previewEntry.songId == state.currentSongId,
+                        isFavorite = previewEntry.songId in state.favoriteSongIds,
+                        isDragging = true,
+                        isDimmed = false,
+                        isDragPreview = true,
+                        dragHandleEnabled = false,
+                        onClick = {},
+                        onToggleFavorite = {},
+                        onOpenDetails = {},
+                        onPlayNext = {},
+                        onAddToQueue = {},
+                        onAddToPlaylist = {},
+                        onRemove = {},
+                        onMoveUp = {},
+                        onMoveDown = {},
+                        onDragStart = {},
+                        onDragDelta = {},
+                        onDragEnd = {},
+                        onDragCancel = {},
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .offset {
+                                IntOffset(
+                                    x = 0,
+                                    y = (previewY - rowHeightPx / 2f).roundToInt(),
+                                )
+                            }
+                            .zIndex(1f),
+                    )
                 }
             }
         }
@@ -515,8 +701,9 @@ private fun PlaylistSongRow(
     isCurrent: Boolean,
     isFavorite: Boolean,
     isDragging: Boolean,
-    dragOffsetPx: Float,
     isDimmed: Boolean,
+    isDragPreview: Boolean,
+    dragHandleEnabled: Boolean = true,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenDetails: () -> Unit,
@@ -529,6 +716,7 @@ private fun PlaylistSongRow(
     onDragStart: () -> Unit,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val song = entry.song
@@ -542,16 +730,19 @@ private fun PlaylistSongRow(
     val compact = LocalCompactMode.current
     val verticalPadding = if (compact) 8.dp else 12.dp
     val artworkSize = if (compact) 44.dp else 48.dp
-    val density = LocalDensity.current
-    val offsetDp = with(density) { dragOffsetPx.toDp() }
 
     Row(
         modifier = modifier
-            .alpha(if (isDimmed) 0.65f else 1f)
-            .offset(y = offsetDp)
+            .alpha(
+                when {
+                    isDragging && !isDragPreview -> 0f
+                    isDimmed -> 0.65f
+                    else -> 1f
+                },
+            )
             .background(rowColor)
             .combinedClickable(
-                enabled       = !(isDragging || isDimmed),
+                enabled       = !(isDragging || isDimmed || isDragPreview),
                 onClick       = onClick,
                 onDoubleClick = onToggleFavorite,
                 onLongClick   = onOpenDetails,
@@ -593,17 +784,41 @@ private fun PlaylistSongRow(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .pointerInput(entry.position) {
-                        detectDragGestures(
-                            onDragStart  = { onDragStart() },
-                            onDrag       = { change, dragAmount ->
-                                change.consume()
-                                onDragDelta(dragAmount.y)
-                            },
-                            onDragEnd    = { onDragEnd() },
-                            onDragCancel = { onDragEnd() },
-                        )
-                    },
+                    .then(
+                        if (dragHandleEnabled) {
+                            Modifier.pointerInput(entry.position) {
+                                awaitEachGesture {
+                                    var dragStarted = false
+                                    var dropCommitted = false
+                                    try {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val touchSlopChange = awaitTouchSlopOrCancellation(down.id) { change, overSlop ->
+                                            change.consume()
+                                            onDragStart()
+                                            dragStarted = true
+                                            onDragDelta(overSlop.y)
+                                        }
+                                        if (touchSlopChange != null) {
+                                            drag(touchSlopChange.id) { change ->
+                                                onDragDelta(change.positionChange().y)
+                                                change.consume()
+                                            }
+                                            if (dragStarted) {
+                                                onDragEnd()
+                                                dropCommitted = true
+                                            }
+                                        }
+                                    } finally {
+                                        if (dragStarted && !dropCommitted) {
+                                            onDragCancel()
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
