@@ -452,12 +452,36 @@ class PlayerController @Inject constructor(
     fun handleSongDeleted(songId: Long) {
         val currentSong = _nowPlayingState.value.song
         if (currentSong?.id == songId) {
-            // Current song deleted — stop ExoPlayer and clear all queue state.
+            handleCurrentSongDeleted()
+        } else {
+            // Song is queued but not the current track — remove all occurrences.
+            val indicesToRemove = playbackQueue.indices
+                .filter { playbackQueue[it].id == songId }
+                .sortedDescending()
+            indicesToRemove.forEach { removeFromQueue(it) }
+        }
+    }
+
+    private fun handleCurrentSongDeleted() {
+        val currentIdx = currentPlaybackIndex() ?: return
+        if (currentIdx !in playbackQueue.indices) return
+
+        // Use nextIndex (not automaticNextIndex) so RepeatMode.ONE still advances
+        // past the deleted song instead of looping back to it.
+        val nextIdx = QueueNavigator.nextIndex(
+            queueSize    = playbackQueue.size,
+            currentIndex = currentIdx,
+            repeatMode   = repeatMode,
+        )
+
+        val controller = mediaController
+        if (nextIdx == null || controller == null) {
+            // No next song available, or controller not yet connected — clear queue and stop.
             mediaController?.pause()
             mediaController?.clearMediaItems()
-            libraryQueue = emptyList()
-            playbackOrder = emptyList()
-            playbackQueue = emptyList()
+            libraryQueue        = emptyList()
+            playbackOrder       = emptyList()
+            playbackQueue       = emptyList()
             lastKnownPositionMs = -1L
             _nowPlayingState.update {
                 it.copy(
@@ -470,13 +494,13 @@ class PlayerController @Inject constructor(
                 )
             }
             saveSessionAsync()
-        } else {
-            // Song is queued but not playing — remove from all non-current positions.
-            val indicesToRemove = playbackQueue.indices
-                .filter { playbackQueue[it].id == songId }
-                .sortedDescending()
-            indicesToRemove.forEach { removeFromQueue(it) }
+            return
         }
+
+        // Advance to the next song first (preserving play/pause state), then remove
+        // the stale entry that was at currentIdx — now behind the new current position.
+        seekToPlaybackIndex(controller, nextIdx)
+        removeFromQueue(currentIdx)
     }
 
     fun moveQueueItemUp(playbackIndex: Int) {

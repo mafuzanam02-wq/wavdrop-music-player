@@ -11,8 +11,10 @@ Historical record of completed and shipped work. Newest changes first.
   on Track Details for library tracks on Android 11+ (API 30+). Tapping it shows a Wavdrop
   confirmation dialog, then the Android system consent dialog. On approval: the file is removed
   from the device, the track is removed from all playlists, any custom lyrics override is
-  deleted, playback is stopped if the deleted song was playing, and Track Details navigates
-  back. Stats and listening history are retained. Not shown for externally opened audio files.
+  deleted, and Track Details navigates back. Stats and listening history are retained. Not shown
+  for externally opened audio files. If the deleted song was playing and more songs follow in the
+  queue, playback advances to the next song automatically (respecting shuffle order and Repeat
+  All); if no next song is available, playback stops cleanly.
 - Native Android share action for local audio tracks. Share appears in every song-row overflow menu
   (Songs, Home, Album, Artist, Folder, Smart Collection, Playlist Details, Queue Sheet), in the Now
   Playing overflow, and in Track Details. The system share sheet is opened via `ACTION_SEND` with
