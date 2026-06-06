@@ -6,6 +6,12 @@ Historical record of completed and shipped work. Newest changes first.
 
 ## Unreleased
 
+### Fixed
+- Prevented duplicate tracks from being added to the same playlist. Adding a song already present in a
+  playlist is now silently skipped at the repository layer; adding via the song-row overflow shows an
+  "Already in playlist" snackbar. Multi-select add (Add Songs screen) skips already-present tracks.
+  Backup/restore was already duplicate-safe and is unchanged.
+
 ### Added
 - Library & Scanning setting: **Include WhatsApp voice notes** (default OFF). When off, files inside
   WhatsApp Voice Notes and WhatsApp Business Voice Notes folders are excluded from the library,

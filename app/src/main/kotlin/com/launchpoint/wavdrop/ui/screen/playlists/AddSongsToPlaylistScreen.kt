@@ -72,7 +72,7 @@ fun AddSongsToPlaylistScreen(
                 selectedCount = state.selectedCount,
                 isAdding      = state.isAdding,
                 onCancel      = onNavigateBack,
-                onAdd         = { viewModel.addSelected(onNavigateBack) },
+                onAdd         = { viewModel.addSelected { _ -> onNavigateBack() } },
             )
         },
     ) { innerPadding ->

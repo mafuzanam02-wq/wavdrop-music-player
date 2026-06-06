@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.repository.AddToPlaylistResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.search.LibrarySearch
@@ -67,7 +68,7 @@ class AddSongsToPlaylistViewModel @Inject constructor(
         }
     }
 
-    fun addSelected(onComplete: () -> Unit) {
+    fun addSelected(onComplete: (AddToPlaylistResult) -> Unit) {
         val selected = selectedSongIds.value
         if (selected.isEmpty() || isAdding.value) return
 
@@ -75,8 +76,8 @@ class AddSongsToPlaylistViewModel @Inject constructor(
             isAdding.value = true
             runCatching {
                 playlistRepository.addSongsToPlaylist(playlistId = playlistId, songIds = selected)
-            }.onSuccess {
-                onComplete()
+            }.onSuccess { result ->
+                onComplete(result)
             }
             isAdding.value = false
         }

@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
+import com.launchpoint.wavdrop.data.repository.AddToPlaylistResult
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -28,20 +29,30 @@ class PlaylistActionsViewModel @Inject constructor(
             initialValue = emptyList(),
         )
 
-    fun addSongToPlaylist(songId: Long, playlistId: Long) {
+    fun addSongToPlaylist(
+        songId: Long,
+        playlistId: Long,
+        onResult: (AddToPlaylistResult) -> Unit = {},
+    ) {
         viewModelScope.launch {
-            playlistRepository.addSongToPlaylist(songId = songId, playlistId = playlistId)
+            val result = playlistRepository.addSongToPlaylist(songId = songId, playlistId = playlistId)
+            onResult(result)
         }
     }
 
-    fun createPlaylistAndAddSong(name: String, songId: Long) {
+    fun createPlaylistAndAddSong(
+        name: String,
+        songId: Long,
+        onResult: (AddToPlaylistResult) -> Unit = {},
+    ) {
         viewModelScope.launch {
-            val result = playlistRepository.createPlaylist(name)
-            if (result is PlaylistOperationResult.Success) {
-                playlistRepository.addSongToPlaylist(
+            val createResult = playlistRepository.createPlaylist(name)
+            if (createResult is PlaylistOperationResult.Success) {
+                val addResult = playlistRepository.addSongToPlaylist(
                     songId     = songId,
-                    playlistId = result.playlistId,
+                    playlistId = createResult.playlistId,
                 )
+                onResult(addResult)
             }
         }
     }

@@ -21,6 +21,8 @@ sealed interface PlaylistOperationResult {
     data object DuplicateName               : PlaylistOperationResult
 }
 
+data class AddToPlaylistResult(val added: Int, val skipped: Int)
+
 @Singleton
 class PlaylistRepository @Inject constructor(
     private val db: WavdropDatabase,
@@ -70,24 +72,30 @@ class PlaylistRepository @Inject constructor(
         dao.deletePlaylist(id)
     }
 
-    suspend fun addSongToPlaylist(songId: Long, playlistId: Long) {
+    suspend fun addSongToPlaylist(songId: Long, playlistId: Long): AddToPlaylistResult =
         addSongsToPlaylist(playlistId = playlistId, songIds = listOf(songId))
-    }
 
-    suspend fun addSongsToPlaylist(playlistId: Long, songIds: List<Long>) {
-        if (songIds.isEmpty()) return
-        db.withTransaction {
-            val nextPos = dao.getMaxPosition(playlistId) + 1
-            dao.insertSongs(
-                songIds.mapIndexed { index, songId ->
-                    PlaylistSongEntity(
-                        playlistId = playlistId,
-                        songId     = songId,
-                        position   = nextPos + index,
-                    )
-                },
-            )
-            dao.touchPlaylist(playlistId, System.currentTimeMillis())
+    suspend fun addSongsToPlaylist(playlistId: Long, songIds: List<Long>): AddToPlaylistResult {
+        if (songIds.isEmpty()) return AddToPlaylistResult(added = 0, skipped = 0)
+        return db.withTransaction {
+            val existingIds = dao.getSongsForPlaylistSnapshot(playlistId)
+                .mapTo(mutableSetOf()) { it.songId }
+            val newIds = songIds.filterNot { it in existingIds }
+            val skipped = songIds.size - newIds.size
+            if (newIds.isNotEmpty()) {
+                val nextPos = dao.getMaxPosition(playlistId) + 1
+                dao.insertSongs(
+                    newIds.mapIndexed { index, id ->
+                        PlaylistSongEntity(
+                            playlistId = playlistId,
+                            songId     = id,
+                            position   = nextPos + index,
+                        )
+                    },
+                )
+                dao.touchPlaylist(playlistId, System.currentTimeMillis())
+            }
+            AddToPlaylistResult(added = newIds.size, skipped = skipped)
         }
     }
 

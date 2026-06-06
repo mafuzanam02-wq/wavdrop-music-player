@@ -502,7 +502,13 @@ fun PlaylistDetailsScreen(
         AddToPlaylistDialog(
             playlists        = playlists,
             onSelectPlaylist = { playlistId ->
-                playlistVm.addSongToPlaylist(song.id, playlistId)
+                playlistVm.addSongToPlaylist(song.id, playlistId) { result ->
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            if (result.skipped > 0) "Already in playlist" else "Added to playlist",
+                        )
+                    }
+                }
                 addToPlaylistSong = null
             },
             onCreateAndAdd   = { name ->
