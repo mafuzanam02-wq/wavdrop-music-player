@@ -353,6 +353,7 @@ fun NowPlayingScreen(
             onRemoveItem = { viewModel.removeFromQueue(it) },
             onMoveUp     = { viewModel.moveQueueItemUp(it) },
             onMoveDown   = { viewModel.moveQueueItemDown(it) },
+            onMoveItemTo = { from, to -> viewModel.moveQueueItemTo(from, to) },
             onPlayNext   = { viewModel.moveToPlayNext(it) },
             onPlaySongNext = { viewModel.playNext(it) },
             onAddSongToQueue = { viewModel.addToQueue(it) },

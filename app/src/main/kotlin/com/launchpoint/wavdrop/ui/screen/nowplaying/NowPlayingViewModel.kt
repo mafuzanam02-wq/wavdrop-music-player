@@ -116,6 +116,8 @@ class NowPlayingViewModel @Inject constructor(
 
     fun moveQueueItemDown(playbackIndex: Int) = playerController.moveQueueItemDown(playbackIndex)
 
+    fun moveQueueItemTo(fromIndex: Int, toIndex: Int) = playerController.moveQueueItemTo(fromIndex, toIndex)
+
     fun moveToPlayNext(playbackIndex: Int) = playerController.moveToPlayNext(playbackIndex)
 
     fun playNext(song: Song) = playerController.playNext(song)

@@ -461,6 +461,33 @@ class PlayerController @Inject constructor(
         swapPlaybackItems(playbackIndex, playbackIndex + 1, currentPlaybackIndex)
     }
 
+    fun moveQueueItemTo(fromPlaybackIndex: Int, toPlaybackIndex: Int) {
+        val currentPlaybackIndex = _nowPlayingState.value.currentIndex
+        if (fromPlaybackIndex <= currentPlaybackIndex || toPlaybackIndex <= currentPlaybackIndex) return
+        if (fromPlaybackIndex == toPlaybackIndex) return
+        if (fromPlaybackIndex !in playbackOrder.indices || toPlaybackIndex !in playbackOrder.indices) return
+
+        val newOrder = playbackOrder.toMutableList()
+        val item = newOrder.removeAt(fromPlaybackIndex)
+        newOrder.add(toPlaybackIndex, item)
+        playbackOrder = newOrder
+        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+
+        if (!playerQueueNeedsSync) {
+            mediaController?.moveMediaItem(fromPlaybackIndex, toPlaybackIndex)
+        }
+
+        _nowPlayingState.update {
+            it.copy(
+                queue          = playbackQueue,
+                currentIndex   = currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode     = repeatMode,
+            )
+        }
+        saveSessionAsync()
+    }
+
     fun moveToPlayNext(playbackIndex: Int) {
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         val immediateNextIndex = currentPlaybackIndex + 1
