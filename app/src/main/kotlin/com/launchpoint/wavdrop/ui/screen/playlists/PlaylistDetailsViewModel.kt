@@ -191,6 +191,17 @@ class PlaylistDetailsViewModel @Inject constructor(
         }
     }
 
+    fun moveToPosition(fromPosition: Int, toPosition: Int) {
+        if (fromPosition == toPosition) return
+        viewModelScope.launch {
+            playlistRepository.movePlaylistSong(
+                playlistId   = playlistId,
+                fromPosition = fromPosition,
+                toPosition   = toPosition,
+            )
+        }
+    }
+
     fun renamePlaylist(name: String, onResult: (PlaylistOperationResult) -> Unit = {}) {
         viewModelScope.launch { onResult(playlistRepository.renamePlaylist(playlistId, name)) }
     }

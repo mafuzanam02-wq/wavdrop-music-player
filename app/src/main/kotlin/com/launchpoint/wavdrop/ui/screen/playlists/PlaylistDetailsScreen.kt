@@ -3,6 +3,8 @@ package com.launchpoint.wavdrop.ui.screen.playlists
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -47,16 +50,21 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
@@ -95,6 +103,14 @@ fun PlaylistDetailsScreen(
     var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
+
+    var draggingPosition  by remember { mutableStateOf<Int?>(null) }
+    var dragStartPosition by remember { mutableStateOf(0) }
+    var dragOffsetPx      by remember { mutableFloatStateOf(0f) }
+    val anyDragging        = draggingPosition != null
+    val compact            = LocalCompactMode.current
+    val density            = LocalDensity.current
+    val rowHeightPx        = with(density) { if (compact) 60.dp.toPx() else 72.dp.toPx() }
 
     val playlistName = state.playlist?.name ?: ""
     val songCount    = state.entries.size
@@ -234,6 +250,7 @@ fun PlaylistDetailsScreen(
                 } else {
                     itemsIndexed(state.visibleEntries, key = { _, entry -> "${entry.position}:${entry.songId}" }) { index, entry ->
                         val isFavorite = entry.songId in state.favoriteSongIds
+                        val isDragging = draggingPosition == entry.position
                         PlaylistSongRow(
                             entry            = entry,
                             isFirst          = index == 0,
@@ -241,6 +258,9 @@ fun PlaylistDetailsScreen(
                             allowMove        = !state.isSearchActive,
                             isCurrent        = entry.songId == state.currentSongId,
                             isFavorite       = isFavorite,
+                            isDragging       = isDragging,
+                            dragOffsetPx     = if (isDragging) dragOffsetPx else 0f,
+                            isDimmed         = anyDragging && !isDragging,
                             onClick          = { viewModel.playEntry(entry) },
                             onToggleFavorite = {
                                 viewModel.toggleFavorite(entry.songId)
@@ -257,6 +277,29 @@ fun PlaylistDetailsScreen(
                             onRemove         = { viewModel.removeEntry(entry.position) },
                             onMoveUp         = { viewModel.moveEntryUp(entry.position) },
                             onMoveDown       = { viewModel.moveEntryDown(entry.position) },
+                            onDragStart      = {
+                                draggingPosition  = entry.position
+                                dragStartPosition = entry.position
+                                dragOffsetPx      = 0f
+                            },
+                            onDragDelta      = { dy -> dragOffsetPx += dy },
+                            onDragEnd        = {
+                                val from    = dragStartPosition
+                                val entries = state.visibleEntries
+                                val fromIdx = entries.indexOfFirst { it.position == from }
+                                if (fromIdx >= 0) {
+                                    val steps = (dragOffsetPx / rowHeightPx).roundToInt()
+                                    val toIdx = (fromIdx + steps).coerceIn(0, entries.lastIndex)
+                                    if (toIdx != fromIdx) {
+                                        viewModel.moveToPosition(
+                                            fromPosition = from,
+                                            toPosition   = entries[toIdx].position,
+                                        )
+                                    }
+                                }
+                                draggingPosition = null
+                                dragOffsetPx     = 0f
+                            },
                             modifier         = Modifier.fillMaxWidth(),
                         )
                         HorizontalDivider(
@@ -471,6 +514,9 @@ private fun PlaylistSongRow(
     allowMove: Boolean,
     isCurrent: Boolean,
     isFavorite: Boolean,
+    isDragging: Boolean,
+    dragOffsetPx: Float,
+    isDimmed: Boolean,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenDetails: () -> Unit,
@@ -480,20 +526,32 @@ private fun PlaylistSongRow(
     onRemove: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onDragStart: () -> Unit,
+    onDragDelta: (Float) -> Unit,
+    onDragEnd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val song = entry.song
-    val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
+    val rowColor = when {
+        isDragging -> MaterialTheme.colorScheme.primaryContainer
+        isCurrent  -> MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+        else       -> Color.Transparent
+    }
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
     var menuExpanded by remember { mutableStateOf(false) }
     val compact = LocalCompactMode.current
     val verticalPadding = if (compact) 8.dp else 12.dp
     val artworkSize = if (compact) 44.dp else 48.dp
+    val density = LocalDensity.current
+    val offsetDp = with(density) { dragOffsetPx.toDp() }
 
     Row(
         modifier = modifier
+            .alpha(if (isDimmed) 0.65f else 1f)
+            .offset(y = offsetDp)
             .background(rowColor)
             .combinedClickable(
+                enabled       = !(isDragging || isDimmed),
                 onClick       = onClick,
                 onDoubleClick = onToggleFavorite,
                 onLongClick   = onOpenDetails,
@@ -530,6 +588,32 @@ private fun PlaylistSongRow(
                                      else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                 modifier           = Modifier.size(20.dp),
             )
+        }
+        if (allowMove) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .pointerInput(entry.position) {
+                        detectDragGestures(
+                            onDragStart  = { onDragStart() },
+                            onDrag       = { change, dragAmount ->
+                                change.consume()
+                                onDragDelta(dragAmount.y)
+                            },
+                            onDragEnd    = { onDragEnd() },
+                            onDragCancel = { onDragEnd() },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Default.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint               = if (isDragging) MaterialTheme.colorScheme.primary
+                                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                    modifier           = Modifier.size(20.dp),
+                )
+            }
         }
         Box {
             IconButton(onClick = { menuExpanded = true }) {

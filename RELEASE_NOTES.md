@@ -12,6 +12,13 @@ Historical record of completed and shipped work. Newest changes first.
   keeping them out of Songs, playlists, search, reports, and Wrapped. WhatsApp Audio and
   non-voice-note audio files received through WhatsApp are unaffected.
 
+### Changed
+- Polished playlist drag-to-reorder feedback and affordance: each row now shows a visible drag
+  handle — touch and drag the handle to reorder; long-pressing the row body still opens Track
+  Details. The dragged row highlights with the `primaryContainer` surface and its handle tints
+  primary; peer rows dim while a drag is active. Row interactions are suppressed during drag to
+  prevent accidental playback.
+
 ---
 
 ## Soft Launch Beta 2
