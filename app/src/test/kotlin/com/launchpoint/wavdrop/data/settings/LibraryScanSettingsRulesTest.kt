@@ -94,6 +94,94 @@ class LibraryScanSettingsRulesTest {
         assertEquals(listOf(1L), filtered.map { it.id })
     }
 
+    @Test
+    fun `whatsapp voice notes are excluded by default`() {
+        val settings = LibraryScanSettings(minimumTrackDurationSeconds = 1)
+        val songs = listOf(
+            song(id = 1, duration = 60_000L, folderPath = "WhatsApp/Media/WhatsApp Voice Notes"),
+            song(id = 2, duration = 60_000L, folderPath = "Music/Rock"),
+        )
+
+        val filtered = LibraryScanSettingsRules.filterSongsForScanSettings(songs, settings)
+
+        assertEquals(listOf(2L), filtered.map { it.id })
+    }
+
+    @Test
+    fun `whatsapp voice notes are included when setting is on`() {
+        val settings = LibraryScanSettings(
+            minimumTrackDurationSeconds = 1,
+            includeWhatsAppVoiceNotes = true,
+        )
+        val songs = listOf(
+            song(id = 1, duration = 60_000L, folderPath = "WhatsApp/Media/WhatsApp Voice Notes"),
+            song(id = 2, duration = 60_000L, folderPath = "Music/Rock"),
+        )
+
+        val filtered = LibraryScanSettingsRules.filterSongsForScanSettings(songs, settings)
+
+        assertEquals(listOf(1L, 2L), filtered.map { it.id })
+    }
+
+    @Test
+    fun `whatsapp business voice notes are excluded by default`() {
+        val settings = LibraryScanSettings(minimumTrackDurationSeconds = 1)
+        val songs = listOf(
+            song(
+                id = 1,
+                duration = 60_000L,
+                folderPath = "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/WhatsApp Business Voice Notes",
+            ),
+            song(id = 2, duration = 60_000L, folderPath = "Music/Rock"),
+        )
+
+        val filtered = LibraryScanSettingsRules.filterSongsForScanSettings(songs, settings)
+
+        assertEquals(listOf(2L), filtered.map { it.id })
+    }
+
+    @Test
+    fun `voice note path matching is case insensitive`() {
+        val settings = LibraryScanSettings(minimumTrackDurationSeconds = 1)
+        val songs = listOf(
+            song(id = 1, duration = 60_000L, folderPath = "whatsapp/media/WHATSAPP VOICE NOTES"),
+            song(id = 2, duration = 60_000L, folderPath = "Music/Rock"),
+        )
+
+        val filtered = LibraryScanSettingsRules.filterSongsForScanSettings(songs, settings)
+
+        assertEquals(listOf(2L), filtered.map { it.id })
+    }
+
+    @Test
+    fun `whatsapp audio folder is not excluded`() {
+        val settings = LibraryScanSettings(minimumTrackDurationSeconds = 1)
+        val songs = listOf(
+            song(id = 1, duration = 60_000L, folderPath = "WhatsApp/Media/WhatsApp Audio"),
+            song(
+                id = 2,
+                duration = 60_000L,
+                folderPath = "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Audio",
+            ),
+        )
+
+        val filtered = LibraryScanSettingsRules.filterSongsForScanSettings(songs, settings)
+
+        assertEquals(listOf(1L, 2L), filtered.map { it.id })
+    }
+
+    @Test
+    fun `songs with null folder path are not excluded by voice note filter`() {
+        val settings = LibraryScanSettings(minimumTrackDurationSeconds = 1)
+        val songs = listOf(
+            song(id = 1, duration = 60_000L, folderPath = null),
+        )
+
+        val filtered = LibraryScanSettingsRules.filterSongsForScanSettings(songs, settings)
+
+        assertEquals(listOf(1L), filtered.map { it.id })
+    }
+
     private fun song(
         id: Long,
         duration: Long,

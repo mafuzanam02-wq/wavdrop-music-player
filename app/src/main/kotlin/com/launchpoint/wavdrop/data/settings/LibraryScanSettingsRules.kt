@@ -75,6 +75,7 @@ object LibraryScanSettingsRules {
     ): Boolean {
         val normalized = normalize(settings)
         if (song.duration < minimumDurationMs(normalized)) return false
+        if (!normalized.includeWhatsAppVoiceNotes && song.isWhatsAppVoiceNote()) return false
         return when (normalized.scanMode) {
             LibraryScanMode.WHOLE_DEVICE -> true
             LibraryScanMode.SELECTED_FOLDERS ->
@@ -142,4 +143,10 @@ object LibraryScanSettingsRules {
         runCatching {
             URLDecoder.decode(value, StandardCharsets.UTF_8.name())
         }.getOrDefault(value)
+
+    private fun Song.isWhatsAppVoiceNote(): Boolean {
+        val path = folderPath.orEmpty()
+        return path.contains("WhatsApp Voice Notes", ignoreCase = true) ||
+            path.contains("WhatsApp Business Voice Notes", ignoreCase = true)
+    }
 }

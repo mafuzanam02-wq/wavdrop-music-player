@@ -111,6 +111,16 @@ fun SettingsLibraryScreen(
 
             item { SectionHeader("Scan Settings") }
             item {
+                ToggleSettingsRow(
+                    title   = "Include WhatsApp voice notes",
+                    subtitle = "Show WhatsApp and WhatsApp Business voice notes in your library. " +
+                        "Off by default to keep voice notes out of Songs, playlists, search, " +
+                        "reports, and Wrapped.",
+                    checked         = scanSettings.includeWhatsAppVoiceNotes,
+                    onCheckedChange = viewModel::setIncludeWhatsAppVoiceNotes,
+                )
+            }
+            item {
                 MinimumDurationRow(
                     seconds          = minimumDurationSeconds.roundToInt(),
                     onSecondsChange  = { minimumDurationSeconds = it.toFloat() },

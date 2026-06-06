@@ -154,6 +154,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setIncludeWhatsAppVoiceNotes(enabled: Boolean) {
+        viewModelScope.launch {
+            scanSettingsRepository.setIncludeWhatsAppVoiceNotes(enabled)
+        }
+    }
+
     fun addSelectedFolderUri(folderUri: String) {
         viewModelScope.launch {
             scanSettingsRepository.addSelectedFolderUri(folderUri)

@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -32,6 +33,8 @@ class LibraryScanSettingsRepository @Inject constructor(
                         .orEmpty(),
                     minimumTrackDurationSeconds = preferences[MINIMUM_TRACK_DURATION_SECONDS_KEY]
                         ?: LibraryScanSettingsRules.DEFAULT_MINIMUM_TRACK_DURATION_SECONDS,
+                    includeWhatsAppVoiceNotes = preferences[INCLUDE_WHATSAPP_VOICE_NOTES_KEY]
+                        ?: false,
                 ),
             )
         }
@@ -55,6 +58,12 @@ class LibraryScanSettingsRepository @Inject constructor(
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
                 .toSet()
+        }
+    }
+
+    suspend fun setIncludeWhatsAppVoiceNotes(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[INCLUDE_WHATSAPP_VOICE_NOTES_KEY] = enabled
         }
     }
 
@@ -88,5 +97,7 @@ class LibraryScanSettingsRepository @Inject constructor(
         val SELECTED_FOLDER_URIS_KEY = stringSetPreferencesKey("library_selected_folder_uris")
         val MINIMUM_TRACK_DURATION_SECONDS_KEY =
             intPreferencesKey("library_minimum_track_duration_seconds")
+        val INCLUDE_WHATSAPP_VOICE_NOTES_KEY =
+            booleanPreferencesKey("library_include_whatsapp_voice_notes")
     }
 }
