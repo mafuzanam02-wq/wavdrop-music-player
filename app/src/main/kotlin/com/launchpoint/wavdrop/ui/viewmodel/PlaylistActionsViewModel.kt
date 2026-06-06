@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.model.PlaylistSong
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.repository.AddToPlaylistResult
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
@@ -23,6 +24,13 @@ class PlaylistActionsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val playlists: StateFlow<List<PlaylistSummary>> = playlistRepository.observePlaylists()
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+    val allPlaylistSongs: StateFlow<List<PlaylistSong>> = playlistRepository.observeAllPlaylistSongs()
         .stateIn(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),

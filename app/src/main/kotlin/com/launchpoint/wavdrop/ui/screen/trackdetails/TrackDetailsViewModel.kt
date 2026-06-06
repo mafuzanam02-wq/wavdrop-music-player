@@ -3,9 +3,11 @@ package com.launchpoint.wavdrop.ui.screen.trackdetails
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.model.PlaylistSong
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.TrackStats
+import com.launchpoint.wavdrop.data.repository.AddToPlaylistResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
@@ -62,6 +64,13 @@ class TrackDetailsViewModel @Inject constructor(
             initialValue = emptyList(),
         )
 
+    val allPlaylistSongs: StateFlow<List<PlaylistSong>> = playlistRepository.observeAllPlaylistSongs()
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
     fun toggleFavorite() {
         val state = uiState.value as? TrackDetailsUiState.Ready ?: return
         viewModelScope.launch {
@@ -69,9 +78,12 @@ class TrackDetailsViewModel @Inject constructor(
         }
     }
 
-    fun addToPlaylist(playlistId: Long) {
+    fun addToPlaylist(playlistId: Long, onResult: (AddToPlaylistResult) -> Unit = {}) {
         val song = (uiState.value as? TrackDetailsUiState.Ready)?.song ?: return
-        viewModelScope.launch { playlistRepository.addSongToPlaylist(song.id, playlistId) }
+        viewModelScope.launch {
+            val result = playlistRepository.addSongToPlaylist(song.id, playlistId)
+            onResult(result)
+        }
     }
 
     fun createPlaylistAndAdd(name: String, onResult: (PlaylistOperationResult) -> Unit = {}) {

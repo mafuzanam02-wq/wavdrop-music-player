@@ -21,7 +21,24 @@ sealed interface PlaylistOperationResult {
     data object DuplicateName               : PlaylistOperationResult
 }
 
-data class AddToPlaylistResult(val added: Int, val skipped: Int)
+data class AddToPlaylistResult(val added: Int, val skipped: Int) {
+
+    fun singleSongMessage(): String = when {
+        added == 1  -> "Added to playlist"
+        skipped > 0 -> "Already in playlist"
+        else        -> "Could not add to playlist"
+    }
+
+    fun multiAddMessage(): String = when {
+        added > 0 && skipped == 0 ->
+            if (added == 1) "Added 1 song" else "Added $added songs"
+        added > 0 && skipped > 0  ->
+            "${if (added == 1) "Added 1 song" else "Added $added songs"} • $skipped already in playlist"
+        skipped > 0               ->
+            if (skipped == 1) "Already in playlist" else "All selected songs are already in this playlist"
+        else                      -> "No songs were added"
+    }
+}
 
 @Singleton
 class PlaylistRepository @Inject constructor(

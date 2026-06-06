@@ -11,6 +11,14 @@ Historical record of completed and shipped work. Newest changes first.
   playlist is now silently skipped at the repository layer; adding via the song-row overflow shows an
   "Already in playlist" snackbar. Multi-select add (Add Songs screen) skips already-present tracks.
   Backup/restore was already duplicate-safe and is unchanged.
+- Improved playlist duplicate-add feedback across all surfaces. The Add to Playlist dialog now
+  shows playlists that already contain the selected song as greyed out with "Already added" and
+  blocks re-selection. The Add Songs screen marks songs already in the playlist as greyed/disabled
+  with "Already in playlist" so they cannot be selected again. After a multi-select add, the Playlist
+  Details screen shows a contextual snackbar: "Added X songs", "Added X songs • Y already in
+  playlist", or "All selected songs are already in this playlist". All song-row overflow menus
+  (Songs, Home, Album, Artist, Folder, Smart Collection, Playlist Details, Now Playing, Track
+  Details) now show "Added to playlist" or "Already in playlist" after every add action.
 
 ### Added
 - Library & Scanning setting: **Include WhatsApp voice notes** (default OFF). When off, files inside

@@ -35,6 +35,7 @@ fun AddToPlaylistDialog(
     onSelectPlaylist: (Long) -> Unit,
     onCreateAndAdd: (String) -> Unit,
     onDismiss: () -> Unit,
+    existingPlaylistIds: Set<Long> = emptySet(),
 ) {
     var showCreateField by remember { mutableStateOf(playlists.isEmpty()) }
     var newName by remember { mutableStateOf("") }
@@ -47,26 +48,35 @@ fun AddToPlaylistDialog(
                 if (!showCreateField && playlists.isNotEmpty()) {
                     LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
                         items(playlists) { playlist ->
+                            val alreadyAdded = playlist.id in existingPlaylistIds
                             Row(
                                 modifier          = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onSelectPlaylist(playlist.id) }
+                                    .then(
+                                        if (alreadyAdded) Modifier
+                                        else Modifier.clickable { onSelectPlaylist(playlist.id) }
+                                    )
                                     .padding(vertical = 10.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(
                                     imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
                                     contentDescription = null,
-                                    tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    tint               = MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = if (alreadyAdded) 0.3f else 0.6f,
+                                    ),
                                     modifier           = Modifier.padding(end = 12.dp),
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text  = playlist.name,
                                         style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(
+                                            alpha = if (alreadyAdded) 0.38f else 1f,
+                                        ),
                                     )
                                     Text(
-                                        text  = "${playlist.songCount} songs",
+                                        text  = if (alreadyAdded) "Already added" else "${playlist.songCount} songs",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                     )

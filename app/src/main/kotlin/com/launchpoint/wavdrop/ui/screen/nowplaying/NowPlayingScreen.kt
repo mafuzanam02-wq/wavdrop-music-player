@@ -54,6 +54,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -123,6 +125,9 @@ fun NowPlayingScreen(
     val hasCustomLyrics   by viewModel.hasCustomLyrics.collectAsStateWithLifecycle()
     val sleepTimerState   by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     val playlists         by viewModel.playlists.collectAsStateWithLifecycle()
+    val allPlaylistSongs  by viewModel.allPlaylistSongs.collectAsStateWithLifecycle()
+    val snackbarHostState  = remember { SnackbarHostState() }
+    val coroutineScope     = rememberCoroutineScope()
     var showAddToPlaylist  by remember { mutableStateOf(false) }
     var showLyricsOverlay  by remember { mutableStateOf(false) }
     var showLyricsEditor   by remember { mutableStateOf(false) }
@@ -150,6 +155,7 @@ fun NowPlayingScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Now Playing") },
@@ -300,17 +306,28 @@ fun NowPlayingScreen(
     }
 
     if (showAddToPlaylist) {
+        val song = state.song
         AddToPlaylistDialog(
-            playlists        = playlists,
-            onSelectPlaylist = { id ->
-                viewModel.addToPlaylist(id)
+            playlists           = playlists,
+            existingPlaylistIds = if (song != null) {
+                allPlaylistSongs
+                    .filter { it.songId == song.id }
+                    .map { it.playlistId }
+                    .toSet()
+            } else emptySet(),
+            onSelectPlaylist    = { id ->
+                viewModel.addToPlaylist(id) { result ->
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(result.singleSongMessage())
+                    }
+                }
                 showAddToPlaylist = false
             },
-            onCreateAndAdd   = { name ->
+            onCreateAndAdd      = { name ->
                 viewModel.createPlaylistAndAdd(name)
                 showAddToPlaylist = false
             },
-            onDismiss        = { showAddToPlaylist = false },
+            onDismiss           = { showAddToPlaylist = false },
         )
     }
 

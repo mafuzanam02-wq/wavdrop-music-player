@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.screen.playlists
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.model.PlaylistSong
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.AddToPlaylistResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -21,6 +23,7 @@ data class AddSongsToPlaylistUiState(
     val query: String = "",
     val songs: List<Song> = emptyList(),
     val selectedSongIds: List<Long> = emptyList(),
+    val existingPlaylistSongIds: Set<Long> = emptySet(),
     val isAdding: Boolean = false,
 ) {
     val selectedCount: Int get() = selectedSongIds.size
@@ -42,13 +45,17 @@ class AddSongsToPlaylistViewModel @Inject constructor(
         songRepository.songs,
         query,
         selectedSongIds,
+        playlistRepository.observePlaylistSongs(playlistId).map { songs ->
+            songs.mapTo(mutableSetOf()) { it.songId }
+        },
         isAdding,
-    ) { songs, searchQuery, selected, adding ->
+    ) { songs, searchQuery, selected, existingIds, adding ->
         AddSongsToPlaylistUiState(
-            query           = searchQuery,
-            songs           = LibrarySearch.filterSongs(songs, searchQuery),
-            selectedSongIds = selected,
-            isAdding        = adding,
+            query                   = searchQuery,
+            songs                   = LibrarySearch.filterSongs(songs, searchQuery),
+            selectedSongIds         = selected,
+            existingPlaylistSongIds = existingIds,
+            isAdding                = adding,
         )
     }.stateIn(
         scope        = viewModelScope,

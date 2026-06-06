@@ -110,6 +110,7 @@ fun HomeScreen(
     val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
 
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
+    val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope    = rememberCoroutineScope()
     var isSearchActive   by remember { mutableStateOf(false) }
@@ -247,16 +248,24 @@ fun HomeScreen(
 
     addToPlaylistSong?.let { song ->
         AddToPlaylistDialog(
-            playlists        = playlists,
-            onSelectPlaylist = { playlistId ->
-                playlistVm.addSongToPlaylist(song.id, playlistId)
+            playlists           = playlists,
+            existingPlaylistIds = allPlaylistSongs
+                .filter { it.songId == song.id }
+                .map { it.playlistId }
+                .toSet(),
+            onSelectPlaylist    = { playlistId ->
+                playlistVm.addSongToPlaylist(song.id, playlistId) { result ->
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(result.singleSongMessage())
+                    }
+                }
                 addToPlaylistSong = null
             },
-            onCreateAndAdd   = { name ->
+            onCreateAndAdd      = { name ->
                 playlistVm.createPlaylistAndAddSong(name, song.id)
                 addToPlaylistSong = null
             },
-            onDismiss        = { addToPlaylistSong = null },
+            onDismiss           = { addToPlaylistSong = null },
         )
     }
 }

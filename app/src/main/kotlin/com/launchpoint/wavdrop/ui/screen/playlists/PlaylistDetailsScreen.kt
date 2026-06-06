@@ -55,6 +55,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,6 +100,8 @@ fun PlaylistDetailsScreen(
     onAddSongsClick: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onNowPlayingClick: () -> Unit = {},
+    pendingMessage: String? = null,
+    onMessageConsumed: () -> Unit = {},
     viewModel: PlaylistDetailsViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
@@ -106,6 +109,7 @@ fun PlaylistDetailsScreen(
     val state             by viewModel.uiState.collectAsStateWithLifecycle()
     val nowPlaying        by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
     val playlists         by playlistVm.playlists.collectAsStateWithLifecycle()
+    val allPlaylistSongs  by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     var showRename        by remember { mutableStateOf(false) }
     var showDelete        by remember { mutableStateOf(false) }
     var menuExpanded      by remember { mutableStateOf(false) }
@@ -115,6 +119,13 @@ fun PlaylistDetailsScreen(
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
     val autoScrollScope    = rememberCoroutineScope()
+
+    LaunchedEffect(pendingMessage) {
+        if (pendingMessage != null) {
+            snackbarHostState.showSnackbar(pendingMessage)
+            onMessageConsumed()
+        }
+    }
 
     var draggingPosition  by remember { mutableStateOf<Int?>(null) }
     var draggingSongId    by remember { mutableStateOf<Long?>(null) }
@@ -500,22 +511,24 @@ fun PlaylistDetailsScreen(
 
     addToPlaylistSong?.let { song ->
         AddToPlaylistDialog(
-            playlists        = playlists,
-            onSelectPlaylist = { playlistId ->
+            playlists           = playlists,
+            existingPlaylistIds = allPlaylistSongs
+                .filter { it.songId == song.id }
+                .map { it.playlistId }
+                .toSet(),
+            onSelectPlaylist    = { playlistId ->
                 playlistVm.addSongToPlaylist(song.id, playlistId) { result ->
                     coroutineScope.launch {
-                        snackbarHostState.showSnackbar(
-                            if (result.skipped > 0) "Already in playlist" else "Added to playlist",
-                        )
+                        snackbarHostState.showSnackbar(result.singleSongMessage())
                     }
                 }
                 addToPlaylistSong = null
             },
-            onCreateAndAdd   = { name ->
+            onCreateAndAdd      = { name ->
                 playlistVm.createPlaylistAndAddSong(name, song.id)
                 addToPlaylistSong = null
             },
-            onDismiss        = { addToPlaylistSong = null },
+            onDismiss           = { addToPlaylistSong = null },
         )
     }
 

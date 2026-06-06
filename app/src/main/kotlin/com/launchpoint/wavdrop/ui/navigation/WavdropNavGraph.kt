@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -353,11 +354,16 @@ fun WavdropNavGraph(
             ),
         ) { backStackEntry ->
             val playlistId = checkNotNull(backStackEntry.arguments?.getLong("playlistId"))
+            val addSongsResult by backStackEntry.savedStateHandle
+                .getStateFlow<String?>("add_songs_result", null)
+                .collectAsStateWithLifecycle()
             PlaylistDetailsScreen(
                 onNavigateBack      = { navController.popBackStack() },
                 onAddSongsClick     = { navController.navigate(Screen.AddSongsToPlaylist.createRoute(playlistId)) },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onNowPlayingClick   = { navController.navigateNowPlaying() },
+                pendingMessage      = addSongsResult,
+                onMessageConsumed   = { backStackEntry.savedStateHandle.remove<String>("add_songs_result") },
             )
         }
         composable(
@@ -368,6 +374,12 @@ fun WavdropNavGraph(
         ) {
             AddSongsToPlaylistScreen(
                 onNavigateBack = { navController.popBackStack() },
+                onAddComplete  = { message ->
+                    navController.previousBackStackEntry
+                        ?.savedStateHandle
+                        ?.set("add_songs_result", message)
+                    navController.popBackStack()
+                },
             )
         }
         composable(

@@ -26,6 +26,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -35,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +55,7 @@ import com.launchpoint.wavdrop.data.model.TrackStats
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.screen.lyrics.LyricsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,10 +68,14 @@ fun TrackDetailsScreen(
     val lyricsState       by lyricsViewModel.lyricsState.collectAsStateWithLifecycle()
     val hasCustomLyrics   by lyricsViewModel.hasCustomLyrics.collectAsStateWithLifecycle()
     val playlists         by viewModel.playlists.collectAsStateWithLifecycle()
+    val allPlaylistSongs  by viewModel.allPlaylistSongs.collectAsStateWithLifecycle()
     var showAddToPlaylist by remember { mutableStateOf(false) }
     var showLyricsEditor  by remember { mutableStateOf(false) }
+    val snackbarHostState  = remember { SnackbarHostState() }
+    val coroutineScope     = rememberCoroutineScope()
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Track Details") },
@@ -117,17 +125,28 @@ fun TrackDetailsScreen(
     }
 
     if (showAddToPlaylist) {
+        val readyState = uiState as? TrackDetailsUiState.Ready
         AddToPlaylistDialog(
-            playlists        = playlists,
-            onSelectPlaylist = { id ->
-                viewModel.addToPlaylist(id)
+            playlists           = playlists,
+            existingPlaylistIds = if (readyState != null) {
+                allPlaylistSongs
+                    .filter { it.songId == readyState.song.id }
+                    .map { it.playlistId }
+                    .toSet()
+            } else emptySet(),
+            onSelectPlaylist    = { id ->
+                viewModel.addToPlaylist(id) { result ->
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(result.singleSongMessage())
+                    }
+                }
                 showAddToPlaylist = false
             },
-            onCreateAndAdd   = { name ->
+            onCreateAndAdd      = { name ->
                 viewModel.createPlaylistAndAdd(name)
                 showAddToPlaylist = false
             },
-            onDismiss        = { showAddToPlaylist = false },
+            onDismiss           = { showAddToPlaylist = false },
         )
     }
 

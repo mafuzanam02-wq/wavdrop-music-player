@@ -45,6 +45,7 @@ import com.launchpoint.wavdrop.data.model.Song
 @Composable
 fun AddSongsToPlaylistScreen(
     onNavigateBack: () -> Unit,
+    onAddComplete: (String) -> Unit,
     viewModel: AddSongsToPlaylistViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -72,7 +73,11 @@ fun AddSongsToPlaylistScreen(
                 selectedCount = state.selectedCount,
                 isAdding      = state.isAdding,
                 onCancel      = onNavigateBack,
-                onAdd         = { viewModel.addSelected { _ -> onNavigateBack() } },
+                onAdd         = {
+                    viewModel.addSelected { result ->
+                        onAddComplete(result.multiAddMessage())
+                    }
+                },
             )
         },
     ) { innerPadding ->
@@ -118,12 +123,16 @@ fun AddSongsToPlaylistScreen(
                     contentPadding = PaddingValues(bottom = 12.dp),
                 ) {
                     items(state.songs, key = { it.id }) { song ->
+                        val alreadyInPlaylist = song.id in state.existingPlaylistSongIds
                         val selected = song.id in state.selectedSongIds
                         SelectableSongRow(
-                            song       = song,
-                            selected   = selected,
-                            onToggle   = { viewModel.toggleSong(song.id) },
-                            modifier   = Modifier.fillMaxWidth(),
+                            song              = song,
+                            selected          = selected,
+                            alreadyInPlaylist = alreadyInPlaylist,
+                            onToggle          = {
+                                if (!alreadyInPlaylist) viewModel.toggleSong(song.id)
+                            },
+                            modifier          = Modifier.fillMaxWidth(),
                         )
                         HorizontalDivider(
                             color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
@@ -140,36 +149,39 @@ fun AddSongsToPlaylistScreen(
 private fun SelectableSongRow(
     song: Song,
     selected: Boolean,
+    alreadyInPlaylist: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val contentAlpha = if (alreadyInPlaylist) 0.38f else 1f
     Row(
         modifier = modifier
-            .clickable(onClick = onToggle)
+            .clickable(enabled = !alreadyInPlaylist, onClick = onToggle)
             .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Checkbox(
             checked         = selected,
-            onCheckedChange = { onToggle() },
+            onCheckedChange = { if (!alreadyInPlaylist) onToggle() },
+            enabled         = !alreadyInPlaylist,
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text     = song.title,
                 style    = MaterialTheme.typography.titleMedium,
-                color    = MaterialTheme.colorScheme.onSurface,
+                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text     = song.artist,
+                text     = if (alreadyInPlaylist) "Already in playlist" else song.artist,
                 style    = MaterialTheme.typography.bodyMedium,
-                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f * contentAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (song.album.isNotBlank()) {
+            if (!alreadyInPlaylist && song.album.isNotBlank()) {
                 Text(
                     text     = song.album,
                     style    = MaterialTheme.typography.bodySmall,
