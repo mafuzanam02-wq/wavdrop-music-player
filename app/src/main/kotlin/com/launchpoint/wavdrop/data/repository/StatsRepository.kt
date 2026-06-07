@@ -14,7 +14,6 @@ import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.TrackStats
-import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -39,8 +38,6 @@ class StatsRepository @Inject constructor(
      * which calls [TrackStatsDao.mergeImportedStats] directly. No events are written for imports.
      */
     override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
-        // DEBUG_STATS: confirm Room write is reached; remove before release.
-        Log.d("WavStats-Repo", "[recordPlay] songId=$songId listenedMs=$listenedMs durationMs=$durationMs")
         val nowMs = System.currentTimeMillis()
         dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
         dao.incrementPlayCount(songId, nowMs = nowMs, listenedMs = listenedMs)

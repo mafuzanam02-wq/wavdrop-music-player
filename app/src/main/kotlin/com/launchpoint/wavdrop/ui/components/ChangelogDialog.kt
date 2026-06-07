@@ -13,23 +13,22 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-private val BETA_3_ITEMS = listOf(
-    "Refreshed launcher icons",
-    "Improved privacy, legal, and Play Store readiness wording",
-    "Added Track Details access from Now Playing",
-    "Improved Home dashboard song actions",
-    "Kept Delete safely inside Track Details only",
-    "Added Play Store readiness and listing draft documents",
+private val CHANGELOG_ITEMS = listOf(
+    "Refreshed launcher icons across all icon variants",
+    "Updated privacy policy and in-app legal information",
+    "Track details now accessible from the Now Playing overflow menu",
+    "Home dashboard song rows now show the full actions menu",
+    "Onboarding pages now support swiping between pages",
 )
 
 @Composable
 fun ChangelogDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title            = { Text("What's new in Beta 3") },
+        title            = { Text("What's new") },
         text             = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                BETA_3_ITEMS.forEachIndexed { index, item ->
+                CHANGELOG_ITEMS.forEachIndexed { index, item ->
                     if (index > 0) Spacer(Modifier.height(8.dp))
                     Text(
                         text  = "· $item",

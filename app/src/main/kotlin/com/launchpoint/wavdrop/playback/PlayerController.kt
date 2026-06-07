@@ -64,9 +64,7 @@ class PlayerController @Inject constructor(
         const val TAG = "WavStats-PC"
         const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
 
-        // Set to true to enable verbose stats lifecycle logs for on-device debugging.
-        // MUST be false (or removed) before a release build.
-        const val DEBUG_STATS = true
+        const val DEBUG_STATS = false
     }
 
     private var mediaController: MediaController? = null

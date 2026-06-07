@@ -341,11 +341,6 @@ private fun ReadyContent(
             ) { Text("Delete from device", color = MaterialTheme.colorScheme.error) }
         }
 
-        SectionDivider()
-
-        // ── Coming soon ──────────────────────────────────────────────────────
-        SectionHeader("Coming soon")
-        PlaceholderRow("Import history")
     }
 }
 
@@ -568,24 +563,3 @@ private fun LyricsSection(result: LyricsResult) {
     }
 }
 
-@Composable
-private fun PlaceholderRow(label: String) {
-    Row(
-        modifier          = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text     = label,
-            style    = MaterialTheme.typography.bodyMedium,
-            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text  = "Coming soon",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-        )
-    }
-}
