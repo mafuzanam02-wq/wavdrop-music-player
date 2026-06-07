@@ -26,6 +26,7 @@ Historical record of completed and shipped work. Newest changes first.
   non-voice-note audio files received through WhatsApp are unaffected.
 
 ### Changed
+- Refreshed all launcher icon variants with a consistent wave-and-play mark.
 - Polished playlist drag-to-reorder feedback and affordance: each row now shows a visible drag
   handle — touch and drag the handle to reorder; long-pressing the row body still opens Track
   Details. The dragged song is shown as a floating preview while the source row stays in place as
