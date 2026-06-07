@@ -22,6 +22,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumDetailsScreen
+import com.launchpoint.wavdrop.ui.components.ChangelogDialog
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumsScreen
 import com.launchpoint.wavdrop.ui.screen.artists.ArtistDetailsScreen
@@ -131,6 +132,7 @@ fun WavdropNavGraph(
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
     val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
     val compactMode by viewModel.compactMode.collectAsStateWithLifecycle()
+    val showChangelog by viewModel.showChangelog.collectAsStateWithLifecycle()
     var startRoute by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(startupDestination, hasCompletedOnboarding) {
@@ -459,6 +461,9 @@ fun WavdropNavGraph(
                 onNavigateBack = { navController.popBackStack() },
             )
         }
+        }
+        if (showChangelog) {
+            ChangelogDialog(onDismiss = viewModel::dismissChangelog)
         }
     }
 }

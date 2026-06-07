@@ -2,12 +2,14 @@ package com.launchpoint.wavdrop.ui.navigation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -42,9 +44,29 @@ class WavdropNavViewModel @Inject constructor(
                 initialValue = null,
             )
 
+    val showChangelog: StateFlow<Boolean> =
+        combine(
+            appSettingsRepository.hasCompletedOnboarding,
+            appSettingsRepository.lastSeenChangelogVersion,
+        ) { completed, lastSeen ->
+            completed && lastSeen < BuildConfig.VERSION_CODE
+        }.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
     fun completeOnboarding() {
         viewModelScope.launch {
             appSettingsRepository.setHasCompletedOnboarding(true)
+            // Seed the version so first-run users never see the auto-changelog
+            appSettingsRepository.setLastSeenChangelogVersion(BuildConfig.VERSION_CODE)
+        }
+    }
+
+    fun dismissChangelog() {
+        viewModelScope.launch {
+            appSettingsRepository.setLastSeenChangelogVersion(BuildConfig.VERSION_CODE)
         }
     }
 }
