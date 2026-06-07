@@ -1,6 +1,5 @@
 package com.launchpoint.wavdrop.ui.screen.onboarding
 
-import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -26,23 +27,21 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 @Composable
 fun OnboardingScreen(
     onComplete: () -> Unit,
 ) {
-    var pageIndex by rememberSaveable { mutableIntStateOf(0) }
-    val page = OnboardingPages[pageIndex]
-    val isLastPage = pageIndex == OnboardingPages.lastIndex
+    val pagerState    = rememberPagerState(pageCount = { OnboardingPages.size })
+    val coroutineScope = rememberCoroutineScope()
+    val isLastPage     = pagerState.currentPage == OnboardingPages.lastIndex
 
     Scaffold { innerPadding ->
         Column(
@@ -60,24 +59,24 @@ fun OnboardingScreen(
                 }
             }
 
-            Box(
+            HorizontalPager(
+                state    = pagerState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Crossfade(
-                    targetState = page,
-                    label = "onboardingPage",
-                ) { currentPage ->
-                    OnboardingPageCard(page = currentPage)
+            ) { page ->
+                Box(
+                    modifier         = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    OnboardingPageCard(page = OnboardingPages[page])
                 }
             }
 
             PageIndicators(
-                selectedIndex = pageIndex,
-                count = OnboardingPages.size,
-                modifier = Modifier.fillMaxWidth(),
+                selectedIndex = pagerState.currentPage,
+                count         = OnboardingPages.size,
+                modifier      = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(18.dp))
             Button(
@@ -85,10 +84,12 @@ fun OnboardingScreen(
                     if (isLastPage) {
                         onComplete()
                     } else {
-                        pageIndex += 1
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                        }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier       = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(vertical = 14.dp),
             ) {
                 Text(if (isLastPage) "Get Started" else "Next")
@@ -104,32 +105,32 @@ private fun OnboardingPageCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
+        colors   = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
         ),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 28.dp),
+            modifier            = Modifier.padding(horizontal = 22.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(
-                imageVector = page.icon,
+                imageVector        = page.icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(52.dp),
+                tint               = MaterialTheme.colorScheme.primary,
+                modifier           = Modifier.size(52.dp),
             )
             Spacer(Modifier.height(22.dp))
             Text(
-                text = page.title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                text      = page.title,
+                style     = MaterialTheme.typography.headlineSmall,
+                color     = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = page.body,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                text      = page.body,
+                style     = MaterialTheme.typography.bodyLarge,
+                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                 textAlign = TextAlign.Center,
             )
         }
@@ -143,9 +144,9 @@ private fun PageIndicators(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier,
+        modifier              = modifier,
         horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
     ) {
         repeat(count) { index ->
             val selected = index == selectedIndex
@@ -156,7 +157,7 @@ private fun PageIndicators(
             ) {
                 Card(
                     modifier = Modifier.fillMaxSize(),
-                    colors = CardDefaults.cardColors(
+                    colors   = CardDefaults.cardColors(
                         containerColor = if (selected) {
                             MaterialTheme.colorScheme.primary
                         } else {
@@ -178,22 +179,22 @@ private data class OnboardingPage(
 private val OnboardingPages = listOf(
     OnboardingPage(
         title = "Welcome to Wavdrop",
-        body = "A local music player for your own audio library.",
-        icon = Icons.Default.LibraryMusic,
+        body  = "A local music player for your own audio library.",
+        icon  = Icons.Default.LibraryMusic,
     ),
     OnboardingPage(
         title = "Your music stays yours",
-        body = "Wavdrop works offline and keeps your library, playlists, lyrics, backups, and listening history on your device.",
-        icon = Icons.Default.PrivacyTip,
+        body  = "Wavdrop works offline and keeps your library, playlists, lyrics, backups, and listening history on your device.",
+        icon  = Icons.Default.PrivacyTip,
     ),
     OnboardingPage(
         title = "Built for real libraries",
-        body = "Browse songs, albums, artists, folders, playlists, smart collections, and accurate listening reports.",
-        icon = Icons.AutoMirrored.Filled.ViewList,
+        body  = "Browse songs, albums, artists, folders, playlists, smart collections, and accurate listening reports.",
+        icon  = Icons.AutoMirrored.Filled.ViewList,
     ),
     OnboardingPage(
         title = "Ready when you are",
-        body = "Scan your device, restore a Wavdrop backup, or import BlackPlayer stats when you need them.",
-        icon = Icons.Default.Backup,
+        body  = "Scan your device, restore a Wavdrop backup, or import BlackPlayer stats when you need them.",
+        icon  = Icons.Default.Backup,
     ),
 )
