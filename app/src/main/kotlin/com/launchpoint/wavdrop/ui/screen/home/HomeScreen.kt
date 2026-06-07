@@ -247,8 +247,25 @@ fun HomeScreen(
                         onSmartCollectionsClick = onSmartCollectionsClick,
                         onWrappedClick      = onWrappedClick,
                         onSongClick         = viewModel::playSong,
-                        onToggleFavorite    = viewModel::toggleFavorite,
+                        onToggleFavorite    = { song, wasFavorite ->
+                            viewModel.toggleFavorite(song.id)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
+                                )
+                            }
+                        },
                         onTrackDetailsClick = onTrackDetailsClick,
+                        onPlayNext          = viewModel::playNext,
+                        onAddToQueue        = viewModel::addToQueue,
+                        onAddToPlaylist     = { song -> addToPlaylistSong = song },
+                        onShare             = { song ->
+                            shareSong(context, song) {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("Could not share this track")
+                                }
+                            }
+                        },
                         modifier            = Modifier.padding(innerPadding),
                     )
                 }
@@ -461,8 +478,12 @@ private fun HomeDashboardContent(
     onSmartCollectionsClick: () -> Unit,
     onWrappedClick: () -> Unit,
     onSongClick: (Song) -> Unit,
-    onToggleFavorite: (Long) -> Unit,
+    onToggleFavorite: (Song, Boolean) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
+    onAddToPlaylist: (Song) -> Unit,
+    onShare: (Song) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -512,6 +533,10 @@ private fun HomeDashboardContent(
                     onSongClick = onSongClick,
                     onToggleFavorite = onToggleFavorite,
                     onTrackDetailsClick = onTrackDetailsClick,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onShare = onShare,
                 )
             }
             if (HomeSectionId.WRAPPED in visibleSections && dashboard.wrapped != null) {
@@ -567,22 +592,31 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
     currentSongId: Long?,
     favoriteSongIds: Set<Long>,
     onSongClick: (Song) -> Unit,
-    onToggleFavorite: (Long) -> Unit,
+    onToggleFavorite: (Song, Boolean) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
+    onAddToPlaylist: (Song) -> Unit,
+    onShare: (Song) -> Unit,
 ) {
     item { DashboardListSectionHeader(title = title) }
     if (songs.isEmpty()) {
         item { DashboardEmptyText(emptyText) }
     } else {
         items(songs, key = { "${title}_${it.id}" }) { song ->
-            SongRow(
-                song = song,
-                isCurrent = song.id == currentSongId,
-                isFavorite = song.id in favoriteSongIds,
-                onClick = { onSongClick(song) },
-                onToggleFavorite = { onToggleFavorite(song.id) },
-                onOpenDetails = { onTrackDetailsClick(song.id) },
-                modifier = Modifier.fillMaxWidth(),
+            val isFavorite = song.id in favoriteSongIds
+            SongRowWithOverflow(
+                song             = song,
+                isCurrent        = song.id == currentSongId,
+                isFavorite       = isFavorite,
+                onPlay           = { onSongClick(song) },
+                onPlayNext       = { onPlayNext(song) },
+                onAddToQueue     = { onAddToQueue(song) },
+                onToggleFavorite = { onToggleFavorite(song, isFavorite) },
+                onAddToPlaylist  = { onAddToPlaylist(song) },
+                onTrackDetails   = { onTrackDetailsClick(song.id) },
+                onShare          = { onShare(song) },
+                modifier         = Modifier.fillMaxWidth(),
             )
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
