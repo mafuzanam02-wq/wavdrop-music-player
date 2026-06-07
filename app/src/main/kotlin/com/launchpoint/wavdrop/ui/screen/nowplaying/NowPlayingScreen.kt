@@ -249,6 +249,13 @@ fun NowPlayingScreen(
                                 }
                                 if (!isExternalAudio) {
                                     DropdownMenuItem(
+                                        text = { Text("Track details") },
+                                        onClick = {
+                                            showMoreActions = false
+                                            onOpenTrackDetails(song.id)
+                                        },
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text("Stats") },
                                         onClick = {
                                             showMoreActions = false
