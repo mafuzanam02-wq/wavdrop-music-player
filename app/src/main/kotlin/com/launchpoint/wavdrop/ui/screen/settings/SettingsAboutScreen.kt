@@ -45,6 +45,7 @@ fun SettingsAboutScreen(
 ) {
     var showFormatsDialog        by remember { mutableStateOf(false) }
     var showPrivacyPolicyDialog  by remember { mutableStateOf(false) }
+    var showTermsDialog          by remember { mutableStateOf(false) }
     var showDisclaimerDialog     by remember { mutableStateOf(false) }
     var showOpenSourceDialog     by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -102,7 +103,7 @@ fun SettingsAboutScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Contact Support",
-                    subtitle = "${WavdropAbout.CONTACT_EMAIL} - include your version and Android device",
+                    subtitle = "${WavdropAbout.CONTACT_EMAIL} · Include your Wavdrop version and Android device.",
                     onClick  = {
                         context.openSupportEmail(
                             email   = WavdropAbout.CONTACT_EMAIL,
@@ -138,6 +139,13 @@ fun SettingsAboutScreen(
             }
             item {
                 ClickableSettingsRow(
+                    title    = "Terms of Use",
+                    subtitle = "Your responsibilities and app use guidelines",
+                    onClick  = { showTermsDialog = true },
+                )
+            }
+            item {
+                ClickableSettingsRow(
                     title    = "Disclaimer",
                     subtitle = "Independent player, imports, formats, and user content",
                     onClick  = { showDisclaimerDialog = true },
@@ -162,6 +170,13 @@ fun SettingsAboutScreen(
             title      = "Privacy Policy",
             paragraphs = WavdropAbout.PRIVACY_POLICY,
             onDismiss  = { showPrivacyPolicyDialog = false },
+        )
+    }
+    if (showTermsDialog) {
+        LegalInfoDialog(
+            title      = "Terms of Use",
+            paragraphs = WavdropAbout.TERMS_OF_USE,
+            onDismiss  = { showTermsDialog = false },
         )
     }
     if (showDisclaimerDialog) {
@@ -371,32 +386,85 @@ private fun Context.openSupportEmail(email: String, subject: String) {
 }
 
 private object WavdropAbout {
-    const val APP_NAME      = "Wavdrop"
-    const val PRODUCT_NAME  = "Wavdrop Music Player"
-    const val PACKAGE_NAME  = "com.launchpoint.wavdrop"
-    const val WEBSITE_URL   = "https://launchpointdigital.co.za"
-    const val CONTACT_EMAIL = "hello.launchpointdigital@gmail.com"
+    const val APP_NAME        = "Wavdrop"
+    const val PRODUCT_NAME    = "Wavdrop Music Player"
+    const val PACKAGE_NAME    = "com.launchpoint.wavdrop"
+    const val WEBSITE_URL     = "https://launchpointdigital.co.za"
+    const val CONTACT_EMAIL   = "hello.launchpointdigital@gmail.com"
     const val SUPPORT_SUBJECT = "Wavdrop Music Player Support"
-    const val COPYRIGHT     = "© 2026 LaunchPoint Digital. All rights reserved."
+    const val COPYRIGHT       = "© 2026 LaunchPoint Digital. All rights reserved."
 
     val PRIVACY_POLICY = listOf(
-        "Wavdrop is an offline-first music player. It does not require an account, does not upload your music files, and does not sell user data.",
-        "Music library data, playlists, lyrics overrides, preferences, backups, statistics, and listening history are stored locally on your device unless you manually export or import backup files.",
-        "Android permissions are used only for music library access and playback-related functionality.",
-        "If optional cloud backup or sync is added in the future, it must remain opt-in.",
+        "Wavdrop is an offline-first music player. It does not require an account, does not upload your music or data to any server, and does not sell or share your data with advertisers or third parties.",
+        "Data stored locally on your device:\n" +
+            "· Your music library: song titles, artists, albums, and file references read from your device's media library\n" +
+            "· Play counts, skip counts, favorite status, and total listening time per track\n" +
+            "· Per-play and per-skip event records with timestamps, used for statistics, monthly reports, and Wrapped\n" +
+            "· Playlists and their track order\n" +
+            "· Custom lyrics you add manually inside the app\n" +
+            "· App settings and preferences, such as startup screen, scan folders, theme, icon choice, and compact mode\n\n" +
+            "None of this data is transmitted to Wavdrop, LaunchPoint Digital, or any third party.",
+        "Android permissions:\n" +
+            "· READ_EXTERNAL_STORAGE on Android 8–12 or READ_MEDIA_AUDIO on Android 13+ is used to find and play audio files on your device\n" +
+            "· FOREGROUND_SERVICE and FOREGROUND_SERVICE_MEDIA_PLAYBACK are used to keep music playing when the screen is off\n\n" +
+            "Wavdrop does not request internet, location, contacts, camera, microphone, advertising ID, or any other unnecessary permissions.",
+        "Backup and export:\n" +
+            "The Export Wavdrop Data feature saves a JSON file to a location you choose, such as local storage or a cloud service you control. This file may contain your library metadata, statistics, playlists, custom lyrics, app preferences, and listening history. Wavdrop does not upload this file. You are responsible for protecting your backup because it may contain personal listening data.",
+        "Share:\n" +
+            "When you use the Share feature on a track, Wavdrop passes a content link for that audio file to the Android share sheet and to the app you choose. Wavdrop does not transmit any data itself and has no control over how the receiving app handles the shared file.",
+        "Delete from device:\n" +
+            "If you delete a track using Delete from device, the audio file is permanently removed from your device. Wavdrop may retain listening statistics and history records associated with that deleted track so that reports, Wrapped summaries, and historical listening data remain accurate. The deleted audio file is not recoverable through Wavdrop.",
+        "BlackPlayer import:\n" +
+            "The BlackPlayer import feature reads a .bpstat file from your device and writes matched play and skip counts into Wavdrop's local database. No data is sent anywhere during this process.",
+        "Third-party services:\n" +
+            "Wavdrop does not use advertising SDKs, analytics services, crash-reporting tools, or third-party tracking. External links, such as the LaunchPoint Digital website and support email, open in your device's browser or email app. Wavdrop itself makes no network requests.",
+        "Contact:\n" +
+            "Questions about this policy: hello.launchpointdigital@gmail.com",
+    )
+
+    val TERMS_OF_USE = listOf(
+        "By using Wavdrop, you agree to the following terms. If you do not agree, please uninstall the app.",
+        "Use of the app:\n" +
+            "Wavdrop is designed for managing and playing audio files stored on your device.",
+        "Your music files and rights:\n" +
+            "You are responsible for ensuring you have the right to play, back up, and share any audio files you use with Wavdrop. Wavdrop does not verify music ownership or licensing.",
+        "Delete from device:\n" +
+            "Delete from device permanently removes audio files from your device. This action cannot be undone. Android does not provide a recycle bin for shared media storage. Use this feature with care.",
+        "Backup files:\n" +
+            "Backup files you export may contain your listening statistics, playlist names, custom lyrics, app preferences, and other personal library data in plain JSON format. Store them securely and do not share them with people you do not trust.",
+        "Sharing:\n" +
+            "When you share a track, you are responsible for what you share and with whom. Wavdrop opens the Android share sheet; it is not responsible for how the receiving app handles the shared file.",
+        "Format support:\n" +
+            "Audio format support depends partly on your Android device and its codecs. Wavdrop does not guarantee playback of all audio file types on all devices.",
+        "BlackPlayer import:\n" +
+            "Only import .bpstat files you exported from your own BlackPlayer installation. Do not attempt to import files you did not personally create.",
+        "Changes to these terms:\n" +
+            "These terms may be updated as new features are added. Continued use of Wavdrop after an update means you accept the revised terms.",
     )
 
     val DISCLAIMER = listOf(
-        "Wavdrop is an independent music player and is not affiliated with BlackPlayer, ExoPlayer, Android, Google, Samsung, or any music service.",
-        "BlackPlayer import exists only to help users migrate their own listening statistics from their own exported files.",
-        "Format support depends partly on Android device codecs.",
-        "Users are responsible for their own music files and backups.",
+        "Wavdrop is an independent music player. It is not affiliated with BlackPlayer or Immortal Soft, ExoPlayer, Kotlin, Jetpack Compose, Android, Google, Samsung, WhatsApp, Meta, or any music streaming service.",
+        "BlackPlayer import exists only to help you migrate your own listening statistics from .bpstat files you exported from your own BlackPlayer installation. Wavdrop is not affiliated with Immortal Soft or the BlackPlayer product.",
+        "Audio format support depends partly on your Android device's media codecs. Not all file types are guaranteed to work on all devices.",
+        "You are responsible for your own music files, listening data, and backup files, and for ensuring you have appropriate rights to play, back up, or share any audio content you use with Wavdrop. Wavdrop does not verify music ownership or licensing.",
         "Wavdrop does not provide, host, sell, or stream music content.",
+        "The Delete from device feature permanently removes audio files from your device and cannot be undone. Android does not provide a recycle bin for shared media storage. Wavdrop cannot recover deleted files.",
+        "When you share a track using the Share feature, Wavdrop provides a content link to the app you choose. Wavdrop is not responsible for how the receiving app handles the shared file.",
+        "Wavdrop statistics, reports, and Wrapped are computed from listening activity recorded locally on your device. History begins from when you started using Wavdrop; prior listening activity is not available unless imported via BlackPlayer import or a Wavdrop backup.",
     )
 
     val OPEN_SOURCE_LICENSES = listOf(
-        "Wavdrop is built with open-source Android libraries and technologies.",
-        "Key technologies include Kotlin, Jetpack Compose, Media3 / ExoPlayer, Room, Hilt, and Coil.",
-        "Detailed license information will be added before a full public release. This screen stays factual and does not claim exact license terms unless they have been verified in project files.",
+        "Wavdrop is built with open-source libraries. These libraries are used under the terms of their respective licenses.",
+        "Apache License 2.0:\n" +
+            "· Kotlin\n" +
+            "· Jetpack Compose and Material3\n" +
+            "· AndroidX Core, Lifecycle, Activity, and Navigation\n" +
+            "· Room\n" +
+            "· DataStore\n" +
+            "· Media3 / ExoPlayer\n" +
+            "· Hilt / Dagger\n" +
+            "· Coil",
+        "Apache License 2.0 permits use, modification, and distribution with attribution. Each library retains its original copyright and license notices. No warranty is provided by the library authors.",
+        "For full copyright notices and license texts, visit each library's official repository.",
     )
 }

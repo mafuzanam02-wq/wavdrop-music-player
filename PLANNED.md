@@ -7,6 +7,10 @@ When work ships, move it to RELEASE_NOTES.md and remove it here.
 
 ## Approved
 
+### Public Privacy Policy Page
+
+Publish the Wavdrop Privacy Policy at `https://launchpointdigital.co.za/wavdrop/privacy`. This URL is required for the Google Play store listing Privacy Policy field before public launch. The page should publish the same text as the in-app Privacy Policy dialog. Once the page is live, add a reference line to the bottom of the in-app Privacy Policy copy pointing to the URL.
+
 ### Future Scan Exclusions
 
 Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped or prioritised).
@@ -15,6 +19,7 @@ Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped o
 
 ## Under Evaluation
 
+- **Support domain email**: Migrate the in-app and Play Store support contact from `hello.launchpointdigital@gmail.com` to a domain address (e.g. `support@launchpointdigital.co.za`) before or shortly after Play Store launch. Update `WavdropAbout.CONTACT_EMAIL` in `SettingsAboutScreen.kt` and the Play Store developer contact field.
 - **Additional Delete entry points**: after Track Details Phase 1 is stable and validated,
   evaluate adding "Delete from device" to song-row overflow menus (Songs, Home, Album, Artist,
   Folder, Smart Collection screens). Requires assessment of accidental-deletion risk in

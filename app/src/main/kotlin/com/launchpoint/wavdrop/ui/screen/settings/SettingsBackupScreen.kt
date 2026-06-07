@@ -74,7 +74,7 @@ fun SettingsBackupScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Export Wavdrop Data",
-                    subtitle = "Create a local JSON backup of your library metadata and stats.",
+                    subtitle = "Save your stats, playlists, listening history, and lyrics overrides to a local JSON file.",
                     enabled  = exportStateValue != ExportUiState.Exporting,
                     onClick  = { exportLauncher.launch(suggestedExportName) },
                 )
@@ -90,7 +90,7 @@ fun SettingsBackupScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Import Wavdrop Data",
-                    subtitle = "Preview a Wavdrop JSON backup before restore support is added.",
+                    subtitle = "Preview and restore a Wavdrop backup to your library stats, playlists, and listening history.",
                     onClick  = { backupImportLauncher.launch(arrayOf("application/json")) },
                 )
             }

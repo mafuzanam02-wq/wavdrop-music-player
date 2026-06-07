@@ -26,6 +26,7 @@ Historical record of completed and shipped work. Newest changes first.
   non-voice-note audio files received through WhatsApp are unaffected.
 
 ### Changed
+- Polished Privacy Policy, Terms of Use, Disclaimer, Open Source Licenses, and backup wording for Play Store readiness.
 - Refreshed all launcher icon variants with a consistent wave-and-play mark.
 - Polished playlist drag-to-reorder feedback and affordance: each row now shows a visible drag
   handle — touch and drag the handle to reorder; long-pressing the row body still opens Track
