@@ -28,9 +28,7 @@ class StatsTracker @Inject constructor(
     private companion object {
         const val TAG = "WavStats-ST"
 
-        // Set to true to enable verbose stats lifecycle logs for on-device debugging.
-        // MUST be false (or removed) before a release build.
-        const val DEBUG_STATS = true
+        const val DEBUG_STATS = false
     }
 
     // Overridable in tests (Dispatchers.Unconfined makes launch calls synchronous).

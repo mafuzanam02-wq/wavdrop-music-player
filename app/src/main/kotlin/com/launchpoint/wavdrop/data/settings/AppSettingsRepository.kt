@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
@@ -131,6 +132,37 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    // Versioned onboarding completion. Migration: if new key is absent but the old boolean
+    // is true, return 1 so existing users are not shown onboarding again.
+    val lastCompletedOnboardingVersion: Flow<Int> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[LAST_COMPLETED_ONBOARDING_VERSION_KEY]
+                ?: if (preferences[HAS_COMPLETED_ONBOARDING_KEY] == true) 1 else 0
+        }
+
+    suspend fun setLastCompletedOnboardingVersion(version: Int) {
+        dataStore.edit { preferences ->
+            preferences[LAST_COMPLETED_ONBOARDING_VERSION_KEY] = version
+            // Keep old boolean in sync so changelog gating (which reads the boolean) still works.
+            if (version > 0) preferences[HAS_COMPLETED_ONBOARDING_KEY] = true
+        }
+    }
+
+    val lastSeenChangelogVersion: Flow<Int> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[LAST_SEEN_CHANGELOG_VERSION_KEY] ?: 0 }
+
+    suspend fun setLastSeenChangelogVersion(versionCode: Int) {
+        dataStore.edit { preferences ->
+            preferences[LAST_SEEN_CHANGELOG_VERSION_KEY] = versionCode
+        }
+    }
+
     val notificationControlsSetting: Flow<NotificationControlsSetting> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -173,7 +205,9 @@ class AppSettingsRepository @Inject constructor(
         val THEME_MODE_KEY               = stringPreferencesKey("theme_mode")
         val ACCENT_COLOR_KEY             = stringPreferencesKey("accent_color")
         val COMPACT_MODE_KEY             = booleanPreferencesKey("compact_mode")
-        val HAS_COMPLETED_ONBOARDING_KEY = booleanPreferencesKey("has_completed_onboarding")
-        val NOTIFICATION_CONTROLS_KEY    = stringPreferencesKey("notification_controls")
+        val HAS_COMPLETED_ONBOARDING_KEY            = booleanPreferencesKey("has_completed_onboarding")
+        val LAST_COMPLETED_ONBOARDING_VERSION_KEY   = intPreferencesKey("last_completed_onboarding_version")
+        val NOTIFICATION_CONTROLS_KEY               = stringPreferencesKey("notification_controls")
+        val LAST_SEEN_CHANGELOG_VERSION_KEY         = intPreferencesKey("last_seen_changelog_version")
     }
 }

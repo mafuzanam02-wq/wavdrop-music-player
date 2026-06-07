@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.launchpoint.wavdrop.BuildConfig
+import com.launchpoint.wavdrop.ui.components.ChangelogDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,6 +49,7 @@ fun SettingsAboutScreen(
     var showTermsDialog          by remember { mutableStateOf(false) }
     var showDisclaimerDialog     by remember { mutableStateOf(false) }
     var showOpenSourceDialog     by remember { mutableStateOf(false) }
+    var showWhatsNewDialog       by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     Scaffold(
@@ -77,6 +79,13 @@ fun SettingsAboutScreen(
         ) {
             item { SectionHeader("Wavdrop") }
             item { AppIdentityCard() }
+            item {
+                ClickableSettingsRow(
+                    title    = "What's New",
+                    subtitle = "Release notes",
+                    onClick  = { showWhatsNewDialog = true },
+                )
+            }
             item { SectionHeader("Privacy") }
             item {
                 AboutPromiseCard(
@@ -124,7 +133,7 @@ fun SettingsAboutScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Diagnostics",
-                    subtitle = "Read-only tester snapshot with no private library details",
+                    subtitle = "App and library overview",
                     onClick  = onDiagnosticsClick,
                 )
             }
@@ -192,6 +201,9 @@ fun SettingsAboutScreen(
             paragraphs = WavdropAbout.OPEN_SOURCE_LICENSES,
             onDismiss  = { showOpenSourceDialog = false },
         )
+    }
+    if (showWhatsNewDialog) {
+        ChangelogDialog(onDismiss = { showWhatsNewDialog = false })
     }
 }
 

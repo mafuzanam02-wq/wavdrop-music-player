@@ -126,7 +126,7 @@ private fun DiagnosticsIntro(modifier: Modifier = Modifier) {
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Text(
-                text = "Read-only tester snapshot",
+                text = "App and library overview",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
