@@ -776,7 +776,7 @@ private fun PlaylistSongRow(
                 enabled       = !(isDragging || isDimmed || isDragPreview),
                 onClick       = onClick,
                 onDoubleClick = onToggleFavorite,
-                onLongClick   = onOpenDetails,
+                onLongClick   = { menuExpanded = true },
             )
             .padding(start = 16.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
