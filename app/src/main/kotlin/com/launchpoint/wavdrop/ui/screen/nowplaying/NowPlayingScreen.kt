@@ -475,11 +475,7 @@ private fun NowPlayingContent(
             maxHeight = maxHeight,
             fontScale = fontScale,
         )
-        val metrics = nowPlayingLayoutMetrics(
-            profile = layoutProfile,
-            maxWidth = maxWidth,
-            maxHeight = maxHeight,
-        )
+        val metrics = nowPlayingLayoutMetrics(profile = layoutProfile)
         val titleClick: (() -> Unit)? = if (!song.isExternalAudio()) {
             { onOpenTrackDetails(song.id) }
         } else {
@@ -497,55 +493,29 @@ private fun NowPlayingContent(
         }
         val upNextCount = (state.queue.size - state.currentIndex - 1).coerceAtLeast(0)
 
-        when (layoutProfile) {
-            NowPlayingLayoutProfile.Compact -> {
-                CompactNowPlayingLayout(
-                    state = state,
-                    song = song,
-                    lyrics = lyrics,
-                    metrics = metrics,
-                    showLyricsOverlay = showLyricsOverlay,
-                    onToggleLyrics = onToggleLyrics,
-                    onEditLyrics = onEditLyrics,
-                    onPrevious = onPrevious,
-                    onTogglePlayPause = onTogglePlayPause,
-                    onNext = onNext,
-                    onToggleShuffle = onToggleShuffle,
-                    onCycleRepeatMode = onCycleRepeatMode,
-                    onSeek = onSeek,
-                    onOpenTrackDetails = titleClick,
-                    onOpenArtist = artistClick,
-                    onOpenQueue = onOpenQueue,
-                    sleepTimerLabel = sleepTimerLabel,
-                    upNextCount = upNextCount,
-                )
-            }
-            NowPlayingLayoutProfile.Medium,
-            NowPlayingLayoutProfile.Expanded -> {
-                NormalNowPlayingLayout(
-                    state = state,
-                    song = song,
-                    queuePosition = queuePosition,
-                    lyrics = lyrics,
-                    metrics = metrics,
-                    showLyricsOverlay = showLyricsOverlay,
-                    onToggleLyrics = onToggleLyrics,
-                    onEditLyrics = onEditLyrics,
-                    onPrevious = onPrevious,
-                    onTogglePlayPause = onTogglePlayPause,
-                    onNext = onNext,
-                    onToggleShuffle = onToggleShuffle,
-                    onCycleRepeatMode = onCycleRepeatMode,
-                    onSeek = onSeek,
-                    onOpenTrackDetails = titleClick,
-                    onOpenArtist = artistClick,
-                    onOpenAlbum = albumClick,
-                    onOpenQueue = onOpenQueue,
-                    sleepTimerLabel = sleepTimerLabel,
-                    upNextCount = upNextCount,
-                )
-            }
-        }
+        FixedBottomNowPlayingLayout(
+            state = state,
+            song = song,
+            queuePosition = queuePosition,
+            lyrics = lyrics,
+            profile = layoutProfile,
+            metrics = metrics,
+            showLyricsOverlay = showLyricsOverlay,
+            onToggleLyrics = onToggleLyrics,
+            onEditLyrics = onEditLyrics,
+            onPrevious = onPrevious,
+            onTogglePlayPause = onTogglePlayPause,
+            onNext = onNext,
+            onToggleShuffle = onToggleShuffle,
+            onCycleRepeatMode = onCycleRepeatMode,
+            onSeek = onSeek,
+            onOpenTrackDetails = titleClick,
+            onOpenArtist = artistClick,
+            onOpenAlbum = albumClick,
+            onOpenQueue = onOpenQueue,
+            sleepTimerLabel = sleepTimerLabel,
+            upNextCount = upNextCount,
+        )
     }
 }
 
@@ -574,70 +544,88 @@ private data class NowPlayingLayoutMetrics(
     val horizontalPadding: Dp,
     val verticalPadding: Dp,
     val titleStyle: TextStyle,
+    val artistStyle: TextStyle,
     val showAlbum: Boolean,
     val showQueuePosition: Boolean,
     val showLyricsHint: Boolean,
+    val bottomPanelSpacing: Dp,
 )
 
 @Composable
-private fun nowPlayingLayoutMetrics(
-    profile: NowPlayingLayoutProfile,
-    maxWidth: Dp,
-    maxHeight: Dp,
-): NowPlayingLayoutMetrics {
-    val normalArtworkSize = run {
-        val fromWidth = (maxWidth - 48.dp).coerceIn(120.dp, 320.dp)
-        val fromHeight = (maxHeight - 400.dp).coerceIn(120.dp, 320.dp)
-        minOf(fromWidth, fromHeight)
-    }
-    return when (profile) {
+private fun nowPlayingLayoutMetrics(profile: NowPlayingLayoutProfile): NowPlayingLayoutMetrics =
+    when (profile) {
         NowPlayingLayoutProfile.Compact -> NowPlayingLayoutMetrics(
-            artworkSize = when {
-                maxHeight < 640.dp -> 120.dp
-                maxHeight < 700.dp -> 132.dp
-                else -> 144.dp
-            },
-            lyricsPanelHeight = when {
-                maxHeight < 640.dp -> 140.dp
-                maxHeight < 700.dp -> 156.dp
-                else -> 176.dp
-            },
+            artworkSize = 120.dp,
+            lyricsPanelHeight = 140.dp,
             horizontalPadding = 16.dp,
             verticalPadding = 8.dp,
             titleStyle = MaterialTheme.typography.titleSmall,
+            artistStyle = MaterialTheme.typography.bodySmall,
             showAlbum = false,
             showQueuePosition = false,
             showLyricsHint = false,
+            bottomPanelSpacing = 4.dp,
         )
         NowPlayingLayoutProfile.Medium -> NowPlayingLayoutMetrics(
-            artworkSize = normalArtworkSize.coerceAtMost(260.dp),
-            lyricsPanelHeight = normalArtworkSize.coerceAtMost(260.dp),
+            artworkSize = 200.dp,
+            lyricsPanelHeight = 200.dp,
             horizontalPadding = 24.dp,
-            verticalPadding = 20.dp,
+            verticalPadding = 12.dp,
             titleStyle = MaterialTheme.typography.headlineSmall,
+            artistStyle = MaterialTheme.typography.titleMedium,
             showAlbum = true,
             showQueuePosition = true,
             showLyricsHint = true,
+            bottomPanelSpacing = 6.dp,
         )
         NowPlayingLayoutProfile.Expanded -> NowPlayingLayoutMetrics(
-            artworkSize = normalArtworkSize,
-            lyricsPanelHeight = normalArtworkSize,
+            artworkSize = 240.dp,
+            lyricsPanelHeight = 240.dp,
             horizontalPadding = 24.dp,
-            verticalPadding = 20.dp,
+            verticalPadding = 16.dp,
             titleStyle = MaterialTheme.typography.headlineSmall,
+            artistStyle = MaterialTheme.typography.titleMedium,
             showAlbum = true,
             showQueuePosition = true,
             showLyricsHint = true,
+            bottomPanelSpacing = 6.dp,
         )
     }
+
+private fun NowPlayingLayoutMetrics.withUpperAreaSizing(
+    profile: NowPlayingLayoutProfile,
+    upperWidth: Dp,
+    upperHeight: Dp,
+): NowPlayingLayoutMetrics {
+    val availableWidth = (upperWidth - 16.dp).coerceAtLeast(96.dp)
+    val artworkFromHeight = when (profile) {
+        NowPlayingLayoutProfile.Compact -> (upperHeight * 0.48f).coerceIn(110.dp, 140.dp)
+        NowPlayingLayoutProfile.Medium -> (upperHeight * 0.52f).coerceIn(180.dp, 240.dp)
+        NowPlayingLayoutProfile.Expanded -> (upperHeight * 0.56f).coerceIn(200.dp, 280.dp)
+    }
+    val maxArtwork = when (profile) {
+        NowPlayingLayoutProfile.Compact -> 140.dp
+        NowPlayingLayoutProfile.Medium -> 240.dp
+        NowPlayingLayoutProfile.Expanded -> 280.dp
+    }
+    val lyricsFromHeight = when (profile) {
+        NowPlayingLayoutProfile.Compact -> (upperHeight * 0.64f).coerceIn(140.dp, 176.dp)
+        NowPlayingLayoutProfile.Medium -> (upperHeight * 0.68f).coerceIn(180.dp, 260.dp)
+        NowPlayingLayoutProfile.Expanded -> (upperHeight * 0.72f).coerceIn(220.dp, 320.dp)
+    }
+    return copy(
+        artworkSize = minOf(availableWidth, artworkFromHeight, maxArtwork),
+        lyricsPanelHeight = minOf(availableWidth, lyricsFromHeight),
+    )
 }
 
 @Composable
-private fun NormalNowPlayingLayout(
+private fun FixedBottomNowPlayingLayout(
     state: NowPlayingState,
     song: Song,
     queuePosition: String,
     lyrics: LyricsResult,
+    profile: NowPlayingLayoutProfile,
     metrics: NowPlayingLayoutMetrics,
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
@@ -658,131 +646,76 @@ private fun NormalNowPlayingLayout(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = metrics.horizontalPadding, vertical = metrics.verticalPadding),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(
+                start = metrics.horizontalPadding,
+                end = metrics.horizontalPadding,
+                top = metrics.verticalPadding,
+                bottom = 4.dp,
+            ),
     ) {
-        TrackInfoBlock(
-            song = song,
-            queuePosition = queuePosition,
-            lyrics = lyrics,
-            showLyricsOverlay = showLyricsOverlay,
-            metrics = metrics,
-            onToggleLyrics = onToggleLyrics,
-            onPrevious = onPrevious,
-            onNext = onNext,
-            onEditLyrics = onEditLyrics,
-            onOpenTrackDetails = onOpenTrackDetails,
-            onOpenArtist = onOpenArtist,
-            onOpenAlbum = onOpenAlbum,
-        )
-
-        Spacer(Modifier.height(16.dp))
-        SeekBar(
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
-            isSeekable = state.isSeekable,
-            onSeek = onSeek,
-        )
-
-        if (sleepTimerLabel != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = sleepTimerLabel,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            val upperMetrics = metrics.withUpperAreaSizing(
+                profile = profile,
+                upperWidth = maxWidth,
+                upperHeight = maxHeight,
+            )
+            UpperNowPlayingContent(
+                song = song,
+                queuePosition = queuePosition,
+                lyrics = lyrics,
+                metrics = upperMetrics,
+                showLyricsOverlay = showLyricsOverlay,
+                onToggleLyrics = onToggleLyrics,
+                onPrevious = onPrevious,
+                onNext = onNext,
+                onEditLyrics = onEditLyrics,
+                onOpenTrackDetails = onOpenTrackDetails,
+                onOpenArtist = onOpenArtist,
+                onOpenAlbum = onOpenAlbum,
             )
         }
 
-        Spacer(Modifier.weight(1f))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onToggleShuffle) {
-                Icon(
-                    imageVector = Icons.Default.Shuffle,
-                    contentDescription = if (state.shuffleEnabled) "Turn shuffle off" else "Turn shuffle on",
-                    tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            IconButton(onClick = onPrevious) {
-                Icon(
-                    imageVector = Icons.Default.SkipPrevious,
-                    contentDescription = "Previous",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-            IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(72.dp)) {
-                Icon(
-                    imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (state.isPlaying) "Pause" else "Play",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(48.dp),
-                )
-            }
-            IconButton(onClick = onNext) {
-                Icon(
-                    imageVector = Icons.Default.SkipNext,
-                    contentDescription = "Next",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-            IconButton(onClick = onCycleRepeatMode) {
-                Icon(
-                    imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne
-                                  else Icons.Default.Repeat,
-                    contentDescription = when (state.repeatMode) {
-                        RepeatMode.OFF -> "Turn repeat all on"
-                        RepeatMode.ALL -> "Turn repeat one on"
-                        RepeatMode.ONE -> "Turn repeat off"
-                    },
-                    tint = if (state.repeatMode == RepeatMode.OFF)
-                        MaterialTheme.colorScheme.onSurface
-                    else
-                        MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-
-        QueueHandle(
+        BottomPlaybackPanel(
+            state = state,
+            metrics = metrics,
+            onToggleShuffle = onToggleShuffle,
+            onPrevious = onPrevious,
+            onTogglePlayPause = onTogglePlayPause,
+            onNext = onNext,
+            onCycleRepeatMode = onCycleRepeatMode,
+            onSeek = onSeek,
+            onOpenQueue = onOpenQueue,
+            sleepTimerLabel = sleepTimerLabel,
             upNextCount = upNextCount,
-            onClick = onOpenQueue,
         )
     }
 }
 
 @Composable
-private fun CompactNowPlayingLayout(
-    state: NowPlayingState,
+private fun UpperNowPlayingContent(
     song: Song,
+    queuePosition: String,
     lyrics: LyricsResult,
     metrics: NowPlayingLayoutMetrics,
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
-    onEditLyrics: () -> Unit,
     onPrevious: () -> Unit,
-    onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
-    onToggleShuffle: () -> Unit,
-    onCycleRepeatMode: () -> Unit,
-    onSeek: (Long) -> Unit,
+    onEditLyrics: () -> Unit,
     onOpenTrackDetails: (() -> Unit)?,
     onOpenArtist: (() -> Unit)?,
-    onOpenQueue: () -> Unit,
-    sleepTimerLabel: String?,
-    upNextCount: Int,
+    onOpenAlbum: (() -> Unit)?,
 ) {
-
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = metrics.horizontalPadding, vertical = metrics.verticalPadding),
+            .verticalScroll(scrollState)
+            .padding(bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -807,8 +740,16 @@ private fun CompactNowPlayingLayout(
                 onEditLyrics = onEditLyrics,
                 modifier = Modifier.size(metrics.artworkSize),
             )
+            if (metrics.showLyricsHint) {
+                Text(
+                    text = "Double-tap for lyrics · Long-press to edit lyrics",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
-
         Text(
             text = song.title,
             style = metrics.titleStyle,
@@ -823,7 +764,7 @@ private fun CompactNowPlayingLayout(
         )
         Text(
             text = song.artist,
-            style = MaterialTheme.typography.bodySmall,
+            style = metrics.artistStyle,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
             textAlign = TextAlign.Center,
             maxLines = 1,
@@ -832,6 +773,48 @@ private fun CompactNowPlayingLayout(
                 .fillMaxWidth()
                 .clickableIfNotNull(onOpenArtist),
         )
+        if (metrics.showAlbum && song.album.isNotBlank()) {
+            Text(
+                text = song.album,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickableIfNotNull(onOpenAlbum),
+            )
+        }
+        if (metrics.showQueuePosition && queuePosition.isNotBlank()) {
+            Text(
+                text = queuePosition,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BottomPlaybackPanel(
+    state: NowPlayingState,
+    metrics: NowPlayingLayoutMetrics,
+    onToggleShuffle: () -> Unit,
+    onPrevious: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onCycleRepeatMode: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onOpenQueue: () -> Unit,
+    sleepTimerLabel: String?,
+    upNextCount: Int,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(metrics.bottomPanelSpacing),
+    ) {
         SeekBar(
             positionMs = state.positionMs,
             durationMs = state.durationMs,
@@ -849,7 +832,7 @@ private fun CompactNowPlayingLayout(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        CompactPlaybackControlsRow(
+        PlaybackControlsRow(
             state = state,
             onToggleShuffle = onToggleShuffle,
             onPrevious = onPrevious,
@@ -860,13 +843,12 @@ private fun CompactNowPlayingLayout(
         QueueHandle(
             upNextCount = upNextCount,
             onClick = onOpenQueue,
-            modifier = Modifier.padding(top = 0.dp),
         )
     }
 }
 
 @Composable
-private fun CompactPlaybackControlsRow(
+private fun PlaybackControlsRow(
     state: NowPlayingState,
     onToggleShuffle: () -> Unit,
     onPrevious: () -> Unit,
