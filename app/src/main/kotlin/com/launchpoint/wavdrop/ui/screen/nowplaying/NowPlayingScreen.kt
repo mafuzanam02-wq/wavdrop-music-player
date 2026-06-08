@@ -750,11 +750,15 @@ private fun UpperNowPlayingContent(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (showLyricsOverlay) {
-                CompactLyricsPanel(
+                ArtworkWithLyricsOverlay(
                     song = song,
                     lyrics = lyrics,
+                    showLyricsOverlay = true,
                     onToggleLyrics = onToggleLyrics,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
                     onEditLyrics = onEditLyrics,
+                    compactLyricsOverlay = !metrics.showLyricsHint,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(metrics.lyricsPanelHeight),
@@ -1029,38 +1033,6 @@ private fun LyricsEditorDialog(
 }
 
 @Composable
-private fun CompactLyricsPanel(
-    song: Song,
-    lyrics: LyricsResult,
-    onToggleLyrics: () -> Unit,
-    onEditLyrics: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    val currentToggleLyrics by rememberUpdatedState(onToggleLyrics)
-    val currentEdit by rememberUpdatedState(onEditLyrics)
-
-    Box(
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.88f))
-            .pointerInput(song.id) {
-                detectTapGestures(
-                    onDoubleTap = { currentToggleLyrics() },
-                    onLongPress = { currentEdit() },
-                )
-            }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-    ) {
-        LyricsOverlayContent(
-            lyrics = lyrics,
-            onSearchOnline = { searchLyricsOnline(context, song) },
-            compact = true,
-            modifier = Modifier.fillMaxSize(),
-        )
-    }
-}
-
-@Composable
 private fun ArtworkWithLyricsOverlay(
     song: Song,
     lyrics: LyricsResult,
@@ -1069,6 +1041,7 @@ private fun ArtworkWithLyricsOverlay(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onEditLyrics: () -> Unit,
+    compactLyricsOverlay: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context          = LocalContext.current
@@ -1119,29 +1092,37 @@ private fun ArtworkWithLyricsOverlay(
         )
 
         if (showLyricsOverlay) {
+            val scrimAlpha = if (compactLyricsOverlay) 0.78f else 0.68f
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.58f)),
+                    .background(Color.Black.copy(alpha = scrimAlpha)),
             ) {
                 LyricsOverlayContent(
                     lyrics = lyrics,
                     onSearchOnline = { searchLyricsOnline(context, song) },
-                    compact = false,
+                    compact = compactLyricsOverlay,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 22.dp, end = 22.dp, top = 22.dp, bottom = 52.dp),
+                        .padding(
+                            start = if (compactLyricsOverlay) 16.dp else 22.dp,
+                            end = if (compactLyricsOverlay) 16.dp else 22.dp,
+                            top = if (compactLyricsOverlay) 16.dp else 22.dp,
+                            bottom = if (compactLyricsOverlay) 16.dp else 52.dp,
+                        ),
                 )
-                Text(
-                    text = "Double-tap to close · Long-press to edit",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.62f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                )
+                if (!compactLyricsOverlay) {
+                    Text(
+                        text = "Double-tap to close · Long-press to edit",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.62f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                    )
+                }
             }
         }
     }
