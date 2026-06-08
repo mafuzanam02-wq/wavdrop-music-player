@@ -541,6 +541,8 @@ private fun NowPlayingContent(
 
             if (compactLyricsOpen) {
                 Spacer(Modifier.height(4.dp))
+            } else if (isCompact) {
+                Spacer(Modifier.height(12.dp))
             } else {
                 Spacer(Modifier.weight(1f))
             }
@@ -747,7 +749,7 @@ private fun TrackInfoBlock(
         if (!showLyricsOverlay || !isCompact) {
             Text(
                 text       = song.title,
-                style      = if (isCompact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
+                style      = if (isCompact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color      = MaterialTheme.colorScheme.onSurface,
                 textAlign  = TextAlign.Center,
