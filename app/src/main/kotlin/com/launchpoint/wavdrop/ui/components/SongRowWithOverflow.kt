@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
 import com.launchpoint.wavdrop.data.model.Song
 
 /**
@@ -34,6 +35,8 @@ fun SongRowWithOverflow(
     onViewFolder: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    highlightedTitle: AnnotatedString? = null,
+    highlightedArtist: AnnotatedString? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -44,10 +47,12 @@ fun SongRowWithOverflow(
             isFavorite         = isFavorite,
             onClick            = onPlay,
             onToggleFavorite   = onToggleFavorite,
-            onOpenDetails      = onTrackDetails,
+            onOpenDetails      = { expanded = true },
             showFavoriteButton = false,
             onMoreClick        = { expanded = true },
             modifier           = Modifier.fillMaxWidth(),
+            highlightedTitle   = highlightedTitle,
+            highlightedArtist  = highlightedArtist,
         )
         DropdownMenu(
             expanded         = expanded,

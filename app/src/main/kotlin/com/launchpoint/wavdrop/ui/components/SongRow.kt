@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
@@ -41,6 +42,8 @@ fun SongRow(
     modifier: Modifier = Modifier,
     showFavoriteButton: Boolean = true,
     onMoreClick: (() -> Unit)? = null,
+    highlightedTitle: AnnotatedString? = null,
+    highlightedArtist: AnnotatedString? = null,
 ) {
     val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
@@ -78,15 +81,27 @@ fun SongRow(
                 .padding(start = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text     = song.title,
-                    style    = MaterialTheme.typography.titleMedium,
-                    color    = if (isCurrent) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
+                if (highlightedTitle != null) {
+                    Text(
+                        text     = highlightedTitle,
+                        style    = MaterialTheme.typography.titleMedium,
+                        color    = if (isCurrent) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                } else {
+                    Text(
+                        text     = song.title,
+                        style    = MaterialTheme.typography.titleMedium,
+                        color    = if (isCurrent) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
                 if (isCurrent) {
                     Icon(
                         imageVector        = Icons.Default.MusicNote,
@@ -96,14 +111,25 @@ fun SongRow(
                     )
                 }
             }
-            Text(
-                text     = song.artist,
-                style    = MaterialTheme.typography.bodyMedium,
-                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+            if (highlightedArtist != null) {
+                Text(
+                    text     = highlightedArtist,
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            } else {
+                Text(
+                    text     = song.artist,
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
         if (onMoreClick != null) {
             IconButton(onClick = onMoreClick) {

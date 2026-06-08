@@ -74,6 +74,14 @@ class HomeViewModel @Inject constructor(
         initialValue = null,
     )
 
+    val librarySongs: StateFlow<List<Song>> = allSongs
+        .map { it.orEmpty() }
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
     val uiState: StateFlow<HomeUiState> = combine(allSongs, _searchQuery) { songs, query ->
         when {
             songs == null -> HomeUiState.Loading

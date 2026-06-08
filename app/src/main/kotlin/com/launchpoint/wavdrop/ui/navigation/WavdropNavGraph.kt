@@ -202,6 +202,8 @@ fun WavdropNavGraph(
                 onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onFolderClick       = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
+                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
             )
         }
         composable(Screen.BpstatPreview.route) {
