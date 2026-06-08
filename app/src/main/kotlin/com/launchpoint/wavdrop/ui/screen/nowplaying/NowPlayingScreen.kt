@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -468,17 +469,17 @@ private fun NowPlayingContent(
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        // Reserve space for everything except artwork: metadata text, seekbar, controls, spacing.
-        // Artwork is also capped by available width so it never overflows horizontally.
-        val heightCompact = maxHeight < 560.dp
-        val widthCompact = maxWidth < 360.dp
-        val baseArtworkSize = run {
-            val fromWidth = (maxWidth - 48.dp).coerceIn(120.dp, 320.dp)
-            val fromHeight = (maxHeight - 400.dp).coerceIn(120.dp, 320.dp)
-            minOf(fromWidth, fromHeight)
-        }
-        val isCompact = heightCompact || widthCompact || baseArtworkSize < 220.dp
-        val artworkSize = baseArtworkSize
+        val fontScale = LocalDensity.current.fontScale
+        val layoutProfile = resolveNowPlayingLayoutProfile(
+            maxWidth = maxWidth,
+            maxHeight = maxHeight,
+            fontScale = fontScale,
+        )
+        val metrics = nowPlayingLayoutMetrics(
+            profile = layoutProfile,
+            maxWidth = maxWidth,
+            maxHeight = maxHeight,
+        )
         val titleClick: (() -> Unit)? = if (!song.isExternalAudio()) {
             { onOpenTrackDetails(song.id) }
         } else {
@@ -496,130 +497,263 @@ private fun NowPlayingContent(
         }
         val upNextCount = (state.queue.size - state.currentIndex - 1).coerceAtLeast(0)
 
-        if (isCompact) {
-            CompactNowPlayingLayout(
-                state = state,
-                song = song,
-                lyrics = lyrics,
-                maxHeight = maxHeight,
-                showLyricsOverlay = showLyricsOverlay,
-                onToggleLyrics = onToggleLyrics,
-                onEditLyrics = onEditLyrics,
-                onPrevious = onPrevious,
-                onTogglePlayPause = onTogglePlayPause,
-                onNext = onNext,
-                onToggleShuffle = onToggleShuffle,
-                onCycleRepeatMode = onCycleRepeatMode,
-                onSeek = onSeek,
-                onOpenTrackDetails = titleClick,
-                onOpenArtist = artistClick,
-                onOpenQueue = onOpenQueue,
-                sleepTimerLabel = sleepTimerLabel,
-                upNextCount = upNextCount,
-            )
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                TrackInfoBlock(
-                    song               = song,
-                    queuePosition      = queuePosition,
-                    lyrics             = lyrics,
-                    showLyricsOverlay  = showLyricsOverlay,
-                    artworkSize        = artworkSize,
-                    isCompact          = false,
-                    onToggleLyrics     = onToggleLyrics,
-                    onPrevious         = onPrevious,
-                    onNext             = onNext,
-                    onEditLyrics       = onEditLyrics,
-                    onOpenTrackDetails = titleClick,
-                    onOpenArtist       = artistClick,
-                    onOpenAlbum        = albumClick,
-                )
-
-                Spacer(Modifier.height(16.dp))
-                SeekBar(
-                    positionMs = state.positionMs,
-                    durationMs = state.durationMs,
-                    isSeekable = state.isSeekable,
+        when (layoutProfile) {
+            NowPlayingLayoutProfile.Compact -> {
+                CompactNowPlayingLayout(
+                    state = state,
+                    song = song,
+                    lyrics = lyrics,
+                    metrics = metrics,
+                    showLyricsOverlay = showLyricsOverlay,
+                    onToggleLyrics = onToggleLyrics,
+                    onEditLyrics = onEditLyrics,
+                    onPrevious = onPrevious,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onNext = onNext,
+                    onToggleShuffle = onToggleShuffle,
+                    onCycleRepeatMode = onCycleRepeatMode,
                     onSeek = onSeek,
-                )
-
-                if (sleepTimerLabel != null) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text      = sleepTimerLabel,
-                        style     = MaterialTheme.typography.bodySmall,
-                        color     = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Center,
-                        modifier  = Modifier.fillMaxWidth(),
-                    )
-                }
-
-                Spacer(Modifier.weight(1f))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onToggleShuffle) {
-                        Icon(
-                            imageVector = Icons.Default.Shuffle,
-                            contentDescription = if (state.shuffleEnabled) "Turn shuffle off" else "Turn shuffle on",
-                            tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
-                                   else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    IconButton(onClick = onPrevious) {
-                        Icon(
-                            imageVector = Icons.Default.SkipPrevious,
-                            contentDescription = "Previous",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(32.dp),
-                        )
-                    }
-                    IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(72.dp)) {
-                        Icon(
-                            imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (state.isPlaying) "Pause" else "Play",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(48.dp),
-                        )
-                    }
-                    IconButton(onClick = onNext) {
-                        Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Next",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(32.dp),
-                        )
-                    }
-                    IconButton(onClick = onCycleRepeatMode) {
-                        Icon(
-                            imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne
-                                          else Icons.Default.Repeat,
-                            contentDescription = when (state.repeatMode) {
-                                RepeatMode.OFF -> "Turn repeat all on"
-                                RepeatMode.ALL -> "Turn repeat one on"
-                                RepeatMode.ONE -> "Turn repeat off"
-                            },
-                            tint = if (state.repeatMode == RepeatMode.OFF)
-                                MaterialTheme.colorScheme.onSurface
-                            else
-                                MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-
-                QueueHandle(
+                    onOpenTrackDetails = titleClick,
+                    onOpenArtist = artistClick,
+                    onOpenQueue = onOpenQueue,
+                    sleepTimerLabel = sleepTimerLabel,
                     upNextCount = upNextCount,
-                    onClick = onOpenQueue,
+                )
+            }
+            NowPlayingLayoutProfile.Medium,
+            NowPlayingLayoutProfile.Expanded -> {
+                NormalNowPlayingLayout(
+                    state = state,
+                    song = song,
+                    queuePosition = queuePosition,
+                    lyrics = lyrics,
+                    metrics = metrics,
+                    showLyricsOverlay = showLyricsOverlay,
+                    onToggleLyrics = onToggleLyrics,
+                    onEditLyrics = onEditLyrics,
+                    onPrevious = onPrevious,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onNext = onNext,
+                    onToggleShuffle = onToggleShuffle,
+                    onCycleRepeatMode = onCycleRepeatMode,
+                    onSeek = onSeek,
+                    onOpenTrackDetails = titleClick,
+                    onOpenArtist = artistClick,
+                    onOpenAlbum = albumClick,
+                    onOpenQueue = onOpenQueue,
+                    sleepTimerLabel = sleepTimerLabel,
+                    upNextCount = upNextCount,
                 )
             }
         }
+    }
+}
+
+private enum class NowPlayingLayoutProfile {
+    Compact,
+    Medium,
+    Expanded,
+}
+
+private fun resolveNowPlayingLayoutProfile(
+    maxWidth: Dp,
+    maxHeight: Dp,
+    fontScale: Float,
+): NowPlayingLayoutProfile = when {
+    maxHeight < 640.dp || maxWidth < 380.dp || (fontScale >= 1.15f && maxHeight < 700.dp) ->
+        NowPlayingLayoutProfile.Compact
+    maxHeight >= 780.dp && maxWidth >= 400.dp && fontScale < 1.15f ->
+        NowPlayingLayoutProfile.Expanded
+    else ->
+        NowPlayingLayoutProfile.Medium
+}
+
+private data class NowPlayingLayoutMetrics(
+    val artworkSize: Dp,
+    val lyricsPanelHeight: Dp,
+    val horizontalPadding: Dp,
+    val verticalPadding: Dp,
+    val titleStyle: TextStyle,
+    val showAlbum: Boolean,
+    val showQueuePosition: Boolean,
+    val showLyricsHint: Boolean,
+)
+
+@Composable
+private fun nowPlayingLayoutMetrics(
+    profile: NowPlayingLayoutProfile,
+    maxWidth: Dp,
+    maxHeight: Dp,
+): NowPlayingLayoutMetrics {
+    val normalArtworkSize = run {
+        val fromWidth = (maxWidth - 48.dp).coerceIn(120.dp, 320.dp)
+        val fromHeight = (maxHeight - 400.dp).coerceIn(120.dp, 320.dp)
+        minOf(fromWidth, fromHeight)
+    }
+    return when (profile) {
+        NowPlayingLayoutProfile.Compact -> NowPlayingLayoutMetrics(
+            artworkSize = when {
+                maxHeight < 640.dp -> 120.dp
+                maxHeight < 700.dp -> 132.dp
+                else -> 144.dp
+            },
+            lyricsPanelHeight = when {
+                maxHeight < 640.dp -> 140.dp
+                maxHeight < 700.dp -> 156.dp
+                else -> 176.dp
+            },
+            horizontalPadding = 16.dp,
+            verticalPadding = 8.dp,
+            titleStyle = MaterialTheme.typography.titleSmall,
+            showAlbum = false,
+            showQueuePosition = false,
+            showLyricsHint = false,
+        )
+        NowPlayingLayoutProfile.Medium -> NowPlayingLayoutMetrics(
+            artworkSize = normalArtworkSize.coerceAtMost(260.dp),
+            lyricsPanelHeight = normalArtworkSize.coerceAtMost(260.dp),
+            horizontalPadding = 24.dp,
+            verticalPadding = 20.dp,
+            titleStyle = MaterialTheme.typography.headlineSmall,
+            showAlbum = true,
+            showQueuePosition = true,
+            showLyricsHint = true,
+        )
+        NowPlayingLayoutProfile.Expanded -> NowPlayingLayoutMetrics(
+            artworkSize = normalArtworkSize,
+            lyricsPanelHeight = normalArtworkSize,
+            horizontalPadding = 24.dp,
+            verticalPadding = 20.dp,
+            titleStyle = MaterialTheme.typography.headlineSmall,
+            showAlbum = true,
+            showQueuePosition = true,
+            showLyricsHint = true,
+        )
+    }
+}
+
+@Composable
+private fun NormalNowPlayingLayout(
+    state: NowPlayingState,
+    song: Song,
+    queuePosition: String,
+    lyrics: LyricsResult,
+    metrics: NowPlayingLayoutMetrics,
+    showLyricsOverlay: Boolean,
+    onToggleLyrics: () -> Unit,
+    onEditLyrics: () -> Unit,
+    onPrevious: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeatMode: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onOpenTrackDetails: (() -> Unit)?,
+    onOpenArtist: (() -> Unit)?,
+    onOpenAlbum: (() -> Unit)?,
+    onOpenQueue: () -> Unit,
+    sleepTimerLabel: String?,
+    upNextCount: Int,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = metrics.horizontalPadding, vertical = metrics.verticalPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        TrackInfoBlock(
+            song = song,
+            queuePosition = queuePosition,
+            lyrics = lyrics,
+            showLyricsOverlay = showLyricsOverlay,
+            metrics = metrics,
+            onToggleLyrics = onToggleLyrics,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            onEditLyrics = onEditLyrics,
+            onOpenTrackDetails = onOpenTrackDetails,
+            onOpenArtist = onOpenArtist,
+            onOpenAlbum = onOpenAlbum,
+        )
+
+        Spacer(Modifier.height(16.dp))
+        SeekBar(
+            positionMs = state.positionMs,
+            durationMs = state.durationMs,
+            isSeekable = state.isSeekable,
+            onSeek = onSeek,
+        )
+
+        if (sleepTimerLabel != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = sleepTimerLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        Spacer(Modifier.weight(1f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onToggleShuffle) {
+                Icon(
+                    imageVector = Icons.Default.Shuffle,
+                    contentDescription = if (state.shuffleEnabled) "Turn shuffle off" else "Turn shuffle on",
+                    tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            IconButton(onClick = onPrevious) {
+                Icon(
+                    imageVector = Icons.Default.SkipPrevious,
+                    contentDescription = "Previous",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+            IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(72.dp)) {
+                Icon(
+                    imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (state.isPlaying) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(48.dp),
+                )
+            }
+            IconButton(onClick = onNext) {
+                Icon(
+                    imageVector = Icons.Default.SkipNext,
+                    contentDescription = "Next",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+            IconButton(onClick = onCycleRepeatMode) {
+                Icon(
+                    imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne
+                                  else Icons.Default.Repeat,
+                    contentDescription = when (state.repeatMode) {
+                        RepeatMode.OFF -> "Turn repeat all on"
+                        RepeatMode.ALL -> "Turn repeat one on"
+                        RepeatMode.ONE -> "Turn repeat off"
+                    },
+                    tint = if (state.repeatMode == RepeatMode.OFF)
+                        MaterialTheme.colorScheme.onSurface
+                    else
+                        MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        QueueHandle(
+            upNextCount = upNextCount,
+            onClick = onOpenQueue,
+        )
     }
 }
 
@@ -628,7 +762,7 @@ private fun CompactNowPlayingLayout(
     state: NowPlayingState,
     song: Song,
     lyrics: LyricsResult,
-    maxHeight: Dp,
+    metrics: NowPlayingLayoutMetrics,
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
     onEditLyrics: () -> Unit,
@@ -644,21 +778,11 @@ private fun CompactNowPlayingLayout(
     sleepTimerLabel: String?,
     upNextCount: Int,
 ) {
-    val artworkSize = when {
-        maxHeight < 500.dp -> 120.dp
-        maxHeight < 560.dp -> 132.dp
-        else -> 144.dp
-    }
-    val lyricsHeight = when {
-        maxHeight < 500.dp -> 140.dp
-        maxHeight < 560.dp -> 156.dp
-        else -> 176.dp
-    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = metrics.horizontalPadding, vertical = metrics.verticalPadding),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -670,7 +794,7 @@ private fun CompactNowPlayingLayout(
                 onEditLyrics = onEditLyrics,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(lyricsHeight),
+                    .height(metrics.lyricsPanelHeight),
             )
         } else {
             ArtworkWithLyricsOverlay(
@@ -681,13 +805,13 @@ private fun CompactNowPlayingLayout(
                 onPrevious = onPrevious,
                 onNext = onNext,
                 onEditLyrics = onEditLyrics,
-                modifier = Modifier.size(artworkSize),
+                modifier = Modifier.size(metrics.artworkSize),
             )
         }
 
         Text(
             text = song.title,
-            style = MaterialTheme.typography.titleSmall,
+            style = metrics.titleStyle,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center,
@@ -897,8 +1021,7 @@ private fun TrackInfoBlock(
     queuePosition: String,
     lyrics: LyricsResult,
     showLyricsOverlay: Boolean,
-    artworkSize: Dp,
-    isCompact: Boolean,
+    metrics: NowPlayingLayoutMetrics,
     onToggleLyrics: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -912,88 +1035,76 @@ private fun TrackInfoBlock(
         modifier            = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (showLyricsOverlay && isCompact) {
-            CompactLyricsPanel(
-                song = song,
-                lyrics = lyrics,
-                onToggleLyrics = onToggleLyrics,
-                onEditLyrics = onEditLyrics,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            ArtworkWithLyricsOverlay(
-                song              = song,
-                lyrics            = lyrics,
-                showLyricsOverlay = showLyricsOverlay,
-                onToggleLyrics    = onToggleLyrics,
-                onPrevious        = onPrevious,
-                onNext            = onNext,
-                onEditLyrics      = onEditLyrics,
-                modifier          = Modifier.size(artworkSize),
-            )
-            if (!showLyricsOverlay) {
-                Spacer(Modifier.height(if (isCompact) 6.dp else 8.dp))
-                if (!isCompact) {
-                    Text(
-                        text = "Double-tap for lyrics · Long-press to edit lyrics",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-            } else {
-                Spacer(Modifier.height(24.dp))
-            }
-        }
-        if (!showLyricsOverlay || !isCompact) {
-            Text(
-                text       = song.title,
-                style      = if (isCompact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-                color      = MaterialTheme.colorScheme.onSurface,
-                textAlign  = TextAlign.Center,
-                maxLines   = 2,
-                overflow   = TextOverflow.Ellipsis,
-                modifier   = Modifier
-                    .fillMaxWidth()
-                    .clickableIfNotNull(onOpenTrackDetails),
-            )
-            Spacer(Modifier.height(if (isCompact) 3.dp else 6.dp))
-            Text(
-                text     = song.artist,
-                style    = if (isCompact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleMedium,
-                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickableIfNotNull(onOpenArtist),
-            )
-            if (!isCompact && song.album.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
+        ArtworkWithLyricsOverlay(
+            song              = song,
+            lyrics            = lyrics,
+            showLyricsOverlay = showLyricsOverlay,
+            onToggleLyrics    = onToggleLyrics,
+            onPrevious        = onPrevious,
+            onNext            = onNext,
+            onEditLyrics      = onEditLyrics,
+            modifier          = Modifier.size(metrics.artworkSize),
+        )
+        if (!showLyricsOverlay) {
+            Spacer(Modifier.height(8.dp))
+            if (metrics.showLyricsHint) {
                 Text(
-                    text      = song.album,
-                    style     = MaterialTheme.typography.bodyMedium,
-                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                    text = "Double-tap for lyrics · Long-press to edit lyrics",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
                     textAlign = TextAlign.Center,
-                    maxLines  = 1,
-                    overflow  = TextOverflow.Ellipsis,
-                    modifier  = Modifier
-                        .fillMaxWidth()
-                        .clickableIfNotNull(onOpenAlbum),
+                    modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(16.dp))
             }
-            if (!isCompact && queuePosition.isNotBlank()) {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text  = queuePosition,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
+        } else {
+            Spacer(Modifier.height(24.dp))
+        }
+        Text(
+            text       = song.title,
+            style      = metrics.titleStyle,
+            fontWeight = FontWeight.SemiBold,
+            color      = MaterialTheme.colorScheme.onSurface,
+            textAlign  = TextAlign.Center,
+            maxLines   = 2,
+            overflow   = TextOverflow.Ellipsis,
+            modifier   = Modifier
+                .fillMaxWidth()
+                .clickableIfNotNull(onOpenTrackDetails),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text     = song.artist,
+            style    = MaterialTheme.typography.titleMedium,
+            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickableIfNotNull(onOpenArtist),
+        )
+        if (metrics.showAlbum && song.album.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text      = song.album,
+                style     = MaterialTheme.typography.bodyMedium,
+                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                textAlign = TextAlign.Center,
+                maxLines  = 1,
+                overflow  = TextOverflow.Ellipsis,
+                modifier  = Modifier
+                    .fillMaxWidth()
+                    .clickableIfNotNull(onOpenAlbum),
+            )
+        }
+        if (metrics.showQueuePosition && queuePosition.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text  = queuePosition,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
