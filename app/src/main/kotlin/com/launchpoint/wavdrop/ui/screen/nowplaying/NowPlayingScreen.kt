@@ -470,17 +470,25 @@ private fun NowPlayingContent(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         // Reserve space for everything except artwork: metadata text, seekbar, controls, spacing.
         // Artwork is also capped by available width so it never overflows horizontally.
-        val artworkSize = run {
+        val heightCompact = maxHeight < 560.dp
+        val widthCompact = maxWidth < 360.dp
+        val baseArtworkSize = run {
             val fromWidth = (maxWidth - 48.dp).coerceIn(120.dp, 320.dp)
             val fromHeight = (maxHeight - 400.dp).coerceIn(120.dp, 320.dp)
             minOf(fromWidth, fromHeight)
         }
-        val isCompact = artworkSize < 220.dp
+        val isCompact = heightCompact || widthCompact || baseArtworkSize < 220.dp
+        val artworkSize = if (isCompact) {
+            baseArtworkSize.coerceAtMost(172.dp)
+        } else {
+            baseArtworkSize
+        }
+        val compactLyricsOpen = isCompact && showLyricsOverlay
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = if (isCompact) 8.dp else 20.dp),
+                .padding(horizontal = if (isCompact) 16.dp else 24.dp, vertical = if (isCompact) 6.dp else 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             TrackInfoBlock(
@@ -509,9 +517,10 @@ private fun NowPlayingContent(
                 } else {
                     null
                 },
+                modifier           = if (compactLyricsOpen) Modifier.weight(1f) else Modifier,
             )
 
-            Spacer(Modifier.height(if (isCompact) 8.dp else 16.dp))
+            Spacer(Modifier.height(if (isCompact) 6.dp else 16.dp))
             SeekBar(
                 positionMs = state.positionMs,
                 durationMs = state.durationMs,
@@ -530,7 +539,11 @@ private fun NowPlayingContent(
                 )
             }
 
-            Spacer(Modifier.weight(1f))
+            if (compactLyricsOpen) {
+                Spacer(Modifier.height(4.dp))
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -696,77 +709,121 @@ private fun TrackInfoBlock(
         modifier            = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ArtworkWithLyricsOverlay(
-            song              = song,
-            lyrics            = lyrics,
-            showLyricsOverlay = showLyricsOverlay,
-            onToggleLyrics    = onToggleLyrics,
-            onPrevious        = onPrevious,
-            onNext            = onNext,
-            onEditLyrics      = onEditLyrics,
-            modifier          = Modifier.size(artworkSize),
-        )
-        if (!showLyricsOverlay) {
-            Spacer(Modifier.height(8.dp))
-            if (!isCompact) {
-                Text(
-                    text = "Double-tap for lyrics · Long-press to edit lyrics",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(16.dp))
-            }
+        if (showLyricsOverlay && isCompact) {
+            CompactLyricsPanel(
+                song = song,
+                lyrics = lyrics,
+                onToggleLyrics = onToggleLyrics,
+                onEditLyrics = onEditLyrics,
+                modifier = Modifier.fillMaxSize(),
+            )
         } else {
-            Spacer(Modifier.height(if (isCompact) 8.dp else 24.dp))
+            ArtworkWithLyricsOverlay(
+                song              = song,
+                lyrics            = lyrics,
+                showLyricsOverlay = showLyricsOverlay,
+                onToggleLyrics    = onToggleLyrics,
+                onPrevious        = onPrevious,
+                onNext            = onNext,
+                onEditLyrics      = onEditLyrics,
+                modifier          = Modifier.size(artworkSize),
+            )
+            if (!showLyricsOverlay) {
+                Spacer(Modifier.height(if (isCompact) 6.dp else 8.dp))
+                if (!isCompact) {
+                    Text(
+                        text = "Double-tap for lyrics · Long-press to edit lyrics",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(16.dp))
+                }
+            } else {
+                Spacer(Modifier.height(24.dp))
+            }
         }
-        Text(
-            text       = song.title,
-            style      = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-            color      = MaterialTheme.colorScheme.onSurface,
-            textAlign  = TextAlign.Center,
-            maxLines   = 2,
-            overflow   = TextOverflow.Ellipsis,
-            modifier   = Modifier
-                .fillMaxWidth()
-                .clickableIfNotNull(onOpenTrackDetails),
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text     = song.artist,
-            style    = MaterialTheme.typography.titleMedium,
-            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickableIfNotNull(onOpenArtist),
-        )
-        if (song.album.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
+        if (!showLyricsOverlay || !isCompact) {
             Text(
-                text      = song.album,
-                style     = MaterialTheme.typography.bodyMedium,
-                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
-                textAlign = TextAlign.Center,
-                maxLines  = 1,
-                overflow  = TextOverflow.Ellipsis,
-                modifier  = Modifier
+                text       = song.title,
+                style      = if (isCompact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = MaterialTheme.colorScheme.onSurface,
+                textAlign  = TextAlign.Center,
+                maxLines   = 2,
+                overflow   = TextOverflow.Ellipsis,
+                modifier   = Modifier
                     .fillMaxWidth()
-                    .clickableIfNotNull(onOpenAlbum),
+                    .clickableIfNotNull(onOpenTrackDetails),
             )
-        }
-        if (queuePosition.isNotBlank()) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(if (isCompact) 3.dp else 6.dp))
             Text(
-                text  = queuePosition,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                text     = song.artist,
+                style    = if (isCompact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.titleMedium,
+                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickableIfNotNull(onOpenArtist),
             )
+            if (!isCompact && song.album.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text      = song.album,
+                    style     = MaterialTheme.typography.bodyMedium,
+                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                    textAlign = TextAlign.Center,
+                    maxLines  = 1,
+                    overflow  = TextOverflow.Ellipsis,
+                    modifier  = Modifier
+                        .fillMaxWidth()
+                        .clickableIfNotNull(onOpenAlbum),
+                )
+            }
+            if (!isCompact && queuePosition.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text  = queuePosition,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun CompactLyricsPanel(
+    song: Song,
+    lyrics: LyricsResult,
+    onToggleLyrics: () -> Unit,
+    onEditLyrics: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val currentToggleLyrics by rememberUpdatedState(onToggleLyrics)
+    val currentEdit by rememberUpdatedState(onEditLyrics)
+
+    Box(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.88f))
+            .pointerInput(song.id) {
+                detectTapGestures(
+                    onDoubleTap = { currentToggleLyrics() },
+                    onLongPress = { currentEdit() },
+                )
+            }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        LyricsOverlayContent(
+            lyrics = lyrics,
+            onSearchOnline = { searchLyricsOnline(context, song) },
+            compact = true,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -837,6 +894,7 @@ private fun ArtworkWithLyricsOverlay(
                 LyricsOverlayContent(
                     lyrics = lyrics,
                     onSearchOnline = { searchLyricsOnline(context, song) },
+                    compact = false,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(start = 22.dp, end = 22.dp, top = 22.dp, bottom = 52.dp),
@@ -860,6 +918,7 @@ private fun ArtworkWithLyricsOverlay(
 private fun LyricsOverlayContent(
     lyrics: LyricsResult,
     onSearchOnline: () -> Unit,
+    compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
     when (lyrics) {
@@ -874,7 +933,7 @@ private fun LyricsOverlayContent(
         is LyricsResult.Available -> {
             Text(
                 text = lyrics.text,
-                style = MaterialTheme.typography.bodyLarge,
+                style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
                 color = Color.White,
                 textAlign = TextAlign.Start,
                 modifier = modifier.verticalScroll(rememberScrollState()),
@@ -891,16 +950,20 @@ private fun LyricsOverlayContent(
                         imageVector = Icons.Default.MusicNote,
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.40f),
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(if (compact) 28.dp else 36.dp),
                     )
                     Text(
                         text = "No lyrics found",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                         color = Color.White.copy(alpha = 0.88f),
                         textAlign = TextAlign.Center,
                     )
                     Text(
-                        text = "Long-press to add custom lyrics, or add embedded/sidecar lyrics locally.",
+                        text = if (compact) {
+                            "Long-press to add custom lyrics."
+                        } else {
+                            "Long-press to add custom lyrics, or add embedded/sidecar lyrics locally."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.50f),
                         textAlign = TextAlign.Center,
