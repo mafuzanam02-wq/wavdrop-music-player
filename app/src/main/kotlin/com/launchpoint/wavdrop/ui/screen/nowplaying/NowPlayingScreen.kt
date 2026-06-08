@@ -598,24 +598,49 @@ private fun NowPlayingLayoutMetrics.withUpperAreaSizing(
     upperHeight: Dp,
 ): NowPlayingLayoutMetrics {
     val availableWidth = (upperWidth - 16.dp).coerceAtLeast(96.dp)
-    val artworkFromHeight = when (profile) {
-        NowPlayingLayoutProfile.Compact -> (upperHeight * 0.48f).coerceIn(110.dp, 140.dp)
-        NowPlayingLayoutProfile.Medium -> (upperHeight * 0.52f).coerceIn(180.dp, 240.dp)
-        NowPlayingLayoutProfile.Expanded -> (upperHeight * 0.56f).coerceIn(200.dp, 280.dp)
+    val metadataReserve = when (profile) {
+        NowPlayingLayoutProfile.Compact -> 78.dp
+        NowPlayingLayoutProfile.Medium -> 118.dp
+        NowPlayingLayoutProfile.Expanded -> 136.dp
     }
-    val maxArtwork = when (profile) {
-        NowPlayingLayoutProfile.Compact -> 140.dp
-        NowPlayingLayoutProfile.Medium -> 240.dp
-        NowPlayingLayoutProfile.Expanded -> 280.dp
+    val artworkRange = when (profile) {
+        NowPlayingLayoutProfile.Compact -> 110.dp..190.dp
+        NowPlayingLayoutProfile.Medium -> 180.dp..280.dp
+        NowPlayingLayoutProfile.Expanded -> 220.dp..340.dp
+    }
+    val artworkFromHeight = when (profile) {
+        NowPlayingLayoutProfile.Compact -> (upperHeight - metadataReserve).coerceIn(
+            artworkRange.start,
+            artworkRange.endInclusive,
+        )
+        NowPlayingLayoutProfile.Medium -> ((upperHeight - metadataReserve) * 0.92f).coerceIn(
+            artworkRange.start,
+            artworkRange.endInclusive,
+        )
+        NowPlayingLayoutProfile.Expanded -> ((upperHeight - metadataReserve) * 0.94f).coerceIn(
+            artworkRange.start,
+            artworkRange.endInclusive,
+        )
     }
     val lyricsFromHeight = when (profile) {
-        NowPlayingLayoutProfile.Compact -> (upperHeight * 0.64f).coerceIn(140.dp, 176.dp)
-        NowPlayingLayoutProfile.Medium -> (upperHeight * 0.68f).coerceIn(180.dp, 260.dp)
-        NowPlayingLayoutProfile.Expanded -> (upperHeight * 0.72f).coerceIn(220.dp, 320.dp)
+        NowPlayingLayoutProfile.Compact -> (upperHeight * 0.82f).coerceIn(150.dp, 220.dp)
+        NowPlayingLayoutProfile.Medium -> (upperHeight * 0.84f).coerceIn(220.dp, 340.dp)
+        NowPlayingLayoutProfile.Expanded -> (upperHeight * 0.86f).coerceIn(260.dp, 420.dp)
+    }
+    val showSecondaryMetadata = upperHeight >= when (profile) {
+        NowPlayingLayoutProfile.Compact -> 999.dp
+        NowPlayingLayoutProfile.Medium -> 430.dp
+        NowPlayingLayoutProfile.Expanded -> 460.dp
     }
     return copy(
-        artworkSize = minOf(availableWidth, artworkFromHeight, maxArtwork),
+        artworkSize = minOf(availableWidth, artworkFromHeight),
         lyricsPanelHeight = minOf(availableWidth, lyricsFromHeight),
+        showAlbum = showAlbum && showSecondaryMetadata,
+        showQueuePosition = showQueuePosition && upperHeight >= when (profile) {
+            NowPlayingLayoutProfile.Compact -> 999.dp
+            NowPlayingLayoutProfile.Medium -> 500.dp
+            NowPlayingLayoutProfile.Expanded -> 520.dp
+        },
     )
 }
 
@@ -711,87 +736,93 @@ private fun UpperNowPlayingContent(
     onOpenAlbum: (() -> Unit)?,
 ) {
     val scrollState = rememberScrollState()
-    Column(
+    Box(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(bottom = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .fillMaxSize(),
+        contentAlignment = Alignment.Center,
     ) {
-        if (showLyricsOverlay) {
-            CompactLyricsPanel(
-                song = song,
-                lyrics = lyrics,
-                onToggleLyrics = onToggleLyrics,
-                onEditLyrics = onEditLyrics,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .padding(bottom = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (showLyricsOverlay) {
+                CompactLyricsPanel(
+                    song = song,
+                    lyrics = lyrics,
+                    onToggleLyrics = onToggleLyrics,
+                    onEditLyrics = onEditLyrics,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(metrics.lyricsPanelHeight),
+                )
+            } else {
+                ArtworkWithLyricsOverlay(
+                    song = song,
+                    lyrics = lyrics,
+                    showLyricsOverlay = false,
+                    onToggleLyrics = onToggleLyrics,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    onEditLyrics = onEditLyrics,
+                    modifier = Modifier.size(metrics.artworkSize),
+                )
+                if (metrics.showLyricsHint) {
+                    Text(
+                        text = "Double-tap for lyrics · Long-press to edit lyrics",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Text(
+                text = song.title,
+                style = metrics.titleStyle,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(metrics.lyricsPanelHeight),
+                    .clickableIfNotNull(onOpenTrackDetails),
             )
-        } else {
-            ArtworkWithLyricsOverlay(
-                song = song,
-                lyrics = lyrics,
-                showLyricsOverlay = false,
-                onToggleLyrics = onToggleLyrics,
-                onPrevious = onPrevious,
-                onNext = onNext,
-                onEditLyrics = onEditLyrics,
-                modifier = Modifier.size(metrics.artworkSize),
-            )
-            if (metrics.showLyricsHint) {
-                Text(
-                    text = "Double-tap for lyrics · Long-press to edit lyrics",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        Text(
-            text = song.title,
-            style = metrics.titleStyle,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickableIfNotNull(onOpenTrackDetails),
-        )
-        Text(
-            text = song.artist,
-            style = metrics.artistStyle,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickableIfNotNull(onOpenArtist),
-        )
-        if (metrics.showAlbum && song.album.isNotBlank()) {
             Text(
-                text = song.album,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                text = song.artist,
+                style = metrics.artistStyle,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickableIfNotNull(onOpenAlbum),
+                    .clickableIfNotNull(onOpenArtist),
             )
-        }
-        if (metrics.showQueuePosition && queuePosition.isNotBlank()) {
-            Text(
-                text = queuePosition,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            if (metrics.showAlbum && song.album.isNotBlank()) {
+                Text(
+                    text = song.album,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickableIfNotNull(onOpenAlbum),
+                )
+            }
+            if (metrics.showQueuePosition && queuePosition.isNotBlank()) {
+                Text(
+                    text = queuePosition,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
     }
 }
@@ -994,100 +1025,6 @@ private fun LyricsEditorDialog(
                 }
             },
         )
-    }
-}
-
-@Composable
-private fun TrackInfoBlock(
-    song: Song,
-    queuePosition: String,
-    lyrics: LyricsResult,
-    showLyricsOverlay: Boolean,
-    metrics: NowPlayingLayoutMetrics,
-    onToggleLyrics: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onEditLyrics: () -> Unit,
-    onOpenTrackDetails: (() -> Unit)?,
-    onOpenArtist: (() -> Unit)?,
-    onOpenAlbum: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier            = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        ArtworkWithLyricsOverlay(
-            song              = song,
-            lyrics            = lyrics,
-            showLyricsOverlay = showLyricsOverlay,
-            onToggleLyrics    = onToggleLyrics,
-            onPrevious        = onPrevious,
-            onNext            = onNext,
-            onEditLyrics      = onEditLyrics,
-            modifier          = Modifier.size(metrics.artworkSize),
-        )
-        if (!showLyricsOverlay) {
-            Spacer(Modifier.height(8.dp))
-            if (metrics.showLyricsHint) {
-                Text(
-                    text = "Double-tap for lyrics · Long-press to edit lyrics",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(16.dp))
-            }
-        } else {
-            Spacer(Modifier.height(24.dp))
-        }
-        Text(
-            text       = song.title,
-            style      = metrics.titleStyle,
-            fontWeight = FontWeight.SemiBold,
-            color      = MaterialTheme.colorScheme.onSurface,
-            textAlign  = TextAlign.Center,
-            maxLines   = 2,
-            overflow   = TextOverflow.Ellipsis,
-            modifier   = Modifier
-                .fillMaxWidth()
-                .clickableIfNotNull(onOpenTrackDetails),
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text     = song.artist,
-            style    = MaterialTheme.typography.titleMedium,
-            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickableIfNotNull(onOpenArtist),
-        )
-        if (metrics.showAlbum && song.album.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text      = song.album,
-                style     = MaterialTheme.typography.bodyMedium,
-                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
-                textAlign = TextAlign.Center,
-                maxLines  = 1,
-                overflow  = TextOverflow.Ellipsis,
-                modifier  = Modifier
-                    .fillMaxWidth()
-                    .clickableIfNotNull(onOpenAlbum),
-            )
-        }
-        if (metrics.showQueuePosition && queuePosition.isNotBlank()) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text  = queuePosition,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
     }
 }
 
