@@ -12,17 +12,16 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -82,6 +81,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -467,117 +467,130 @@ private fun NowPlayingContent(
         ""
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        TrackInfoBlock(
-            song               = song,
-            queuePosition      = queuePosition,
-            lyrics             = lyrics,
-            showLyricsOverlay  = showLyricsOverlay,
-            onToggleLyrics     = onToggleLyrics,
-            onPrevious         = onPrevious,
-            onNext             = onNext,
-            onEditLyrics       = onEditLyrics,
-            onOpenTrackDetails = if (!song.isExternalAudio()) {
-                { onOpenTrackDetails(song.id) }
-            } else {
-                null
-            },
-            onOpenArtist       = if (song.hasKnownArtist()) {
-                { onOpenArtist(ArtistGrouper.artistKey(song)) }
-            } else {
-                null
-            },
-            onOpenAlbum        = if (song.hasKnownAlbum()) {
-                { onOpenAlbum(AlbumGrouper.albumKey(song)) }
-            } else {
-                null
-            },
-        )
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // Reserve space for everything except artwork: metadata text, seekbar, controls, spacing.
+        // Artwork is also capped by available width so it never overflows horizontally.
+        val artworkSize = run {
+            val fromWidth = (maxWidth - 48.dp).coerceIn(120.dp, 320.dp)
+            val fromHeight = (maxHeight - 400.dp).coerceIn(120.dp, 320.dp)
+            minOf(fromWidth, fromHeight)
+        }
+        val isCompact = artworkSize < 220.dp
 
-        Spacer(Modifier.height(16.dp))
-        SeekBar(
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
-            isSeekable = state.isSeekable,
-            onSeek = onSeek,
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = if (isCompact) 8.dp else 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            TrackInfoBlock(
+                song               = song,
+                queuePosition      = queuePosition,
+                lyrics             = lyrics,
+                showLyricsOverlay  = showLyricsOverlay,
+                artworkSize        = artworkSize,
+                isCompact          = isCompact,
+                onToggleLyrics     = onToggleLyrics,
+                onPrevious         = onPrevious,
+                onNext             = onNext,
+                onEditLyrics       = onEditLyrics,
+                onOpenTrackDetails = if (!song.isExternalAudio()) {
+                    { onOpenTrackDetails(song.id) }
+                } else {
+                    null
+                },
+                onOpenArtist       = if (song.hasKnownArtist()) {
+                    { onOpenArtist(ArtistGrouper.artistKey(song)) }
+                } else {
+                    null
+                },
+                onOpenAlbum        = if (song.hasKnownAlbum()) {
+                    { onOpenAlbum(AlbumGrouper.albumKey(song)) }
+                } else {
+                    null
+                },
+            )
 
-        if (sleepTimerLabel != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text      = sleepTimerLabel,
-                style     = MaterialTheme.typography.bodySmall,
-                color     = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center,
-                modifier  = Modifier.fillMaxWidth(),
+            Spacer(Modifier.height(if (isCompact) 8.dp else 16.dp))
+            SeekBar(
+                positionMs = state.positionMs,
+                durationMs = state.durationMs,
+                isSeekable = state.isSeekable,
+                onSeek = onSeek,
+            )
+
+            if (sleepTimerLabel != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text      = sleepTimerLabel,
+                    style     = MaterialTheme.typography.bodySmall,
+                    color     = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center,
+                    modifier  = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(Modifier.weight(1f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onToggleShuffle) {
+                    Icon(
+                        imageVector = Icons.Default.Shuffle,
+                        contentDescription = if (state.shuffleEnabled) "Turn shuffle off" else "Turn shuffle on",
+                        tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                IconButton(onClick = onPrevious) {
+                    Icon(
+                        imageVector = Icons.Default.SkipPrevious,
+                        contentDescription = "Previous",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+                IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(72.dp)) {
+                    Icon(
+                        imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (state.isPlaying) "Pause" else "Play",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(48.dp),
+                    )
+                }
+                IconButton(onClick = onNext) {
+                    Icon(
+                        imageVector = Icons.Default.SkipNext,
+                        contentDescription = "Next",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+                IconButton(onClick = onCycleRepeatMode) {
+                    Icon(
+                        imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne
+                                      else Icons.Default.Repeat,
+                        contentDescription = when (state.repeatMode) {
+                            RepeatMode.OFF -> "Turn repeat all on"
+                            RepeatMode.ALL -> "Turn repeat one on"
+                            RepeatMode.ONE -> "Turn repeat off"
+                        },
+                        tint = if (state.repeatMode == RepeatMode.OFF)
+                            MaterialTheme.colorScheme.onSurface
+                        else
+                            MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            val upNextCount = (state.queue.size - state.currentIndex - 1).coerceAtLeast(0)
+            QueueHandle(
+                upNextCount = upNextCount,
+                onClick = onOpenQueue,
             )
         }
-
-        Spacer(Modifier.weight(1f))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onToggleShuffle) {
-                Icon(
-                    imageVector = Icons.Default.Shuffle,
-                    contentDescription = if (state.shuffleEnabled) "Turn shuffle off" else "Turn shuffle on",
-                    tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            IconButton(onClick = onPrevious) {
-                Icon(
-                    imageVector = Icons.Default.SkipPrevious,
-                    contentDescription = "Previous",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-            IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(72.dp)) {
-                Icon(
-                    imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (state.isPlaying) "Pause" else "Play",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(48.dp),
-                )
-            }
-            IconButton(onClick = onNext) {
-                Icon(
-                    imageVector = Icons.Default.SkipNext,
-                    contentDescription = "Next",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-            IconButton(onClick = onCycleRepeatMode) {
-                Icon(
-                    imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne
-                                  else Icons.Default.Repeat,
-                    contentDescription = when (state.repeatMode) {
-                        RepeatMode.OFF -> "Turn repeat all on"
-                        RepeatMode.ALL -> "Turn repeat one on"
-                        RepeatMode.ONE -> "Turn repeat off"
-                    },
-                    tint = if (state.repeatMode == RepeatMode.OFF)
-                        MaterialTheme.colorScheme.onSurface
-                    else
-                        MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-
-        val upNextCount = (state.queue.size - state.currentIndex - 1).coerceAtLeast(0)
-        QueueHandle(
-            upNextCount = upNextCount,
-            onClick = onOpenQueue,
-        )
     }
 }
 
@@ -668,6 +681,8 @@ private fun TrackInfoBlock(
     queuePosition: String,
     lyrics: LyricsResult,
     showLyricsOverlay: Boolean,
+    artworkSize: Dp,
+    isCompact: Boolean,
     onToggleLyrics: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -689,23 +704,22 @@ private fun TrackInfoBlock(
             onPrevious        = onPrevious,
             onNext            = onNext,
             onEditLyrics      = onEditLyrics,
-            modifier          = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 360.dp)
-                .aspectRatio(1f),
+            modifier          = Modifier.size(artworkSize),
         )
         if (!showLyricsOverlay) {
             Spacer(Modifier.height(8.dp))
-            Text(
-                text = "Double-tap for lyrics · Long-press to edit lyrics",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(16.dp))
+            if (!isCompact) {
+                Text(
+                    text = "Double-tap for lyrics · Long-press to edit lyrics",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(16.dp))
+            }
         } else {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(if (isCompact) 8.dp else 24.dp))
         }
         Text(
             text       = song.title,
