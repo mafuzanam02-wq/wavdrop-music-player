@@ -129,6 +129,22 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         mediaSession
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_AUDIO_OUTPUT_CONNECTED) {
+            val outputKind = intent.getStringExtra(EXTRA_AUDIO_OUTPUT_KIND)
+            if (outputKind != null) {
+                serviceScope.launch {
+                    val songs = songRepository.songs.first()
+                    when (outputKind) {
+                        OUTPUT_BLUETOOTH -> playerController.resumeForBluetooth(songs)
+                        OUTPUT_WIRED     -> playerController.resumeForWiredHeadphones(songs)
+                    }
+                }
+            }
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onDestroy() {
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
@@ -225,8 +241,12 @@ class PlaybackService : MediaSessionService() {
         return buttons
     }
 
-    private companion object {
-        const val CMD_TOGGLE_SHUFFLE = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
-        const val CMD_CYCLE_REPEAT   = "com.launchpoint.wavdrop.CYCLE_REPEAT"
+    companion object {
+        const val ACTION_AUDIO_OUTPUT_CONNECTED = "com.launchpoint.wavdrop.ACTION_AUDIO_OUTPUT_CONNECTED"
+        const val EXTRA_AUDIO_OUTPUT_KIND       = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
+        const val OUTPUT_BLUETOOTH              = "bluetooth"
+        const val OUTPUT_WIRED                  = "wired"
+        private const val CMD_TOGGLE_SHUFFLE    = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
+        private const val CMD_CYCLE_REPEAT      = "com.launchpoint.wavdrop.CYCLE_REPEAT"
     }
 }

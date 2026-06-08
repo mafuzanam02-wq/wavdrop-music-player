@@ -158,6 +158,25 @@
             </intent-filter>
         </service>
 
+        <!--
+            AudioOutputReconnectReceiver: wakes the app when a Bluetooth A2DP / HFP / hearing-aid
+            profile connects, or when wired headphones are plugged in, so that playback can be
+            resumed per the user's reconnect settings.
+            exported="false": these are protected system broadcasts; no other app can send them.
+        -->
+        <receiver
+            android:name=".playback.AudioOutputReconnectReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.HEADSET_PLUG" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
+                <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
+                <action android:name="android.bluetooth.hearingaid.profile.action.CONNECTION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

@@ -11,6 +11,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 @Singleton
@@ -62,8 +63,30 @@ class ResumeBehaviorSettingsRepository @Inject constructor(
         dataStore.edit { prefs -> prefs[WIRED_RESUME_MODE_KEY] = mode.name }
     }
 
+    suspend fun hasBluetoothInterruptedResumePending(): Boolean = try {
+        dataStore.data.first()[BLUETOOTH_INTERRUPTED_PENDING] ?: false
+    } catch (_: IOException) {
+        false
+    }
+
+    suspend fun hasWiredInterruptedResumePending(): Boolean = try {
+        dataStore.data.first()[WIRED_INTERRUPTED_PENDING] ?: false
+    } catch (_: IOException) {
+        false
+    }
+
+    suspend fun setBluetoothInterruptedResumePending(pending: Boolean) {
+        dataStore.edit { prefs -> prefs[BLUETOOTH_INTERRUPTED_PENDING] = pending }
+    }
+
+    suspend fun setWiredInterruptedResumePending(pending: Boolean) {
+        dataStore.edit { prefs -> prefs[WIRED_INTERRUPTED_PENDING] = pending }
+    }
+
     private companion object {
-        val PAUSE_ON_AUDIO_DISCONNECT   = booleanPreferencesKey("playback_pause_on_audio_disconnect")
+        val PAUSE_ON_AUDIO_DISCONNECT     = booleanPreferencesKey("playback_pause_on_audio_disconnect")
+        val BLUETOOTH_INTERRUPTED_PENDING = booleanPreferencesKey("resume_bt_interrupted_pending")
+        val WIRED_INTERRUPTED_PENDING     = booleanPreferencesKey("resume_wired_interrupted_pending")
         val REMEMBER_LAST_TRACK         = booleanPreferencesKey("resume_remember_last_track")
         val REMEMBER_POSITION           = booleanPreferencesKey("resume_remember_position")
         val RESTORE_QUEUE               = booleanPreferencesKey("resume_restore_queue")

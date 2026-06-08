@@ -747,7 +747,11 @@ class PlayerController @Inject constructor(
      * honour the RESUME_IF_INTERRUPTED mode.
      */
     fun onBluetoothDeviceRemoved() {
-        wasInterruptedByBluetooth = mediaController?.isPlaying == true
+        val wasPlaying = mediaController?.isPlaying == true
+        wasInterruptedByBluetooth = wasPlaying
+        if (wasPlaying) {
+            scope.launch { resumeBehaviorRepository.setBluetoothInterruptedResumePending(true) }
+        }
     }
 
     /**
@@ -756,7 +760,11 @@ class PlayerController @Inject constructor(
      * honour the RESUME_IF_INTERRUPTED mode.
      */
     fun onWiredDeviceRemoved() {
-        wasInterruptedByWired = mediaController?.isPlaying == true
+        val wasPlaying = mediaController?.isPlaying == true
+        wasInterruptedByWired = wasPlaying
+        if (wasPlaying) {
+            scope.launch { resumeBehaviorRepository.setWiredInterruptedResumePending(true) }
+        }
     }
 
     /**
@@ -765,8 +773,13 @@ class PlayerController @Inject constructor(
     fun resumeForBluetooth(availableSongs: List<Song>) {
         scope.launch {
             val settings = resumeBehaviorRepository.settings.first()
-            val interrupted = wasInterruptedByBluetooth
+            // In-memory flag covers the case where the service stayed alive across the disconnect.
+            // The persisted flag covers the broadcast-receiver wakeup path where the service died
+            // between disconnect and reconnect.
+            val interrupted = wasInterruptedByBluetooth ||
+                resumeBehaviorRepository.hasBluetoothInterruptedResumePending()
             wasInterruptedByBluetooth = false
+            resumeBehaviorRepository.setBluetoothInterruptedResumePending(false)
             if (!settings.bluetoothResumeMode.shouldResume(interrupted)) return@launch
             if (!settings.rememberLastTrack) return@launch
 
@@ -795,8 +808,10 @@ class PlayerController @Inject constructor(
         if (wiredResumeJob?.isActive == true) return
         wiredResumeJob = scope.launch {
             val settings = resumeBehaviorRepository.settings.first()
-            val interrupted = wasInterruptedByWired
+            val interrupted = wasInterruptedByWired ||
+                resumeBehaviorRepository.hasWiredInterruptedResumePending()
             wasInterruptedByWired = false
+            resumeBehaviorRepository.setWiredInterruptedResumePending(false)
             if (!settings.wiredResumeMode.shouldResume(interrupted)) return@launch
             if (!settings.rememberLastTrack) return@launch
 
