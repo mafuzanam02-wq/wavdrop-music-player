@@ -1,6 +1,9 @@
 package com.launchpoint.wavdrop.ui.screen.backupimport
 
+import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -57,6 +61,21 @@ fun BackupImportPreviewScreen(
     viewModel: BackupImportPreviewViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.saveAutoBackupFolder(uri.toString())
+        }
+    }
 
     LaunchedEffect(selectedUri) {
         if (selectedUri != null) viewModel.processFile(selectedUri)
@@ -109,9 +128,10 @@ fun BackupImportPreviewScreen(
 
             is BackupImportUiState.Applied ->
                 AppliedContent(
-                    result         = state.result,
-                    onNavigateBack = onNavigateBack,
-                    modifier       = Modifier.padding(innerPadding),
+                    result              = state.result,
+                    onNavigateBack      = onNavigateBack,
+                    onChooseFolder      = { folderPickerLauncher.launch(null) },
+                    modifier            = Modifier.padding(innerPadding),
                 )
 
             is BackupImportUiState.Error ->
@@ -244,9 +264,9 @@ private fun ConfirmApplyDialog(
         title = { Text("Apply Wavdrop backup?") },
         text  = {
             Text(
-                text  = "This will merge statistics and lyrics from this Wavdrop backup " +
-                        "into your current library. Existing statistics will not be " +
-                        "overwritten. Lyrics are only replaced if the backup copy is newer.",
+                text  = "Stats will be updated where the backup has higher totals. " +
+                        "Local stats that are already higher will not be reduced. " +
+                        "Lyrics are only replaced if the backup copy is newer.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
             )
@@ -266,8 +286,33 @@ private fun ConfirmApplyDialog(
 private fun AppliedContent(
     result: WavdropBackupImportApplyResult,
     onNavigateBack: () -> Unit,
+    onChooseFolder: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showFolderPrompt by remember { mutableStateOf(result.needsAutoBackupFolderSelection) }
+
+    if (showFolderPrompt) {
+        AlertDialog(
+            onDismissRequest = { showFolderPrompt = false },
+            title = { Text("Choose backup folder") },
+            text  = {
+                Text(
+                    text  = "Automatic backup settings were restored. Choose a folder to continue automatic backups on this device.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                )
+            },
+            confirmButton = {
+                Button(onClick = { showFolderPrompt = false; onChooseFolder() }) {
+                    Text("Choose Folder")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFolderPrompt = false }) { Text("Not Now") }
+            },
+        )
+    }
+
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -288,11 +333,10 @@ private fun AppliedContent(
                 shape    = RoundedCornerShape(12.dp),
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                    StatRow("Matched tracks",   result.matchedTracks.toString())
-                    StatRow("Unmatched tracks", result.unmatchedTracks.toString())
-                    StatRow("Plays added",      result.playsAdded.toString())
-                    StatRow("Skips added",      result.skipsAdded.toString())
-                    StatRow("Lyrics restored",    result.lyricsRestored.toString())
+                    StatRow("Matched tracks",    result.matchedTracks.toString())
+                    StatRow("Unmatched tracks",  result.unmatchedTracks.toString())
+                    StatRow("Stats updated",     result.statsUpdated.toString())
+                    StatRow("Lyrics restored",   result.lyricsRestored.toString())
                     StatRow("Favorites restored", result.favoritesRestored.toString())
                     if (result.preferencesRestored) {
                         StatRow("Preferences", "Restored")
@@ -411,7 +455,7 @@ private fun PreviewNotice(modifier: Modifier = Modifier) {
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text  = "Tap Apply Import to merge statistics into your library.",
+                    text  = "Stats will be updated where the backup has higher totals. Existing higher stats are preserved.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
                 )

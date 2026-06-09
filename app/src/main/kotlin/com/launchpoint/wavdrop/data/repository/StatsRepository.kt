@@ -1,9 +1,9 @@
 package com.launchpoint.wavdrop.data.repository
 
 import androidx.room.withTransaction
+import com.launchpoint.wavdrop.data.backup.StatsImportMerger
 import com.launchpoint.wavdrop.data.legacy.BpstatApplyResult
 import com.launchpoint.wavdrop.data.legacy.BlackPlayerStatImportRow
-import com.launchpoint.wavdrop.data.legacy.ImportDeltaCalculator
 import com.launchpoint.wavdrop.data.legacy.ImportSourceTypes
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
@@ -112,14 +112,17 @@ class StatsRepository @Inject constructor(
     /**
      * Merges [matchedRows] into the Wavdrop stats database inside a single Room transaction.
      *
-     * Merge rules per track:
-     * - playCount  += max(0, imported playCount - last imported BlackPlayer playCount)
-     * - skipCount  += max(0, imported skipCount - last imported BlackPlayer skipCount)
-     * - lastPlayedAt = newer of (existing, imported lastPlayedMs)
+     * Merge strategy: MAX-reconciliation.
+     * - newPlayCount  = MAX(current, imported)
+     * - newSkipCount  = MAX(current, imported)
+     * - lastPlayedAt  = MAX(current, imported)
      *
-     * The external BlackPlayer counts are stored as a baseline after every matched row, so
-     * re-importing the same file produces zero deltas. The isFavorite and
-     * totalListeningTimeMs fields are not touched.
+     * This is idempotent — importing the same file twice produces no change on the
+     * second import. Local stats that are already higher are never reduced.
+     * totalListeningTimeMs is not available from BlackPlayer and is left unchanged.
+     *
+     * Import baselines are still written for historical tracking but are no longer
+     * required for idempotency (MAX semantics guarantee that).
      *
      * @param matchedRows  Pairs of (Wavdrop Song, BlackPlayer import row) to apply.
      * @param unmatchedCount Rows that had no match — recorded in the result for display.
@@ -133,52 +136,60 @@ class StatsRepository @Inject constructor(
         var skipsImported = 0L
         val importedAt = System.currentTimeMillis()
 
+        // Pre-load all current stats to compute reporting deltas without N individual queries.
+        val currentStatsById = dao.getAllStatsSnapshot().associateBy { it.songId }
+
         for ((song, row) in matchedRows) {
-            val sourceKey = row.blackPlayerBpstatSourceKey()
-            val baseline = importBaselineDao.getBaseline(
-                songId = song.id,
-                sourceType = ImportSourceTypes.BLACKPLAYER_BPSTAT,
-                sourceKey = sourceKey,
-            )
-            val delta = ImportDeltaCalculator.calculate(
-                previousPlayCount = baseline?.lastImportedPlayCount ?: 0,
-                previousSkipCount = baseline?.lastImportedSkipCount ?: 0,
-                incomingPlayCount = row.playCount,
-                incomingSkipCount = row.skipCount,
+            val current = currentStatsById[song.id]
+
+            // Ensure a stats row exists before updating.
+            dao.insertIfAbsent(TrackStatsEntity(songId = song.id, contentUri = song.uri))
+
+            // MAX-reconciliation: each counter is set to MAX(current, imported).
+            // Pass 0 for totalListeningTimeMs — BlackPlayer does not provide listening time,
+            // so MAX(current, 0) = current, leaving it unchanged.
+            dao.mergeMaxStats(
+                songId                  = song.id,
+                importedPlayCount       = row.playCount,
+                importedSkipCount       = row.skipCount,
+                importedListeningTimeMs = 0L,
+                importedLastPlayedAt    = row.lastPlayedMs,
             )
 
-            if (delta.hasNewStats) {
-                dao.insertIfAbsent(TrackStatsEntity(songId = song.id, contentUri = song.uri))
-                dao.mergeImportedStats(
-                    songId               = song.id,
-                    addPlays             = delta.playDelta,
-                    addSkips             = delta.skipDelta,
-                    importedLastPlayedAt = row.lastPlayedMs,
-                )
-                tracksUpdated += 1
-                playsImported += delta.playDelta.toLong()
-                skipsImported += delta.skipDelta.toLong()
+            val effect = StatsImportMerger.computeEffect(
+                currentPlayCount        = current?.playCount ?: 0,
+                currentSkipCount        = current?.skipCount ?: 0,
+                currentListeningTimeMs  = current?.totalListeningTimeMs ?: 0L,
+                importedPlayCount       = row.playCount,
+                importedSkipCount       = row.skipCount,
+                importedListeningTimeMs = 0L,
+            )
+            if (effect.anyUpdated) {
+                tracksUpdated++
+                playsImported += effect.playDelta
+                skipsImported += effect.skipDelta
             }
 
+            // Write baseline for historical tracking.
             importBaselineDao.upsertBaseline(
                 ImportBaselineEntity(
-                    songId = song.id,
-                    sourceType = ImportSourceTypes.BLACKPLAYER_BPSTAT,
-                    sourceKey = sourceKey,
-                    lastImportedPlayCount = delta.nextBaselinePlayCount,
-                    lastImportedSkipCount = delta.nextBaselineSkipCount,
-                    lastImportedAt = importedAt,
+                    songId                = song.id,
+                    sourceType            = ImportSourceTypes.BLACKPLAYER_BPSTAT,
+                    sourceKey             = row.blackPlayerBpstatSourceKey(),
+                    lastImportedPlayCount = row.playCount,
+                    lastImportedSkipCount = row.skipCount,
+                    lastImportedAt        = importedAt,
                 )
             )
         }
 
         BpstatApplyResult(
-            tracksMatched = matchedRows.size,
-            tracksUpdated = tracksUpdated,
+            tracksMatched           = matchedRows.size,
+            tracksUpdated           = tracksUpdated,
             tracksSkippedNoNewStats = matchedRows.size - tracksUpdated,
-            playsImported    = playsImported,
-            skipsImported    = skipsImported,
-            unmatchedSkipped = unmatchedCount,
+            playsImported           = playsImported,
+            skipsImported           = skipsImported,
+            unmatchedSkipped        = unmatchedCount,
         )
     }
 }

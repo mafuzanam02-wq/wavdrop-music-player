@@ -79,4 +79,32 @@ interface TrackStatsDao {
         addSkips: Int,
         importedLastPlayedAt: Long,
     )
+
+    /**
+     * Idempotent MAX-reconciliation merge used by both Wavdrop backup restore and
+     * BlackPlayer import. Each counter is set to MAX(current, imported), so:
+     * - Local stats are never reduced.
+     * - If the import has higher totals, the local value is brought up.
+     * - Importing the same values again is a no-op.
+     * - lastPlayedAt is set to MAX(current, imported) (keeps newer timestamp).
+     * Row must already exist (call [insertIfAbsent] first).
+     */
+    @Query("""
+        UPDATE track_stats
+        SET playCount            = MAX(playCount,            :importedPlayCount),
+            skipCount            = MAX(skipCount,            :importedSkipCount),
+            totalListeningTimeMs = MAX(totalListeningTimeMs, :importedListeningTimeMs),
+            lastPlayedAt         = MAX(lastPlayedAt,         :importedLastPlayedAt)
+        WHERE songId = :songId
+    """)
+    suspend fun mergeMaxStats(
+        songId: Long,
+        importedPlayCount: Int,
+        importedSkipCount: Int,
+        importedListeningTimeMs: Long,
+        importedLastPlayedAt: Long,
+    )
+
+    @Query("SELECT * FROM track_stats WHERE songId = :songId")
+    suspend fun getStatsBySongId(songId: Long): TrackStatsEntity?
 }

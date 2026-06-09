@@ -356,7 +356,7 @@ private fun ConfirmImportDialog(
                 StatRow("Matched file skips", matchedSkips.toString())
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text  = "This import only adds new counts since your last import. Re-importing the same file will not duplicate stats.",
+                    text  = "Stats will be updated where the import has higher totals. Local stats that are already higher will not be reduced. Re-importing the same file will not change anything.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 )
@@ -405,8 +405,8 @@ private fun AppliedContent(
                         "Tracks skipped (no new stats)",
                         result.tracksSkippedNoNewStats.toString(),
                     )
-                    StatRow("Plays added", result.playsImported.toString())
-                    StatRow("Skips added", result.skipsImported.toString())
+                    StatRow("Plays updated", result.playsImported.toString())
+                    StatRow("Skips updated", result.skipsImported.toString())
                     StatRow("Unmatched skipped", result.unmatchedSkipped.toString())
                 }
             }

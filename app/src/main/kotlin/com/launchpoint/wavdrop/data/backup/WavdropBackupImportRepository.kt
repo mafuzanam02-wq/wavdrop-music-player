@@ -1,16 +1,12 @@
 package com.launchpoint.wavdrop.data.backup
 
 import androidx.room.withTransaction
-import com.launchpoint.wavdrop.data.legacy.ImportDeltaCalculator
-import com.launchpoint.wavdrop.data.legacy.ImportSourceTypes
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
-import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
-import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistSongEntity
@@ -23,6 +19,8 @@ import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
+import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
@@ -31,13 +29,13 @@ import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
 
 @Singleton
 class WavdropBackupImportRepository @Inject constructor(
     private val db: WavdropDatabase,
     private val songDao: SongDao,
     private val trackStatsDao: TrackStatsDao,
-    private val importBaselineDao: ImportBaselineDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
     private val playlistDao: PlaylistDao,
     private val trackListenEventDao: TrackListenEventDao,
@@ -65,57 +63,44 @@ class WavdropBackupImportRepository @Inject constructor(
 
             val match            = WavdropBackupStatsMatcher.match(backup, currentSongs)
             val importedAt       = System.currentTimeMillis()
-            var playsAdded       = 0L
-            var skipsAdded       = 0L
+            var statsUpdated     = 0
             var favoritesRestored = 0
 
+            // Pre-load current stats for all matched songs to compute reporting deltas
+            // without N individual queries inside the loop.
+            val currentStatsById = trackStatsDao.getAllStatsSnapshot().associateBy { it.songId }
+
             for ((song, backupStats) in match.matchedRows) {
-                val sourceKey = "uri:${song.uri}"
+                val current = currentStatsById[song.id]
 
-                val baseline = importBaselineDao.getBaseline(
-                    songId     = song.id,
-                    sourceType = ImportSourceTypes.WAVDROP_JSON,
-                    sourceKey  = sourceKey,
+                // Ensure a stats row exists before updating.
+                trackStatsDao.insertIfAbsent(
+                    TrackStatsEntity(songId = song.id, contentUri = song.uri)
                 )
 
-                val delta = ImportDeltaCalculator.calculate(
-                    previousPlayCount = baseline?.lastImportedPlayCount ?: 0,
-                    previousSkipCount = baseline?.lastImportedSkipCount ?: 0,
-                    incomingPlayCount = backupStats.playCount,
-                    incomingSkipCount = backupStats.skipCount,
+                // MAX-reconciliation: each counter is set to MAX(current, backup).
+                // This is idempotent — restoring the same backup twice produces no change.
+                // It also prevents reducing local stats that are higher than the backup.
+                trackStatsDao.mergeMaxStats(
+                    songId                  = song.id,
+                    importedPlayCount       = backupStats.playCount,
+                    importedSkipCount       = backupStats.skipCount,
+                    importedListeningTimeMs = backupStats.totalListeningTimeMs,
+                    importedLastPlayedAt    = backupStats.lastPlayedAt,
                 )
 
-                if (delta.hasNewStats) {
-                    trackStatsDao.insertIfAbsent(
-                        TrackStatsEntity(songId = song.id, contentUri = song.uri)
-                    )
-                    trackStatsDao.mergeImportedStats(
-                        songId               = song.id,
-                        addPlays             = delta.playDelta,
-                        addSkips             = delta.skipDelta,
-                        importedLastPlayedAt = backupStats.lastPlayedAt,
-                    )
-                    playsAdded += delta.playDelta
-                    skipsAdded += delta.skipDelta
-                }
-
-                // Always update baseline so re-importing doesn't double-count.
-                importBaselineDao.upsertBaseline(
-                    ImportBaselineEntity(
-                        songId                = song.id,
-                        sourceType            = ImportSourceTypes.WAVDROP_JSON,
-                        sourceKey             = sourceKey,
-                        lastImportedPlayCount = delta.nextBaselinePlayCount,
-                        lastImportedSkipCount = delta.nextBaselineSkipCount,
-                        lastImportedAt        = importedAt,
-                    )
+                val effect = StatsImportMerger.computeEffect(
+                    currentPlayCount       = current?.playCount ?: 0,
+                    currentSkipCount       = current?.skipCount ?: 0,
+                    currentListeningTimeMs = current?.totalListeningTimeMs ?: 0L,
+                    importedPlayCount      = backupStats.playCount,
+                    importedSkipCount      = backupStats.skipCount,
+                    importedListeningTimeMs = backupStats.totalListeningTimeMs,
                 )
+                if (effect.anyUpdated) statsUpdated++
 
                 // Restore favorite: only set true, never clear a local favorite.
                 if (backupStats.isFavorite) {
-                    trackStatsDao.insertIfAbsent(
-                        TrackStatsEntity(songId = song.id, contentUri = song.uri)
-                    )
                     trackStatsDao.setFavorite(song.id, true)
                     favoritesRestored++
                 }
@@ -265,8 +250,7 @@ class WavdropBackupImportRepository @Inject constructor(
             WavdropBackupImportApplyResult(
                 matchedTracks         = match.matchedRows.size,
                 unmatchedTracks       = match.unmatchedCount,
-                playsAdded            = playsAdded,
-                skipsAdded            = skipsAdded,
+                statsUpdated          = statsUpdated,
                 lyricsRestored        = lyricsRestored,
                 favoritesRestored     = favoritesRestored,
                 playlistsRestored     = playlistsRestored,
@@ -331,9 +315,38 @@ class WavdropBackupImportRepository @Inject constructor(
 
             prefs.compactMode
                 ?.let { appSettingsRepository.setCompactMode(it); preferencesRestored = true }
+
+            prefs.backupFileMode
+                ?.let { runCatching { BackupFileMode.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setBackupFileMode(it); preferencesRestored = true }
+
+            // Restore auto-backup interval but NOT the folder URI (SAF permissions are device-specific)
+            // and NOT lastAutoBackupAtMillis. Reset lastAutoBackupAtMillis to 0 so a backup is
+            // attempted on the next app open once the user selects a folder on this device.
+            prefs.autoBackupInterval
+                ?.let { runCatching { AutoBackupInterval.valueOf(it) }.getOrNull() }
+                ?.let { interval ->
+                    appSettingsRepository.setAutoBackupInterval(interval)
+                    appSettingsRepository.setLastAutoBackupAtMillis(0L)
+                    preferencesRestored = true
+                }
         }
 
-        return dbResult.copy(preferencesRestored = preferencesRestored)
+        // Show a folder-selection prompt if auto-backup was restored with a non-OFF interval
+        // and there is no folder already set on this device. SAF permissions are not portable
+        // across devices, so the old folder URI is never restored from backup.
+        val restoredInterval = backup.preferences?.autoBackupInterval
+            ?.let { runCatching { AutoBackupInterval.valueOf(it) }.getOrNull() }
+        val currentFolderUri = appSettingsRepository.autoBackupFolderUri.first()
+        val needsAutoBackupFolderSelection =
+            restoredInterval != null
+                && restoredInterval != AutoBackupInterval.OFF
+                && currentFolderUri == null
+
+        return dbResult.copy(
+            preferencesRestored            = preferencesRestored,
+            needsAutoBackupFolderSelection = needsAutoBackupFolderSelection,
+        )
     }
 }
 
