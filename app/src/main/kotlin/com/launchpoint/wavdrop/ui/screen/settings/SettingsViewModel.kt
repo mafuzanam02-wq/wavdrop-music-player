@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
+import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
@@ -61,6 +62,13 @@ class SettingsViewModel @Inject constructor(
 
     private val _exportUiState = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
     val exportUiState: StateFlow<ExportUiState> = _exportUiState.asStateFlow()
+
+    val backupFileMode: StateFlow<BackupFileMode> =
+        appSettingsRepository.backupFileMode.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = BackupFileMode.DATED,
+        )
 
     val libraryScanSettings: StateFlow<LibraryScanSettings> =
         scanSettingsRepository.settings.stateIn(
@@ -127,6 +135,10 @@ class SettingsViewModel @Inject constructor(
 
     private val _iconChangeEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val iconChangeEvent: SharedFlow<String> = _iconChangeEvent.asSharedFlow()
+
+    fun setBackupFileMode(mode: BackupFileMode) {
+        viewModelScope.launch { appSettingsRepository.setBackupFileMode(mode) }
+    }
 
     fun exportTo(uri: Uri) {
         _exportUiState.value = ExportUiState.Exporting

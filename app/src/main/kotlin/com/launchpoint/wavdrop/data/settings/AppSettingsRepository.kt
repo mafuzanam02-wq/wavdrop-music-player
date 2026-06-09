@@ -163,6 +163,20 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val backupFileMode: Flow<BackupFileMode> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[BACKUP_FILE_MODE_KEY]?.toBackupFileMode() ?: BackupFileMode.DATED
+        }
+
+    suspend fun setBackupFileMode(mode: BackupFileMode) {
+        dataStore.edit { preferences ->
+            preferences[BACKUP_FILE_MODE_KEY] = mode.name
+        }
+    }
+
     val notificationControlsSetting: Flow<NotificationControlsSetting> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -178,6 +192,9 @@ class AppSettingsRepository @Inject constructor(
             preferences[NOTIFICATION_CONTROLS_KEY] = setting.name
         }
     }
+
+    private fun String.toBackupFileMode(): BackupFileMode? =
+        runCatching { BackupFileMode.valueOf(this) }.getOrNull()
 
     private fun String.toStartupDestination(): StartupDestination? =
         runCatching { StartupDestination.valueOf(this) }.getOrNull()
@@ -207,6 +224,7 @@ class AppSettingsRepository @Inject constructor(
         val COMPACT_MODE_KEY             = booleanPreferencesKey("compact_mode")
         val HAS_COMPLETED_ONBOARDING_KEY            = booleanPreferencesKey("has_completed_onboarding")
         val LAST_COMPLETED_ONBOARDING_VERSION_KEY   = intPreferencesKey("last_completed_onboarding_version")
+        val BACKUP_FILE_MODE_KEY                    = stringPreferencesKey("backup_file_mode")
         val NOTIFICATION_CONTROLS_KEY               = stringPreferencesKey("notification_controls")
         val LAST_SEEN_CHANGELOG_VERSION_KEY         = intPreferencesKey("last_seen_changelog_version")
     }
