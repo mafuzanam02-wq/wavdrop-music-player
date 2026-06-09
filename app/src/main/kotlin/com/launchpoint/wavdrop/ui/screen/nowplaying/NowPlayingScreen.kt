@@ -161,7 +161,13 @@ fun NowPlayingScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Now Playing") },
+                title = {
+                    Text(
+                        text     = "Now Playing",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -597,49 +603,59 @@ private fun NowPlayingLayoutMetrics.withUpperAreaSizing(
     upperWidth: Dp,
     upperHeight: Dp,
 ): NowPlayingLayoutMetrics {
+    // Usable width after horizontal padding.
     val availableWidth = (upperWidth - 16.dp).coerceAtLeast(96.dp)
-    val metadataReserve = when (profile) {
-        NowPlayingLayoutProfile.Compact -> 78.dp
-        NowPlayingLayoutProfile.Medium -> 118.dp
-        NowPlayingLayoutProfile.Expanded -> 136.dp
+
+    // Fraction of the upper area height allocated to the artwork / lyrics panel.
+    // Larger screens get a higher fraction so the artwork feels proportionate.
+    val artworkHeightFraction = when (profile) {
+        NowPlayingLayoutProfile.Compact  -> 0.48f
+        NowPlayingLayoutProfile.Medium   -> 0.56f
+        NowPlayingLayoutProfile.Expanded -> 0.62f
     }
-    val artworkRange = when (profile) {
-        NowPlayingLayoutProfile.Compact -> 110.dp..190.dp
-        NowPlayingLayoutProfile.Medium -> 180.dp..280.dp
-        NowPlayingLayoutProfile.Expanded -> 220.dp..340.dp
+    // Lyrics panel is allowed slightly more vertical room than artwork so lyrics text
+    // has breathing space on all device sizes.
+    val lyricsHeightFraction = when (profile) {
+        NowPlayingLayoutProfile.Compact  -> 0.72f
+        NowPlayingLayoutProfile.Medium   -> 0.80f
+        NowPlayingLayoutProfile.Expanded -> 0.86f
     }
-    val artworkFromHeight = when (profile) {
-        NowPlayingLayoutProfile.Compact -> (upperHeight - metadataReserve).coerceIn(
-            artworkRange.start,
-            artworkRange.endInclusive,
-        )
-        NowPlayingLayoutProfile.Medium -> ((upperHeight - metadataReserve) * 0.92f).coerceIn(
-            artworkRange.start,
-            artworkRange.endInclusive,
-        )
-        NowPlayingLayoutProfile.Expanded -> ((upperHeight - metadataReserve) * 0.94f).coerceIn(
-            artworkRange.start,
-            artworkRange.endInclusive,
-        )
+
+    // Minimum sizes prevent artwork from becoming unusably small on very short screens.
+    val minArtwork = when (profile) {
+        NowPlayingLayoutProfile.Compact  -> 96.dp
+        NowPlayingLayoutProfile.Medium   -> 140.dp
+        NowPlayingLayoutProfile.Expanded -> 160.dp
     }
-    val lyricsFromHeight = when (profile) {
-        NowPlayingLayoutProfile.Compact -> (upperHeight * 0.82f).coerceIn(150.dp, 220.dp)
-        NowPlayingLayoutProfile.Medium -> (upperHeight * 0.84f).coerceIn(220.dp, 340.dp)
-        NowPlayingLayoutProfile.Expanded -> (upperHeight * 0.86f).coerceIn(260.dp, 420.dp)
+    val minLyrics = when (profile) {
+        NowPlayingLayoutProfile.Compact  -> 120.dp
+        NowPlayingLayoutProfile.Medium   -> 180.dp
+        NowPlayingLayoutProfile.Expanded -> 200.dp
     }
+
+    val artworkFromHeight = (upperHeight * artworkHeightFraction).coerceAtLeast(minArtwork)
+    val lyricsFromHeight  = (upperHeight * lyricsHeightFraction).coerceAtLeast(minLyrics)
+
+    // Final size = min(width-constrained, height-based).
+    // This naturally caps square artwork to both the available width and the available height
+    // fraction without any hardcoded upper limit that could over-constrain tall screens.
+    val newArtworkSize       = minOf(availableWidth, artworkFromHeight)
+    val newLyricsPanelHeight = minOf(availableWidth, lyricsFromHeight)
+
     val showSecondaryMetadata = upperHeight >= when (profile) {
-        NowPlayingLayoutProfile.Compact -> 999.dp
-        NowPlayingLayoutProfile.Medium -> 430.dp
-        NowPlayingLayoutProfile.Expanded -> 460.dp
+        NowPlayingLayoutProfile.Compact  -> 999.dp  // never on compact
+        NowPlayingLayoutProfile.Medium   -> 400.dp
+        NowPlayingLayoutProfile.Expanded -> 420.dp
     }
+
     return copy(
-        artworkSize = minOf(availableWidth, artworkFromHeight),
-        lyricsPanelHeight = minOf(availableWidth, lyricsFromHeight),
-        showAlbum = showAlbum && showSecondaryMetadata,
+        artworkSize       = newArtworkSize,
+        lyricsPanelHeight = newLyricsPanelHeight,
+        showAlbum         = showAlbum && showSecondaryMetadata,
         showQueuePosition = showQueuePosition && upperHeight >= when (profile) {
-            NowPlayingLayoutProfile.Compact -> 999.dp
-            NowPlayingLayoutProfile.Medium -> 500.dp
-            NowPlayingLayoutProfile.Expanded -> 520.dp
+            NowPlayingLayoutProfile.Compact  -> 999.dp
+            NowPlayingLayoutProfile.Medium   -> 460.dp
+            NowPlayingLayoutProfile.Expanded -> 480.dp
         },
     )
 }
