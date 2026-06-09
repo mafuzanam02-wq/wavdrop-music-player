@@ -14,11 +14,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 private val CHANGELOG_ITEMS = listOf(
-    "Refreshed launcher icons across all icon variants",
-    "Updated privacy policy and in-app legal information",
-    "Track details now accessible from the Now Playing overflow menu",
-    "Home dashboard song rows now show the full actions menu",
-    "Onboarding pages now support swiping between pages",
+    "Improved search with grouped results for songs, artists, and albums",
+    "Long-press a song to quickly access actions and Track Details",
+    "Track details now accessible from the Now Playing menu",
+    "Improved backup and restore experience",
+    "Backup preferences can now be restored from Wavdrop backups",
+    "Improved backup file handling to help avoid duplicate backup files",
+    "Improved reliability when importing or restoring listening statistics",
+    "Improved import and restore behavior when using the same backup or import file more than once",
+    "Various stability, reliability, and usability improvements",
 )
 
 @Composable
