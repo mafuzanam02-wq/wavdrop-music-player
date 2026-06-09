@@ -49,6 +49,9 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler",  ver
 # DataStore
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
+# DocumentFile (SAF tree URI helpers)
+androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version = "1.0.1" }
+
 # Media3
 androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 androidx-media3-session   = { group = "androidx.media3", name = "media3-session",   version.ref = "media3" }

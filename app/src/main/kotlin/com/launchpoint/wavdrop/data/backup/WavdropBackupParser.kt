@@ -125,6 +125,8 @@ object WavdropBackupParser {
                     accentColor                 = obj["accentColor"] as? String,
                     launcherIcon                = obj["launcherIcon"] as? String,
                     compactMode                 = obj["compactMode"] as? Boolean,
+                    backupFileMode              = obj["backupFileMode"] as? String,
+                    autoBackupInterval          = obj["autoBackupInterval"] as? String,
                 )
             }
 

@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.navigation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.BuildConfig
+import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,7 +18,23 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class WavdropNavViewModel @Inject constructor(
     private val appSettingsRepository: AppSettingsRepository,
+    private val autoBackupRepository: AutoBackupRepository,
 ) : ViewModel() {
+
+    // Guard: run at most once per process lifetime, regardless of recompositions.
+    private var autoBackupCheckedThisSession = false
+
+    /**
+     * Checks whether an auto-backup is due and performs it in the background.
+     * Safe to call from a LaunchedEffect — it is a no-op after the first invocation.
+     */
+    fun triggerAutoBackupIfDue() {
+        if (autoBackupCheckedThisSession) return
+        autoBackupCheckedThisSession = true
+        viewModelScope.launch {
+            autoBackupRepository.runIfDue()
+        }
+    }
 
     val startupDestination: StateFlow<StartupDestination?> =
         appSettingsRepository.startupDestination

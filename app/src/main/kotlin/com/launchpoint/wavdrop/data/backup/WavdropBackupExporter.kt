@@ -133,6 +133,8 @@ object WavdropBackupExporter {
         prefs.themeMode?.let    { put("themeMode",    it) }
         prefs.accentColor?.let  { put("accentColor",  it) }
         prefs.launcherIcon?.let { put("launcherIcon", it) }
-        prefs.compactMode?.let  { put("compactMode",  it) }
+        prefs.compactMode?.let        { put("compactMode",        it) }
+        prefs.backupFileMode?.let     { put("backupFileMode",     it) }
+        prefs.autoBackupInterval?.let { put("autoBackupInterval", it) }
     }
 }

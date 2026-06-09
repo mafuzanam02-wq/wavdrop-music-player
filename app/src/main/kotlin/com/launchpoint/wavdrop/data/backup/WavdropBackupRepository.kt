@@ -39,6 +39,14 @@ class WavdropBackupRepository @Inject constructor(
     private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
 ) {
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
+        val json = buildBackupJson()
+        context.contentResolver.openOutputStream(uri)?.use { stream ->
+            stream.write(json.toByteArray(Charsets.UTF_8))
+        } ?: throw IOException("Could not open output stream for the selected file.")
+    }
+
+    /** Collects all backup data from the database and returns the serialised JSON string. */
+    suspend fun buildBackupJson(): String = withContext(Dispatchers.IO) {
         val songs      = songDao.getAllSongsSnapshot()
         val stats      = trackStatsDao.getAllStatsSnapshot()
         val baselines  = importBaselineDao.getAllImportBaselinesSnapshot()
@@ -99,6 +107,8 @@ class WavdropBackupRepository @Inject constructor(
             accentColor                 = appSettingsRepository.accentColor.first().name,
             launcherIcon                = appSettingsRepository.appIconChoice.first().name,
             compactMode                 = appSettingsRepository.compactMode.first(),
+            backupFileMode              = appSettingsRepository.backupFileMode.first().name,
+            autoBackupInterval          = appSettingsRepository.autoBackupInterval.first().name,
         )
 
         val backup = WavdropBackup(
@@ -112,11 +122,7 @@ class WavdropBackupRepository @Inject constructor(
             listenEvents    = listenEvents,
         )
 
-        val json = WavdropBackupExporter.toJson(backup)
-
-        context.contentResolver.openOutputStream(uri)?.use { stream ->
-            stream.write(json.toByteArray(Charsets.UTF_8))
-        } ?: throw IOException("Could not open output stream for the selected file.")
+        WavdropBackupExporter.toJson(backup)
     }
 }
 

@@ -152,6 +152,13 @@ fun WavdropNavGraph(
     }
 
     CompositionLocalProvider(LocalCompactMode provides compactMode) {
+        // Fire auto-backup check once per session, after onboarding is confirmed complete.
+        LaunchedEffect(Unit) {
+            if (hasCompletedOnboarding == true) {
+                viewModel.triggerAutoBackupIfDue()
+            }
+        }
+
         NavHost(
             navController    = navController,
             startDestination = resolvedStartRoute,

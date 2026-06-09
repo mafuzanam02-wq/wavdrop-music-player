@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
@@ -163,6 +164,46 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    // Persisted SAF tree URI for auto-backup. Null means no folder has been selected yet.
+    val autoBackupFolderUri: Flow<String?> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[AUTO_BACKUP_FOLDER_URI_KEY] }
+
+    suspend fun setAutoBackupFolderUri(uri: String?) {
+        dataStore.edit { preferences ->
+            if (uri != null) preferences[AUTO_BACKUP_FOLDER_URI_KEY] = uri
+            else preferences.remove(AUTO_BACKUP_FOLDER_URI_KEY)
+        }
+    }
+
+    val autoBackupInterval: Flow<AutoBackupInterval> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[AUTO_BACKUP_INTERVAL_KEY]?.toAutoBackupInterval() ?: AutoBackupInterval.OFF
+        }
+
+    suspend fun setAutoBackupInterval(interval: AutoBackupInterval) {
+        dataStore.edit { preferences ->
+            preferences[AUTO_BACKUP_INTERVAL_KEY] = interval.name
+        }
+    }
+
+    val lastAutoBackupAtMillis: Flow<Long> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[LAST_AUTO_BACKUP_AT_MILLIS_KEY] ?: 0L }
+
+    suspend fun setLastAutoBackupAtMillis(millis: Long) {
+        dataStore.edit { preferences ->
+            preferences[LAST_AUTO_BACKUP_AT_MILLIS_KEY] = millis
+        }
+    }
+
     val backupFileMode: Flow<BackupFileMode> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -192,6 +233,9 @@ class AppSettingsRepository @Inject constructor(
             preferences[NOTIFICATION_CONTROLS_KEY] = setting.name
         }
     }
+
+    private fun String.toAutoBackupInterval(): AutoBackupInterval? =
+        runCatching { AutoBackupInterval.valueOf(this) }.getOrNull()
 
     private fun String.toBackupFileMode(): BackupFileMode? =
         runCatching { BackupFileMode.valueOf(this) }.getOrNull()
@@ -224,6 +268,9 @@ class AppSettingsRepository @Inject constructor(
         val COMPACT_MODE_KEY             = booleanPreferencesKey("compact_mode")
         val HAS_COMPLETED_ONBOARDING_KEY            = booleanPreferencesKey("has_completed_onboarding")
         val LAST_COMPLETED_ONBOARDING_VERSION_KEY   = intPreferencesKey("last_completed_onboarding_version")
+        val AUTO_BACKUP_FOLDER_URI_KEY              = stringPreferencesKey("auto_backup_folder_uri")
+        val AUTO_BACKUP_INTERVAL_KEY                = stringPreferencesKey("auto_backup_interval")
+        val LAST_AUTO_BACKUP_AT_MILLIS_KEY          = longPreferencesKey("last_auto_backup_at_millis")
         val BACKUP_FILE_MODE_KEY                    = stringPreferencesKey("backup_file_mode")
         val NOTIFICATION_CONTROLS_KEY               = stringPreferencesKey("notification_controls")
         val LAST_SEEN_CHANGELOG_VERSION_KEY         = intPreferencesKey("last_seen_changelog_version")

@@ -8,6 +8,7 @@ import com.launchpoint.wavdrop.data.backup.WavdropBackup
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportApplyResult
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportRepository
 import com.launchpoint.wavdrop.data.backup.WavdropBackupParser
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -46,6 +47,7 @@ sealed interface BackupImportUiState {
 class BackupImportPreviewViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val importRepository: WavdropBackupImportRepository,
+    private val appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<BackupImportUiState>(BackupImportUiState.Idle)
@@ -90,6 +92,15 @@ class BackupImportPreviewViewModel @Inject constructor(
             playlistCount        = backup.playlists.size,
             listenEventsCount    = backup.listenEvents.size,
         )
+    }
+
+    // ── Post-restore folder selection ─────────────────────────────────────────
+
+    fun saveAutoBackupFolder(uri: String) {
+        viewModelScope.launch {
+            appSettingsRepository.setAutoBackupFolderUri(uri)
+            appSettingsRepository.setLastAutoBackupAtMillis(0L)
+        }
     }
 
     // ── Apply ─────────────────────────────────────────────────────────────────

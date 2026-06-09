@@ -51,6 +51,8 @@ data class BackupPreferences(
     val accentColor: String? = null,
     val launcherIcon: String? = null,
     val compactMode: Boolean? = null,
+    val backupFileMode: String? = null,
+    val autoBackupInterval: String? = null,
 )
 
 data class BackupPlaylistSong(

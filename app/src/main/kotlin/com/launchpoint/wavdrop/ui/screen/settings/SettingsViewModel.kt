@@ -6,7 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
+import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
+import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
@@ -52,6 +54,7 @@ sealed interface LibraryScanUiState {
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val backupRepository: WavdropBackupRepository,
+    private val autoBackupRepository: AutoBackupRepository,
     private val appSettingsRepository: AppSettingsRepository,
     private val appIconAliasManager: AppIconAliasManager,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
@@ -69,6 +72,23 @@ class SettingsViewModel @Inject constructor(
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = BackupFileMode.DATED,
         )
+
+    val autoBackupFolderUri: StateFlow<String?> =
+        appSettingsRepository.autoBackupFolderUri.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
+
+    val autoBackupInterval: StateFlow<AutoBackupInterval> =
+        appSettingsRepository.autoBackupInterval.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = AutoBackupInterval.OFF,
+        )
+
+    private val _folderBackupUiState = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
+    val folderBackupUiState: StateFlow<ExportUiState> = _folderBackupUiState.asStateFlow()
 
     val libraryScanSettings: StateFlow<LibraryScanSettings> =
         scanSettingsRepository.settings.stateIn(
@@ -138,6 +158,28 @@ class SettingsViewModel @Inject constructor(
 
     fun setBackupFileMode(mode: BackupFileMode) {
         viewModelScope.launch { appSettingsRepository.setBackupFileMode(mode) }
+    }
+
+    fun setAutoBackupFolderUri(uri: String?) {
+        viewModelScope.launch { appSettingsRepository.setAutoBackupFolderUri(uri) }
+    }
+
+    fun setAutoBackupInterval(interval: AutoBackupInterval) {
+        viewModelScope.launch { appSettingsRepository.setAutoBackupInterval(interval) }
+    }
+
+    fun backupNowToFolder() {
+        if (_folderBackupUiState.value == ExportUiState.Exporting) return
+        _folderBackupUiState.value = ExportUiState.Exporting
+        viewModelScope.launch {
+            _folderBackupUiState.value = when (val result = autoBackupRepository.runNow()) {
+                is AutoBackupRepository.Result.Success          -> ExportUiState.Success
+                is AutoBackupRepository.Result.NoFolderSelected -> ExportUiState.Error("No backup folder selected.")
+                is AutoBackupRepository.Result.FolderUnavailable -> ExportUiState.Error(result.message)
+                is AutoBackupRepository.Result.Failure          -> ExportUiState.Error(result.message)
+                else                                            -> ExportUiState.Idle
+            }
+        }
     }
 
     fun exportTo(uri: Uri) {
