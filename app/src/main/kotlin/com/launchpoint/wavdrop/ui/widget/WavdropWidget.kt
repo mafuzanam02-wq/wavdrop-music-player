@@ -40,6 +40,8 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Hilt entry point so the widget (which lives outside the normal DI graph)
@@ -164,24 +166,34 @@ private fun WidgetControlButton(
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────
+// MediaController (inside PlayerController) is main-thread-only, while Glance
+// runs ActionCallbacks on a worker thread — so every command hops to Main.
+// WavdropWidgetUpdater observes the resulting state change and re-renders the
+// widget; the explicit update() here just makes the tap feel instant.
 
 internal class PreviousAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        runCatching { playerController(context).skipToPrevious() }
+        withContext(Dispatchers.Main) {
+            runCatching { playerController(context).skipToPrevious() }
+        }
         WavdropWidget().update(context, glanceId)
     }
 }
 
 internal class PlayPauseAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        runCatching { playerController(context).togglePlayPause() }
+        withContext(Dispatchers.Main) {
+            runCatching { playerController(context).togglePlayPause() }
+        }
         WavdropWidget().update(context, glanceId)
     }
 }
 
 internal class NextAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        runCatching { playerController(context).skipToNext() }
+        withContext(Dispatchers.Main) {
+            runCatching { playerController(context).skipToNext() }
+        }
         WavdropWidget().update(context, glanceId)
     }
 }
