@@ -179,7 +179,11 @@
             </intent-filter>
         </receiver>
 
-        <!-- Wavdrop home-screen widget: Now Playing title/artist + transport controls -->
+        <!--
+            Widget v1 is kept dormant for a future release.
+            Re-enable by restoring this receiver declaration and setting
+            WavdropApp.ENABLE_WIDGET = true. Source lives in ui/widget/.
+
         <receiver
             android:name=".ui.widget.WavdropWidgetReceiver"
             android:exported="true"
@@ -191,6 +195,7 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/wavdrop_widget_info" />
         </receiver>
+        -->
 
     </application>
 

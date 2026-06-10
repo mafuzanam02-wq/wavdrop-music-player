@@ -12,6 +12,15 @@ class WavdropApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        widgetUpdater.start()
+        if (ENABLE_WIDGET) {
+            widgetUpdater.start()
+        }
+    }
+
+    companion object {
+        // Widget v1 is kept dormant for a future release. Flipping this to true
+        // also requires restoring the WavdropWidgetReceiver entry in
+        // AndroidManifest.xml so the widget appears in the launcher picker.
+        const val ENABLE_WIDGET = false
     }
 }
