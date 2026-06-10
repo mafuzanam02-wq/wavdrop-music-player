@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">Wavdrop Music Player</string>
     <string name="launcher_label">Wavdrop</string>
+    <string name="widget_description">Now Playing controls for Wavdrop.</string>
 </resources>

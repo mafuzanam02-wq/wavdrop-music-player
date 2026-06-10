@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder shown while the Glance widget renders its first frame. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:text="@string/launcher_label"
+    android:textColor="#EDEAF4"
+    android:background="@drawable/wavdrop_widget_loading_background" />

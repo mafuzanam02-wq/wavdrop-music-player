@@ -179,6 +179,19 @@
             </intent-filter>
         </receiver>
 
+        <!-- Wavdrop home-screen widget: Now Playing title/artist + transport controls -->
+        <receiver
+            android:name=".ui.widget.WavdropWidgetReceiver"
+            android:exported="true"
+            android:label="@string/launcher_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/wavdrop_widget_info" />
+        </receiver>
+
     </application>
 
 </manifest>
