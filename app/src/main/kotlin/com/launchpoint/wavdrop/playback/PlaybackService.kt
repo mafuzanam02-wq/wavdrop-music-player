@@ -6,6 +6,7 @@ import android.content.Intent
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.util.Log
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -18,6 +19,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.MainActivity
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
@@ -56,21 +58,29 @@ class PlaybackService : MediaSessionService() {
         override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) {
             val hasBluetooth = addedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }
             val hasWired     = addedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }
+            logResume(
+                "audioDeviceCallback.onAudioDevicesAdded: count=${addedDevices.size} " +
+                    "hasBluetooth=$hasBluetooth hasWired=$hasWired " +
+                    "sinkTypes=${addedDevices.filter { it.isSink }.map { it.type }}",
+            )
             if (!hasBluetooth && !hasWired) return
             serviceScope.launch {
                 val songs = songRepository.songs.first()
+                logResume("audioDeviceCallback: got ${songs.size} songs for resume")
                 if (hasBluetooth) playerController.resumeForBluetooth(songs)
                 if (hasWired)     playerController.resumeForWiredHeadphones(songs)
             }
         }
 
         override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) {
-            if (removedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }) {
-                playerController.onBluetoothDeviceRemoved()
-            }
-            if (removedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }) {
-                playerController.onWiredDeviceRemoved()
-            }
+            val hasBluetooth = removedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }
+            val hasWired     = removedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }
+            logResume(
+                "audioDeviceCallback.onAudioDevicesRemoved: count=${removedDevices.size} " +
+                    "hasBluetooth=$hasBluetooth hasWired=$hasWired",
+            )
+            if (hasBluetooth) playerController.onBluetoothDeviceRemoved()
+            if (hasWired)     playerController.onWiredDeviceRemoved()
         }
     }
 
@@ -130,11 +140,14 @@ class PlaybackService : MediaSessionService() {
         mediaSession
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        logResume("onStartCommand: action=${intent?.action}")
         if (intent?.action == ACTION_AUDIO_OUTPUT_CONNECTED) {
             val outputKind = intent.getStringExtra(EXTRA_AUDIO_OUTPUT_KIND)
+            logResume("onStartCommand: ACTION_AUDIO_OUTPUT_CONNECTED outputKind=$outputKind")
             if (outputKind != null) {
                 serviceScope.launch {
                     val songs = songRepository.songs.first()
+                    logResume("onStartCommand: got ${songs.size} songs, dispatching resume for outputKind=$outputKind")
                     when (outputKind) {
                         OUTPUT_BLUETOOTH -> playerController.resumeForBluetooth(songs)
                         OUTPUT_WIRED     -> playerController.resumeForWiredHeadphones(songs)
@@ -241,6 +254,10 @@ class PlaybackService : MediaSessionService() {
         return buttons
     }
 
+    private fun logResume(message: String) {
+        if (BuildConfig.DEBUG) Log.d(RESUME_TAG, message)
+    }
+
     companion object {
         const val ACTION_AUDIO_OUTPUT_CONNECTED = "com.launchpoint.wavdrop.ACTION_AUDIO_OUTPUT_CONNECTED"
         const val EXTRA_AUDIO_OUTPUT_KIND       = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
@@ -248,5 +265,6 @@ class PlaybackService : MediaSessionService() {
         const val OUTPUT_WIRED                  = "wired"
         private const val CMD_TOGGLE_SHUFFLE    = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
         private const val CMD_CYCLE_REPEAT      = "com.launchpoint.wavdrop.CYCLE_REPEAT"
+        private const val RESUME_TAG            = "WavdropResume"
     }
 }

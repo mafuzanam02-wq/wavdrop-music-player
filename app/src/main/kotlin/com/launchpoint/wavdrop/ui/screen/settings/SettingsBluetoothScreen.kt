@@ -1,5 +1,13 @@
 package com.launchpoint.wavdrop.ui.screen.settings
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,9 +22,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 
@@ -27,6 +43,32 @@ fun SettingsBluetoothScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val resumeBehavior by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
+
+    val context      = LocalContext.current
+    val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
+    var isIgnoringBatteryOptimizations by remember {
+        mutableStateOf(powerManager.isIgnoringBatteryOptimizations(context.packageName))
+    }
+
+    // Refresh the battery-optimization status whenever the user returns from system settings.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isIgnoringBatteryOptimizations =
+                    powerManager.isIgnoringBatteryOptimizations(context.packageName)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val batteryOptLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) {
+        isIgnoringBatteryOptimizations =
+            powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    }
 
     Scaffold(
         topBar = {
@@ -94,6 +136,51 @@ fun SettingsBluetoothScreen(
                         subtitle = mode.description,
                         selected = resumeBehavior.wiredResumeMode == mode,
                         onClick  = { viewModel.setWiredResumeMode(mode) },
+                    )
+                }
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Background Playback Reliability") }
+            item {
+                SettingsMessageRow(
+                    message = "Some phones may stop Wavdrop after it is closed from recent apps. " +
+                        "Allowing background playback can improve Bluetooth and wired auto-resume reliability.",
+                )
+            }
+            item {
+                if (isIgnoringBatteryOptimizations) {
+                    ClickableSettingsRow(
+                        title    = "Background playback allowed",
+                        subtitle = "Wavdrop is excluded from battery optimization. No action needed.",
+                        onClick  = {
+                            // Open the settings page so the user can review or change it.
+                            try {
+                                batteryOptLauncher.launch(
+                                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                                )
+                            } catch (_: ActivityNotFoundException) { }
+                        },
+                    )
+                } else {
+                    ClickableSettingsRow(
+                        title    = "Allow background playback",
+                        subtitle = "Open system settings to exclude Wavdrop from battery optimization.",
+                        onClick  = {
+                            val pkg = context.packageName
+                            val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:$pkg")
+                            }
+                            try {
+                                batteryOptLauncher.launch(direct)
+                            } catch (_: ActivityNotFoundException) {
+                                try {
+                                    batteryOptLauncher.launch(
+                                        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                                    )
+                                } catch (_: ActivityNotFoundException) { }
+                            }
+                        },
                     )
                 }
             }

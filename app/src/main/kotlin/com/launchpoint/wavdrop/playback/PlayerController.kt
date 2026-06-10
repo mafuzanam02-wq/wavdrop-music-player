@@ -10,6 +10,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRules
@@ -62,6 +63,7 @@ class PlayerController @Inject constructor(
 ) {
     private companion object {
         const val TAG = "WavStats-PC"
+        const val RESUME_TAG = "WavdropResume"
         const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
 
         const val DEBUG_STATS = false
@@ -749,6 +751,7 @@ class PlayerController @Inject constructor(
     fun onBluetoothDeviceRemoved() {
         val wasPlaying = mediaController?.isPlaying == true
         wasInterruptedByBluetooth = wasPlaying
+        logResume("onBluetoothDeviceRemoved: wasPlaying=$wasPlaying")
         if (wasPlaying) {
             scope.launch { resumeBehaviorRepository.setBluetoothInterruptedResumePending(true) }
         }
@@ -762,6 +765,7 @@ class PlayerController @Inject constructor(
     fun onWiredDeviceRemoved() {
         val wasPlaying = mediaController?.isPlaying == true
         wasInterruptedByWired = wasPlaying
+        logResume("onWiredDeviceRemoved: wasPlaying=$wasPlaying")
         if (wasPlaying) {
             scope.launch { resumeBehaviorRepository.setWiredInterruptedResumePending(true) }
         }
@@ -769,6 +773,9 @@ class PlayerController @Inject constructor(
 
     /**
      * Resumes the last session and starts playback after a Bluetooth audio device connects.
+     *
+     * Uses [awaitMediaController] to handle the cold-start case where this is called from
+     * [PlaybackService.onStartCommand] before the async [MediaController] future has resolved.
      */
     fun resumeForBluetooth(availableSongs: List<Song>) {
         scope.launch {
@@ -780,22 +787,48 @@ class PlayerController @Inject constructor(
                 resumeBehaviorRepository.hasBluetoothInterruptedResumePending()
             wasInterruptedByBluetooth = false
             resumeBehaviorRepository.setBluetoothInterruptedResumePending(false)
-            if (!settings.bluetoothResumeMode.shouldResume(interrupted)) return@launch
-            if (!settings.rememberLastTrack) return@launch
+            logResume(
+                "resumeForBluetooth: mode=${settings.bluetoothResumeMode} " +
+                    "interrupted=$interrupted rememberLastTrack=${settings.rememberLastTrack}",
+            )
+            if (!settings.bluetoothResumeMode.shouldResume(interrupted)) {
+                logResume("resumeForBluetooth: skipped — mode=${settings.bluetoothResumeMode} does not resume for interrupted=$interrupted")
+                return@launch
+            }
+            if (!settings.rememberLastTrack) {
+                logResume("resumeForBluetooth: skipped — rememberLastTrack=false")
+                return@launch
+            }
 
-            val controller = mediaController ?: return@launch
-            if (controller.isPlaying) return@launch
+            val controller = awaitMediaController()
+            if (controller == null) {
+                logResume("resumeForBluetooth: giving up — mediaController not ready after timeout")
+                return@launch
+            }
+            if (controller.isPlaying) {
+                logResume("resumeForBluetooth: already playing before delay, nothing to do")
+                return@launch
+            }
 
             delay(1_000L)
 
-            if (controller.isPlaying) return@launch
+            if (controller.isPlaying) {
+                logResume("resumeForBluetooth: already playing after delay, nothing to do")
+                return@launch
+            }
 
             val song = _nowPlayingState.value.song
+            logResume(
+                "resumeForBluetooth: song=${song?.title} libraryQueueSize=${libraryQueue.size} " +
+                    "mediaItemCount=${controller.mediaItemCount} " +
+                    "playbackState=${stateString(controller.playbackState)}",
+            )
             if (song != null && libraryQueue.isNotEmpty()) {
                 lastKnownPositionMs = -1L
                 statsTracker.onSongSelected(song)
-                controller.play()
+                performHotResume(controller, availableSongs, settings, "resumeForBluetooth")
             } else {
+                logResume("resumeForBluetooth: no active queue — loading session cold")
                 resumeSessionCold(availableSongs, settings)
             }
         }
@@ -803,31 +836,63 @@ class PlayerController @Inject constructor(
 
     /**
      * Resumes the last session and starts playback after wired headphones connect.
+     *
+     * Uses [awaitMediaController] to handle the cold-start case where this is called from
+     * [PlaybackService.onStartCommand] before the async [MediaController] future has resolved.
      */
     fun resumeForWiredHeadphones(availableSongs: List<Song>) {
-        if (wiredResumeJob?.isActive == true) return
+        if (wiredResumeJob?.isActive == true) {
+            logResume("resumeForWiredHeadphones: debounced — wiredResumeJob already active")
+            return
+        }
         wiredResumeJob = scope.launch {
             val settings = resumeBehaviorRepository.settings.first()
             val interrupted = wasInterruptedByWired ||
                 resumeBehaviorRepository.hasWiredInterruptedResumePending()
             wasInterruptedByWired = false
             resumeBehaviorRepository.setWiredInterruptedResumePending(false)
-            if (!settings.wiredResumeMode.shouldResume(interrupted)) return@launch
-            if (!settings.rememberLastTrack) return@launch
+            logResume(
+                "resumeForWiredHeadphones: mode=${settings.wiredResumeMode} " +
+                    "interrupted=$interrupted rememberLastTrack=${settings.rememberLastTrack}",
+            )
+            if (!settings.wiredResumeMode.shouldResume(interrupted)) {
+                logResume("resumeForWiredHeadphones: skipped — mode=${settings.wiredResumeMode} does not resume for interrupted=$interrupted")
+                return@launch
+            }
+            if (!settings.rememberLastTrack) {
+                logResume("resumeForWiredHeadphones: skipped — rememberLastTrack=false")
+                return@launch
+            }
 
-            val controller = mediaController ?: return@launch
-            if (controller.isPlaying) return@launch
+            val controller = awaitMediaController()
+            if (controller == null) {
+                logResume("resumeForWiredHeadphones: giving up — mediaController not ready after timeout")
+                return@launch
+            }
+            if (controller.isPlaying) {
+                logResume("resumeForWiredHeadphones: already playing before delay, nothing to do")
+                return@launch
+            }
 
             delay(1_000L)
 
-            if (controller.isPlaying) return@launch
+            if (controller.isPlaying) {
+                logResume("resumeForWiredHeadphones: already playing after delay, nothing to do")
+                return@launch
+            }
 
             val song = _nowPlayingState.value.song
+            logResume(
+                "resumeForWiredHeadphones: song=${song?.title} libraryQueueSize=${libraryQueue.size} " +
+                    "mediaItemCount=${controller.mediaItemCount} " +
+                    "playbackState=${stateString(controller.playbackState)}",
+            )
             if (song != null && libraryQueue.isNotEmpty()) {
                 lastKnownPositionMs = -1L
                 statsTracker.onSongSelected(song)
-                controller.play()
+                performHotResume(controller, availableSongs, settings, "resumeForWiredHeadphones")
             } else {
+                logResume("resumeForWiredHeadphones: no active queue — loading session cold")
                 resumeSessionCold(availableSongs, settings)
             }
         }
@@ -837,8 +902,17 @@ class PlayerController @Inject constructor(
         availableSongs: List<Song>,
         settings: ResumeBehaviorSettings,
     ) {
-        val rawSnapshot = sessionRepository.load() ?: return
-        val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, settings) ?: return
+        logResume("resumeSessionCold: availableSongs=${availableSongs.size}")
+        val rawSnapshot = sessionRepository.load()
+        if (rawSnapshot == null) {
+            logResume("resumeSessionCold: no saved session, aborting")
+            return
+        }
+        val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, settings)
+        if (snapshot == null) {
+            logResume("resumeSessionCold: session filtered out by resume rules, aborting")
+            return
+        }
 
         val idSet = availableSongs.associateBy { it.id }
         val mappedQueue = snapshot.queueSongIds.mapNotNull { idSet[it] }
@@ -846,7 +920,12 @@ class PlayerController @Inject constructor(
             sessionSongId = snapshot.currentSongId,
             sessionIndex  = PlaybackSessionRules.clampIndex(snapshot.currentIndex, mappedQueue.size),
             mappedQueue   = mappedQueue,
-        ) ?: return
+        )
+        if (startSong == null) {
+            logResume("resumeSessionCold: could not resolve start song (mappedQueue=${mappedQueue.size}), aborting")
+            return
+        }
+        logResume("resumeSessionCold: startSong=${startSong.title} mappedQueue=${mappedQueue.size} positionMs=${snapshot.positionMs}")
 
         libraryQueue   = mappedQueue
         shuffleEnabled = snapshot.shuffleEnabled
@@ -873,7 +952,12 @@ class PlayerController @Inject constructor(
             )
         }
 
-        val controller = mediaController ?: return
+        val controller = mediaController
+        if (controller == null) {
+            logResume("resumeSessionCold: mediaController null at play step, aborting")
+            return
+        }
+        logResume("resumeSessionCold: loading ExoPlayer and calling play()")
         controller.repeatMode         = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         controller.setMediaItems(
@@ -884,6 +968,118 @@ class PlayerController @Inject constructor(
         controller.prepare()
         syncNowPlayingState()
         controller.play()
+    }
+
+    /**
+     * Executes the hot-resume play step after eligibility checks have passed.
+     *
+     * - If the controller has no loaded media items, falls back to [resumeSessionCold].
+     * - If ExoPlayer is in STATE_IDLE or STATE_ENDED, calls [prepare] first so [play] is not a no-op.
+     * - Logs immediate post-play diagnostics, then waits 700 ms and logs again.
+     * - If after the delay the player is still not playing (playWhenReady=true, isPlaying=false,
+     *   no error), performs one controlled retry — this covers transient audio-focus or
+     *   audio-route suppression that resolves shortly after reconnect.
+     */
+    private suspend fun performHotResume(
+        controller: MediaController,
+        availableSongs: List<Song>,
+        settings: ResumeBehaviorSettings,
+        source: String,
+    ) {
+        if (controller.currentMediaItem == null || controller.mediaItemCount == 0) {
+            logResume("$source: hot resume has no media item (mediaItemCount=${controller.mediaItemCount}) — falling back to cold resume")
+            resumeSessionCold(availableSongs, settings)
+            return
+        }
+
+        // Issue prepare() if the pipeline is not ready — play() is a no-op in STATE_IDLE/ENDED.
+        when (controller.playbackState) {
+            Player.STATE_IDLE, Player.STATE_ENDED -> {
+                logResume("$source: hot resume prepared + play (state=${stateString(controller.playbackState)})")
+                controller.prepare()
+                controller.play()
+            }
+            else -> {
+                logResume("$source: hot resume play (state=${stateString(controller.playbackState)})")
+                controller.play()
+            }
+        }
+
+        logResumePlayDiagnostics(controller, "$source: immediate post-play")
+
+        // Give ExoPlayer time to settle audio focus and routing after reconnect, then verify.
+        delay(700L)
+
+        logResumePlayDiagnostics(controller, "$source: delayed post-play")
+
+        val suppression = controller.playbackSuppressionReason
+        if (suppression != Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
+            logResume("$source: playback suppressed reason=$suppression — not retrying")
+            return
+        }
+
+        // One controlled retry if the player accepted the command but still hasn't started.
+        if (controller.playWhenReady && !controller.isPlaying && controller.playerError == null
+            && controller.mediaItemCount > 0
+        ) {
+            logResume("$source: hot resume retry play (playWhenReady=true but isPlaying=false after delay)")
+            if (controller.playbackState == Player.STATE_IDLE || controller.playbackState == Player.STATE_ENDED) {
+                controller.prepare()
+            }
+            controller.play()
+            logResumePlayDiagnostics(controller, "$source: post-retry")
+        }
+    }
+
+    private fun logResumePlayDiagnostics(controller: MediaController, label: String) {
+        val suppression = controller.playbackSuppressionReason
+        logResume(
+            "$label: state=${stateString(controller.playbackState)} " +
+                "playWhenReady=${controller.playWhenReady} " +
+                "isPlaying=${controller.isPlaying} " +
+                "suppression=${suppressionString(suppression)} " +
+                "hasMediaItem=${controller.currentMediaItem != null} " +
+                "mediaItemCount=${controller.mediaItemCount} " +
+                "currentIndex=${controller.currentMediaItemIndex} " +
+                "canPlay=${controller.availableCommands.contains(Player.COMMAND_PLAY_PAUSE)} " +
+                "error=${controller.playerError}",
+        )
+    }
+
+    private fun suppressionString(reason: Int): String = when (reason) {
+        Player.PLAYBACK_SUPPRESSION_REASON_NONE                       -> "NONE"
+        Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS -> "TRANSIENT_AUDIO_FOCUS_LOSS"
+        Player.PLAYBACK_SUPPRESSION_REASON_UNSUITABLE_AUDIO_ROUTE     -> "UNSUITABLE_AUDIO_ROUTE"
+        else                                                           -> "UNKNOWN($reason)"
+    }
+
+    private fun stateString(state: Int): String = when (state) {
+        Player.STATE_IDLE      -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY     -> "READY"
+        Player.STATE_ENDED     -> "ENDED"
+        else                   -> "UNKNOWN($state)"
+    }
+
+    /**
+     * Polls for the [MediaController] to become available, up to [timeoutMs].
+     *
+     * Required because [resumeForBluetooth]/[resumeForWiredHeadphones] can be called from
+     * [PlaybackService.onStartCommand] before the async [MediaController] future completes,
+     * especially on cold start (broadcast-receiver wakeup after process death).
+     */
+    private suspend fun awaitMediaController(timeoutMs: Long = 3_000L): MediaController? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val c = mediaController
+            if (c != null) return c
+            delay(100L)
+        }
+        return null
+    }
+
+    private fun logResume(message: String) {
+        if (BuildConfig.DEBUG) Log.d(RESUME_TAG, message)
     }
 
     private fun saveSessionAsync() {
