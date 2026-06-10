@@ -114,8 +114,8 @@ fun SettingsBackupScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
-            // Backup folder
-            item { SectionHeader("Backup") }
+            // ── Backup Folder ──────────────────────────────────────────────────
+            item { SectionHeader("Backup Folder") }
             item {
                 ClickableSettingsRow(
                     title    = "Backup folder",
@@ -123,21 +123,23 @@ fun SettingsBackupScreen(
                         "Choose where Wavdrop saves backups."
                     } else {
                         folderDisplayName
-                            ?.let { name -> "Backups are saved to \"$name\"." }
+                            ?.let { name -> "Saving backups to \"$name\"." }
                             ?: "Backups are saved to your selected folder."
                     },
                     onClick  = { folderPickerLauncher.launch(null) },
                 )
             }
+            item { SectionDivider() }
 
-            // Backup Now
+            // ── Back Up Now ────────────────────────────────────────────────────
+            item { SectionHeader("Back Up Now") }
             item {
                 ClickableSettingsRow(
-                    title    = "Backup Now",
+                    title    = "Back up now",
                     subtitle = if (autoBackupFolderUri == null) {
-                        "Choose a backup folder first so Wavdrop can update the same backup file without creating copies."
+                        "Choose a backup folder first."
                     } else {
-                        "Save a backup to your selected backup folder."
+                        "Save a backup to your selected folder."
                     },
                     enabled  = folderBackupState != ExportUiState.Exporting,
                     onClick  = {
@@ -151,14 +153,19 @@ fun SettingsBackupScreen(
             }
             when (val state = folderBackupState) {
                 ExportUiState.Idle      -> Unit
-                ExportUiState.Exporting -> item { ExportStatusRow("Creating backup...") }
+                ExportUiState.Exporting -> item { ExportStatusRow("Creating backup…") }
                 ExportUiState.Success   -> item { ExportStatusRow("Backup saved to selected folder.") }
                 is ExportUiState.Error  -> item { ExportStatusRow(state.message, isError = true) }
             }
             item { SectionDivider() }
 
-            // Auto backup interval
-            item { SectionHeader("Auto backup") }
+            // ── Automatic Backup ───────────────────────────────────────────────
+            item { SectionHeader("Automatic Backup") }
+            item {
+                SettingsMessageRow(
+                    message = "Wavdrop backs up automatically when you open the app, if the selected interval has passed.",
+                )
+            }
             item {
                 ScanModeRow(
                     title    = "Off",
@@ -170,7 +177,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Daily",
-                    subtitle = "Wavdrop creates a backup when you open the app, if your selected interval is due.",
+                    subtitle = "Back up once per day.",
                     selected = autoBackupInterval == AutoBackupInterval.DAILY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.DAILY) },
                 )
@@ -178,7 +185,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Weekly",
-                    subtitle = "Wavdrop creates a backup when you open the app, if your selected interval is due.",
+                    subtitle = "Back up once per week.",
                     selected = autoBackupInterval == AutoBackupInterval.WEEKLY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.WEEKLY) },
                 )
@@ -186,69 +193,69 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Monthly",
-                    subtitle = "Wavdrop creates a backup when you open the app, if your selected interval is due.",
+                    subtitle = "Back up once per month.",
                     selected = autoBackupInterval == AutoBackupInterval.MONTHLY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.MONTHLY) },
                 )
             }
             item { SectionDivider() }
 
-            // Backup file behavior
-            item { SectionHeader("Backup file behavior") }
+            // ── Backup File ────────────────────────────────────────────────────
+            item { SectionHeader("Backup File") }
             item {
                 ScanModeRow(
-                    title    = "Dated backup",
-                    subtitle = "Uses today's dated backup file and updates it if it already exists.",
+                    title    = "Dated file",
+                    subtitle = "Each backup uses today's date in the filename, updating the same file if it already exists.",
                     selected = backupFileMode == BackupFileMode.DATED,
                     onClick  = { viewModel.setBackupFileMode(BackupFileMode.DATED) },
                 )
             }
             item {
                 ScanModeRow(
-                    title    = "Use fixed filename",
-                    subtitle = "Uses wavdrop-backup.json for folder backups. Manual export may still create a copy depending on Android.",
+                    title    = "Fixed filename",
+                    subtitle = "Always saves as wavdrop-backup.json, replacing the previous file.",
                     selected = backupFileMode == BackupFileMode.REPLACE_PREVIOUS,
                     onClick  = { viewModel.setBackupFileMode(BackupFileMode.REPLACE_PREVIOUS) },
                 )
             }
             item { SectionDivider() }
 
-            // Manual export
-            item { SectionHeader("Manual export") }
+            // ── Manual Export ──────────────────────────────────────────────────
+            item { SectionHeader("Manual Export") }
             item {
                 ClickableSettingsRow(
-                    title    = "Export Backup",
-                    subtitle = "Save a backup file to a location you choose. Android may create a copy if a file with the same name already exists.",
+                    title    = "Save backup file",
+                    subtitle = "Choose where to save a backup file on your device.",
                     enabled  = exportStateValue != ExportUiState.Exporting,
                     onClick  = { exportLauncher.launch(suggestedExportName) },
                 )
             }
             when (val state = exportStateValue) {
                 ExportUiState.Idle      -> Unit
-                ExportUiState.Exporting -> item { ExportStatusRow("Exporting Wavdrop data...") }
-                ExportUiState.Success   -> item { ExportStatusRow("Export complete.") }
+                ExportUiState.Exporting -> item { ExportStatusRow("Saving backup…") }
+                ExportUiState.Success   -> item { ExportStatusRow("Backup saved.") }
                 is ExportUiState.Error  -> item {
-                    ExportStatusRow("Export failed: ${state.message}", isError = true)
+                    ExportStatusRow("Save failed: ${state.message}", isError = true)
                 }
             }
             item { SectionDivider() }
 
-            // Restore
+            // ── Restore ────────────────────────────────────────────────────────
             item { SectionHeader("Restore") }
             item {
                 ClickableSettingsRow(
-                    title    = "Restore Backup",
+                    title    = "Restore from backup",
                     subtitle = "Preview and restore a Wavdrop backup to your library stats, playlists, and listening history.",
                     onClick  = { backupImportLauncher.launch(arrayOf("application/json")) },
                 )
             }
             item { SectionDivider() }
 
-            // BlackPlayer import
-            item { SectionHeader("Import") }
+            // ── Import from BlackPlayer ────────────────────────────────────────
+            item { SectionHeader("Import from BlackPlayer") }
             item {
                 ClickableSettingsRow(
-                    title    = "Import BlackPlayer Statistics",
+                    title    = "Import BlackPlayer data",
                     subtitle = "Import play counts and skip counts from a BlackPlayer .bpstat file.",
                     onClick  = onImportClick,
                 )

@@ -82,7 +82,7 @@ fun SettingsAboutScreen(
             item {
                 ClickableSettingsRow(
                     title    = "What's New",
-                    subtitle = "Release notes",
+                    subtitle = "See what changed in this version.",
                     onClick  = { showWhatsNewDialog = true },
                 )
             }
@@ -126,14 +126,14 @@ fun SettingsAboutScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Supported Audio Formats",
-                    subtitle = "Android and Media3 playback support by device",
+                    subtitle = "Audio formats your device can play.",
                     onClick  = { showFormatsDialog = true },
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Diagnostics",
-                    subtitle = "App and library overview",
+                    subtitle = "View app info and library details.",
                     onClick  = onDiagnosticsClick,
                 )
             }

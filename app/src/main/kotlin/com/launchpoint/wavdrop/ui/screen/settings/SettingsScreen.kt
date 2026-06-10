@@ -69,50 +69,50 @@ fun SettingsScreen(
         ) {
             item {
                 ClickableSettingsRow(
-                    title    = "Playback Settings",
-                    subtitle = "Resume, queue, and startup preferences",
+                    title    = "Playback",
+                    subtitle = "Startup screen, session restore, sleep timer, and display",
                     onClick  = onPlaybackClick,
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Bluetooth & Headphones",
-                    subtitle = "Audio disconnect and auto-resume behavior",
+                    subtitle = "Auto-resume and audio output disconnect behavior",
                     onClick  = onBluetoothClick,
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Library & Scanning",
-                    subtitle = "Scan mode, folders, and minimum track duration",
+                    subtitle = "Scan mode, folders, and track filters",
                     onClick  = onLibrarySettingsClick,
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Backup & Migration",
-                    subtitle = "Export, import, and BlackPlayer data restore",
+                    subtitle = "Save, restore, and import your library data",
                     onClick  = onBackupClick,
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Appearance",
-                    subtitle = "Theme, accent color, app icon, and home sections",
+                    subtitle = "Theme, colors, display preferences, and app icon",
                     onClick  = onAppearanceClick,
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "Reports & Insights",
-                    subtitle = "Statistics, listening reports, monthly reports, and Wrapped",
+                    subtitle = "Statistics, listening reports, monthly recaps, and Wrapped",
                     onClick  = onStatisticsClick,
                 )
             }
             item {
                 ClickableSettingsRow(
                     title    = "About",
-                    subtitle = "Version, supported formats, and app info",
+                    subtitle = "Version info, supported formats, and legal",
                     onClick  = onAboutClick,
                 )
             }

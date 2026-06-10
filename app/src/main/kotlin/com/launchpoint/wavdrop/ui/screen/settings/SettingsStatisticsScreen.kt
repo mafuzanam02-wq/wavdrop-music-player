@@ -76,7 +76,7 @@ fun SettingsStatisticsScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Wrapped",
-                    subtitle = "Review yearly event-backed listening highlights.",
+                    subtitle = "Review your year in music.",
                     onClick  = onWrappedClick,
                 )
             }

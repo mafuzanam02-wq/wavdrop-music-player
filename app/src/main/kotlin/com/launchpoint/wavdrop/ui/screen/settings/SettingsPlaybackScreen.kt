@@ -54,7 +54,7 @@ fun SettingsPlaybackScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Playback Settings") },
+                title = { Text("Playback") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -97,7 +97,7 @@ fun SettingsPlaybackScreen(
             item {
                 ToggleSettingsRow(
                     title           = "Remember playback position",
-                    subtitle        = "Resume from where you left off instead of starting from the beginning.",
+                    subtitle        = "Resume from where you left off.",
                     checked         = resumeBehavior.rememberPosition,
                     onCheckedChange = viewModel::setRememberPosition,
                 )

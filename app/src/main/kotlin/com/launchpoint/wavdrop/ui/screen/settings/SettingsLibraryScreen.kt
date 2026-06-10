@@ -83,7 +83,7 @@ fun SettingsLibraryScreen(
             item {
                 ScanModeRow(
                     title    = "Scan whole device",
-                    subtitle = "Find audio from the device media library.",
+                    subtitle = "Find all audio from Android's media library.",
                     selected = scanSettings.scanMode == LibraryScanMode.WHOLE_DEVICE,
                     onClick  = { viewModel.setScanMode(LibraryScanMode.WHOLE_DEVICE) },
                 )
@@ -91,7 +91,7 @@ fun SettingsLibraryScreen(
             item {
                 ScanModeRow(
                     title    = "Selected folders only",
-                    subtitle = "Only include audio from the folders listed below when Wavdrop can match them.",
+                    subtitle = "Only include audio from the folders you add below.",
                     selected = scanSettings.scanMode == LibraryScanMode.SELECTED_FOLDERS,
                     onClick  = { viewModel.setScanMode(LibraryScanMode.SELECTED_FOLDERS) },
                 )
@@ -109,13 +109,11 @@ fun SettingsLibraryScreen(
             }
             item { SectionDivider() }
 
-            item { SectionHeader("Scan Settings") }
+            item { SectionHeader("Filters & Folders") }
             item {
                 ToggleSettingsRow(
                     title   = "Include WhatsApp voice notes",
-                    subtitle = "Show WhatsApp and WhatsApp Business voice notes in your library. " +
-                        "Off by default to keep voice notes out of Songs, playlists, search, " +
-                        "reports, and Wrapped.",
+                    subtitle = "Show WhatsApp and WhatsApp Business voice notes in your library.",
                     checked         = scanSettings.includeWhatsAppVoiceNotes,
                     onCheckedChange = viewModel::setIncludeWhatsAppVoiceNotes,
                 )
@@ -134,7 +132,7 @@ fun SettingsLibraryScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Add folder",
-                    subtitle = "Choose a music folder using Android's folder picker.",
+                    subtitle = "Choose a folder to include in your library.",
                     onClick  = { folderPickerLauncher.launch(null) },
                 )
             }
@@ -150,7 +148,7 @@ fun SettingsLibraryScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Rescan library",
-                    subtitle = "Scan again using the current library scan settings.",
+                    subtitle = "Scan your device again using the current settings.",
                     enabled  = scanState != LibraryScanUiState.Scanning,
                     onClick  = viewModel::rescanLibrary,
                 )

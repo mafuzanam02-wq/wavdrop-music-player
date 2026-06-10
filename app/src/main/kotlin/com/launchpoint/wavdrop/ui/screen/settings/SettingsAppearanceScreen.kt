@@ -28,7 +28,6 @@ import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.ThemeMode
-
 import com.launchpoint.wavdrop.ui.theme.AmberGoldPrimary
 import com.launchpoint.wavdrop.ui.theme.CleanPurplePrimary
 import com.launchpoint.wavdrop.ui.theme.CrimsonRedPrimary
@@ -46,15 +45,15 @@ fun SettingsAppearanceScreen(
     onHomeCustomizationClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val appIconChoice       by viewModel.appIconChoice.collectAsStateWithLifecycle()
-    val themeMode           by viewModel.themeMode.collectAsStateWithLifecycle()
-    val accentColor         by viewModel.accentColor.collectAsStateWithLifecycle()
-    val compactMode         by viewModel.compactMode.collectAsStateWithLifecycle()
-    val artworkCornerStyle  by viewModel.artworkCornerStyle.collectAsStateWithLifecycle()
-    val showSongThumbnails  by viewModel.showSongThumbnails.collectAsStateWithLifecycle()
-    val showAlbumInSongRows by viewModel.showAlbumInSongRows.collectAsStateWithLifecycle()
+    val appIconChoice        by viewModel.appIconChoice.collectAsStateWithLifecycle()
+    val themeMode            by viewModel.themeMode.collectAsStateWithLifecycle()
+    val accentColor          by viewModel.accentColor.collectAsStateWithLifecycle()
+    val compactMode          by viewModel.compactMode.collectAsStateWithLifecycle()
+    val artworkCornerStyle   by viewModel.artworkCornerStyle.collectAsStateWithLifecycle()
+    val showSongThumbnails   by viewModel.showSongThumbnails.collectAsStateWithLifecycle()
+    val showAlbumInSongRows  by viewModel.showAlbumInSongRows.collectAsStateWithLifecycle()
     val nowPlayingBackground by viewModel.nowPlayingBackground.collectAsStateWithLifecycle()
-    val showQueueCount      by viewModel.showQueueCount.collectAsStateWithLifecycle()
+    val showQueueCount       by viewModel.showQueueCount.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -88,86 +87,8 @@ fun SettingsAppearanceScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
-            item { SectionHeader("Home") }
-            item {
-                ClickableSettingsRow(
-                    title    = "Home Sections",
-                    subtitle = "Choose which sections appear on your Home screen.",
-                    onClick  = onHomeCustomizationClick,
-                )
-            }
-            item { SectionDivider() }
-
-            item { SectionHeader("Display") }
-            item {
-                ToggleSettingsRow(
-                    title = "Compact Mode",
-                    subtitle = "Use denser rows in library lists and queue views.",
-                    checked = compactMode,
-                    onCheckedChange = viewModel::setCompactMode,
-                )
-            }
-            item { SectionDivider() }
-
-            item { SectionHeader("Song List") }
-            item {
-                ToggleSettingsRow(
-                    title           = "Show song thumbnails",
-                    subtitle        = "Display album artwork next to each song in lists.",
-                    checked         = showSongThumbnails,
-                    onCheckedChange = viewModel::setShowSongThumbnails,
-                )
-            }
-            item {
-                ToggleSettingsRow(
-                    title           = "Show album name",
-                    subtitle        = "Show the album name below the artist in song rows.",
-                    checked         = showAlbumInSongRows,
-                    onCheckedChange = viewModel::setShowAlbumInSongRows,
-                )
-            }
-            item { SectionDivider() }
-
-            item { SectionHeader("Artwork Corner Style") }
-            item {
-                SettingsMessageRow(
-                    message = "Controls the corner rounding of album artwork throughout the app.",
-                )
-            }
-            ArtworkCornerStyle.entries.forEach { style ->
-                item {
-                    ScanModeRow(
-                        title    = style.displayName,
-                        subtitle = style.description,
-                        selected = artworkCornerStyle == style,
-                        onClick  = { viewModel.setArtworkCornerStyle(style) },
-                    )
-                }
-            }
-            item { SectionDivider() }
-
-            item { SectionHeader("Now Playing Display") }
-            NowPlayingBackground.entries.forEach { bg ->
-                item {
-                    ScanModeRow(
-                        title    = bg.displayName,
-                        subtitle = bg.description,
-                        selected = nowPlayingBackground == bg,
-                        onClick  = { viewModel.setNowPlayingBackground(bg) },
-                    )
-                }
-            }
-            item {
-                ToggleSettingsRow(
-                    title           = "Show queue count",
-                    subtitle        = "Display the number of upcoming tracks on the queue handle.",
-                    checked         = showQueueCount,
-                    onCheckedChange = viewModel::setShowQueueCount,
-                )
-            }
-            item { SectionDivider() }
-
-            item { SectionHeader("Theme Mode") }
+            // ── Theme ──────────────────────────────────────────────────────────
+            item { SectionHeader("Theme") }
             ThemeMode.entries.forEach { mode ->
                 item {
                     IconChoiceRow(
@@ -192,10 +113,91 @@ fun SettingsAppearanceScreen(
             }
             item { SectionDivider() }
 
+            // ── Song Lists ─────────────────────────────────────────────────────
+            item { SectionHeader("Song Lists") }
+            item {
+                ToggleSettingsRow(
+                    title           = "Compact rows",
+                    subtitle        = "Use denser rows in song lists and queue views.",
+                    checked         = compactMode,
+                    onCheckedChange = viewModel::setCompactMode,
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show album artwork",
+                    subtitle        = "Display a thumbnail next to each song in lists.",
+                    checked         = showSongThumbnails,
+                    onCheckedChange = viewModel::setShowSongThumbnails,
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show album name",
+                    subtitle        = "Show the album name below the artist in song rows.",
+                    checked         = showAlbumInSongRows,
+                    onCheckedChange = viewModel::setShowAlbumInSongRows,
+                )
+            }
+            item { SectionDivider() }
+
+            // ── Artwork ────────────────────────────────────────────────────────
+            item { SectionHeader("Artwork") }
+            item {
+                SettingsMessageRow(
+                    message = "Controls how album artwork corners are shown throughout the app.",
+                )
+            }
+            ArtworkCornerStyle.entries.forEach { style ->
+                item {
+                    ScanModeRow(
+                        title    = style.displayName,
+                        subtitle = style.description,
+                        selected = artworkCornerStyle == style,
+                        onClick  = { viewModel.setArtworkCornerStyle(style) },
+                    )
+                }
+            }
+            item { SectionDivider() }
+
+            // ── Now Playing ────────────────────────────────────────────────────
+            item { SectionHeader("Now Playing") }
+            NowPlayingBackground.entries.forEach { bg ->
+                item {
+                    ScanModeRow(
+                        title    = bg.displayName,
+                        subtitle = bg.description,
+                        selected = nowPlayingBackground == bg,
+                        onClick  = { viewModel.setNowPlayingBackground(bg) },
+                    )
+                }
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show queue count",
+                    subtitle        = "Show the number of upcoming tracks on the queue handle.",
+                    checked         = showQueueCount,
+                    onCheckedChange = viewModel::setShowQueueCount,
+                )
+            }
+            item { SectionDivider() }
+
+            // ── Home ───────────────────────────────────────────────────────────
+            item { SectionHeader("Home Screen") }
+            item {
+                ClickableSettingsRow(
+                    title    = "Home Sections",
+                    subtitle = "Choose which sections appear on your Home screen.",
+                    onClick  = onHomeCustomizationClick,
+                )
+            }
+            item { SectionDivider() }
+
+            // ── App Icon ───────────────────────────────────────────────────────
             item { SectionHeader("App Icon") }
             item {
                 SettingsMessageRow(
-                    message = "Some launchers may take a moment, restart, or home-screen refresh before showing the new icon.",
+                    message = "Your launcher may take a moment to update the icon after you switch.",
                 )
             }
             AppIconChoice.entries.forEach { choice ->
