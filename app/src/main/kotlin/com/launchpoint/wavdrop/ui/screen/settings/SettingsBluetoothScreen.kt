@@ -144,41 +144,48 @@ fun SettingsBluetoothScreen(
             item { SectionHeader("Background Playback Reliability") }
             item {
                 SettingsMessageRow(
-                    message = "Some phones may stop Wavdrop after it is closed from recent apps. " +
-                        "Allowing background playback can improve Bluetooth and wired auto-resume reliability.",
+                    message = "For the best Bluetooth and wired auto-resume experience, allow Wavdrop " +
+                        "to run without battery restrictions. Some phones may still stop apps that are " +
+                        "closed from Recent Apps.",
                 )
             }
             item {
                 if (isIgnoringBatteryOptimizations) {
                     ClickableSettingsRow(
                         title    = "Background playback allowed",
-                        subtitle = "Wavdrop is excluded from battery optimization. No action needed.",
+                        subtitle = "Wavdrop is excluded from battery optimization on this device.",
                         onClick  = {
-                            // Open the settings page so the user can review or change it.
+                            // Let the user review or revoke the exemption.
                             try {
                                 batteryOptLauncher.launch(
                                     Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
                                 )
-                            } catch (_: ActivityNotFoundException) { }
+                            } catch (_: ActivityNotFoundException) {
+                            } catch (_: SecurityException) { }
                         },
                     )
                 } else {
                     ClickableSettingsRow(
                         title    = "Allow background playback",
-                        subtitle = "Open system settings to exclude Wavdrop from battery optimization.",
+                        subtitle = "Open system settings to improve playback and auto-resume reliability.",
                         onClick  = {
                             val pkg = context.packageName
                             val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                                 data = Uri.parse("package:$pkg")
                             }
+                            var launched = false
                             try {
                                 batteryOptLauncher.launch(direct)
+                                launched = true
                             } catch (_: ActivityNotFoundException) {
+                            } catch (_: SecurityException) { }
+                            if (!launched) {
                                 try {
                                     batteryOptLauncher.launch(
                                         Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
                                     )
-                                } catch (_: ActivityNotFoundException) { }
+                                } catch (_: ActivityNotFoundException) {
+                                } catch (_: SecurityException) { }
                             }
                         },
                     )
