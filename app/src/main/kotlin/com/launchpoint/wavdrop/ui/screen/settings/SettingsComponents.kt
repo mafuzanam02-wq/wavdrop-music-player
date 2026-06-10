@@ -4,8 +4,8 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
@@ -30,9 +31,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+
+// ── Constants ──────────────────────────────────────────────────────────────
+private val ROW_HORIZONTAL_PADDING = 16.dp
+private val ROW_VERTICAL_PADDING   = 14.dp
+private const val SUBTITLE_ALPHA   = 0.65f
+
+// ── Section structure ──────────────────────────────────────────────────────
 
 @Composable
 internal fun SectionHeader(title: String) {
@@ -42,18 +49,20 @@ internal fun SectionHeader(title: String) {
         color    = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp),
+            .padding(start = ROW_HORIZONTAL_PADDING, end = ROW_HORIZONTAL_PADDING, top = 24.dp, bottom = 6.dp),
     )
 }
 
 @Composable
 internal fun SectionDivider() {
     HorizontalDivider(
-        modifier  = Modifier.padding(horizontal = 16.dp),
-        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+        modifier  = Modifier.padding(horizontal = ROW_HORIZONTAL_PADDING),
+        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
         thickness = 0.5.dp,
     )
 }
+
+// ── Row types ──────────────────────────────────────────────────────────────
 
 @Composable
 internal fun ClickableSettingsRow(
@@ -68,7 +77,7 @@ internal fun ClickableSettingsRow(
             .fillMaxWidth()
             .alpha(if (enabled) 1f else 0.55f)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -81,13 +90,13 @@ internal fun ClickableSettingsRow(
             Text(
                 text  = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
             )
         }
         Icon(
             imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
-            tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             modifier           = Modifier.size(20.dp),
         )
     }
@@ -107,7 +116,7 @@ internal fun ToggleSettingsRow(
             .fillMaxWidth()
             .alpha(if (enabled) 1f else 0.45f)
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -120,7 +129,7 @@ internal fun ToggleSettingsRow(
             Text(
                 text  = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
             )
         }
         Switch(
@@ -132,6 +141,45 @@ internal fun ToggleSettingsRow(
     }
 }
 
+// Radio-style row: title tints primary when selected for clear selection state.
+@Composable
+internal fun ScanModeRow(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp),
+        ) {
+            Text(
+                text  = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text  = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
+            )
+        }
+    }
+}
+
+// Radio-style row for single-label choices (theme, icon). Name tints primary when selected.
 @Composable
 internal fun IconChoiceRow(
     name: String,
@@ -144,14 +192,14 @@ internal fun IconChoiceRow(
         modifier          = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onClick)
         if (swatchColor != null) {
             Box(
                 modifier = Modifier
-                    .padding(start = 4.dp)
+                    .padding(start = 8.dp)
                     .size(18.dp)
                     .background(swatchColor, CircleShape)
                     .border(
@@ -165,47 +213,54 @@ internal fun IconChoiceRow(
         Text(
             text     = name,
             style    = MaterialTheme.typography.bodyLarge,
-            color    = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 4.dp),
+            color    = if (selected) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 8.dp),
         )
     }
 }
 
+// ── Informational rows ─────────────────────────────────────────────────────
+
+// Informational message below a section header, or inline status/error.
 @Composable
-internal fun ScanModeRow(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    onClick: () -> Unit,
+internal fun SettingsMessageRow(
+    message: String,
+    isError: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    Text(
+        text     = message,
+        style    = MaterialTheme.typography.bodySmall,
+        color    = if (isError) MaterialTheme.colorScheme.error
+                   else MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 4.dp),
-        ) {
-            Text(
-                text  = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text  = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-        }
-    }
+            .padding(horizontal = ROW_HORIZONTAL_PADDING)
+            .padding(top = 4.dp, bottom = 12.dp),
+    )
 }
+
+// Inline status feedback after an export / backup action.
+@Composable
+internal fun ExportStatusRow(
+    message: String,
+    isError: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text     = message,
+        style    = MaterialTheme.typography.bodySmall,
+        color    = if (isError) MaterialTheme.colorScheme.error
+                   else MaterialTheme.colorScheme.primary,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = ROW_HORIZONTAL_PADDING)
+            .padding(top = 4.dp, bottom = 12.dp),
+    )
+}
+
+// ── Specialised rows ───────────────────────────────────────────────────────
 
 @Composable
 internal fun MinimumDurationRow(
@@ -217,7 +272,7 @@ internal fun MinimumDurationRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING),
     ) {
         Text(
             text  = "Ignore audio shorter than $seconds seconds",
@@ -225,11 +280,11 @@ internal fun MinimumDurationRow(
             color = MaterialTheme.colorScheme.onSurface,
         )
         Slider(
-            value                = seconds.toFloat(),
-            onValueChange        = { onSecondsChange(it.roundToInt().coerceIn(1, 60)) },
+            value                 = seconds.toFloat(),
+            onValueChange         = { onSecondsChange(it.roundToInt().coerceIn(1, 60)) },
             onValueChangeFinished = onChangeFinished,
-            valueRange           = 1f..60f,
-            steps                = 58,
+            valueRange            = 1f..60f,
+            steps                 = 58,
         )
         Row(
             modifier              = Modifier.fillMaxWidth(),
@@ -238,12 +293,12 @@ internal fun MinimumDurationRow(
             Text(
                 text  = "1 s",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
             )
             Text(
                 text  = "60 s",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
             )
         }
     }
@@ -265,7 +320,7 @@ internal fun SelectedFolderRow(
     Row(
         modifier          = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = ROW_HORIZONTAL_PADDING, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -278,53 +333,17 @@ internal fun SelectedFolderRow(
             Text(
                 text  = decodedUri,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
             )
         }
         IconButton(onClick = onRemove) {
             Icon(
                 imageVector        = Icons.Filled.Delete,
                 contentDescription = "Remove selected folder",
-                tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
             )
         }
     }
-}
-
-@Composable
-internal fun SettingsMessageRow(
-    message: String,
-    isError: Boolean = false,
-    modifier: Modifier = Modifier,
-) {
-    Text(
-        text     = message,
-        style    = MaterialTheme.typography.bodySmall,
-        color    = if (isError) MaterialTheme.colorScheme.error
-                   else MaterialTheme.colorScheme.primary,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
-    )
-}
-
-@Composable
-internal fun ExportStatusRow(
-    message: String,
-    isError: Boolean = false,
-    modifier: Modifier = Modifier,
-) {
-    Text(
-        text     = message,
-        style    = MaterialTheme.typography.bodySmall,
-        color    = if (isError) MaterialTheme.colorScheme.error
-                   else MaterialTheme.colorScheme.primary,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
-    )
 }
 
 @Composable
@@ -336,13 +355,13 @@ internal fun AboutInfoRow(
     Row(
         modifier          = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text     = label,
             style    = MaterialTheme.typography.bodyMedium,
-            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
             modifier = Modifier.weight(1f),
         )
         Text(
@@ -363,7 +382,7 @@ internal fun DisabledSettingsRow(
         modifier = modifier
             .fillMaxWidth()
             .alpha(0.45f)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = ROW_HORIZONTAL_PADDING, vertical = ROW_VERTICAL_PADDING),
     ) {
         Text(
             text  = title,
@@ -374,7 +393,7 @@ internal fun DisabledSettingsRow(
         Text(
             text  = subtitle,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
         )
     }
 }
