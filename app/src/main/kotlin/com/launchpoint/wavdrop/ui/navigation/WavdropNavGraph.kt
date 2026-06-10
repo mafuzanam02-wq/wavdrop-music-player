@@ -23,7 +23,13 @@ import androidx.navigation.navArgument
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumDetailsScreen
 import com.launchpoint.wavdrop.ui.components.ChangelogDialog
+import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
+import com.launchpoint.wavdrop.ui.components.LocalNowPlayingBackground
+import com.launchpoint.wavdrop.ui.components.LocalShowAlbumInSongRows
+import com.launchpoint.wavdrop.ui.components.LocalShowQueueCount
+import com.launchpoint.wavdrop.ui.components.LocalShowRemainingTime
+import com.launchpoint.wavdrop.ui.components.LocalShowSongThumbnails
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumsScreen
 import com.launchpoint.wavdrop.ui.screen.artists.ArtistDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.artists.ArtistsScreen
@@ -131,8 +137,14 @@ fun WavdropNavGraph(
 ) {
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
     val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
-    val compactMode by viewModel.compactMode.collectAsStateWithLifecycle()
-    val showChangelog by viewModel.showChangelog.collectAsStateWithLifecycle()
+    val compactMode          by viewModel.compactMode.collectAsStateWithLifecycle()
+    val showSongThumbnails   by viewModel.showSongThumbnails.collectAsStateWithLifecycle()
+    val showAlbumInSongRows  by viewModel.showAlbumInSongRows.collectAsStateWithLifecycle()
+    val artworkCornerStyle   by viewModel.artworkCornerStyle.collectAsStateWithLifecycle()
+    val nowPlayingBackground by viewModel.nowPlayingBackground.collectAsStateWithLifecycle()
+    val showQueueCount       by viewModel.showQueueCount.collectAsStateWithLifecycle()
+    val showRemainingTime    by viewModel.showRemainingTime.collectAsStateWithLifecycle()
+    val showChangelog        by viewModel.showChangelog.collectAsStateWithLifecycle()
     var startRoute by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(startupDestination, hasCompletedOnboarding) {
@@ -151,7 +163,15 @@ fun WavdropNavGraph(
         return
     }
 
-    CompositionLocalProvider(LocalCompactMode provides compactMode) {
+    CompositionLocalProvider(
+        LocalCompactMode         provides compactMode,
+        LocalShowSongThumbnails  provides showSongThumbnails,
+        LocalShowAlbumInSongRows provides showAlbumInSongRows,
+        LocalArtworkCornerStyle  provides artworkCornerStyle,
+        LocalNowPlayingBackground provides nowPlayingBackground,
+        LocalShowQueueCount      provides showQueueCount,
+        LocalShowRemainingTime   provides showRemainingTime,
+    ) {
         // Fire auto-backup check once per session, after onboarding is confirmed complete.
         LaunchedEffect(Unit) {
             if (hasCompletedOnboarding == true) {

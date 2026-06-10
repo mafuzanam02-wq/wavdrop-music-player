@@ -68,8 +68,11 @@ import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
+import com.launchpoint.wavdrop.ui.components.LocalShowQueueCount
 import com.launchpoint.wavdrop.ui.components.shareSong
+import com.launchpoint.wavdrop.ui.components.toShape
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -919,7 +922,7 @@ fun QueueHandle(
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            text = if (upNextCount > 0) "Up Next · $upNextCount" else "Up Next",
+            text = if (upNextCount > 0 && LocalShowQueueCount.current) "Up Next · $upNextCount" else "Up Next",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )

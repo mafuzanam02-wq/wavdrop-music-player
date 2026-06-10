@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
+import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -51,6 +53,54 @@ class WavdropNavViewModel @Inject constructor(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = false,
+            )
+
+    val showSongThumbnails: StateFlow<Boolean> =
+        appSettingsRepository.showSongThumbnails
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = true,
+            )
+
+    val showAlbumInSongRows: StateFlow<Boolean> =
+        appSettingsRepository.showAlbumInSongRows
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = false,
+            )
+
+    val artworkCornerStyle: StateFlow<ArtworkCornerStyle> =
+        appSettingsRepository.artworkCornerStyle
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = ArtworkCornerStyle.ROUNDED,
+            )
+
+    val nowPlayingBackground: StateFlow<NowPlayingBackground> =
+        appSettingsRepository.nowPlayingBackground
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = NowPlayingBackground.ARTWORK,
+            )
+
+    val showQueueCount: StateFlow<Boolean> =
+        appSettingsRepository.showQueueCount
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = true,
+            )
+
+    val showRemainingTime: StateFlow<Boolean> =
+        appSettingsRepository.showRemainingTime
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = true,
             )
 
     // Show onboarding when lastCompletedOnboardingVersion < CURRENT_ONBOARDING_VERSION.

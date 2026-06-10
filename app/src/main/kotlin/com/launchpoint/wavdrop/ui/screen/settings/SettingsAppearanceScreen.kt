@@ -25,6 +25,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
+import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
+import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.ui.theme.AmberGoldPrimary
 import com.launchpoint.wavdrop.ui.theme.CleanPurplePrimary
@@ -43,10 +45,16 @@ fun SettingsAppearanceScreen(
     onHomeCustomizationClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val appIconChoice    by viewModel.appIconChoice.collectAsStateWithLifecycle()
-    val themeMode        by viewModel.themeMode.collectAsStateWithLifecycle()
-    val accentColor      by viewModel.accentColor.collectAsStateWithLifecycle()
-    val compactMode      by viewModel.compactMode.collectAsStateWithLifecycle()
+    val appIconChoice       by viewModel.appIconChoice.collectAsStateWithLifecycle()
+    val themeMode           by viewModel.themeMode.collectAsStateWithLifecycle()
+    val accentColor         by viewModel.accentColor.collectAsStateWithLifecycle()
+    val compactMode         by viewModel.compactMode.collectAsStateWithLifecycle()
+    val artworkCornerStyle  by viewModel.artworkCornerStyle.collectAsStateWithLifecycle()
+    val showSongThumbnails  by viewModel.showSongThumbnails.collectAsStateWithLifecycle()
+    val showAlbumInSongRows by viewModel.showAlbumInSongRows.collectAsStateWithLifecycle()
+    val nowPlayingBackground by viewModel.nowPlayingBackground.collectAsStateWithLifecycle()
+    val showQueueCount      by viewModel.showQueueCount.collectAsStateWithLifecycle()
+    val showRemainingTime   by viewModel.showRemainingTime.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -97,6 +105,72 @@ fun SettingsAppearanceScreen(
                     subtitle = "Use denser rows in library lists and queue views.",
                     checked = compactMode,
                     onCheckedChange = viewModel::setCompactMode,
+                )
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Song List") }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show song thumbnails",
+                    subtitle        = "Display album artwork next to each song in lists.",
+                    checked         = showSongThumbnails,
+                    onCheckedChange = viewModel::setShowSongThumbnails,
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show album name",
+                    subtitle        = "Show the album name below the artist in song rows.",
+                    checked         = showAlbumInSongRows,
+                    onCheckedChange = viewModel::setShowAlbumInSongRows,
+                )
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Artwork Corner Style") }
+            item {
+                SettingsMessageRow(
+                    message = "Controls the corner rounding of album artwork throughout the app.",
+                )
+            }
+            ArtworkCornerStyle.entries.forEach { style ->
+                item {
+                    ScanModeRow(
+                        title    = style.displayName,
+                        subtitle = style.description,
+                        selected = artworkCornerStyle == style,
+                        onClick  = { viewModel.setArtworkCornerStyle(style) },
+                    )
+                }
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Now Playing Display") }
+            NowPlayingBackground.entries.forEach { bg ->
+                item {
+                    ScanModeRow(
+                        title    = bg.displayName,
+                        subtitle = bg.description,
+                        selected = nowPlayingBackground == bg,
+                        onClick  = { viewModel.setNowPlayingBackground(bg) },
+                    )
+                }
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show queue count",
+                    subtitle        = "Display the number of upcoming tracks on the queue handle.",
+                    checked         = showQueueCount,
+                    onCheckedChange = viewModel::setShowQueueCount,
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show remaining time",
+                    subtitle        = "Display time remaining instead of total track duration.",
+                    checked         = showRemainingTime,
+                    onCheckedChange = viewModel::setShowRemainingTime,
                 )
             }
             item { SectionDivider() }

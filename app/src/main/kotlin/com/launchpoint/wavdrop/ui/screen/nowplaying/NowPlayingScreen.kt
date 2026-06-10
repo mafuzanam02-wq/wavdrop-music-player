@@ -100,8 +100,13 @@ import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
+import com.launchpoint.wavdrop.ui.components.LocalNowPlayingBackground
+import com.launchpoint.wavdrop.ui.components.LocalShowRemainingTime
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
+import com.launchpoint.wavdrop.ui.components.toShape
+import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -1060,12 +1065,19 @@ private fun ArtworkWithLyricsOverlay(
     compactLyricsOverlay: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val context          = LocalContext.current
-    val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
-    val currentToggleLyrics by rememberUpdatedState(onToggleLyrics)
-    val currentPrevious     by rememberUpdatedState(onPrevious)
-    val currentNext         by rememberUpdatedState(onNext)
-    val currentEdit         by rememberUpdatedState(onEditLyrics)
+    val context              = LocalContext.current
+    val swipeThresholdPx     = with(LocalDensity.current) { 80.dp.toPx() }
+    val currentToggleLyrics  by rememberUpdatedState(onToggleLyrics)
+    val currentPrevious      by rememberUpdatedState(onPrevious)
+    val currentNext          by rememberUpdatedState(onNext)
+    val currentEdit          by rememberUpdatedState(onEditLyrics)
+    val artworkShape         = LocalArtworkCornerStyle.current.toShape()
+    val npBackground         = LocalNowPlayingBackground.current
+    val effectiveArtworkUri  = if (npBackground == NowPlayingBackground.ARTWORK) {
+        ArtworkResolver.albumArtworkUri(song.albumId)
+    } else {
+        null
+    }
 
     Box(
         modifier = modifier
@@ -1101,9 +1113,10 @@ private fun ArtworkWithLyricsOverlay(
             },
     ) {
         ArtworkImage(
-            artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+            artworkUri = effectiveArtworkUri,
             contentDescription = "Album artwork for ${song.album}",
             placeholderIcon = Icons.Default.MusicNote,
+            shape = artworkShape,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -1252,6 +1265,7 @@ private fun SeekBar(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val showRemaining = LocalShowRemainingTime.current
     var isDragging by remember { mutableStateOf(false) }
     var dragPositionMs by remember { mutableStateOf(0L) }
 
@@ -1350,7 +1364,11 @@ private fun SeekBar(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
             )
             Text(
-                text = if (safeDurationMs > 0) "-${formatMs(remainingMs)}" else "--:--",
+                text = when {
+                    safeDurationMs <= 0 -> "--:--"
+                    showRemaining -> "-${formatMs(remainingMs)}"
+                    else -> formatMs(safeDurationMs)
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
             )

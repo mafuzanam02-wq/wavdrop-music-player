@@ -218,6 +218,90 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val artworkCornerStyle: Flow<ArtworkCornerStyle> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[ARTWORK_CORNER_STYLE_KEY]
+                ?.let { runCatching { ArtworkCornerStyle.valueOf(it) }.getOrNull() }
+                ?: ArtworkCornerStyle.ROUNDED
+        }
+
+    suspend fun setArtworkCornerStyle(style: ArtworkCornerStyle) {
+        dataStore.edit { preferences ->
+            preferences[ARTWORK_CORNER_STYLE_KEY] = style.name
+        }
+    }
+
+    val showSongThumbnails: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[SHOW_SONG_THUMBNAILS_KEY] ?: true }
+
+    suspend fun setShowSongThumbnails(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[SHOW_SONG_THUMBNAILS_KEY] = enabled
+        }
+    }
+
+    val showAlbumInSongRows: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[SHOW_ALBUM_IN_SONG_ROWS_KEY] ?: false }
+
+    suspend fun setShowAlbumInSongRows(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[SHOW_ALBUM_IN_SONG_ROWS_KEY] = enabled
+        }
+    }
+
+    val nowPlayingBackground: Flow<NowPlayingBackground> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[NOW_PLAYING_BACKGROUND_KEY]
+                ?.let { runCatching { NowPlayingBackground.valueOf(it) }.getOrNull() }
+                ?: NowPlayingBackground.ARTWORK
+        }
+
+    suspend fun setNowPlayingBackground(bg: NowPlayingBackground) {
+        dataStore.edit { preferences ->
+            preferences[NOW_PLAYING_BACKGROUND_KEY] = bg.name
+        }
+    }
+
+    val showQueueCount: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[SHOW_QUEUE_COUNT_KEY] ?: true }
+
+    suspend fun setShowQueueCount(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[SHOW_QUEUE_COUNT_KEY] = enabled
+        }
+    }
+
+    val nowPlayingTimeDisplayMode: Flow<NowPlayingTimeDisplayMode> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[NOW_PLAYING_TIME_DISPLAY_MODE_KEY]
+                ?.let { runCatching { NowPlayingTimeDisplayMode.valueOf(it) }.getOrNull() }
+                ?: NowPlayingTimeDisplayMode.DURATION
+        }
+
+    suspend fun setNowPlayingTimeDisplayMode(mode: NowPlayingTimeDisplayMode) {
+        dataStore.edit { preferences ->
+            preferences[NOW_PLAYING_TIME_DISPLAY_MODE_KEY] = mode.name
+        }
+    }
+
     val notificationControlsSetting: Flow<NotificationControlsSetting> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -274,5 +358,11 @@ class AppSettingsRepository @Inject constructor(
         val BACKUP_FILE_MODE_KEY                    = stringPreferencesKey("backup_file_mode")
         val NOTIFICATION_CONTROLS_KEY               = stringPreferencesKey("notification_controls")
         val LAST_SEEN_CHANGELOG_VERSION_KEY         = intPreferencesKey("last_seen_changelog_version")
+        val ARTWORK_CORNER_STYLE_KEY                = stringPreferencesKey("artwork_corner_style")
+        val SHOW_SONG_THUMBNAILS_KEY                = booleanPreferencesKey("show_song_thumbnails")
+        val SHOW_ALBUM_IN_SONG_ROWS_KEY             = booleanPreferencesKey("show_album_in_song_rows")
+        val NOW_PLAYING_BACKGROUND_KEY              = stringPreferencesKey("now_playing_background")
+        val SHOW_QUEUE_COUNT_KEY                    = booleanPreferencesKey("show_queue_count")
+        val NOW_PLAYING_TIME_DISPLAY_MODE_KEY       = stringPreferencesKey("now_playing_time_display_mode")
     }
 }

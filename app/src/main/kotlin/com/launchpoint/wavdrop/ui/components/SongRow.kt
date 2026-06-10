@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -47,9 +48,12 @@ fun SongRow(
 ) {
     val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
-    val compact = LocalCompactMode.current
-    val verticalPadding = if (compact) 8.dp else 12.dp
-    val artworkSize = if (compact) 44.dp else 48.dp
+    val compact          = LocalCompactMode.current
+    val showThumbnail    = LocalShowSongThumbnails.current
+    val showAlbum        = LocalShowAlbumInSongRows.current
+    val cornerStyle      = LocalArtworkCornerStyle.current
+    val verticalPadding  = if (compact) 8.dp else 12.dp
+    val artworkSize      = if (compact) 44.dp else 48.dp
 
     Row(
         modifier = modifier
@@ -69,12 +73,15 @@ fun SongRow(
                 .background(accentColor),
         )
         Spacer(Modifier.width(12.dp))
-        ArtworkImage(
-            artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
-            contentDescription = "Album artwork for ${song.album}",
-            placeholderIcon = Icons.Default.MusicNote,
-            modifier = Modifier.size(artworkSize),
-        )
+        if (showThumbnail) {
+            ArtworkImage(
+                artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+                contentDescription = "Album artwork for ${song.album}",
+                placeholderIcon = Icons.Default.MusicNote,
+                shape = cornerStyle.toShape(),
+                modifier = Modifier.size(artworkSize),
+            )
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -128,6 +135,15 @@ fun SongRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            if (showAlbum && song.album.isNotBlank()) {
+                Text(
+                    text     = song.album,
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

@@ -8,11 +8,13 @@ import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
+import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.ThemeMode
@@ -148,6 +150,48 @@ class SettingsViewModel @Inject constructor(
             initialValue = false,
         )
 
+    val artworkCornerStyle: StateFlow<ArtworkCornerStyle> =
+        appSettingsRepository.artworkCornerStyle.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ArtworkCornerStyle.ROUNDED,
+        )
+
+    val showSongThumbnails: StateFlow<Boolean> =
+        appSettingsRepository.showSongThumbnails.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true,
+        )
+
+    val showAlbumInSongRows: StateFlow<Boolean> =
+        appSettingsRepository.showAlbumInSongRows.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
+    val nowPlayingBackground: StateFlow<NowPlayingBackground> =
+        appSettingsRepository.nowPlayingBackground.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = NowPlayingBackground.ARTWORK,
+        )
+
+    val showQueueCount: StateFlow<Boolean> =
+        appSettingsRepository.showQueueCount.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true,
+        )
+
+    val showRemainingTime: StateFlow<Boolean> =
+        appSettingsRepository.showRemainingTime.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true,
+        )
+
     private val _libraryScanUiState =
         MutableStateFlow<LibraryScanUiState>(LibraryScanUiState.Idle)
     val libraryScanUiState: StateFlow<LibraryScanUiState> =
@@ -274,6 +318,30 @@ class SettingsViewModel @Inject constructor(
 
     fun setCompactMode(enabled: Boolean) {
         viewModelScope.launch { appSettingsRepository.setCompactMode(enabled) }
+    }
+
+    fun setArtworkCornerStyle(style: ArtworkCornerStyle) {
+        viewModelScope.launch { appSettingsRepository.setArtworkCornerStyle(style) }
+    }
+
+    fun setShowSongThumbnails(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setShowSongThumbnails(enabled) }
+    }
+
+    fun setShowAlbumInSongRows(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setShowAlbumInSongRows(enabled) }
+    }
+
+    fun setNowPlayingBackground(bg: NowPlayingBackground) {
+        viewModelScope.launch { appSettingsRepository.setNowPlayingBackground(bg) }
+    }
+
+    fun setShowQueueCount(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setShowQueueCount(enabled) }
+    }
+
+    fun setShowRemainingTime(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setShowRemainingTime(enabled) }
     }
 
     fun setAppIcon(choice: AppIconChoice) {
