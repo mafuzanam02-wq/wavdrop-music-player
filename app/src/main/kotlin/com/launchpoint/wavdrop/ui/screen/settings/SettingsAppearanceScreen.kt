@@ -28,6 +28,7 @@ import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.ThemeMode
+
 import com.launchpoint.wavdrop.ui.theme.AmberGoldPrimary
 import com.launchpoint.wavdrop.ui.theme.CleanPurplePrimary
 import com.launchpoint.wavdrop.ui.theme.CrimsonRedPrimary
@@ -54,7 +55,6 @@ fun SettingsAppearanceScreen(
     val showAlbumInSongRows by viewModel.showAlbumInSongRows.collectAsStateWithLifecycle()
     val nowPlayingBackground by viewModel.nowPlayingBackground.collectAsStateWithLifecycle()
     val showQueueCount      by viewModel.showQueueCount.collectAsStateWithLifecycle()
-    val showRemainingTime   by viewModel.showRemainingTime.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -163,14 +163,6 @@ fun SettingsAppearanceScreen(
                     subtitle        = "Display the number of upcoming tracks on the queue handle.",
                     checked         = showQueueCount,
                     onCheckedChange = viewModel::setShowQueueCount,
-                )
-            }
-            item {
-                ToggleSettingsRow(
-                    title           = "Show remaining time",
-                    subtitle        = "Display time remaining instead of total track duration.",
-                    checked         = showRemainingTime,
-                    onCheckedChange = viewModel::setShowRemainingTime,
                 )
             }
             item { SectionDivider() }

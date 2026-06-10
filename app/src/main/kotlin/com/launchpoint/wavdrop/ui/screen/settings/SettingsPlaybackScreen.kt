@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
+import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -45,8 +46,10 @@ fun SettingsPlaybackScreen(
     val resumeBehavior              by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
     val sleepTimerState             by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     val notificationControlsSetting by viewModel.notificationControlsSetting.collectAsStateWithLifecycle()
-    var showStartupDialog  by remember { mutableStateOf(false) }
-    var showSleepTimerDialog by remember { mutableStateOf(false) }
+    val timeDisplayMode             by viewModel.nowPlayingTimeDisplayMode.collectAsStateWithLifecycle()
+    var showStartupDialog       by remember { mutableStateOf(false) }
+    var showSleepTimerDialog    by remember { mutableStateOf(false) }
+    var showTimeDisplayDialog   by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -109,6 +112,16 @@ fun SettingsPlaybackScreen(
             }
             item { SectionDivider() }
 
+            item { SectionHeader("Display") }
+            item {
+                ClickableSettingsRow(
+                    title    = "Time display",
+                    subtitle = timeDisplayMode.displayName,
+                    onClick  = { showTimeDisplayDialog = true },
+                )
+            }
+            item { SectionDivider() }
+
             item { SectionHeader("Sleep Timer") }
             item {
                 ClickableSettingsRow(
@@ -137,6 +150,16 @@ fun SettingsPlaybackScreen(
         }
     }
 
+    if (showTimeDisplayDialog) {
+        TimeDisplayDialog(
+            selected  = timeDisplayMode,
+            onSelect  = { mode ->
+                viewModel.setNowPlayingTimeDisplayMode(mode)
+                showTimeDisplayDialog = false
+            },
+            onDismiss = { showTimeDisplayDialog = false },
+        )
+    }
     if (showStartupDialog) {
         StartupDestinationDialog(
             selected  = startupDestination,
@@ -184,6 +207,45 @@ private fun StartupDestinationDialog(
                         )
                         Text(
                             text     = destination.displayName,
+                            style    = MaterialTheme.typography.bodyLarge,
+                            color    = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun TimeDisplayDialog(
+    selected: NowPlayingTimeDisplayMode,
+    onSelect: (NowPlayingTimeDisplayMode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title            = { Text("Time display") },
+        text             = {
+            Column {
+                NowPlayingTimeDisplayMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(mode) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = mode == selected,
+                            onClick  = { onSelect(mode) },
+                        )
+                        Text(
+                            text     = mode.displayName,
                             style    = MaterialTheme.typography.bodyLarge,
                             color    = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.padding(start = 8.dp),

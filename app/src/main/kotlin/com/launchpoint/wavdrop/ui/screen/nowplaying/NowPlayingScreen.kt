@@ -102,8 +102,9 @@ import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
 import com.launchpoint.wavdrop.ui.components.LocalNowPlayingBackground
-import com.launchpoint.wavdrop.ui.components.LocalShowRemainingTime
+import com.launchpoint.wavdrop.ui.components.LocalNowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
+import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.toShape
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
@@ -1265,7 +1266,7 @@ private fun SeekBar(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val showRemaining = LocalShowRemainingTime.current
+    val timeDisplayMode = LocalNowPlayingTimeDisplayMode.current
     var isDragging by remember { mutableStateOf(false) }
     var dragPositionMs by remember { mutableStateOf(0L) }
 
@@ -1366,7 +1367,7 @@ private fun SeekBar(
             Text(
                 text = when {
                     safeDurationMs <= 0 -> "--:--"
-                    showRemaining -> "-${formatMs(remainingMs)}"
+                    timeDisplayMode == NowPlayingTimeDisplayMode.REMAINING -> "-${formatMs(remainingMs)}"
                     else -> formatMs(safeDurationMs)
                 },
                 style = MaterialTheme.typography.labelSmall,

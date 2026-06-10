@@ -10,6 +10,7 @@ import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
+import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
@@ -185,11 +186,11 @@ class SettingsViewModel @Inject constructor(
             initialValue = true,
         )
 
-    val showRemainingTime: StateFlow<Boolean> =
-        appSettingsRepository.showRemainingTime.stateIn(
+    val nowPlayingTimeDisplayMode: StateFlow<NowPlayingTimeDisplayMode> =
+        appSettingsRepository.nowPlayingTimeDisplayMode.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = true,
+            initialValue = NowPlayingTimeDisplayMode.DURATION,
         )
 
     private val _libraryScanUiState =
@@ -340,8 +341,8 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { appSettingsRepository.setShowQueueCount(enabled) }
     }
 
-    fun setShowRemainingTime(enabled: Boolean) {
-        viewModelScope.launch { appSettingsRepository.setShowRemainingTime(enabled) }
+    fun setNowPlayingTimeDisplayMode(mode: NowPlayingTimeDisplayMode) {
+        viewModelScope.launch { appSettingsRepository.setNowPlayingTimeDisplayMode(mode) }
     }
 
     fun setAppIcon(choice: AppIconChoice) {

@@ -7,6 +7,7 @@ import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
+import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -95,12 +96,12 @@ class WavdropNavViewModel @Inject constructor(
                 initialValue = true,
             )
 
-    val showRemainingTime: StateFlow<Boolean> =
-        appSettingsRepository.showRemainingTime
+    val nowPlayingTimeDisplayMode: StateFlow<NowPlayingTimeDisplayMode> =
+        appSettingsRepository.nowPlayingTimeDisplayMode
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
-                initialValue = true,
+                initialValue = NowPlayingTimeDisplayMode.DURATION,
             )
 
     // Show onboarding when lastCompletedOnboardingVersion < CURRENT_ONBOARDING_VERSION.

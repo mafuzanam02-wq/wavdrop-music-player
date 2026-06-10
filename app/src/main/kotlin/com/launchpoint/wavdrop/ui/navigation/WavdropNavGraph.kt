@@ -27,8 +27,8 @@ import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.LocalNowPlayingBackground
 import com.launchpoint.wavdrop.ui.components.LocalShowAlbumInSongRows
+import com.launchpoint.wavdrop.ui.components.LocalNowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.ui.components.LocalShowQueueCount
-import com.launchpoint.wavdrop.ui.components.LocalShowRemainingTime
 import com.launchpoint.wavdrop.ui.components.LocalShowSongThumbnails
 import com.launchpoint.wavdrop.ui.screen.albums.AlbumsScreen
 import com.launchpoint.wavdrop.ui.screen.artists.ArtistDetailsScreen
@@ -142,8 +142,8 @@ fun WavdropNavGraph(
     val showAlbumInSongRows  by viewModel.showAlbumInSongRows.collectAsStateWithLifecycle()
     val artworkCornerStyle   by viewModel.artworkCornerStyle.collectAsStateWithLifecycle()
     val nowPlayingBackground by viewModel.nowPlayingBackground.collectAsStateWithLifecycle()
-    val showQueueCount       by viewModel.showQueueCount.collectAsStateWithLifecycle()
-    val showRemainingTime    by viewModel.showRemainingTime.collectAsStateWithLifecycle()
+    val showQueueCount            by viewModel.showQueueCount.collectAsStateWithLifecycle()
+    val nowPlayingTimeDisplayMode by viewModel.nowPlayingTimeDisplayMode.collectAsStateWithLifecycle()
     val showChangelog        by viewModel.showChangelog.collectAsStateWithLifecycle()
     var startRoute by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -169,8 +169,8 @@ fun WavdropNavGraph(
         LocalShowAlbumInSongRows provides showAlbumInSongRows,
         LocalArtworkCornerStyle  provides artworkCornerStyle,
         LocalNowPlayingBackground provides nowPlayingBackground,
-        LocalShowQueueCount      provides showQueueCount,
-        LocalShowRemainingTime   provides showRemainingTime,
+        LocalShowQueueCount           provides showQueueCount,
+        LocalNowPlayingTimeDisplayMode provides nowPlayingTimeDisplayMode,
     ) {
         // Fire auto-backup check once per session, after onboarding is confirmed complete.
         LaunchedEffect(Unit) {
