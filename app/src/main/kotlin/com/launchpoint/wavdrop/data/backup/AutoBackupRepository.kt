@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.data.backup
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
@@ -101,24 +102,68 @@ class AutoBackupRepository @Inject constructor(
     /**
      * Writes the current backup JSON into [fileName] inside [folder].
      *
-     * Uses [find-or-create + openOutputStream("wt")] so that an existing file is
-     * overwritten in place rather than deleted and recreated. This prevents Android
-     * from appending " (1)" to the filename when the provider refuses deletion.
+     * Uses a [listFiles()] scan instead of [findFile()] because [DocumentFile.findFile]
+     * is unreliable on many SAF providers — it can return null even when the file exists,
+     * causing [createFile] to be called again. The provider then appends " (1)" to the new
+     * filename, creating duplicates. The [listFiles()] scan bypasses the provider's
+     * name-lookup path and directly inspects the directory listing.
+     *
+     * Writes via [openOutputStream] with mode "wt" (truncate-and-write). Falls back to
+     * mode "w" if "wt" is not supported by the provider.
      */
     private suspend fun writeJsonToFolder(folder: DocumentFile, fileName: String): Boolean {
-        val target = folder.findFile(fileName)
-            ?: folder.createFile("application/json", fileName)
-            ?: return false
+        val backupFileMode = appSettingsRepository.backupFileMode.first()
+        Log.d(TAG, "writeJsonToFolder: mode=$backupFileMode fileName=$fileName folderUri=${folder.uri}")
+
+        val existing = findExistingChildByName(folder, fileName)
+        Log.d(TAG, "writeJsonToFolder: existingFile=${existing?.uri}")
+
+        val target = if (existing != null) {
+            existing
+        } else {
+            Log.d(TAG, "writeJsonToFolder: file not found — calling createFile")
+            folder.createFile("application/json", fileName) ?: return false
+        }
+        Log.d(TAG, "writeJsonToFolder: targetUri=${target.uri}")
 
         val json = backupRepository.buildBackupJson()
-        context.contentResolver.openOutputStream(target.uri, "wt")?.use { output ->
-            output.write(json.toByteArray(Charsets.UTF_8))
-        } ?: return false
 
+        val wrote = tryWriteStream(target, json, "wt")
+            ?: tryWriteStream(target, json, "w")
+
+        if (wrote == null) {
+            Log.e(TAG, "writeJsonToFolder: openOutputStream failed with both 'wt' and 'w'")
+            return false
+        }
+
+        Log.d(TAG, "writeJsonToFolder: write succeeded")
         return true
     }
 
+    /**
+     * Scans [folder]'s direct children via [DocumentFile.listFiles] and returns the
+     * first child whose [DocumentFile.getName] matches [name] exactly, or null if not found.
+     *
+     * This is more reliable than [DocumentFile.findFile], which delegates to the SAF
+     * provider's COLUMN_DISPLAY_NAME query — a query that some providers answer incorrectly.
+     */
+    private fun findExistingChildByName(folder: DocumentFile, name: String): DocumentFile? =
+        folder.listFiles().firstOrNull { it.name == name }
+
+    /**
+     * Attempts to open an output stream for [target] using [mode] and write [json] to it.
+     * Returns [Unit] on success, or null if [openOutputStream] returns null or throws.
+     */
+    private fun tryWriteStream(target: DocumentFile, json: String, mode: String): Unit? {
+        return runCatching {
+            context.contentResolver.openOutputStream(target.uri, mode)?.use { output ->
+                output.write(json.toByteArray(Charsets.UTF_8))
+            }
+        }.getOrNull()
+    }
+
     private companion object {
+        const val TAG = "WavdropBackup"
         const val FOLDER_UNAVAILABLE_MSG =
             "Automatic backup couldn't access the selected folder. Choose a backup folder again."
     }
