@@ -1,6 +1,9 @@
 package com.launchpoint.wavdrop.ui.widget
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -20,7 +23,9 @@ import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
 import androidx.glance.layout.Column
+import androidx.glance.layout.ContentScale
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
@@ -35,6 +40,7 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.launchpoint.wavdrop.MainActivity
 import com.launchpoint.wavdrop.R
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.playback.PlayerController
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -63,8 +69,11 @@ private fun playerController(context: Context): PlayerController =
 // premium dark look with the Wavdrop violet accent regardless of system theme.
 private val WidgetBackground = ColorProvider(Color(0xFF16131F))
 private val WidgetAccent     = ColorProvider(Color(0xFF7C4DFF))
+private val WidgetIdleCircle = ColorProvider(Color(0xFF2A2536))
 private val WidgetOnSurface  = ColorProvider(Color(0xFFEDEAF4))
 private val WidgetSubtle     = ColorProvider(Color(0xFFA9A3B8))
+
+private const val ARTWORK_TARGET_PX = 256
 
 class WavdropWidget : GlanceAppWidget() {
 
@@ -79,10 +88,42 @@ class WavdropWidget : GlanceAppWidget() {
         val artist    = state?.song?.artist?.takeIf { it.isNotBlank() } ?: "Ready to play"
         val isPlaying = state?.isPlaying == true
 
+        // Decode artwork in-process (we hold the audio permission; the launcher
+        // does not), downscaled so the RemoteViews bitmap stays small.
+        val artwork = withContext(Dispatchers.IO) {
+            loadAlbumArtwork(context, state?.song?.albumId)
+        }
+
         provideContent {
-            WidgetContent(title = title, artist = artist, isPlaying = isPlaying)
+            WidgetContent(
+                title     = title,
+                artist    = artist,
+                isPlaying = isPlaying,
+                artwork   = artwork,
+            )
         }
     }
+}
+
+private fun loadAlbumArtwork(context: Context, albumId: Long?): Bitmap? {
+    val uriString = ArtworkResolver.albumArtworkUri(albumId) ?: return null
+    return runCatching {
+        context.contentResolver.openInputStream(Uri.parse(uriString))?.use { stream ->
+            BitmapFactory.decodeStream(stream)
+        }?.let { full ->
+            if (full.width > ARTWORK_TARGET_PX || full.height > ARTWORK_TARGET_PX) {
+                val scale = ARTWORK_TARGET_PX.toFloat() / maxOf(full.width, full.height)
+                Bitmap.createScaledBitmap(
+                    full,
+                    (full.width * scale).toInt().coerceAtLeast(1),
+                    (full.height * scale).toInt().coerceAtLeast(1),
+                    true,
+                ).also { if (it !== full) full.recycle() }
+            } else {
+                full
+            }
+        }
+    }.getOrNull()
 }
 
 @Composable
@@ -90,6 +131,7 @@ private fun WidgetContent(
     title: String,
     artist: String,
     isPlaying: Boolean,
+    artwork: Bitmap?,
 ) {
     Column(
         modifier = GlanceModifier
@@ -97,46 +139,82 @@ private fun WidgetContent(
             .background(WidgetBackground)
             .cornerRadius(20.dp)
             .clickable(actionStartActivity<MainActivity>())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = title,
-            style = TextStyle(
-                color      = WidgetOnSurface,
-                fontSize   = 15.sp,
-                fontWeight = FontWeight.Medium,
-            ),
-            maxLines = 1,
-        )
-        Spacer(GlanceModifier.height(2.dp))
-        Text(
-            text = artist,
-            style = TextStyle(
-                color    = WidgetSubtle,
-                fontSize = 12.sp,
-            ),
-            maxLines = 1,
-        )
-        Spacer(GlanceModifier.height(10.dp))
+        // ── Artwork + metadata row ─────────────────────────────────────────
         Row(
-            modifier              = GlanceModifier.fillMaxWidth(),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalAlignment   = Alignment.CenterHorizontally,
+            modifier          = GlanceModifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (artwork != null) {
+                Image(
+                    provider           = ImageProvider(artwork),
+                    contentDescription = "Album artwork",
+                    contentScale       = ContentScale.Crop,
+                    modifier           = GlanceModifier
+                        .size(56.dp)
+                        .cornerRadius(10.dp),
+                )
+            } else {
+                Box(
+                    modifier = GlanceModifier
+                        .size(56.dp)
+                        .cornerRadius(10.dp)
+                        .background(WidgetIdleCircle),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        provider           = ImageProvider(R.drawable.widget_ic_play),
+                        contentDescription = null,
+                        modifier           = GlanceModifier.size(22.dp),
+                    )
+                }
+            }
+            Spacer(GlanceModifier.width(12.dp))
+            Column(modifier = GlanceModifier.defaultWeight()) {
+                Text(
+                    text = title,
+                    style = TextStyle(
+                        color      = WidgetOnSurface,
+                        fontSize   = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                    maxLines = 1,
+                )
+                Spacer(GlanceModifier.height(1.dp))
+                Text(
+                    text = artist,
+                    style = TextStyle(
+                        color    = WidgetSubtle,
+                        fontSize = 12.sp,
+                    ),
+                    maxLines = 1,
+                )
+            }
+        }
+        Spacer(GlanceModifier.height(6.dp))
+        // ── Controls row ───────────────────────────────────────────────────
+        Row(
+            modifier            = GlanceModifier.fillMaxWidth(),
+            verticalAlignment   = Alignment.CenterVertically,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             WidgetControlButton(
                 drawableRes        = R.drawable.widget_ic_skip_previous,
                 contentDescription = "Previous",
                 action             = actionRunCallback<PreviousAction>(),
             )
-            Spacer(GlanceModifier.width(20.dp))
+            Spacer(GlanceModifier.width(24.dp))
+            // Accent circle while playing; muted circle while paused, so the
+            // state change is obvious beyond the icon swap.
             WidgetControlButton(
                 drawableRes        = if (isPlaying) R.drawable.widget_ic_pause else R.drawable.widget_ic_play,
                 contentDescription = if (isPlaying) "Pause" else "Play",
                 action             = actionRunCallback<PlayPauseAction>(),
-                accent             = true,
+                circleColor        = if (isPlaying) WidgetAccent else WidgetIdleCircle,
             )
-            Spacer(GlanceModifier.width(20.dp))
+            Spacer(GlanceModifier.width(24.dp))
             WidgetControlButton(
                 drawableRes        = R.drawable.widget_ic_skip_next,
                 contentDescription = "Next",
@@ -151,16 +229,16 @@ private fun WidgetControlButton(
     drawableRes: Int,
     contentDescription: String,
     action: androidx.glance.action.Action,
-    accent: Boolean = false,
+    circleColor: ColorProvider? = null,
 ) {
     Image(
         provider           = ImageProvider(drawableRes),
         contentDescription = contentDescription,
         modifier           = GlanceModifier
-            .size(if (accent) 44.dp else 36.dp)
-            .cornerRadius(22.dp)
-            .background(if (accent) WidgetAccent else ColorProvider(Color(0x00000000)))
-            .padding(if (accent) 10.dp else 6.dp)
+            .size(if (circleColor != null) 40.dp else 32.dp)
+            .cornerRadius(20.dp)
+            .background(circleColor ?: ColorProvider(Color(0x00000000)))
+            .padding(if (circleColor != null) 9.dp else 5.dp)
             .clickable(action),
     )
 }
