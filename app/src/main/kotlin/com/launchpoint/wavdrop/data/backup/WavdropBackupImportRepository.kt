@@ -59,6 +59,8 @@ class WavdropBackupImportRepository @Inject constructor(
                     dateAdded   = e.dateAdded,
                     trackNumber = e.trackNumber,
                     year        = e.year,
+                    folderPath  = e.folderPath,
+                    folderName  = e.folderName,
                 )
             }
 
@@ -196,15 +198,17 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
-            // Listen event restore
-            var eventsRestored = 0
-            var eventsSkipped  = 0
+            // Listen event restore. Song identity goes through the same tier matcher
+            // as stats so events follow their track to the new song id after a
+            // reinstall — exact-tag-only matching previously dropped most events,
+            // leaving Monthly Reports/Wrapped empty even though aggregates restored.
+            var eventPlan = ListenEventRestorePlanner.Plan(
+                toInsert = emptyList(), eventsInBackup = 0, restored = 0,
+                skippedDuplicate = 0, skippedUnmatched = 0, skippedInvalidType = 0,
+                currentMonthRestored = 0,
+            )
 
             if (backup.listenEvents.isNotEmpty()) {
-                val validEventTypes = setOf(
-                    TrackListenEventEntity.TYPE_PLAY,
-                    TrackListenEventEntity.TYPE_SKIP,
-                )
                 val minMs = backup.listenEvents.minOf { it.occurredAt }
                 val maxMs = backup.listenEvents.maxOf { it.occurredAt }
 
@@ -213,49 +217,36 @@ class WavdropBackupImportRepository @Inject constructor(
                     .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
                     .toHashSet()
 
-                for (event in backup.listenEvents) {
-                    if (event.eventType !in validEventTypes) {
-                        eventsSkipped++
-                        continue
-                    }
+                val resolvedBySongId =
+                    WavdropBackupStatsMatcher.resolveBackupSongIds(backup, currentSongs)
 
-                    val song = byUri[event.contentUri]
-                        ?: byTags[Triple(
-                            event.title.norm(),
-                            event.artist.norm(),
-                            event.album.norm(),
-                        )]
+                eventPlan = ListenEventRestorePlanner.plan(
+                    events = backup.listenEvents,
+                    resolveSong = { event ->
+                        byUri[event.contentUri]
+                            ?: resolvedBySongId[event.songId]
+                            // Last resort for old backups whose songs array lacks this
+                            // track: exact tags carried on the event row itself.
+                            ?: byTags[Triple(
+                                event.title.norm(),
+                                event.artist.norm(),
+                                event.album.norm(),
+                            )]
+                    },
+                    existingFingerprints = existingFingerprints,
+                )
 
-                    if (song == null) {
-                        eventsSkipped++
-                        continue
-                    }
-
-                    val fingerprint = "${song.id}|${event.occurredAt}|${event.eventType}|${event.listenedMs}"
-
-                    if (fingerprint in existingFingerprints) {
-                        eventsSkipped++
-                        continue
-                    }
-
-                    trackListenEventDao.insert(
-                        TrackListenEventEntity(
-                            songId     = song.id,
-                            eventType  = event.eventType,
-                            occurredAt = event.occurredAt,
-                            listenedMs = event.listenedMs,
-                            durationMs = event.durationMs,
-                            source     = TrackListenEventEntity.SOURCE_MANUAL_RESTORE,
-                        )
-                    )
-                    existingFingerprints.add(fingerprint)
-                    eventsRestored++
+                for (entity in eventPlan.toInsert) {
+                    trackListenEventDao.insert(entity)
                 }
             }
+            val eventsRestored = eventPlan.restored
+            val eventsSkipped  = eventPlan.skippedTotal
 
             WavdropBackupImportApplyResult(
                 matchedTracks         = match.matchedRows.size,
                 unmatchedTracks       = match.unmatchedCount,
+                matchDiagnostics      = match.diagnostics,
                 statsUpdated          = statsUpdated,
                 lyricsRestored        = lyricsRestored,
                 favoritesRestored     = favoritesRestored,
@@ -263,18 +254,31 @@ class WavdropBackupImportRepository @Inject constructor(
                 playlistSongsRestored = playlistSongsRestored,
                 eventsRestored        = eventsRestored,
                 eventsSkipped         = eventsSkipped,
+                eventsSkippedDuplicate     = eventPlan.skippedDuplicate,
+                eventsSkippedUnmatched     = eventPlan.skippedUnmatched,
+                currentMonthEventsRestored = eventPlan.currentMonthRestored,
             )
         }
 
         // Diagnostics: explains "missing plays" after restore (unmatched tracks are the
         // usual cause — URI changes after reinstall plus tag mismatch).
+        val diag = dbResult.matchDiagnostics
         Log.i(
             TAG,
-            "Restore applied: statsInBackup=${backup.trackStats.size} " +
-                "matched=${dbResult.matchedTracks} unmatched=${dbResult.unmatchedTracks} " +
+            "Restore applied: statsInBackup=${diag.statsInBackup} " +
+                "matched=${dbResult.matchedTracks} " +
+                "[uri=${diag.matchedByUri} path=${diag.matchedByPath} " +
+                "tags+dur=${diag.matchedByTagsDuration} " +
+                "title+artist+dur=${diag.matchedByTitleArtistDuration} " +
+                "title+dur=${diag.matchedByTitleDuration} tagsOnly=${diag.matchedByTagsOnly}] " +
+                "ambiguous=${diag.ambiguous} collisions=${diag.collisions} " +
+                "unmatched=${diag.unmatched} " +
                 "statsRestored=${dbResult.statsUpdated} " +
                 "eventsInBackup=${backup.listenEvents.size} " +
-                "eventsRestored=${dbResult.eventsRestored} eventsSkipped=${dbResult.eventsSkipped}",
+                "eventsRestored=${dbResult.eventsRestored} " +
+                "eventsDuplicate=${dbResult.eventsSkippedDuplicate} " +
+                "eventsUnmatched=${dbResult.eventsSkippedUnmatched} " +
+                "currentMonthEventsRestored=${dbResult.currentMonthEventsRestored}",
         )
 
         // Restore preferences outside the Room transaction — DataStore is not Room-transactional.

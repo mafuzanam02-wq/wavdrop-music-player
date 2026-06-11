@@ -352,8 +352,16 @@ private fun AppliedContent(
                         StatRow("Playlist songs added", result.playlistSongsRestored.toString())
                     }
                     if (result.eventsRestored > 0 || result.eventsSkipped > 0) {
-                        StatRow("Events restored", result.eventsRestored.toString())
-                        StatRow("Events skipped", result.eventsSkipped.toString())
+                        StatRow("Listening history restored", result.eventsRestored.toString())
+                        if (result.currentMonthEventsRestored > 0) {
+                            StatRow("This month's listens", result.currentMonthEventsRestored.toString())
+                        }
+                        if (result.eventsSkippedDuplicate > 0) {
+                            StatRow("Already present", result.eventsSkippedDuplicate.toString())
+                        }
+                        if (result.eventsSkippedUnmatched > 0) {
+                            StatRow("History not matched", result.eventsSkippedUnmatched.toString())
+                        }
                     }
                 }
             }

@@ -55,6 +55,9 @@ object WavdropBackupParser {
                     dateAdded = item.requiredLong("songs[$index].dateAdded", "dateAdded"),
                     trackNumber = item.requiredInt("songs[$index].trackNumber", "trackNumber"),
                     year = item.requiredInt("songs[$index].year", "year"),
+                    // Optional identity fields added after v1 launch; absent in older backups.
+                    folderPath = item["folderPath"] as? String,
+                    folderName = item["folderName"] as? String,
                 )
             }
 

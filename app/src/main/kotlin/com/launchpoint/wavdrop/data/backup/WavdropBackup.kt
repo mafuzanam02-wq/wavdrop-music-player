@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.data.backup
 
 data class BackupSong(
     val id: Long,
+    /** Content URI — only a weak hint; MediaStore IDs change on reinstall/rescan. */
     val uri: String,
     val title: String,
     val artist: String,
@@ -11,6 +12,9 @@ data class BackupSong(
     val dateAdded: Long,
     val trackNumber: Int,
     val year: Int,
+    /** Folder path (relative path on Q+, parent dir below Q). Stable across reinstall. */
+    val folderPath: String? = null,
+    val folderName: String? = null,
 )
 
 data class BackupTrackStats(

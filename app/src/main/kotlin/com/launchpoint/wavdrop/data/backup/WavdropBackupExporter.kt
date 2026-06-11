@@ -34,6 +34,8 @@ object WavdropBackupExporter {
                 put("dateAdded",   s.dateAdded)
                 put("trackNumber", s.trackNumber)
                 put("year",        s.year)
+                s.folderPath?.let { put("folderPath", it) }
+                s.folderName?.let { put("folderName", it) }
             })
         }
     }

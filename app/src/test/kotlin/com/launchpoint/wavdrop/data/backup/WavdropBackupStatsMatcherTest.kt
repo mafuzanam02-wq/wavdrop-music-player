@@ -14,17 +14,20 @@ class WavdropBackupStatsMatcherTest {
         title: String  = "Title $id",
         artist: String = "Artist $id",
         album: String  = "Album $id",
+        duration: Long = 180_000L,
+        folderPath: String? = null,
     ) = Song(
         id          = id,
         title       = title,
         artist      = artist,
         album       = album,
         albumId     = 0L,
-        duration    = 180_000L,
+        duration    = duration,
         uri         = uri,
         dateAdded   = 0L,
         trackNumber = 0,
         year        = 0,
+        folderPath  = folderPath,
     )
 
     private fun backupSong(
@@ -33,6 +36,8 @@ class WavdropBackupStatsMatcherTest {
         title: String  = "Title $id",
         artist: String = "Artist $id",
         album: String  = "Album $id",
+        duration: Long = 180_000L,
+        folderPath: String? = null,
     ) = BackupSong(
         id          = id,
         uri         = uri,
@@ -40,10 +45,11 @@ class WavdropBackupStatsMatcherTest {
         artist      = artist,
         album       = album,
         albumId     = 0L,
-        duration    = 180_000L,
+        duration    = duration,
         dateAdded   = 0L,
         trackNumber = 0,
         year        = 0,
+        folderPath  = folderPath,
     )
 
     private fun stat(
@@ -209,6 +215,141 @@ class WavdropBackupStatsMatcherTest {
         val result = WavdropBackupStatsMatcher.match(b, emptyList())
 
         assertEquals(0, result.matchedRows.size)
+        assertEquals(1, result.unmatchedCount)
+    }
+
+    // ── Matched stat payload ──────────────────────────────────────────────────
+
+    // ── Duration tolerance ────────────────────────────────────────────────────
+
+    @Test
+    fun `URI changed but tags and duration match`() {
+        val song  = song(1L, "content://media/NEW", "S", "A", "Al", duration = 200_000L)
+        val bSong = backupSong(1L, "content://media/OLD", "S", "A", "Al", duration = 200_000L)
+        val b     = backup(listOf(bSong), listOf(stat(1L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(song))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(1, result.diagnostics.matchedByTagsDuration)
+    }
+
+    @Test
+    fun `duration differing by less than two seconds still matches`() {
+        val song  = song(1L, "content://media/NEW", "S", "A", "Al", duration = 200_000L)
+        val bSong = backupSong(1L, "content://media/OLD", "S", "A", "Al", duration = 201_500L)
+        val b     = backup(listOf(bSong), listOf(stat(1L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(song))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(0, result.unmatchedCount)
+    }
+
+    @Test
+    fun `duplicate tags with different durations resolve to the correct copy`() {
+        val short = song(1L, "content://media/1", "S", "A", "Al", duration = 180_000L)
+        val long  = song(2L, "content://media/2", "S", "A", "Al", duration = 240_000L)
+        val bSong = backupSong(9L, "content://media/OLD", "S", "A", "Al", duration = 240_000L)
+        val b     = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(short, long))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(long, result.matchedRows[0].first)
+    }
+
+    // ── Ambiguity ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `identical tags and duration is ambiguous, not silently wrong`() {
+        val copy1 = song(1L, "content://media/1", "S", "A", "Al")
+        val copy2 = song(2L, "content://media/2", "S", "A", "Al")
+        val bSong = backupSong(9L, "content://media/OLD", "S", "A", "Al")
+        val b     = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(copy1, copy2))
+
+        assertEquals(0, result.matchedRows.size)
+        assertEquals(1, result.unmatchedCount)
+        assertEquals(1, result.diagnostics.ambiguous)
+    }
+
+    @Test
+    fun `identical tags but distinct folder paths disambiguate via path tier`() {
+        val copy1 = song(1L, "content://media/1", "S", "A", "Al", folderPath = "Music/Old")
+        val copy2 = song(2L, "content://media/2", "S", "A", "Al", folderPath = "Music/New")
+        val bSong = backupSong(9L, "content://media/OLD", "S", "A", "Al", folderPath = "Music/New")
+        val b     = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(copy1, copy2))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(copy2, result.matchedRows[0].first)
+        assertEquals(1, result.diagnostics.matchedByPath)
+    }
+
+    // ── Weaker tiers ──────────────────────────────────────────────────────────
+
+    @Test
+    fun `title and duration fallback matches when artist and album tags changed`() {
+        val song  = song(1L, "content://media/NEW", "My Track", "Retagged Artist", "Retagged Album")
+        val bSong = backupSong(9L, "content://media/OLD", "My Track", "Old Artist", "Old Album")
+        val b     = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(song))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(1, result.diagnostics.matchedByTitleDuration)
+    }
+
+    @Test
+    fun `tags-only weak fallback matches when duration changed beyond tolerance`() {
+        val song  = song(1L, "content://media/NEW", "S", "A", "Al", duration = 300_000L)
+        val bSong = backupSong(9L, "content://media/OLD", "S", "A", "Al", duration = 180_000L)
+        val b     = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(song))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(1, result.diagnostics.matchedByTagsOnly)
+    }
+
+    // ── Collisions ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `two backup rows resolving to one local song keep only the strongest match`() {
+        val current = song(1L, "content://media/1", "S", "A", "Al")
+        // Row A matches by URI (strongest); row B matches by tags.
+        val bSongA  = backupSong(10L, "content://media/1", "S", "A", "Al")
+        val bSongB  = backupSong(11L, "content://media/OLD", "S", "A", "Al")
+        val statA   = stat(10L, "content://media/1", plays = 7)
+        val statB   = stat(11L, "content://media/OLD", plays = 99)
+        val b       = backup(listOf(bSongA, bSongB), listOf(statA, statB))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(current))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(7, result.matchedRows[0].second.playCount) // URI match wins
+        assertEquals(1, result.diagnostics.collisions)
+        assertEquals(1, result.unmatchedCount)
+    }
+
+    @Test
+    fun `unmatched and diagnostics counts are reported clearly`() {
+        val current = song(1L, "content://media/1", "Kept", "A", "Al")
+        val bKept   = backupSong(1L, "content://media/OLD1", "Kept", "A", "Al")
+        val bGone   = backupSong(2L, "content://media/OLD2", "Deleted Song", "X", "Y")
+        val b       = backup(
+            listOf(bKept, bGone),
+            listOf(stat(1L, "content://media/OLD1"), stat(2L, "content://media/OLD2")),
+        )
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(current))
+
+        assertEquals(2, result.diagnostics.statsInBackup)
+        assertEquals(1, result.matchedCount)
+        assertEquals(1, result.diagnostics.unmatched)
         assertEquals(1, result.unmatchedCount)
     }
 

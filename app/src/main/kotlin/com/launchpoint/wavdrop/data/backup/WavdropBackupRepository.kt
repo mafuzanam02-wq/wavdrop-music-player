@@ -139,6 +139,8 @@ private fun SongEntity.toBackup() = BackupSong(
     dateAdded   = dateAdded,
     trackNumber = trackNumber,
     year        = year,
+    folderPath  = folderPath,
+    folderName  = folderName,
 )
 
 private fun TrackStatsEntity.toBackup() = BackupTrackStats(
