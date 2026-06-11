@@ -130,9 +130,12 @@ class WavdropNavViewModel @Inject constructor(
 
     fun completeOnboarding() {
         viewModelScope.launch {
-            appSettingsRepository.setLastCompletedOnboardingVersion(CURRENT_ONBOARDING_VERSION)
-            // Seed the changelog version so first-run users never see the auto-changelog.
-            appSettingsRepository.setLastSeenChangelogVersion(BuildConfig.VERSION_CODE)
+            // Single atomic write: avoids intermediate state where onboarding is marked done
+            // but changelog version is not yet seeded, which caused the dialog to flash briefly.
+            appSettingsRepository.completeOnboardingAndSeedChangelog(
+                onboardingVersion = CURRENT_ONBOARDING_VERSION,
+                changelogVersion  = BuildConfig.VERSION_CODE,
+            )
         }
     }
 

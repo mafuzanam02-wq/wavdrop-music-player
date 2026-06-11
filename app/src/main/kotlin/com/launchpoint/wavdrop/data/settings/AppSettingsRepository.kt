@@ -152,6 +152,20 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    /**
+     * Atomically marks onboarding complete and seeds the changelog version in one DataStore
+     * write. Splitting these into two separate edits creates an intermediate state where
+     * hasCompletedOnboarding=true but lastSeenChangelogVersion=0, causing the changelog
+     * dialog to flash briefly on first-run.
+     */
+    suspend fun completeOnboardingAndSeedChangelog(onboardingVersion: Int, changelogVersion: Int) {
+        dataStore.edit { preferences ->
+            preferences[LAST_COMPLETED_ONBOARDING_VERSION_KEY] = onboardingVersion
+            preferences[HAS_COMPLETED_ONBOARDING_KEY] = true
+            preferences[LAST_SEEN_CHANGELOG_VERSION_KEY] = changelogVersion
+        }
+    }
+
     val lastSeenChangelogVersion: Flow<Int> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
