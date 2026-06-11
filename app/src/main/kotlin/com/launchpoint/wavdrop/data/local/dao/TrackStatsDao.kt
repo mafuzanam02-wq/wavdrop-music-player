@@ -81,8 +81,30 @@ interface TrackStatsDao {
     )
 
     /**
-     * Idempotent MAX-reconciliation merge used by both Wavdrop backup restore and
-     * BlackPlayer import. Each counter is set to MAX(current, imported), so:
+     * Restore-mode write used by Wavdrop backup restore: sets every aggregate stat
+     * to exactly the backup value, replacing local values even when they are higher.
+     * A Wavdrop backup restore treats the backup as the source of truth, and exact
+     * set is naturally idempotent. Row must already exist (call [insertIfAbsent] first).
+     */
+    @Query("""
+        UPDATE track_stats
+        SET playCount            = :playCount,
+            skipCount            = :skipCount,
+            totalListeningTimeMs = :listeningTimeMs,
+            lastPlayedAt         = :lastPlayedAt
+        WHERE songId = :songId
+    """)
+    suspend fun restoreExactStats(
+        songId: Long,
+        playCount: Int,
+        skipCount: Int,
+        listeningTimeMs: Long,
+        lastPlayedAt: Long,
+    )
+
+    /**
+     * Idempotent MAX-reconciliation merge used by BlackPlayer import (merge mode).
+     * Each counter is set to MAX(current, imported), so:
      * - Local stats are never reduced.
      * - If the import has higher totals, the local value is brought up.
      * - Importing the same values again is a no-op.

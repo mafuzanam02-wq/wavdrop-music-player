@@ -1,8 +1,9 @@
 package com.launchpoint.wavdrop.data.backup
 
 /**
- * Shared, pure MAX-reconciliation strategy used by both Wavdrop backup restore and
- * BlackPlayer import.
+ * Pure MAX-reconciliation strategy used by BlackPlayer *import* (merge mode).
+ * Wavdrop backup *restore* uses [StatsRestoreStrategy] instead, which sets exact
+ * backup values.
  *
  * Strategy: treat imported totals as target totals, not increments.
  *   newPlayCount         = MAX(current, imported)

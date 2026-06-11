@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.data.backup
 
+import android.util.Log
 import androidx.room.withTransaction
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
@@ -78,26 +79,31 @@ class WavdropBackupImportRepository @Inject constructor(
                     TrackStatsEntity(songId = song.id, contentUri = song.uri)
                 )
 
-                // MAX-reconciliation: each counter is set to MAX(current, backup).
-                // This is idempotent — restoring the same backup twice produces no change.
-                // It also prevents reducing local stats that are higher than the backup.
-                trackStatsDao.mergeMaxStats(
-                    songId                  = song.id,
-                    importedPlayCount       = backupStats.playCount,
-                    importedSkipCount       = backupStats.skipCount,
-                    importedListeningTimeMs = backupStats.totalListeningTimeMs,
-                    importedLastPlayedAt    = backupStats.lastPlayedAt,
+                // Restore mode: the backup is the source of truth. Set each aggregate
+                // stat to exactly the backup value (playCount, skipCount,
+                // totalListeningTimeMs, lastPlayedAt) — even when the local value is
+                // higher. Exact set is naturally idempotent, so restoring the same
+                // backup twice yields the same values. BlackPlayer *import* keeps
+                // MAX-merge semantics separately in StatsRepository.
+                trackStatsDao.restoreExactStats(
+                    songId          = song.id,
+                    playCount       = backupStats.playCount,
+                    skipCount       = backupStats.skipCount,
+                    listeningTimeMs = backupStats.totalListeningTimeMs,
+                    lastPlayedAt    = backupStats.lastPlayedAt,
                 )
 
-                val effect = StatsImportMerger.computeEffect(
+                val effect = StatsRestoreStrategy.computeEffect(
                     currentPlayCount       = current?.playCount ?: 0,
                     currentSkipCount       = current?.skipCount ?: 0,
                     currentListeningTimeMs = current?.totalListeningTimeMs ?: 0L,
-                    importedPlayCount      = backupStats.playCount,
-                    importedSkipCount      = backupStats.skipCount,
-                    importedListeningTimeMs = backupStats.totalListeningTimeMs,
+                    currentLastPlayedAt    = current?.lastPlayedAt ?: 0L,
+                    backupPlayCount        = backupStats.playCount,
+                    backupSkipCount        = backupStats.skipCount,
+                    backupListeningTimeMs  = backupStats.totalListeningTimeMs,
+                    backupLastPlayedAt     = backupStats.lastPlayedAt,
                 )
-                if (effect.anyUpdated) statsUpdated++
+                if (effect.anyChanged) statsUpdated++
 
                 // Restore favorite: only set true, never clear a local favorite.
                 if (backupStats.isFavorite) {
@@ -260,6 +266,17 @@ class WavdropBackupImportRepository @Inject constructor(
             )
         }
 
+        // Diagnostics: explains "missing plays" after restore (unmatched tracks are the
+        // usual cause — URI changes after reinstall plus tag mismatch).
+        Log.i(
+            TAG,
+            "Restore applied: statsInBackup=${backup.trackStats.size} " +
+                "matched=${dbResult.matchedTracks} unmatched=${dbResult.unmatchedTracks} " +
+                "statsRestored=${dbResult.statsUpdated} " +
+                "eventsInBackup=${backup.listenEvents.size} " +
+                "eventsRestored=${dbResult.eventsRestored} eventsSkipped=${dbResult.eventsSkipped}",
+        )
+
         // Restore preferences outside the Room transaction — DataStore is not Room-transactional.
         var preferencesRestored = false
         backup.preferences?.let { prefs ->
@@ -355,5 +372,7 @@ class WavdropBackupImportRepository @Inject constructor(
         )
     }
 }
+
+private const val TAG = "WavdropRestore"
 
 private fun String.norm() = trim().lowercase()

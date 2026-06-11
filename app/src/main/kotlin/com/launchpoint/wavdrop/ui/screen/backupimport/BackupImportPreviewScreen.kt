@@ -261,11 +261,11 @@ private fun ConfirmApplyDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Apply Wavdrop backup?") },
+        title = { Text("Restore Wavdrop backup?") },
         text  = {
             Text(
-                text  = "Stats will be updated where the backup has higher totals. " +
-                        "Local stats that are already higher will not be reduced. " +
+                text  = "Stats will be restored from this backup. Matched tracks are set " +
+                        "to the exact backup values, replacing current stats. " +
                         "Lyrics are only replaced if the backup copy is newer.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
@@ -461,7 +461,7 @@ private fun PreviewNotice(modifier: Modifier = Modifier) {
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text  = "Stats will be updated where the backup has higher totals. Existing higher stats are preserved.",
+                    text  = "Stats will be restored from this backup. Matched tracks take the backup values exactly.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
                 )
