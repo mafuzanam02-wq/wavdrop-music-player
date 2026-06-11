@@ -325,7 +325,13 @@ private fun AppliedContent(
                 modifier           = Modifier.size(64.dp),
             )
             Spacer(Modifier.height(16.dp))
-            Text("Import complete", style = MaterialTheme.typography.titleMedium)
+            Text("Restore complete", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = "Your backup has been applied to this library.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+            )
             Spacer(Modifier.height(20.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -333,8 +339,8 @@ private fun AppliedContent(
                 shape    = RoundedCornerShape(12.dp),
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                    StatRow("Matched tracks",    result.matchedTracks.toString())
-                    StatRow("Unmatched tracks",  result.unmatchedTracks.toString())
+                    StatRow("Songs matched",     result.matchedTracks.toString())
+                    StatRow("Songs not matched", result.unmatchedTracks.toString())
                     StatRow("Stats updated",     result.statsUpdated.toString())
                     StatRow("Lyrics restored",   result.lyricsRestored.toString())
                     StatRow("Favorites restored", result.favoritesRestored.toString())

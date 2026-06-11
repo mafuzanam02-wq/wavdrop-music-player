@@ -4,11 +4,18 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -23,11 +30,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +55,7 @@ fun SettingsBackupScreen(
     val backupFileMode      by viewModel.backupFileMode.collectAsStateWithLifecycle()
     val autoBackupFolderUri by viewModel.autoBackupFolderUri.collectAsStateWithLifecycle()
     val autoBackupInterval  by viewModel.autoBackupInterval.collectAsStateWithLifecycle()
+    val lastBackupAtMillis  by viewModel.lastBackupAtMillis.collectAsStateWithLifecycle()
 
     val suggestedExportName by remember {
         derivedStateOf {
@@ -114,6 +126,16 @@ fun SettingsBackupScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
+            // ── Backup status ──────────────────────────────────────────────────
+            item {
+                BackupStatusCard(
+                    lastBackupAtMillis = lastBackupAtMillis,
+                    folderSelected     = autoBackupFolderUri != null,
+                    folderName         = folderDisplayName,
+                    interval           = autoBackupInterval,
+                )
+            }
+
             // ── Backup Folder ──────────────────────────────────────────────────
             item { SectionHeader("Backup Folder") }
             item {
@@ -262,4 +284,100 @@ fun SettingsBackupScreen(
             }
         }
     }
+}
+
+// ── Backup status card ─────────────────────────────────────────────────────
+
+private const val RECENT_BACKUP_WINDOW_MS = 8L * 24 * 60 * 60 * 1000 // ~8 days
+
+@Composable
+private fun BackupStatusCard(
+    lastBackupAtMillis: Long,
+    folderSelected: Boolean,
+    folderName: String?,
+    interval: AutoBackupInterval,
+) {
+    val hasBackup    = lastBackupAtMillis > 0L
+    val recentBackup = hasBackup &&
+        System.currentTimeMillis() - lastBackupAtMillis < RECENT_BACKUP_WINDOW_MS
+    val healthy = recentBackup && folderSelected
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (healthy) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+            },
+        ),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                text  = if (healthy) "Backups are up to date" else "Backup status",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(6.dp))
+            BackupStatusLine(
+                label = "Last backup",
+                value = if (hasBackup) formatBackupTime(lastBackupAtMillis) else "Never",
+            )
+            BackupStatusLine(
+                label = "Backup folder",
+                value = when {
+                    !folderSelected     -> "Not selected"
+                    folderName != null  -> "“$folderName”"
+                    else                -> "Selected"
+                },
+            )
+            BackupStatusLine(
+                label = "Automatic backup",
+                value = when (interval) {
+                    AutoBackupInterval.OFF     -> "Off"
+                    AutoBackupInterval.DAILY   -> "Daily"
+                    AutoBackupInterval.WEEKLY  -> "Weekly"
+                    AutoBackupInterval.MONTHLY -> "Monthly"
+                },
+            )
+            if (!healthy) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = when {
+                        !folderSelected -> "Choose a backup folder below to protect your stats, playlists, and settings."
+                        !hasBackup      -> "No backup yet. Use Back Up Now below to create your first backup."
+                        else            -> "Your last backup is getting old. Consider running Back Up Now."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupStatusLine(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text     = label,
+            style    = MaterialTheme.typography.bodySmall,
+            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text  = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+private fun formatBackupTime(epochMillis: Long): String {
+    val dateTime = Instant.ofEpochMilli(epochMillis)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDateTime()
+    return dateTime.format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 }

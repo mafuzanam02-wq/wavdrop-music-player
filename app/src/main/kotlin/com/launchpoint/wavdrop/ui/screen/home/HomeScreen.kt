@@ -71,6 +71,8 @@ import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.GroupedSearchContent
+import com.launchpoint.wavdrop.ui.components.SongSearchActions
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
@@ -97,6 +99,8 @@ fun HomeScreen(
     onPlaylistsClick: () -> Unit = {},
     onSmartCollectionsClick: () -> Unit = {},
     onWrappedClick: () -> Unit = {},
+    onAlbumClick: (String) -> Unit = {},
+    onArtistClick: (String) -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
@@ -108,6 +112,7 @@ fun HomeScreen(
     val nowPlaying      by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val favoriteSongIds by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val searchQuery     by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val librarySongs    by viewModel.librarySongs.collectAsStateWithLifecycle()
     val appIconChoice   by viewModel.appIconChoice.collectAsStateWithLifecycle()
     val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
 
@@ -147,7 +152,7 @@ fun HomeScreen(
                         isSearchActive = false
                         viewModel.setSearchQuery("")
                     },
-                    placeholder  = "Search songs…",
+                    placeholder  = "Search songs, artists, albums…",
                 )
             } else {
                 TopAppBar(
@@ -202,7 +207,40 @@ fun HomeScreen(
             onPermissionGranted = viewModel::syncIfNeeded,
             modifier = Modifier.padding(innerPadding),
         ) {
-            if (isSearchActive) {
+            val trimmedQuery = searchQuery.trim()
+            if (isSearchActive && trimmedQuery.isNotEmpty()) {
+                GroupedSearchContent(
+                    songs = librarySongs,
+                    query = trimmedQuery,
+                    songActions = SongSearchActions(
+                        currentSongId = nowPlaying.song?.id,
+                        favoriteSongIds = favoriteSongIds,
+                        onSongClick = viewModel::playSongFromLibraryQueue,
+                        onPlayNext = viewModel::playNext,
+                        onAddToQueue = viewModel::addToQueue,
+                        onToggleFavorite = { song, wasFavorite ->
+                            viewModel.toggleFavorite(song.id)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
+                                )
+                            }
+                        },
+                        onAddToPlaylist = { song -> addToPlaylistSong = song },
+                        onTrackDetailsClick = onTrackDetailsClick,
+                        onFolderClick = onFolderClick,
+                        onShare = { song ->
+                            shareSong(context, song) {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("Could not share this track")
+                                }
+                            }
+                        },
+                    ),
+                    onAlbumClick = onAlbumClick,
+                    onArtistClick = onArtistClick,
+                )
+            } else if (isSearchActive) {
                 LibraryContent(
                     uiState             = uiState,
                     currentSongId       = nowPlaying.song?.id,
@@ -229,11 +267,10 @@ fun HomeScreen(
                             }
                         }
                     },
-                    modifier            = Modifier.padding(innerPadding),
                 )
             } else {
                 if (uiState == HomeUiState.Loading) {
-                    ScanningContent(Modifier.padding(innerPadding))
+                    ScanningContent()
                 } else {
                     HomeDashboardContent(
                         dashboard           = dashboardState,
@@ -266,7 +303,6 @@ fun HomeScreen(
                                 }
                             }
                         },
-                        modifier            = Modifier.padding(innerPadding),
                     )
                 }
             }

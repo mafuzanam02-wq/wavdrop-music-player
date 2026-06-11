@@ -93,6 +93,14 @@ class SettingsViewModel @Inject constructor(
     private val _folderBackupUiState = MutableStateFlow<ExportUiState>(ExportUiState.Idle)
     val folderBackupUiState: StateFlow<ExportUiState> = _folderBackupUiState.asStateFlow()
 
+    /** Epoch-ms of the last successful folder backup (auto or Back Up Now); 0 if never. */
+    val lastBackupAtMillis: StateFlow<Long> =
+        appSettingsRepository.lastAutoBackupAtMillis.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0L,
+        )
+
     val libraryScanSettings: StateFlow<LibraryScanSettings> =
         scanSettingsRepository.settings.stateIn(
             scope = viewModelScope,

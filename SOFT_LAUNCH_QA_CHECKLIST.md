@@ -2,6 +2,8 @@
 
 Use this checklist on a real Android phone with a realistic local music library. Record device model, Android version, Wavdrop version, and any screen recordings or logs for failures.
 
+> **⚠️ Back up Wavdrop first.** Uninstalling or clearing app data removes local stats, playlists, settings, and backup schedules unless restored from a backup. Before ANY test below that involves uninstalling, clearing app data, or a fresh install, run Settings → Backup & Migration → Back Up Now (or Save Backup File) and confirm the backup exists in your chosen folder.
+
 ## High-Risk Areas
 
 | Area | Why it matters | Pass / Fail / Notes |
@@ -25,6 +27,8 @@ Use this checklist on a real Android phone with a realistic local music library.
 | Include at least one `.lrc` or `.txt` sidecar lyric file if available. | Lyrics sidecar behavior can be checked. | |
 
 ## 1. Install / First Launch
+
+> **Back up Wavdrop first.** A fresh install test on a device with existing Wavdrop data destroys that data. Uninstalling or clearing app data removes local stats, playlists, settings, and backup schedules unless restored from a backup.
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
