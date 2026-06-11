@@ -239,6 +239,7 @@ fun HomeScreen(
                     ),
                     onAlbumClick = onAlbumClick,
                     onArtistClick = onArtistClick,
+                    modifier = Modifier.padding(innerPadding),
                 )
             } else if (isSearchActive) {
                 LibraryContent(
@@ -267,10 +268,11 @@ fun HomeScreen(
                             }
                         }
                     },
+                    modifier            = Modifier.padding(innerPadding),
                 )
             } else {
                 if (uiState == HomeUiState.Loading) {
-                    ScanningContent()
+                    ScanningContent(Modifier.padding(innerPadding))
                 } else {
                     HomeDashboardContent(
                         dashboard           = dashboardState,
@@ -303,6 +305,7 @@ fun HomeScreen(
                                 }
                             }
                         },
+                        modifier            = Modifier.padding(innerPadding),
                     )
                 }
             }
