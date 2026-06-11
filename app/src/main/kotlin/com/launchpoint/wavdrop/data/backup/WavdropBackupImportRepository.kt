@@ -301,18 +301,6 @@ class WavdropBackupImportRepository @Inject constructor(
                 ?.let { runCatching { AccentColor.valueOf(it) }.getOrNull() }
                 ?.let { appSettingsRepository.setAccentColor(it); preferencesRestored = true }
 
-            // Restores the icon preference in DataStore only. The launcher icon visual change
-            // requires activity alias switching (PackageManager), which only happens through
-            // the Appearance settings screen. The preference is preserved and will take effect
-            // the next time the user visits Settings → Appearance, or on reinstall.
-            prefs.launcherIcon
-                ?.let { AppIconChoice.fromStoredName(it) }
-                ?.let {
-                    appSettingsRepository.setAppIconChoice(it)
-                    runCatching { appIconAliasManager.apply(it) }
-                    preferencesRestored = true
-                }
-
             prefs.compactMode
                 ?.let { appSettingsRepository.setCompactMode(it); preferencesRestored = true }
 
@@ -332,7 +320,7 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
         }
 
-        // Show a folder-selection prompt if auto-backup was restored with a non-OFF interval
+        // Folder selection is needed if auto-backup was restored with a non-OFF interval
         // and there is no folder already set on this device. SAF permissions are not portable
         // across devices, so the old folder URI is never restored from backup.
         val restoredInterval = backup.preferences?.autoBackupInterval
@@ -342,6 +330,24 @@ class WavdropBackupImportRepository @Inject constructor(
             restoredInterval != null
                 && restoredInterval != AutoBackupInterval.OFF
                 && currentFolderUri == null
+
+        // Persist the pending-folder flag BEFORE applying the launcher icon below: alias
+        // switching can kill the process, and this flag is what makes the folder prompt
+        // reappear after the relaunch.
+        if (needsAutoBackupFolderSelection) {
+            appSettingsRepository.setNeedsAutoBackupFolderSelectionAfterRestore(true)
+        }
+
+        // Launcher icon is restored LAST. Applying the activity-alias switch can restart or
+        // close the app on some launchers, so everything else (including the pending-folder
+        // flag above) must already be persisted by this point.
+        backup.preferences?.launcherIcon
+            ?.let { AppIconChoice.fromStoredName(it) }
+            ?.let {
+                appSettingsRepository.setAppIconChoice(it)
+                runCatching { appIconAliasManager.apply(it) }
+                preferencesRestored = true
+            }
 
         return dbResult.copy(
             preferencesRestored            = preferencesRestored,

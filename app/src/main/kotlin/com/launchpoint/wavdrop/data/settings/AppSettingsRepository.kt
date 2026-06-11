@@ -204,6 +204,23 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    /**
+     * True when a restore re-enabled automatic backup but the user has not yet granted a
+     * backup folder on this device. Survives process death and launcher-icon relaunches.
+     * Cleared only after a folder is successfully selected and its permission persisted.
+     */
+    val needsAutoBackupFolderSelectionAfterRestore: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[NEEDS_BACKUP_FOLDER_AFTER_RESTORE_KEY] ?: false }
+
+    suspend fun setNeedsAutoBackupFolderSelectionAfterRestore(needed: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[NEEDS_BACKUP_FOLDER_AFTER_RESTORE_KEY] = needed
+        }
+    }
+
     val backupFileMode: Flow<BackupFileMode> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -364,5 +381,6 @@ class AppSettingsRepository @Inject constructor(
         val NOW_PLAYING_BACKGROUND_KEY              = stringPreferencesKey("now_playing_background")
         val SHOW_QUEUE_COUNT_KEY                    = booleanPreferencesKey("show_queue_count")
         val NOW_PLAYING_TIME_DISPLAY_MODE_KEY       = stringPreferencesKey("now_playing_time_display_mode")
+        val NEEDS_BACKUP_FOLDER_AFTER_RESTORE_KEY   = booleanPreferencesKey("needs_auto_backup_folder_selection_after_restore")
     }
 }

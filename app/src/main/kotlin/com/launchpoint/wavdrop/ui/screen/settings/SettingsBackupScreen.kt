@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.ui.screen.settings
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -14,9 +15,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -27,7 +31,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -56,6 +62,7 @@ fun SettingsBackupScreen(
     val autoBackupFolderUri by viewModel.autoBackupFolderUri.collectAsStateWithLifecycle()
     val autoBackupInterval  by viewModel.autoBackupInterval.collectAsStateWithLifecycle()
     val lastBackupAtMillis  by viewModel.lastBackupAtMillis.collectAsStateWithLifecycle()
+    val needsFolderAfterRestore by viewModel.needsBackupFolderAfterRestore.collectAsStateWithLifecycle()
 
     val suggestedExportName by remember {
         derivedStateOf {
@@ -92,14 +99,50 @@ fun SettingsBackupScreen(
         contract = ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
-            runCatching {
+            val permissionGranted = runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
-            }
-            viewModel.setAutoBackupFolderUri(uri.toString())
+            }.isSuccess
+            viewModel.onBackupFolderPicked(uri.toString(), permissionGranted)
         }
+    }
+
+    // A stored URI alone is not enough: the persisted permission may have been revoked
+    // (or never granted, e.g. when restore happened on another device).
+    val folderPermissionValid = remember(autoBackupFolderUri) {
+        hasValidFolderPermission(context, autoBackupFolderUri)
+    }
+    val folderSelectionPending =
+        needsFolderAfterRestore &&
+            autoBackupInterval != AutoBackupInterval.OFF &&
+            !folderPermissionValid
+
+    // Post-restore prompt: dismissing with "Not Now" hides it for this screen visit only;
+    // the persistent flag (and the warning card below) stay until a folder is granted.
+    var promptDismissedThisVisit by remember { mutableStateOf(false) }
+    if (folderSelectionPending && !promptDismissedThisVisit) {
+        AlertDialog(
+            onDismissRequest = { promptDismissedThisVisit = true },
+            title = { Text("Choose backup folder") },
+            text  = {
+                Text(
+                    text  = "Automatic backup settings were restored. Choose a folder so Wavdrop can continue creating backups on this device.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    promptDismissedThisVisit = true
+                    folderPickerLauncher.launch(null)
+                }) { Text("Choose Folder") }
+            },
+            dismissButton = {
+                TextButton(onClick = { promptDismissedThisVisit = true }) { Text("Not Now") }
+            },
+        )
     }
 
     Scaffold(
@@ -126,6 +169,15 @@ fun SettingsBackupScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
+            // ── Post-restore folder warning ────────────────────────────────────
+            if (folderSelectionPending) {
+                item {
+                    BackupFolderNeededCard(
+                        onChooseFolder = { folderPickerLauncher.launch(null) },
+                    )
+                }
+            }
+
             // ── Backup status ──────────────────────────────────────────────────
             item {
                 BackupStatusCard(
@@ -282,6 +334,54 @@ fun SettingsBackupScreen(
                     onClick  = onImportClick,
                 )
             }
+        }
+    }
+}
+
+// ── Folder permission validation ────────────────────────────────────────────
+
+/**
+ * True only when [uriString] is set AND a persisted read+write URI permission for it
+ * still exists. A stored URI without a live permission cannot be written to.
+ */
+private fun hasValidFolderPermission(context: Context, uriString: String?): Boolean {
+    if (uriString == null) return false
+    return runCatching {
+        context.contentResolver.persistedUriPermissions.any { permission ->
+            permission.uri.toString() == uriString &&
+                permission.isReadPermission &&
+                permission.isWritePermission
+        }
+    }.getOrDefault(false)
+}
+
+// ── Post-restore folder needed card ──────────────────────────────────────────
+
+@Composable
+private fun BackupFolderNeededCard(onChooseFolder: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(top = 12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+        ),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                text  = "Backup folder needed",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = "Automatic backup is enabled, but Wavdrop needs a folder on this device before backups can continue.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(onClick = onChooseFolder) { Text("Choose Folder") }
         }
     }
 }

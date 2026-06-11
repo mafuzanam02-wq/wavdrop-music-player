@@ -101,6 +101,27 @@ class SettingsViewModel @Inject constructor(
             initialValue = 0L,
         )
 
+    /** Set by restore when auto-backup was re-enabled but no folder exists on this device. */
+    val needsBackupFolderAfterRestore: StateFlow<Boolean> =
+        appSettingsRepository.needsAutoBackupFolderSelectionAfterRestore.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
+    /**
+     * Saves a freshly picked backup folder. Clears the post-restore pending flag only when
+     * the persistable URI permission was actually granted ([permissionGranted]).
+     */
+    fun onBackupFolderPicked(uri: String, permissionGranted: Boolean) {
+        viewModelScope.launch {
+            appSettingsRepository.setAutoBackupFolderUri(uri)
+            if (permissionGranted) {
+                appSettingsRepository.setNeedsAutoBackupFolderSelectionAfterRestore(false)
+            }
+        }
+    }
+
     val libraryScanSettings: StateFlow<LibraryScanSettings> =
         scanSettingsRepository.settings.stateIn(
             scope = viewModelScope,

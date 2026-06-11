@@ -67,13 +67,13 @@ fun BackupImportPreviewScreen(
         contract = ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
-            runCatching {
+            val permissionGranted = runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
-            }
-            viewModel.saveAutoBackupFolder(uri.toString())
+            }.isSuccess
+            viewModel.saveAutoBackupFolder(uri.toString(), permissionGranted)
         }
     }
 

@@ -96,10 +96,18 @@ class BackupImportPreviewViewModel @Inject constructor(
 
     // ── Post-restore folder selection ─────────────────────────────────────────
 
-    fun saveAutoBackupFolder(uri: String) {
+    /**
+     * Saves the folder picked right after a restore. The persistent pending flag is
+     * cleared only when the persistable URI permission was actually granted; a save
+     * without permission would still leave auto-backup unable to write.
+     */
+    fun saveAutoBackupFolder(uri: String, permissionGranted: Boolean) {
         viewModelScope.launch {
             appSettingsRepository.setAutoBackupFolderUri(uri)
             appSettingsRepository.setLastAutoBackupAtMillis(0L)
+            if (permissionGranted) {
+                appSettingsRepository.setNeedsAutoBackupFolderSelectionAfterRestore(false)
+            }
         }
     }
 
