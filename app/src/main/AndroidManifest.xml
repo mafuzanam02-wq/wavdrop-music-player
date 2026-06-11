@@ -55,11 +55,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Midnight Violet — default launcher alias (enabled at install time) -->
+        <!-- Midnight Violet — disabled until the user switches to it -->
         <activity-alias
             android:name=".MainActivityAliasMidnightViolet"
             android:targetActivity=".MainActivity"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true"
             android:label="@string/launcher_label"
             android:icon="@mipmap/wavdrop_icon_midnight_violet"
@@ -100,11 +100,11 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Obsidian Black - disabled until the user switches to it -->
+        <!-- Obsidian Black — default launcher alias (enabled at install time) -->
         <activity-alias
             android:name=".MainActivityAliasObsidianBlack"
             android:targetActivity=".MainActivity"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true"
             android:label="@string/launcher_label"
             android:icon="@mipmap/wavdrop_icon_obsidian_black"

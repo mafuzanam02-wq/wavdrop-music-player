@@ -12,6 +12,12 @@ object WavdropBackupExporter {
         put("exportedAt", backup.exportedAt)
         put("packageName", "com.launchpoint.wavdrop")
         put("database", "wavdrop.db")
+        // App version metadata (absent in legacy backups; not part of the fingerprint).
+        backup.appVersionCode?.let { put("appVersionCode", it) }
+        backup.appVersionName?.let { put("appVersionName", it) }
+        // Section counts + payload checksum, both recomputed and validated at parse time.
+        put("manifest", manifestObject(BackupManifest.of(backup)))
+        put("payloadSha256", WavdropBackupIntegrity.payloadFingerprint(backup))
         put("songs", songsArray(backup.songs))
         put("trackStats", trackStatsArray(backup.trackStats))
         put("importBaselines", baselinesArray(backup.importBaselines))
@@ -120,6 +126,16 @@ object WavdropBackupExporter {
         }
     }
 
+    private fun manifestObject(manifest: BackupManifest): JSONObject = JSONObject().apply {
+        put("songCount",           manifest.songCount)
+        put("trackStatsCount",     manifest.trackStatsCount)
+        put("listenEventCount",    manifest.listenEventCount)
+        put("importBaselineCount", manifest.importBaselineCount)
+        put("lyricsOverrideCount", manifest.lyricsOverrideCount)
+        put("playlistCount",       manifest.playlistCount)
+        put("preferenceCount",     manifest.preferenceCount)
+    }
+
     private fun preferencesObject(prefs: BackupPreferences): JSONObject = JSONObject().apply {
         prefs.startupDestination?.let  { put("startupDestination",  it) }
         prefs.mostPlayedPeriod?.let    { put("mostPlayedPeriod",    it) }
@@ -138,5 +154,19 @@ object WavdropBackupExporter {
         prefs.compactMode?.let        { put("compactMode",        it) }
         prefs.backupFileMode?.let     { put("backupFileMode",     it) }
         prefs.autoBackupInterval?.let { put("autoBackupInterval", it) }
+        prefs.artworkCornerStyle?.let        { put("artworkCornerStyle",        it) }
+        prefs.showSongThumbnails?.let        { put("showSongThumbnails",        it) }
+        prefs.showAlbumInSongRows?.let       { put("showAlbumInSongRows",       it) }
+        prefs.nowPlayingBackground?.let      { put("nowPlayingBackground",      it) }
+        prefs.showQueueCount?.let            { put("showQueueCount",            it) }
+        prefs.nowPlayingTimeDisplayMode?.let { put("nowPlayingTimeDisplayMode", it) }
+        prefs.notificationControls?.let      { put("notificationControls",      it) }
+        prefs.includeWhatsAppVoiceNotes?.let { put("includeWhatsAppVoiceNotes", it) }
+        prefs.pauseOnAudioDisconnect?.let    { put("pauseOnAudioDisconnect",    it) }
+        prefs.rememberLastTrack?.let         { put("rememberLastTrack",         it) }
+        prefs.rememberPosition?.let          { put("rememberPosition",          it) }
+        prefs.restoreQueue?.let              { put("restoreQueue",              it) }
+        prefs.bluetoothResumeMode?.let       { put("bluetoothResumeMode",       it) }
+        prefs.wiredResumeMode?.let           { put("wiredResumeMode",           it) }
     }
 }

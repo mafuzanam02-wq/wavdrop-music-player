@@ -161,7 +161,7 @@ class HomeViewModel @Inject constructor(
     val appIconChoice: StateFlow<AppIconChoice> = appSettingsRepository.appIconChoice.stateIn(
         scope        = viewModelScope,
         started      = SharingStarted.WhileSubscribed(5_000),
-        initialValue = AppIconChoice.MIDNIGHT_VIOLET,
+        initialValue = AppIconChoice.DEFAULT,
     )
 
     val statsMap: StateFlow<Map<Long, Int>> = statsRepository.allPlayCounts()

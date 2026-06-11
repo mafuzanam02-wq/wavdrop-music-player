@@ -57,6 +57,22 @@ data class BackupPreferences(
     val compactMode: Boolean? = null,
     val backupFileMode: String? = null,
     val autoBackupInterval: String? = null,
+    // ── Phase 4: every remaining user-facing DataStore setting. All nullable;
+    // null = "was default at export time" and restore leaves the default. ─────
+    val artworkCornerStyle: String? = null,
+    val showSongThumbnails: Boolean? = null,
+    val showAlbumInSongRows: Boolean? = null,
+    val nowPlayingBackground: String? = null,
+    val showQueueCount: Boolean? = null,
+    val nowPlayingTimeDisplayMode: String? = null,
+    val notificationControls: String? = null,
+    val includeWhatsAppVoiceNotes: Boolean? = null,
+    val pauseOnAudioDisconnect: Boolean? = null,
+    val rememberLastTrack: Boolean? = null,
+    val rememberPosition: Boolean? = null,
+    val restoreQueue: Boolean? = null,
+    val bluetoothResumeMode: String? = null,
+    val wiredResumeMode: String? = null,
 )
 
 data class BackupPlaylistSong(
@@ -89,6 +105,74 @@ data class BackupListenEvent(
     val source: String,
 )
 
+/**
+ * Section counts written at export time and re-checked at parse time. A mismatch
+ * between the manifest and the actual parsed content indicates a corrupt or
+ * tampered file. [preferenceCount] is informational only and is NOT validated:
+ * newer app versions add preference fields that older parsers ignore, which would
+ * otherwise turn legitimate forward-compatible backups into false failures.
+ */
+data class BackupManifest(
+    val songCount: Int,
+    val trackStatsCount: Int,
+    val listenEventCount: Int,
+    val importBaselineCount: Int,
+    val lyricsOverrideCount: Int,
+    val playlistCount: Int,
+    val preferenceCount: Int,
+) {
+    /** True when every validated count matches the backup's actual content. */
+    fun matchesContentOf(backup: WavdropBackup): Boolean =
+        songCount == backup.songs.size &&
+            trackStatsCount == backup.trackStats.size &&
+            listenEventCount == backup.listenEvents.size &&
+            importBaselineCount == backup.importBaselines.size &&
+            lyricsOverrideCount == backup.lyricsOverrides.size &&
+            playlistCount == backup.playlists.size
+
+    companion object {
+        fun of(backup: WavdropBackup): BackupManifest = BackupManifest(
+            songCount           = backup.songs.size,
+            trackStatsCount     = backup.trackStats.size,
+            listenEventCount    = backup.listenEvents.size,
+            importBaselineCount = backup.importBaselines.size,
+            lyricsOverrideCount = backup.lyricsOverrides.size,
+            playlistCount       = backup.playlists.size,
+            preferenceCount     = backup.preferences?.let(::countNonNullFields) ?: 0,
+        )
+
+        private fun countNonNullFields(prefs: BackupPreferences): Int = listOfNotNull(
+            prefs.startupDestination,
+            prefs.mostPlayedPeriod,
+            prefs.mostPlayedLimit,
+            prefs.homeVisibleSections,
+            prefs.scanMode,
+            prefs.selectedFolderUris,
+            prefs.minimumTrackDurationSeconds,
+            prefs.themeMode,
+            prefs.accentColor,
+            prefs.launcherIcon,
+            prefs.compactMode,
+            prefs.backupFileMode,
+            prefs.autoBackupInterval,
+            prefs.artworkCornerStyle,
+            prefs.showSongThumbnails,
+            prefs.showAlbumInSongRows,
+            prefs.nowPlayingBackground,
+            prefs.showQueueCount,
+            prefs.nowPlayingTimeDisplayMode,
+            prefs.notificationControls,
+            prefs.includeWhatsAppVoiceNotes,
+            prefs.pauseOnAudioDisconnect,
+            prefs.rememberLastTrack,
+            prefs.rememberPosition,
+            prefs.restoreQueue,
+            prefs.bluetoothResumeMode,
+            prefs.wiredResumeMode,
+        ).size
+    }
+}
+
 data class WavdropBackup(
     val exportedAt: String,
     val songs: List<BackupSong>,
@@ -98,4 +182,10 @@ data class WavdropBackup(
     val preferences: BackupPreferences? = null,
     val playlists: List<BackupPlaylist> = emptyList(),
     val listenEvents: List<BackupListenEvent> = emptyList(),
+    // ── Metadata written by newer exporters; null for legacy backups. ─────────
+    // None of these participate in the payload fingerprint.
+    val appVersionCode: Int? = null,
+    val appVersionName: String? = null,
+    val manifest: BackupManifest? = null,
+    val payloadSha256: String? = null,
 )

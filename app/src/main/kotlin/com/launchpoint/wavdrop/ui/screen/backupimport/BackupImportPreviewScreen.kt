@@ -240,7 +240,8 @@ private fun PreviewContent(
             Button(
                 onClick  = { showDialog = true },
                 enabled  = state.statsCount > 0 || state.lyricsOverridesCount > 0
-                        || state.playlistCount > 0 || state.listenEventsCount > 0,
+                        || state.playlistCount > 0 || state.listenEventsCount > 0
+                        || state.baselineCount > 0 || state.hasPreferences,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
@@ -347,6 +348,9 @@ private fun AppliedContent(
                     if (result.preferencesRestored) {
                         StatRow("Preferences", "Restored")
                     }
+                    if (result.launcherIconRestored) {
+                        StatRow("Launcher icon", "Restored")
+                    }
                     if (result.playlistsRestored > 0 || result.playlistSongsRestored > 0) {
                         StatRow("Playlists created", result.playlistsRestored.toString())
                         StatRow("Playlist songs added", result.playlistSongsRestored.toString())
@@ -362,6 +366,9 @@ private fun AppliedContent(
                         if (result.eventsSkippedUnmatched > 0) {
                             StatRow("History not matched", result.eventsSkippedUnmatched.toString())
                         }
+                    }
+                    result.warnings.forEach { warning ->
+                        StatRow("Note", warning)
                     }
                 }
             }

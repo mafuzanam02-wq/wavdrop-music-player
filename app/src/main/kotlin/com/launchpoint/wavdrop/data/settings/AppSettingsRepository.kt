@@ -72,7 +72,7 @@ class AppSettingsRepository @Inject constructor(
         }
         .map { preferences ->
             preferences[APP_ICON_CHOICE_KEY]?.toAppIconChoice()
-                ?: AppIconChoice.MIDNIGHT_VIOLET
+                ?: AppIconChoice.DEFAULT
         }
 
     suspend fun setAppIconChoice(choice: AppIconChoice) {

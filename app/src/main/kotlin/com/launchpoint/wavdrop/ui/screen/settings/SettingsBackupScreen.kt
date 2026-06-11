@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.backup.BackupVerificationResult
+import com.launchpoint.wavdrop.data.backup.VerificationStatus
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import java.time.Instant
@@ -52,9 +55,14 @@ fun SettingsBackupScreen(
     onNavigateBack: () -> Unit,
     onImportClick: () -> Unit,
     onBackupImportClick: (Uri) -> Unit,
+    onVerificationClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
+    verificationViewModel: BackupVerificationViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
+
+    LaunchedEffect(Unit) { verificationViewModel.verifyOnEntry() }
+    val verificationState by verificationViewModel.uiState.collectAsStateWithLifecycle()
 
     val exportStateValue    by viewModel.exportUiState.collectAsStateWithLifecycle()
     val folderBackupState   by viewModel.folderBackupUiState.collectAsStateWithLifecycle()
@@ -187,6 +195,25 @@ fun SettingsBackupScreen(
                     interval           = autoBackupInterval,
                 )
             }
+
+            // ── Backup Verification ────────────────────────────────────────────
+            item { SectionHeader("Backup Verification") }
+            item {
+                val subtitle = when (val state = verificationState) {
+                    BackupVerificationUiState.Loading -> "Tap to check backup health."
+                    is BackupVerificationUiState.Ready -> backupHealthIndicatorText(
+                        result               = state.result,
+                        folderSelected       = autoBackupFolderUri != null,
+                        folderPermissionValid = folderPermissionValid,
+                    )
+                }
+                ClickableSettingsRow(
+                    title    = "Backup Verification",
+                    subtitle = subtitle,
+                    onClick  = onVerificationClick,
+                )
+            }
+            item { SectionDivider() }
 
             // ── Backup Folder ──────────────────────────────────────────────────
             item { SectionHeader("Backup Folder") }
@@ -338,6 +365,37 @@ fun SettingsBackupScreen(
             }
         }
     }
+}
+
+// ── Backup health indicator ──────────────────────────────────────────────────
+
+private const val BACKUP_STALE_AFTER_MS = 7L * 24 * 60 * 60 * 1000 // 7 days
+
+/**
+ * Compact, user-facing one-liner for the Backup Verification entry row. The dedicated
+ * verification screen carries the details; this only signals whether attention is needed.
+ */
+private fun backupHealthIndicatorText(
+    result: BackupVerificationResult,
+    folderSelected: Boolean,
+    folderPermissionValid: Boolean,
+): String = when (result.status) {
+    VerificationStatus.VERIFIED -> {
+        val timestamp = result.backupTimestampMillis
+        if (timestamp != null && System.currentTimeMillis() - timestamp > BACKUP_STALE_AFTER_MS) {
+            "Backup older than 7 days"
+        } else {
+            "Verified backup"
+        }
+    }
+    VerificationStatus.PARTIAL  -> "Backup needs attention"
+    VerificationStatus.FAILED   -> "Backup verification failed"
+    VerificationStatus.NO_BACKUP_FOUND ->
+        if (folderSelected && !folderPermissionValid) {
+            "Backup folder unavailable"
+        } else {
+            "No verified backup found"
+        }
 }
 
 // ── Folder permission validation ────────────────────────────────────────────

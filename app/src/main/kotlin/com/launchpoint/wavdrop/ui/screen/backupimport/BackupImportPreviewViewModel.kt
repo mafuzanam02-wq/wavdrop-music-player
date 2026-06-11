@@ -117,6 +117,8 @@ class BackupImportPreviewViewModel @Inject constructor(
     private fun userFacingParseError(error: String?): String = when {
         error == null -> ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE
         error.startsWith("Unsupported backup version") -> error
+        // Already plain language; tells the user the file is damaged rather than wrong.
+        error.startsWith("Backup integrity check failed") -> error
         else -> ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE
     }
 

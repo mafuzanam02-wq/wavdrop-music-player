@@ -49,6 +49,7 @@ import com.launchpoint.wavdrop.ui.screen.monthlyreports.MonthlyReportsScreen
 import com.launchpoint.wavdrop.ui.screen.reports.ReportsScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsAboutScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsAppearanceScreen
+import com.launchpoint.wavdrop.ui.screen.settings.BackupVerificationScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsBackupScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsBluetoothScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsDiagnosticsScreen
@@ -77,6 +78,7 @@ sealed class Screen(val route: String) {
     data object SettingsBluetooth   : Screen("settings/bluetooth")
     data object SettingsLibrary     : Screen("settings/library")
     data object SettingsBackup      : Screen("settings/backup")
+    data object SettingsBackupVerification : Screen("settings/backup/verification")
     data object SettingsAppearance  : Screen("settings/appearance")
     data object SettingsStatistics  : Screen("settings/statistics")
     data object SettingsAbout       : Screen("settings/about")
@@ -461,7 +463,13 @@ fun WavdropNavGraph(
                         "${Screen.BackupImportPreview.route}?uri=${Uri.encode(uri.toString())}"
                     )
                 },
+                onVerificationClick = {
+                    navController.navigate(Screen.SettingsBackupVerification.route)
+                },
             )
+        }
+        composable(Screen.SettingsBackupVerification.route) {
+            BackupVerificationScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.SettingsAppearance.route) {
             SettingsAppearanceScreen(

@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.data.backup
 import android.util.Log
 import androidx.room.withTransaction
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
+import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
@@ -20,8 +21,14 @@ import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppIconAliasManager
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
+import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
+import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
+import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
+import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
+import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
@@ -38,12 +45,14 @@ class WavdropBackupImportRepository @Inject constructor(
     private val songDao: SongDao,
     private val trackStatsDao: TrackStatsDao,
     private val lyricsOverrideDao: LyricsOverrideDao,
+    private val importBaselineDao: ImportBaselineDao,
     private val playlistDao: PlaylistDao,
     private val trackListenEventDao: TrackListenEventDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val appIconAliasManager: AppIconAliasManager,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
     private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
+    private val resumeBehaviorSettingsRepository: ResumeBehaviorSettingsRepository,
 ) {
     suspend fun applyImport(backup: WavdropBackup): WavdropBackupImportApplyResult {
         val dbResult = db.withTransaction {
@@ -65,6 +74,10 @@ class WavdropBackupImportRepository @Inject constructor(
             }
 
             val match            = WavdropBackupStatsMatcher.match(backup, currentSongs)
+            // Backup song id → current library song, shared by event and baseline
+            // restore so every songId-keyed row follows its track after a reinstall.
+            val resolvedBySongId =
+                WavdropBackupStatsMatcher.resolveBackupSongIds(backup, currentSongs)
             val importedAt       = System.currentTimeMillis()
             var statsUpdated     = 0
             var favoritesRestored = 0
@@ -114,24 +127,28 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
-            // Lyrics overrides restore
+            // Shared resolver for song-linked rows (lyrics, playlist entries, events):
+            // tier-matched songId first, then URI, then tags only when unambiguous.
             val backupSongById = backup.songs.associateBy { it.id }
-            val byUri  = currentSongs.associateBy { it.uri }
-            val byTags = currentSongs.associateBy {
-                Triple(it.title.norm(), it.artist.norm(), it.album.norm())
-            }
-            var lyricsRestored = 0
+            val linkResolver   = BackupSongLinkResolver(currentSongs, resolvedBySongId)
+
+            // Lyrics overrides restore
+            var lyricsRestored  = 0
+            var lyricsUnmatched = 0
 
             for (override in backup.lyricsOverrides) {
-                val song = byUri[override.contentUri]
-                    ?: run {
-                        val backupSong = backupSongById[override.songId] ?: return@run null
-                        byTags[Triple(
-                            backupSong.title.norm(),
-                            backupSong.artist.norm(),
-                            backupSong.album.norm(),
-                        )]
-                    } ?: continue
+                val backupSong = backupSongById[override.songId]
+                val song = linkResolver.resolve(
+                    backupSongId = override.songId,
+                    contentUri   = override.contentUri,
+                    title        = backupSong?.title,
+                    artist       = backupSong?.artist,
+                    album        = backupSong?.album,
+                )
+                if (song == null) {
+                    lyricsUnmatched++
+                    continue
+                }
 
                 val existing = lyricsOverrideDao.getForSong(song.id, song.uri)
                 if (existing == null || override.updatedAt > existing.updatedAt) {
@@ -148,8 +165,9 @@ class WavdropBackupImportRepository @Inject constructor(
             }
 
             // Playlist restore
-            var playlistsRestored     = 0
-            var playlistSongsRestored = 0
+            var playlistsRestored        = 0
+            var playlistSongsRestored    = 0
+            var playlistEntriesUnmatched = 0
 
             for (backupPlaylist in backup.playlists) {
                 val name = backupPlaylist.name.trim()
@@ -165,35 +183,36 @@ class WavdropBackupImportRepository @Inject constructor(
 
                 val existingSongIds = playlistDao.getSongsForPlaylistSnapshot(playlistId)
                     .map { it.songId }
-                    .toMutableSet()
-                var nextPos = playlistDao.getMaxPosition(playlistId) + 1
-                var songsAddedHere = 0
+                    .toSet()
 
-                for (backupSong in backupPlaylist.songs.sortedBy { it.position }) {
-                    val currentSong = byUri[backupSong.contentUri]
-                        ?: byTags[Triple(
-                            backupSong.title.norm(),
-                            backupSong.artist.norm(),
-                            backupSong.album.norm(),
-                        )]
-                        ?: continue
-
-                    if (currentSong.id !in existingSongIds) {
-                        playlistDao.insertSong(
-                            PlaylistSongEntity(
-                                playlistId = playlistId,
-                                songId     = currentSong.id,
-                                position   = nextPos,
-                            )
+                val entryPlan = PlaylistEntryRestorePlanner.plan(
+                    entries = backupPlaylist.songs,
+                    resolve = { entry ->
+                        linkResolver.resolve(
+                            backupSongId = entry.songId,
+                            contentUri   = entry.contentUri,
+                            title        = entry.title,
+                            artist       = entry.artist,
+                            album        = entry.album,
                         )
-                        existingSongIds += currentSong.id
-                        nextPos++
-                        songsAddedHere++
-                        playlistSongsRestored++
-                    }
-                }
+                    },
+                    existingSongIds = existingSongIds,
+                    nextPosition    = playlistDao.getMaxPosition(playlistId) + 1,
+                )
 
-                if (songsAddedHere > 0) {
+                for (entry in entryPlan.toAdd) {
+                    playlistDao.insertSong(
+                        PlaylistSongEntity(
+                            playlistId = playlistId,
+                            songId     = entry.songId,
+                            position   = entry.position,
+                        )
+                    )
+                }
+                playlistSongsRestored    += entryPlan.restored
+                playlistEntriesUnmatched += entryPlan.skippedUnmatched
+
+                if (entryPlan.restored > 0) {
                     playlistDao.touchPlaylist(playlistId, importedAt)
                 }
             }
@@ -217,21 +236,19 @@ class WavdropBackupImportRepository @Inject constructor(
                     .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
                     .toHashSet()
 
-                val resolvedBySongId =
-                    WavdropBackupStatsMatcher.resolveBackupSongIds(backup, currentSongs)
-
                 eventPlan = ListenEventRestorePlanner.plan(
                     events = backup.listenEvents,
+                    // Tier-matched songId, then URI, then tags-only-if-unique — the
+                    // tags fallback covers old backups whose songs array lacks this
+                    // track, without guessing between duplicate-tag songs.
                     resolveSong = { event ->
-                        byUri[event.contentUri]
-                            ?: resolvedBySongId[event.songId]
-                            // Last resort for old backups whose songs array lacks this
-                            // track: exact tags carried on the event row itself.
-                            ?: byTags[Triple(
-                                event.title.norm(),
-                                event.artist.norm(),
-                                event.album.norm(),
-                            )]
+                        linkResolver.resolve(
+                            backupSongId = event.songId,
+                            contentUri   = event.contentUri,
+                            title        = event.title,
+                            artist       = event.artist,
+                            album        = event.album,
+                        )
                     },
                     existingFingerprints = existingFingerprints,
                 )
@@ -243,16 +260,41 @@ class WavdropBackupImportRepository @Inject constructor(
             val eventsRestored = eventPlan.restored
             val eventsSkipped  = eventPlan.skippedTotal
 
+            // Import baseline restore. Baselines track what previous BlackPlayer
+            // imports contributed; without them, a future re-import reports inflated
+            // "plays imported" numbers (stored stats stay correct via MAX-merge).
+            // Re-keyed to current song ids through the same tier matcher; an existing
+            // local baseline with a newer lastImportedAt always wins.
+            val baselinePlan = ImportBaselineRestorePlanner.plan(
+                baselines     = backup.importBaselines,
+                resolveSongId = { backupSongId -> resolvedBySongId[backupSongId]?.id },
+                existing      = importBaselineDao.getAllImportBaselinesSnapshot(),
+            )
+            for (entity in baselinePlan.toUpsert) {
+                importBaselineDao.upsertBaseline(entity)
+            }
+
+            val favoritesInBackup = backup.trackStats.count { it.isFavorite }
+            val matchedFavorites  = match.matchedRows.count { (_, stat) -> stat.isFavorite }
+
             WavdropBackupImportApplyResult(
                 matchedTracks         = match.matchedRows.size,
                 unmatchedTracks       = match.unmatchedCount,
                 matchDiagnostics      = match.diagnostics,
                 statsUpdated          = statsUpdated,
                 lyricsRestored        = lyricsRestored,
+                lyricsInBackup        = backup.lyricsOverrides.size,
+                lyricsUnmatched       = lyricsUnmatched,
                 favoritesRestored     = favoritesRestored,
+                favoritesInBackup     = favoritesInBackup,
+                favoritesUnmatched    = favoritesInBackup - matchedFavorites,
                 playlistsRestored     = playlistsRestored,
+                playlistsInBackup     = backup.playlists.size,
                 playlistSongsRestored = playlistSongsRestored,
+                playlistEntriesInBackup  = backup.playlists.sumOf { it.songs.size },
+                playlistEntriesUnmatched = playlistEntriesUnmatched,
                 eventsRestored        = eventsRestored,
+                baselinesRestored     = baselinePlan.restored,
                 eventsSkipped         = eventsSkipped,
                 eventsSkippedDuplicate     = eventPlan.skippedDuplicate,
                 eventsSkippedUnmatched     = eventPlan.skippedUnmatched,
@@ -278,12 +320,25 @@ class WavdropBackupImportRepository @Inject constructor(
                 "eventsRestored=${dbResult.eventsRestored} " +
                 "eventsDuplicate=${dbResult.eventsSkippedDuplicate} " +
                 "eventsUnmatched=${dbResult.eventsSkippedUnmatched} " +
-                "currentMonthEventsRestored=${dbResult.currentMonthEventsRestored}",
+                "currentMonthEventsRestored=${dbResult.currentMonthEventsRestored} " +
+                "baselinesInBackup=${backup.importBaselines.size} " +
+                "baselinesRestored=${dbResult.baselinesRestored} " +
+                "favorites=${dbResult.favoritesRestored}/${dbResult.favoritesInBackup}" +
+                "(unmatched=${dbResult.favoritesUnmatched}) " +
+                "lyrics=${dbResult.lyricsRestored}/${dbResult.lyricsInBackup}" +
+                "(unmatched=${dbResult.lyricsUnmatched}) " +
+                "playlists=${dbResult.playlistsRestored}/${dbResult.playlistsInBackup} " +
+                "playlistEntries=${dbResult.playlistSongsRestored}/${dbResult.playlistEntriesInBackup}" +
+                "(unmatched=${dbResult.playlistEntriesUnmatched})",
         )
 
         // Restore preferences outside the Room transaction — DataStore is not Room-transactional.
+        val warnings = mutableListOf<String>()
+        BackupRestoreWarnings.selectedFolderPermissionWarning(backup.preferences)?.let { warnings += it }
+
         var preferencesRestored = false
         backup.preferences?.let { prefs ->
+            runCatching {
             prefs.startupDestination
                 ?.let { runCatching { StartupDestination.valueOf(it) }.getOrNull() }
                 ?.let { appSettingsRepository.setStartupDestination(it); preferencesRestored = true }
@@ -325,6 +380,54 @@ class WavdropBackupImportRepository @Inject constructor(
             prefs.compactMode
                 ?.let { appSettingsRepository.setCompactMode(it); preferencesRestored = true }
 
+            prefs.artworkCornerStyle
+                ?.let { runCatching { ArtworkCornerStyle.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setArtworkCornerStyle(it); preferencesRestored = true }
+
+            prefs.showSongThumbnails
+                ?.let { appSettingsRepository.setShowSongThumbnails(it); preferencesRestored = true }
+
+            prefs.showAlbumInSongRows
+                ?.let { appSettingsRepository.setShowAlbumInSongRows(it); preferencesRestored = true }
+
+            prefs.nowPlayingBackground
+                ?.let { runCatching { NowPlayingBackground.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setNowPlayingBackground(it); preferencesRestored = true }
+
+            prefs.showQueueCount
+                ?.let { appSettingsRepository.setShowQueueCount(it); preferencesRestored = true }
+
+            prefs.nowPlayingTimeDisplayMode
+                ?.let { runCatching { NowPlayingTimeDisplayMode.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setNowPlayingTimeDisplayMode(it); preferencesRestored = true }
+
+            prefs.notificationControls
+                ?.let { runCatching { NotificationControlsSetting.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setNotificationControlsSetting(it); preferencesRestored = true }
+
+            prefs.includeWhatsAppVoiceNotes
+                ?.let { libraryScanSettingsRepository.setIncludeWhatsAppVoiceNotes(it); preferencesRestored = true }
+
+            prefs.pauseOnAudioDisconnect
+                ?.let { resumeBehaviorSettingsRepository.setPauseOnAudioDisconnect(it); preferencesRestored = true }
+
+            prefs.rememberLastTrack
+                ?.let { resumeBehaviorSettingsRepository.setRememberLastTrack(it); preferencesRestored = true }
+
+            prefs.rememberPosition
+                ?.let { resumeBehaviorSettingsRepository.setRememberPosition(it); preferencesRestored = true }
+
+            prefs.restoreQueue
+                ?.let { resumeBehaviorSettingsRepository.setRestoreQueue(it); preferencesRestored = true }
+
+            prefs.bluetoothResumeMode
+                ?.let { runCatching { HeadphoneResumeMode.valueOf(it) }.getOrNull() }
+                ?.let { resumeBehaviorSettingsRepository.setBluetoothResumeMode(it); preferencesRestored = true }
+
+            prefs.wiredResumeMode
+                ?.let { runCatching { HeadphoneResumeMode.valueOf(it) }.getOrNull() }
+                ?.let { resumeBehaviorSettingsRepository.setWiredResumeMode(it); preferencesRestored = true }
+
             prefs.backupFileMode
                 ?.let { runCatching { BackupFileMode.valueOf(it) }.getOrNull() }
                 ?.let { appSettingsRepository.setBackupFileMode(it); preferencesRestored = true }
@@ -339,6 +442,10 @@ class WavdropBackupImportRepository @Inject constructor(
                     appSettingsRepository.setLastAutoBackupAtMillis(0L)
                     preferencesRestored = true
                 }
+            }.onFailure { error ->
+                Log.e(TAG, "Restore data committed but some settings failed to restore", error)
+                warnings += BackupRestoreWarnings.SETTINGS_PARTIAL
+            }
         }
 
         // Folder selection is needed if auto-backup was restored with a non-OFF interval
@@ -346,7 +453,15 @@ class WavdropBackupImportRepository @Inject constructor(
         // across devices, so the old folder URI is never restored from backup.
         val restoredInterval = backup.preferences?.autoBackupInterval
             ?.let { runCatching { AutoBackupInterval.valueOf(it) }.getOrNull() }
-        val currentFolderUri = appSettingsRepository.autoBackupFolderUri.first()
+        val currentFolderUri = runCatching {
+            appSettingsRepository.autoBackupFolderUri.first()
+        }.getOrElse { error ->
+            Log.e(TAG, "Restore data committed but current backup folder could not be read", error)
+            if (BackupRestoreWarnings.SETTINGS_PARTIAL !in warnings) {
+                warnings += BackupRestoreWarnings.SETTINGS_PARTIAL
+            }
+            null
+        }
         val needsAutoBackupFolderSelection =
             restoredInterval != null
                 && restoredInterval != AutoBackupInterval.OFF
@@ -356,27 +471,43 @@ class WavdropBackupImportRepository @Inject constructor(
         // switching can kill the process, and this flag is what makes the folder prompt
         // reappear after the relaunch.
         if (needsAutoBackupFolderSelection) {
-            appSettingsRepository.setNeedsAutoBackupFolderSelectionAfterRestore(true)
+            runCatching {
+                appSettingsRepository.setNeedsAutoBackupFolderSelectionAfterRestore(true)
+            }.onFailure { error ->
+                Log.e(TAG, "Restore data committed but backup folder prompt flag failed", error)
+                if (BackupRestoreWarnings.SETTINGS_PARTIAL !in warnings) {
+                    warnings += BackupRestoreWarnings.SETTINGS_PARTIAL
+                }
+            }
         }
 
         // Launcher icon is restored LAST. Applying the activity-alias switch can restart or
         // close the app on some launchers, so everything else (including the pending-folder
         // flag above) must already be persisted by this point.
+        var launcherIconRestored = false
         backup.preferences?.launcherIcon
             ?.let { AppIconChoice.fromStoredName(it) }
             ?.let {
-                appSettingsRepository.setAppIconChoice(it)
-                runCatching { appIconAliasManager.apply(it) }
-                preferencesRestored = true
+                runCatching {
+                    appSettingsRepository.setAppIconChoice(it)
+                    runCatching { appIconAliasManager.apply(it) }
+                    preferencesRestored = true
+                    launcherIconRestored = true
+                }.onFailure { error ->
+                    Log.e(TAG, "Restore data committed but launcher icon failed to restore", error)
+                    if (BackupRestoreWarnings.SETTINGS_PARTIAL !in warnings) {
+                        warnings += BackupRestoreWarnings.SETTINGS_PARTIAL
+                    }
+                }
             }
 
         return dbResult.copy(
             preferencesRestored            = preferencesRestored,
             needsAutoBackupFolderSelection = needsAutoBackupFolderSelection,
+            launcherIconRestored           = launcherIconRestored,
+            warnings                       = warnings.distinct(),
         )
     }
 }
 
 private const val TAG = "WavdropRestore"
-
-private fun String.norm() = trim().lowercase()

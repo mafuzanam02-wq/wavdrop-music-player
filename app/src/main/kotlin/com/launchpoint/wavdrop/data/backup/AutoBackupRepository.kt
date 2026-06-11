@@ -100,7 +100,24 @@ class AutoBackupRepository @Inject constructor(
     }
 
     /**
-     * Writes the current backup JSON into [fileName] inside [folder].
+     * Writes the current backup JSON into [fileName] inside [folder] using an
+     * atomic-style temp-then-final flow:
+     *
+     *  1. Write the JSON to a temp file ([fileName] + ".tmp").
+     *  2. Read the temp file back and parse it with [WavdropBackupParser] — proves the
+     *     JSON is complete and well-formed BEFORE the previous backup is touched.
+     *  3. Write the final file with truncating mode and validate it the same way.
+     *  4. Delete the temp file.
+     *
+     * SAF's renameDocument is not reliable across providers (and rename-over-existing
+     * is not universally supported), so step 3 is a truncating overwrite of the final
+     * file rather than a true rename. KNOWN RISK: a crash or power loss during step 3
+     * itself can still corrupt the final file — but the window is now a single
+     * validated-content write instead of the entire JSON build + write, and a failure
+     * in any earlier step leaves the previous backup completely untouched.
+     *
+     * Success is returned only after the FINAL file parses successfully, so
+     * lastAutoBackupAtMillis is never updated for a corrupt backup.
      *
      * Uses a [listFiles()] scan instead of [findFile()] because [DocumentFile.findFile]
      * is unreliable on many SAF providers — it can return null even when the file exists,
@@ -108,35 +125,84 @@ class AutoBackupRepository @Inject constructor(
      * filename, creating duplicates. The [listFiles()] scan bypasses the provider's
      * name-lookup path and directly inspects the directory listing.
      *
-     * Writes via [openOutputStream] with mode "wt" (truncate-and-write). Falls back to
-     * mode "w" if "wt" is not supported by the provider.
+     * The temp name ends in ".tmp" (not ".json") so Backup Verification's
+     * "wavdrop-backup*.json" discovery never picks up a leftover temp file.
      */
     private suspend fun writeJsonToFolder(folder: DocumentFile, fileName: String): Boolean {
         val backupFileMode = appSettingsRepository.backupFileMode.first()
         Log.d(TAG, "writeJsonToFolder: mode=$backupFileMode fileName=$fileName folderUri=${folder.uri}")
 
-        val existing = findExistingChildByName(folder, fileName)
-        Log.d(TAG, "writeJsonToFolder: existingFile=${existing?.uri}")
-
-        val target = if (existing != null) {
-            existing
-        } else {
-            Log.d(TAG, "writeJsonToFolder: file not found — calling createFile")
-            folder.createFile("application/json", fileName) ?: return false
-        }
-        Log.d(TAG, "writeJsonToFolder: targetUri=${target.uri}")
-
         val json = backupRepository.buildBackupJson()
+        val tempName = "$fileName.tmp"
 
-        val wrote = tryWriteStream(target, json, "wt")
-            ?: tryWriteStream(target, json, "w")
+        // Stale temp from an earlier crashed run — remove before writing a fresh one.
+        findExistingChildByName(folder, tempName)?.let { stale ->
+            runCatching { stale.delete() }
+        }
 
-        if (wrote == null) {
-            Log.e(TAG, "writeJsonToFolder: openOutputStream failed with both 'wt' and 'w'")
+        // Step 1: write temp. Any failure here leaves the previous backup untouched.
+        // octet-stream MIME so providers don't append ".json" to the temp name, which
+        // would make it discoverable as a real backup.
+        val temp = folder.createFile("application/octet-stream", tempName)
+        if (temp == null) {
+            Log.e(TAG, "writeJsonToFolder: could not create temp file")
+            return false
+        }
+        if (!writeAndValidate(temp, json)) {
+            Log.e(TAG, "writeJsonToFolder: temp write/validation failed — previous backup untouched")
+            runCatching { temp.delete() }
             return false
         }
 
-        Log.d(TAG, "writeJsonToFolder: write succeeded")
+        // Step 3: write final with truncating mode, then validate it.
+        val existing = findExistingChildByName(folder, fileName)
+        val target = existing
+            ?: folder.createFile("application/json", fileName)
+        if (target == null) {
+            Log.e(TAG, "writeJsonToFolder: could not create final file")
+            runCatching { temp.delete() }
+            return false
+        }
+
+        val finalOk = writeAndValidate(target, json)
+        runCatching { temp.delete() }
+
+        if (!finalOk) {
+            Log.e(TAG, "writeJsonToFolder: final write/validation failed")
+            return false
+        }
+
+        Log.d(TAG, "writeJsonToFolder: write succeeded and final file validated")
+        return true
+    }
+
+    /**
+     * Writes [json] to [target] ("wt" truncating mode, "w" fallback), reads the file
+     * back, and confirms it parses as a valid Wavdrop backup. Returns false on any
+     * write, read, or parse failure.
+     */
+    private fun writeAndValidate(target: DocumentFile, json: String): Boolean {
+        val wrote = tryWriteStream(target, json, "wt")
+            ?: tryWriteStream(target, json, "w")
+        if (wrote == null) {
+            Log.e(TAG, "writeAndValidate: openOutputStream failed with both 'wt' and 'w'")
+            return false
+        }
+
+        val readBack = runCatching {
+            context.contentResolver.openInputStream(target.uri)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+        }.getOrNull()
+        if (readBack == null) {
+            Log.e(TAG, "writeAndValidate: could not read file back for validation")
+            return false
+        }
+
+        if (!BackupSaveValidator.isSavedBackupValid(readBack)) {
+            Log.e(TAG, "writeAndValidate: written file failed saved-backup validation")
+            return false
+        }
         return true
     }
 

@@ -28,6 +28,12 @@ enum class AppIconChoice(val displayName: String, val aliasClassName: String) {
     ;
 
     companion object {
+        /**
+         * Fresh-install launcher icon. Must match the single activity-alias with
+         * android:enabled="true" in AndroidManifest.xml.
+         */
+        val DEFAULT = OBSIDIAN_BLACK
+
         fun fromStoredName(raw: String?): AppIconChoice? =
             raw?.let { value -> entries.firstOrNull { it.name == value } }
     }

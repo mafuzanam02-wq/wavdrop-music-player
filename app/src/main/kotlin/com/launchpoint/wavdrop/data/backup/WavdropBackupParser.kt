@@ -4,6 +4,12 @@ object WavdropBackupParser {
     const val SUPPORTED_FORMAT = "wavdrop_backup"
     const val SUPPORTED_VERSION = 1
 
+    /**
+     * Calm user-facing message for checksum/manifest mismatches. Surfaced verbatim
+     * by restore preview and verification — keep it plain language.
+     */
+    const val INTEGRITY_ERROR = "Backup integrity check failed. The file may be damaged."
+
     private val requiredRootFields = listOf(
         "app",
         "format",
@@ -130,6 +136,20 @@ object WavdropBackupParser {
                     compactMode                 = obj["compactMode"] as? Boolean,
                     backupFileMode              = obj["backupFileMode"] as? String,
                     autoBackupInterval          = obj["autoBackupInterval"] as? String,
+                    artworkCornerStyle          = obj["artworkCornerStyle"] as? String,
+                    showSongThumbnails          = obj["showSongThumbnails"] as? Boolean,
+                    showAlbumInSongRows         = obj["showAlbumInSongRows"] as? Boolean,
+                    nowPlayingBackground        = obj["nowPlayingBackground"] as? String,
+                    showQueueCount              = obj["showQueueCount"] as? Boolean,
+                    nowPlayingTimeDisplayMode   = obj["nowPlayingTimeDisplayMode"] as? String,
+                    notificationControls        = obj["notificationControls"] as? String,
+                    includeWhatsAppVoiceNotes   = obj["includeWhatsAppVoiceNotes"] as? Boolean,
+                    pauseOnAudioDisconnect      = obj["pauseOnAudioDisconnect"] as? Boolean,
+                    rememberLastTrack           = obj["rememberLastTrack"] as? Boolean,
+                    rememberPosition            = obj["rememberPosition"] as? Boolean,
+                    restoreQueue                = obj["restoreQueue"] as? Boolean,
+                    bluetoothResumeMode         = obj["bluetoothResumeMode"] as? String,
+                    wiredResumeMode             = obj["wiredResumeMode"] as? String,
                 )
             }
 
@@ -170,18 +190,47 @@ object WavdropBackupParser {
                     )
                 } ?: emptyList()
 
-            success(
-                WavdropBackup(
-                    exportedAt      = root["exportedAt"] as? String ?: "",
-                    songs           = songs,
-                    trackStats      = trackStats,
-                    importBaselines = importBaselines,
-                    lyricsOverrides = lyricsOverrides,
-                    preferences     = preferences,
-                    playlists       = playlists,
-                    listenEvents    = listenEvents,
+            // Optional metadata written by newer exporters; all absent in legacy backups.
+            val manifest = (root["manifest"] as? Map<*, *>)?.let { m ->
+                BackupManifest(
+                    songCount           = m.optCount("songCount"),
+                    trackStatsCount     = m.optCount("trackStatsCount"),
+                    listenEventCount    = m.optCount("listenEventCount"),
+                    importBaselineCount = m.optCount("importBaselineCount"),
+                    lyricsOverrideCount = m.optCount("lyricsOverrideCount"),
+                    playlistCount       = m.optCount("playlistCount"),
+                    preferenceCount     = m.optCount("preferenceCount"),
                 )
+            }
+            val payloadSha256 = root["payloadSha256"] as? String
+
+            val backup = WavdropBackup(
+                exportedAt      = root["exportedAt"] as? String ?: "",
+                songs           = songs,
+                trackStats      = trackStats,
+                importBaselines = importBaselines,
+                lyricsOverrides = lyricsOverrides,
+                preferences     = preferences,
+                playlists       = playlists,
+                listenEvents    = listenEvents,
+                appVersionCode  = (root["appVersionCode"] as? Long)?.toInt(),
+                appVersionName  = root["appVersionName"] as? String,
+                manifest        = manifest,
+                payloadSha256   = payloadSha256,
             )
+
+            // Integrity validation — only for backups that carry the metadata.
+            // Legacy backups (no checksum/manifest) stay fully valid.
+            if (payloadSha256 != null &&
+                payloadSha256 != WavdropBackupIntegrity.payloadFingerprint(backup)
+            ) {
+                return failure(INTEGRITY_ERROR)
+            }
+            if (manifest != null && !manifest.matchesContentOf(backup)) {
+                return failure(INTEGRITY_ERROR)
+            }
+
+            success(backup)
         } catch (e: BackupParseException) {
             failure(e.message ?: "Invalid backup file")
         }
@@ -202,6 +251,9 @@ private class BackupParseException(message: String) : IllegalArgumentException(m
 private class JsonParseException(message: String) : IllegalArgumentException(message)
 
 private fun Map<*, *>.hasField(name: String): Boolean = containsKey(name) && this[name] != null
+
+/** Lenient manifest count: missing or non-numeric values read as 0. */
+private fun Map<*, *>.optCount(name: String): Int = (this[name] as? Long)?.toInt() ?: 0
 
 private fun Map<*, *>.requiredArray(name: String): List<*> {
     if (!hasField(name)) throw BackupParseException("Missing field: $name")
