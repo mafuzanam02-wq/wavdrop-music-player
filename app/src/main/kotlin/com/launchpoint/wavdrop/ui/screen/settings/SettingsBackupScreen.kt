@@ -319,7 +319,9 @@ fun SettingsBackupScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Restore from backup",
-                    subtitle = "Preview and restore a Wavdrop backup to your library stats, playlists, and listening history.",
+                    subtitle = "Choose a Wavdrop backup JSON file to preview and restore.",
+                    // Narrow filter so the picker hides non-JSON files. Post-selection
+                    // validation still rejects anything a provider lets through.
                     onClick  = { backupImportLauncher.launch(arrayOf("application/json")) },
                 )
             }
@@ -330,7 +332,7 @@ fun SettingsBackupScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Import BlackPlayer data",
-                    subtitle = "Import play counts and skip counts from a BlackPlayer .bpstat file.",
+                    subtitle = "Choose a BlackPlayer .bpstat file to import play and skip counts.",
                     onClick  = onImportClick,
                 )
             }

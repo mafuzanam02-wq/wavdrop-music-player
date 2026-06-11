@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.backup.ImportFileValidation
 import com.launchpoint.wavdrop.data.backup.WavdropBackup
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportApplyResult
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportRepository
@@ -67,6 +68,14 @@ class BackupImportPreviewViewModel @Inject constructor(
     }
 
     private suspend fun readAndParse(uri: Uri): BackupImportUiState {
+        // Gate by file name first: only .json files belong here. Files without a
+        // usable display name fall through to the content sniff below.
+        val displayName = ImportFileValidation.displayName(context, uri)
+        val nameLooksRight = ImportFileValidation.isLikelyWavdropBackupFileName(displayName)
+        if (displayName != null && !nameLooksRight) {
+            return BackupImportUiState.Error(ImportFileValidation.WAVDROP_WRONG_FILE_MESSAGE)
+        }
+
         val content = withContext(Dispatchers.IO) {
             context.contentResolver
                 .openInputStream(uri)
@@ -74,9 +83,15 @@ class BackupImportPreviewViewModel @Inject constructor(
                 ?.use { it.readText() }
         } ?: return BackupImportUiState.Error("Could not open the selected file.")
 
+        // Structural sniff before full parsing — rejects arbitrary JSON/binary
+        // content without running the parser over it.
+        if (!ImportFileValidation.isLikelyWavdropBackupContent(content)) {
+            return BackupImportUiState.Error(ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE)
+        }
+
         val result = WavdropBackupParser.parse(content)
         val backup = result.backup
-            ?: return BackupImportUiState.Error(result.error ?: "Invalid backup file.")
+            ?: return BackupImportUiState.Error(userFacingParseError(result.error))
 
         parsedBackup = backup
 
@@ -92,6 +107,17 @@ class BackupImportPreviewViewModel @Inject constructor(
             playlistCount        = backup.playlists.size,
             listenEventsCount    = backup.listenEvents.size,
         )
+    }
+
+    /**
+     * Maps technical parser errors (malformed JSON, wrong format, missing schema
+     * fields) to a calm user-facing message. Version errors stay specific so users
+     * know a newer backup needs a newer app.
+     */
+    private fun userFacingParseError(error: String?): String = when {
+        error == null -> ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE
+        error.startsWith("Unsupported backup version") -> error
+        else -> ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE
     }
 
     // ── Post-restore folder selection ─────────────────────────────────────────

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.backup.ImportFileValidation
 import com.launchpoint.wavdrop.data.legacy.BpstatApplyResult
 import com.launchpoint.wavdrop.data.legacy.BpstatMatchResult
 import com.launchpoint.wavdrop.data.legacy.BpstatMatcher
@@ -71,6 +72,13 @@ class BpstatPreviewViewModel @Inject constructor(
     }
 
     private suspend fun readAndMatch(uri: Uri): BpstatPreviewUiState {
+        // BlackPlayer exports have no reliable MIME type, so the picker is */* and
+        // the extension is enforced here instead.
+        val displayName = ImportFileValidation.displayName(context, uri)
+        if (!ImportFileValidation.isLikelyBlackPlayerStatsFileName(displayName)) {
+            return BpstatPreviewUiState.Error(ImportFileValidation.BPSTAT_WRONG_FILE_MESSAGE)
+        }
+
         val content = withContext(Dispatchers.IO) {
             context.contentResolver
                 .openInputStream(uri)
