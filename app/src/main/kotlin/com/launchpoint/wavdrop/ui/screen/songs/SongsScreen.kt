@@ -180,7 +180,7 @@ fun SongsScreen(
             PullToRefreshBox(
                 isRefreshing = isRefreshing,
                 onRefresh    = viewModel::refreshLibrary,
-                modifier     = Modifier.fillMaxSize(),
+                modifier     = Modifier.padding(innerPadding).fillMaxSize(),
             ) {
                 when (val state = uiState) {
                     HomeUiState.Loading -> LoadingSongs()
