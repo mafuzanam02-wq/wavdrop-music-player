@@ -157,6 +157,12 @@ fun SettingsLibraryScreen(
                 LibraryScanUiState.Idle     -> Unit
                 LibraryScanUiState.Scanning -> item { SettingsMessageRow("Library scan started...") }
                 LibraryScanUiState.Complete -> item { SettingsMessageRow("Library scan complete.") }
+                is LibraryScanUiState.Warning -> item {
+                    SettingsMessageRow(
+                        message = state.message,
+                        isError = true,
+                    )
+                }
                 is LibraryScanUiState.Error -> item {
                     SettingsMessageRow(
                         message = "Library scan failed: ${state.message}",

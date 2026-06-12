@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
+import com.launchpoint.wavdrop.data.repository.LibrarySyncResult
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
@@ -51,6 +52,7 @@ sealed interface LibraryScanUiState {
     data object Idle : LibraryScanUiState
     data object Scanning : LibraryScanUiState
     data object Complete : LibraryScanUiState
+    data class Warning(val message: String) : LibraryScanUiState
     data class Error(val message: String) : LibraryScanUiState
 }
 
@@ -406,7 +408,12 @@ class SettingsViewModel @Inject constructor(
             _libraryScanUiState.value = runCatching {
                 songRepository.sync()
             }.fold(
-                onSuccess = { LibraryScanUiState.Complete },
+                onSuccess = { result ->
+                    when (result) {
+                        is LibrarySyncResult.Success       -> LibraryScanUiState.Complete
+                        is LibrarySyncResult.EmptyPreserved -> LibraryScanUiState.Warning(result.reason)
+                    }
+                },
                 onFailure = { e ->
                     LibraryScanUiState.Error(e.message ?: "Library scan failed. Please try again.")
                 },

@@ -28,8 +28,11 @@ interface SongDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(songs: List<SongEntity>)
 
-    @Query("DELETE FROM songs WHERE id NOT IN (:activeIds)")
-    suspend fun pruneDeleted(activeIds: List<Long>)
+    @Query("SELECT id FROM songs")
+    suspend fun getAllSongIds(): List<Long>
+
+    @Query("DELETE FROM songs WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
 
     @Query("DELETE FROM songs WHERE id = :songId")
     suspend fun deleteSong(songId: Long)

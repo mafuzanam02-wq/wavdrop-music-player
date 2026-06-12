@@ -16,7 +16,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -119,6 +125,21 @@ fun AlbumDetailsScreen(
                         color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                         thickness = 0.5.dp,
                     )
+                }
+                if (state.songs.isNotEmpty()) {
+                    item {
+                        GroupPlaybackActions(
+                            onPlayAll    = viewModel::playAll,
+                            onPlayNext   = viewModel::playAllNext,
+                            onAddToQueue = viewModel::addAllToQueue,
+                            onShuffle    = viewModel::shufflePlay,
+                            modifier     = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        HorizontalDivider(
+                            color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                            thickness = 0.5.dp,
+                        )
+                    }
                 }
                 if (state.songs.isEmpty()) {
                     item {
@@ -253,6 +274,46 @@ private fun AlbumHeader(
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f),
                 modifier = Modifier.padding(top = 8.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun GroupPlaybackActions(
+    onPlayAll: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onShuffle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var moreExpanded by remember { mutableStateOf(false) }
+    Row(
+        modifier              = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+    ) {
+        FilledTonalButton(onClick = onPlayAll, modifier = Modifier.weight(1f)) {
+            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.padding(end = 4.dp))
+            Text("Play")
+        }
+        FilledTonalButton(onClick = onShuffle, modifier = Modifier.weight(1f)) {
+            Icon(Icons.Default.Shuffle, null, modifier = Modifier.padding(end = 4.dp))
+            Text("Shuffle")
+        }
+        Box {
+            IconButton(onClick = { moreExpanded = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "More queue actions")
+            }
+            DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
+                DropdownMenuItem(
+                    text    = { Text("Play next") },
+                    onClick = { moreExpanded = false; onPlayNext() },
+                )
+                DropdownMenuItem(
+                    text    = { Text("Add to queue") },
+                    onClick = { moreExpanded = false; onAddToQueue() },
+                )
+            }
         }
     }
 }

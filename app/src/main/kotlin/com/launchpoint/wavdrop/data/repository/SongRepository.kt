@@ -1,5 +1,7 @@
 ﻿package com.launchpoint.wavdrop.data.repository
 
+import android.util.Log
+import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
 import com.launchpoint.wavdrop.data.mediastore.MediaStoreScanner
@@ -15,6 +17,7 @@ import javax.inject.Inject
 
 class SongRepository @Inject constructor(
     private val dao: SongDao,
+    private val playlistDao: PlaylistDao,
     private val scanner: MediaStoreScanner,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
 ) {
@@ -29,15 +32,46 @@ class SongRepository @Inject constructor(
         dao.deleteSong(songId)
     }
 
-    suspend fun sync() = withContext(Dispatchers.IO) {
+    suspend fun sync(): LibrarySyncResult = withContext(Dispatchers.IO) {
         val scanSettings = scanSettingsRepository.settings.first()
         val found = scanner.scanSongs(scanSettings)
+
         if (found.isEmpty()) {
+            if (SongSyncPolicy.shouldPreserveOnEmptyScan(scanSettings)) {
+                Log.w(TAG,
+                    "Selected-folder scan returned 0 songs — preserving existing library. " +
+                    "Configured folder URIs: ${scanSettings.selectedFolderUris}"
+                )
+                return@withContext LibrarySyncResult.EmptyPreserved(
+                    "Selected folder scan returned no songs. " +
+                    "Your selected folder may have moved or its access may have changed. " +
+                    "Check your folder selection and rescan."
+                )
+            }
             dao.deleteAll()
-            return@withContext
+            return@withContext LibrarySyncResult.Success(0)
         }
+
         dao.upsertAll(found.map(Song::toEntity))
-        dao.pruneDeleted(found.map(Song::id))
+
+        val activeIds = found.map { it.id }.toSet()
+        val currentIds = dao.getAllSongIds().toSet()
+        val staleIds = SongSyncPolicy.computeStaleIds(currentIds, activeIds)
+        staleIds.chunked(PRUNE_CHUNK_SIZE).forEach { chunk ->
+            dao.deleteByIds(chunk)
+            // Remove playlist memberships for songs that are no longer in the library.
+            // track_stats, track_listen_events, lyrics_overrides, and import_baselines are
+            // intentionally kept: they reconnect automatically if the file reappears with the
+            // same MediaStore ID, and they preserve listening history across temporary scan gaps.
+            playlistDao.removeEntriesForSongs(chunk)
+        }
+
+        LibrarySyncResult.Success(found.size)
+    }
+
+    private companion object {
+        const val TAG = "Wavdrop-Sync"
+        const val PRUNE_CHUNK_SIZE = 500
     }
 }
 

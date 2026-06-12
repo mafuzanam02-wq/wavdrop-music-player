@@ -391,6 +391,19 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    /** Inserts [songs] immediately after the current item in their original order. */
+    fun playAllNext(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        // Inserting each song at currentIndex+1 in reversed order produces the original order.
+        songs.reversed().forEach { playNext(it) }
+    }
+
+    /** Appends [songs] to the end of the queue in their original order. */
+    fun addAllToQueue(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        songs.forEach { addToQueue(it) }
+    }
+
     fun addToQueue(song: Song) {
         val currentPlaybackIndex = currentPlaybackIndex()
         if (libraryQueue.isEmpty() || currentPlaybackIndex == null) {

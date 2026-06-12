@@ -95,6 +95,15 @@ class ArtistDetailsViewModel @Inject constructor(
     fun playNext(song: Song)   = playerController.playNext(song)
     fun addToQueue(song: Song) = playerController.addToQueue(song)
 
+    fun playAll() {
+        val songs = uiState.value.songs
+        val first = songs.firstOrNull() ?: return
+        playerController.playFromQueue(queue = songs, startSong = first)
+    }
+    fun playAllNext()   = playerController.playAllNext(uiState.value.songs)
+    fun addAllToQueue() = playerController.addAllToQueue(uiState.value.songs)
+    fun shufflePlay()   = playerController.playFromQueueShuffled(uiState.value.songs)
+
     fun toggleFavorite(songId: Long) {
         val song = uiState.value.songs.firstOrNull { it.id == songId } ?: return
         viewModelScope.launch { statsRepository.toggleFavorite(songId, song.uri) }

@@ -31,4 +31,7 @@ interface ImportBaselineDao {
 
     @Query("SELECT * FROM import_baselines ORDER BY sourceType ASC, sourceKey ASC, songId ASC")
     suspend fun getAllImportBaselinesSnapshot(): List<ImportBaselineEntity>
+
+    @Query("DELETE FROM import_baselines WHERE songId = :songId")
+    suspend fun deleteBySongId(songId: Long)
 }

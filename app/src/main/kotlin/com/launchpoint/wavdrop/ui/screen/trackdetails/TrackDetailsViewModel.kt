@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.model.PlaylistSong
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
@@ -47,6 +48,7 @@ class TrackDetailsViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val playerController: PlayerController,
     private val lyricsOverrideDao: LyricsOverrideDao,
+    private val importBaselineDao: ImportBaselineDao,
 ) : ViewModel() {
 
     private val songId: Long = checkNotNull(savedStateHandle["songId"])
@@ -129,6 +131,11 @@ class TrackDetailsViewModel @Inject constructor(
             runCatching { songRepository.pruneSong(song.id) }
             runCatching { playlistRepository.removeSongFromAllPlaylists(song.id) }
             runCatching { lyricsOverrideDao.deleteForSong(song.id, song.uri) }
+            // Import baselines for this song are no longer useful: the file has been
+            // permanently deleted from the device, so it cannot be re-imported. Clearing
+            // them avoids stale deduplication if the user ever imports a similarly-named track.
+            // track_stats and track_listen_events are intentionally kept for historical reports.
+            runCatching { importBaselineDao.deleteBySongId(song.id) }
             onComplete()
         }
     }
