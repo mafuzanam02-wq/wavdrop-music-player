@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.screen.settings
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -112,7 +113,7 @@ fun SettingsAboutScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Contact Support",
-                    subtitle = "${WavdropAbout.CONTACT_EMAIL} · Include your Wavdrop version and Android device.",
+                    subtitle = "${WavdropAbout.CONTACT_EMAIL} · Questions, feedback, or bug reports.",
                     onClick  = {
                         context.openSupportEmail(
                             email   = WavdropAbout.CONTACT_EMAIL,
@@ -388,11 +389,35 @@ private fun Context.openWebsite(url: String) {
     runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }
 
+private fun buildSupportEmailBody(): String {
+    val versionName  = runCatching { BuildConfig.VERSION_NAME }.getOrDefault("unknown")
+    val versionCode  = runCatching { BuildConfig.VERSION_CODE.toString() }.getOrDefault("unknown")
+    val androidVer   = runCatching { "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})" }.getOrDefault("unknown")
+    val manufacturer = runCatching { Build.MANUFACTURER }.getOrDefault("unknown")
+    val model        = runCatching { Build.MODEL }.getOrDefault("unknown")
+    return """
+        Describe the issue below:
+
+        --------------------------------
+
+
+
+        --------------------------------
+
+        Diagnostics
+        App: Wavdrop $versionName
+        Version Code: $versionCode
+        Android: $androidVer
+        Device: $manufacturer $model
+    """.trimIndent()
+}
+
 private fun Context.openSupportEmail(email: String, subject: String) {
     val intent = Intent(Intent.ACTION_SENDTO).apply {
         data = Uri.parse("mailto:")
         putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
         putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, buildSupportEmailBody())
     }
     runCatching { startActivity(intent) }
 }
@@ -403,7 +428,7 @@ private object WavdropAbout {
     const val PACKAGE_NAME    = "com.launchpoint.wavdrop"
     const val WEBSITE_URL     = "https://launchpointdigital.co.za"
     const val CONTACT_EMAIL   = "info@launchpointdigital.co.za"
-    const val SUPPORT_SUBJECT = "Wavdrop Music Player Support"
+    const val SUPPORT_SUBJECT = "Wavdrop Feedback"
     const val COPYRIGHT       = "© 2026 LaunchPoint Digital. All rights reserved."
 
     val PRIVACY_POLICY = listOf(
