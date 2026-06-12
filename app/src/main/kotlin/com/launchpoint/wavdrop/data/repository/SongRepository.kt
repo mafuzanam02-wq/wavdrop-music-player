@@ -36,16 +36,16 @@ class SongRepository @Inject constructor(
         val scanSettings = scanSettingsRepository.settings.first()
         val found = scanner.scanSongs(scanSettings)
 
+        val currentIds = dao.getAllSongIds().toSet()
+
         if (found.isEmpty()) {
-            if (SongSyncPolicy.shouldPreserveOnEmptyScan(scanSettings)) {
+            if (SongSyncPolicy.shouldPreserveOnEmptyScan(scanSettings, currentIds.size)) {
                 Log.w(TAG,
-                    "Selected-folder scan returned 0 songs — preserving existing library. " +
-                    "Configured folder URIs: ${scanSettings.selectedFolderUris}"
+                    "Scan returned 0 songs — preserving ${currentIds.size} existing songs. " +
+                    "Mode: ${scanSettings.scanMode}"
                 )
                 return@withContext LibrarySyncResult.EmptyPreserved(
-                    "Selected folder scan returned no songs. " +
-                    "Your selected folder may have moved or its access may have changed. " +
-                    "Check your folder selection and rescan."
+                    SongSyncPolicy.emptyPreservedReason(scanSettings)
                 )
             }
             dao.deleteAll()
@@ -55,7 +55,6 @@ class SongRepository @Inject constructor(
         dao.upsertAll(found.map(Song::toEntity))
 
         val activeIds = found.map { it.id }.toSet()
-        val currentIds = dao.getAllSongIds().toSet()
         val staleIds = SongSyncPolicy.computeStaleIds(currentIds, activeIds)
         staleIds.chunked(PRUNE_CHUNK_SIZE).forEach { chunk ->
             dao.deleteByIds(chunk)

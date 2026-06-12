@@ -12,8 +12,6 @@
     <!-- Background playback -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <!-- Required to launch ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".WavdropApp"

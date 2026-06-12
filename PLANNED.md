@@ -19,7 +19,7 @@ Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped o
 
 ## Under Evaluation
 
-- **Support domain email**: Migrate the in-app and Play Store support contact from `hello.launchpointdigital@gmail.com` to a domain address (e.g. `support@launchpointdigital.co.za`) before or shortly after Play Store launch. Update `WavdropAbout.CONTACT_EMAIL` in `SettingsAboutScreen.kt` and the Play Store developer contact field.
+- **Support domain email**: ~~Migrated~~ — `WavdropAbout.CONTACT_EMAIL` and the privacy policy contact line in `SettingsAboutScreen.kt` now use `info@launchpointdigital.co.za`. Update the Play Store developer contact field to the same address before submission.
 - **Additional Delete entry points**: after Track Details Phase 1 is stable and validated,
   evaluate adding "Delete from device" to song-row overflow menus (Songs, Home, Album, Artist,
   Folder, Smart Collection screens). Requires assessment of accidental-deletion risk in

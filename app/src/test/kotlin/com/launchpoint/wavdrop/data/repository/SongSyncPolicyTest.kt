@@ -10,39 +10,79 @@ import org.junit.Test
 class SongSyncPolicyTest {
 
     // -----------------------------------------------------------------------
-    // shouldPreserveOnEmptyScan
+    // shouldPreserveOnEmptyScan — universal rule: preserve when DB is non-empty
     // -----------------------------------------------------------------------
 
     @Test
-    fun `selected-folder mode with configured folders preserves on empty scan`() {
+    fun `selected-folder mode with configured folders and existing songs preserves on empty scan`() {
         val settings = LibraryScanSettings(
             scanMode           = LibraryScanMode.SELECTED_FOLDERS,
             selectedFolderUris = listOf("content://com.android.externalstorage.documents/tree/primary:Music"),
         )
-        assertTrue(SongSyncPolicy.shouldPreserveOnEmptyScan(settings))
+        assertTrue(SongSyncPolicy.shouldPreserveOnEmptyScan(settings, existingSongCount = 42))
     }
 
     @Test
-    fun `selected-folder mode with no configured folders does not preserve on empty scan`() {
+    fun `selected-folder mode with no configured folders but existing songs preserves on empty scan`() {
+        // Safest behavior: if songs already exist, preserve regardless of folder configuration.
         val settings = LibraryScanSettings(
             scanMode           = LibraryScanMode.SELECTED_FOLDERS,
             selectedFolderUris = emptyList(),
         )
-        assertFalse(SongSyncPolicy.shouldPreserveOnEmptyScan(settings))
+        assertTrue(SongSyncPolicy.shouldPreserveOnEmptyScan(settings, existingSongCount = 10))
     }
 
     @Test
-    fun `whole-device mode does not preserve on empty scan`() {
+    fun `selected-folder mode with no configured folders and no existing songs does not preserve`() {
         val settings = LibraryScanSettings(
-            scanMode           = LibraryScanMode.WHOLE_DEVICE,
-            selectedFolderUris = listOf("content://anything"),
+            scanMode           = LibraryScanMode.SELECTED_FOLDERS,
+            selectedFolderUris = emptyList(),
         )
-        assertFalse(SongSyncPolicy.shouldPreserveOnEmptyScan(settings))
+        assertFalse(SongSyncPolicy.shouldPreserveOnEmptyScan(settings, existingSongCount = 0))
     }
 
     @Test
-    fun `default settings do not preserve on empty scan`() {
-        assertFalse(SongSyncPolicy.shouldPreserveOnEmptyScan(LibraryScanSettings()))
+    fun `whole-device mode with existing songs preserves on empty scan`() {
+        val settings = LibraryScanSettings(scanMode = LibraryScanMode.WHOLE_DEVICE)
+        assertTrue(SongSyncPolicy.shouldPreserveOnEmptyScan(settings, existingSongCount = 150))
+    }
+
+    @Test
+    fun `whole-device mode with no existing songs does not preserve on empty scan`() {
+        val settings = LibraryScanSettings(scanMode = LibraryScanMode.WHOLE_DEVICE)
+        assertFalse(SongSyncPolicy.shouldPreserveOnEmptyScan(settings, existingSongCount = 0))
+    }
+
+    @Test
+    fun `default settings with no existing songs do not preserve on empty scan`() {
+        assertFalse(SongSyncPolicy.shouldPreserveOnEmptyScan(LibraryScanSettings(), existingSongCount = 0))
+    }
+
+    @Test
+    fun `exactly one existing song triggers preservation`() {
+        assertTrue(SongSyncPolicy.shouldPreserveOnEmptyScan(LibraryScanSettings(), existingSongCount = 1))
+    }
+
+    // -----------------------------------------------------------------------
+    // emptyPreservedReason — mode-specific user-facing messages
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `whole-device preserve reason mentions device storage and media permission`() {
+        val reason = SongSyncPolicy.emptyPreservedReason(
+            LibraryScanSettings(scanMode = LibraryScanMode.WHOLE_DEVICE)
+        )
+        assertTrue(reason.contains("device storage", ignoreCase = true))
+        assertTrue(reason.contains("Existing songs were kept", ignoreCase = true))
+    }
+
+    @Test
+    fun `selected-folder preserve reason mentions folder selection`() {
+        val reason = SongSyncPolicy.emptyPreservedReason(
+            LibraryScanSettings(scanMode = LibraryScanMode.SELECTED_FOLDERS)
+        )
+        assertTrue(reason.contains("folder", ignoreCase = true))
+        assertTrue(reason.contains("rescan", ignoreCase = true))
     }
 
     // -----------------------------------------------------------------------

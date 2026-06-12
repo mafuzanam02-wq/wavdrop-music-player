@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.data.backup
 
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.text.MusicTextNormalizer
 import kotlin.math.abs
 
 /**
@@ -33,6 +34,9 @@ object WavdropBackupStatsMatcher {
         TAGS_DURATION,
         TITLE_ARTIST_DURATION,
         TITLE_DURATION,
+        TOLERANT_PATH_TITLE_DURATION,
+        TOLERANT_TAGS_DURATION,
+        TOLERANT_TITLE_ARTIST_DURATION,
         TAGS_ONLY,
     }
 
@@ -46,12 +50,21 @@ object WavdropBackupStatsMatcher {
         val byUri = currentSongs.associateBy { it.uri }
         private val byPathTitle = currentSongs
             .filter { !it.folderPath.isNullOrBlank() }
-            .groupBy { it.folderPath!!.normPath() to it.title.norm() }
+            .groupBy { it.folderPath!!.normPath() to it.title.strictKey() }
+        private val byTolerantPathTitle = currentSongs
+            .filter { !it.folderPath.isNullOrBlank() }
+            .groupBy { it.folderPath!!.normPath() to it.title.tolerantKey() }
         private val byTags = currentSongs.groupBy {
-            Triple(it.title.norm(), it.artist.norm(), it.album.norm())
+            Triple(it.title.strictKey(), it.artist.strictKey(), it.album.strictKey())
         }
-        private val byTitleArtist = currentSongs.groupBy { it.title.norm() to it.artist.norm() }
-        private val byTitle = currentSongs.groupBy { it.title.norm() }
+        private val byTolerantTags = currentSongs.groupBy {
+            Triple(it.title.tolerantKey(), it.artist.tolerantKey(), it.album.tolerantKey())
+        }
+        private val byTitleArtist = currentSongs.groupBy { it.title.strictKey() to it.artist.strictKey() }
+        private val byTolerantTitleArtist = currentSongs.groupBy {
+            it.title.tolerantKey() to it.artist.tolerantKey()
+        }
+        private val byTitle = currentSongs.groupBy { it.title.strictKey() }
 
         fun resolve(bSong: BackupSong?, uriHint: String): Resolution {
             byUri[uriHint]?.let { return Resolution.Matched(it, MatchTier.URI) }
@@ -61,21 +74,38 @@ object WavdropBackupStatsMatcher {
             fun durationOk(song: Song): Boolean =
                 abs(song.duration - bSong.duration) <= DURATION_TOLERANCE_MS
 
-            val tagsKey = Triple(bSong.title.norm(), bSong.artist.norm(), bSong.album.norm())
+            val tagsKey = Triple(bSong.title.strictKey(), bSong.artist.strictKey(), bSong.album.strictKey())
+            val tolerantTagsKey = Triple(
+                bSong.title.tolerantKey(),
+                bSong.artist.tolerantKey(),
+                bSong.album.tolerantKey(),
+            )
 
             val tiers: List<Pair<MatchTier, List<Song>>> = listOf(
                 MatchTier.PATH_TITLE_DURATION to (
                     bSong.folderPath
                         ?.takeIf { it.isNotBlank() }
-                        ?.let { byPathTitle[it.normPath() to bSong.title.norm()] }
+                        ?.let { byPathTitle[it.normPath() to bSong.title.strictKey()] }
                         ?.filter(::durationOk)
                         .orEmpty()
                     ),
                 MatchTier.TAGS_DURATION to byTags[tagsKey]?.filter(::durationOk).orEmpty(),
                 MatchTier.TITLE_ARTIST_DURATION to
-                    byTitleArtist[bSong.title.norm() to bSong.artist.norm()]
+                    byTitleArtist[bSong.title.strictKey() to bSong.artist.strictKey()]
                         ?.filter(::durationOk).orEmpty(),
-                MatchTier.TITLE_DURATION to byTitle[bSong.title.norm()]?.filter(::durationOk).orEmpty(),
+                MatchTier.TITLE_DURATION to byTitle[bSong.title.strictKey()]?.filter(::durationOk).orEmpty(),
+                MatchTier.TOLERANT_PATH_TITLE_DURATION to (
+                    bSong.folderPath
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { byTolerantPathTitle[it.normPath() to bSong.title.tolerantKey()] }
+                        ?.filter(::durationOk)
+                        .orEmpty()
+                    ),
+                MatchTier.TOLERANT_TAGS_DURATION to
+                    byTolerantTags[tolerantTagsKey]?.filter(::durationOk).orEmpty(),
+                MatchTier.TOLERANT_TITLE_ARTIST_DURATION to
+                    byTolerantTitleArtist[bSong.title.tolerantKey() to bSong.artist.tolerantKey()]
+                        ?.filter(::durationOk).orEmpty(),
                 MatchTier.TAGS_ONLY to byTags[tagsKey].orEmpty(),
             )
 
@@ -133,9 +163,15 @@ object WavdropBackupStatsMatcher {
         val diagnostics = WavdropBackupMatchDiagnostics(
             statsInBackup                = backup.trackStats.size,
             matchedByUri                 = tierCounts[MatchTier.URI] ?: 0,
-            matchedByPath                = tierCounts[MatchTier.PATH_TITLE_DURATION] ?: 0,
-            matchedByTagsDuration        = tierCounts[MatchTier.TAGS_DURATION] ?: 0,
-            matchedByTitleArtistDuration = tierCounts[MatchTier.TITLE_ARTIST_DURATION] ?: 0,
+            matchedByPath                =
+                (tierCounts[MatchTier.PATH_TITLE_DURATION] ?: 0) +
+                    (tierCounts[MatchTier.TOLERANT_PATH_TITLE_DURATION] ?: 0),
+            matchedByTagsDuration        =
+                (tierCounts[MatchTier.TAGS_DURATION] ?: 0) +
+                    (tierCounts[MatchTier.TOLERANT_TAGS_DURATION] ?: 0),
+            matchedByTitleArtistDuration =
+                (tierCounts[MatchTier.TITLE_ARTIST_DURATION] ?: 0) +
+                    (tierCounts[MatchTier.TOLERANT_TITLE_ARTIST_DURATION] ?: 0),
             matchedByTitleDuration       = tierCounts[MatchTier.TITLE_DURATION] ?: 0,
             matchedByTagsOnly            = tierCounts[MatchTier.TAGS_ONLY] ?: 0,
             ambiguous                    = ambiguous,
@@ -166,7 +202,9 @@ object WavdropBackupStatsMatcher {
         return resolved
     }
 
-    private fun String.norm() = trim().lowercase()
+    private fun String.strictKey() = MusicTextNormalizer.normalizeStrict(this)
 
-    private fun String.normPath() = trim().trim('/', '\\').lowercase()
+    private fun String.tolerantKey() = MusicTextNormalizer.normalizeTolerant(this)
+
+    private fun String.normPath() = MusicTextNormalizer.normalizeStrict(trim().trim('/', '\\'))
 }

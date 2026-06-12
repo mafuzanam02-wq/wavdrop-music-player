@@ -45,12 +45,11 @@ class SmartCollectionDetailsViewModel @Inject constructor(
     private val appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
-    val type: SmartCollectionType = SmartCollectionType.valueOf(
-        checkNotNull(savedStateHandle["type"]),
-    )
+    val type: SmartCollectionType? = SmartCollectionType.fromRouteValue(savedStateHandle["type"])
+    val isInvalidType: Boolean = type == null
 
-    val title: String       = SmartCollectionBuilder.titleFor(type)
-    val description: String = SmartCollectionBuilder.descriptionFor(type)
+    val title: String       = if (type != null) SmartCollectionBuilder.titleFor(type) else ""
+    val description: String = if (type != null) SmartCollectionBuilder.descriptionFor(type) else ""
 
     private val mostPlayedPeriod = MutableStateFlow(MostPlayedPeriod.ALL_TIME)
     private val mostPlayedDisplayLimit = MutableStateFlow(MostPlayedDisplayLimit.TOP_25)
@@ -80,8 +79,16 @@ class SmartCollectionDetailsViewModel @Inject constructor(
         )
     }
 
-    val uiState: StateFlow<SmartCollectionDetailsUiState> = if (type == SmartCollectionType.MOST_PLAYED) {
-        combine(
+    val uiState: StateFlow<SmartCollectionDetailsUiState> = when {
+        type == null -> MutableStateFlow(
+            SmartCollectionDetailsUiState(
+                isLoading       = false,
+                songs           = emptyList(),
+                favoriteSongIds = emptySet(),
+                currentSongId   = null,
+            ),
+        )
+        type == SmartCollectionType.MOST_PLAYED -> combine(
             mostPlayedSummaries,
             mostPlayedPeriod,
             mostPlayedDisplayLimit,
@@ -97,9 +104,17 @@ class SmartCollectionDetailsViewModel @Inject constructor(
                 favoriteSongIds = favorites,
                 currentSongId = nowPlaying.song?.id,
             )
-        }
-    } else {
-        combine(
+        }.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = SmartCollectionDetailsUiState(
+                isLoading       = true,
+                songs           = emptyList(),
+                favoriteSongIds = emptySet(),
+                currentSongId   = null,
+            ),
+        )
+        else -> combine(
             smartCollectionRepository.observeSongsForCollection(type),
             statsRepository.favoriteSongIds(),
             playerController.nowPlayingState,
@@ -110,17 +125,17 @@ class SmartCollectionDetailsViewModel @Inject constructor(
                 favoriteSongIds = favorites,
                 currentSongId = nowPlaying.song?.id,
             )
-        }
-    }.stateIn(
-        scope        = viewModelScope,
-        started      = SharingStarted.WhileSubscribed(5_000),
-        initialValue = SmartCollectionDetailsUiState(
-            isLoading       = true,
-            songs           = emptyList(),
-            favoriteSongIds = emptySet(),
-            currentSongId   = null,
-        ),
-    )
+        }.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = SmartCollectionDetailsUiState(
+                isLoading       = true,
+                songs           = emptyList(),
+                favoriteSongIds = emptySet(),
+                currentSongId   = null,
+            ),
+        )
+    }
 
     fun setMostPlayedPeriod(period: MostPlayedPeriod) {
         mostPlayedPeriod.value = period

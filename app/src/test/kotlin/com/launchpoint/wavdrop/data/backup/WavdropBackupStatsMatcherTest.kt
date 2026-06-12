@@ -370,4 +370,71 @@ class WavdropBackupStatsMatcherTest {
         assertEquals(17, matchedStat.playCount)
         assertEquals(3, matchedStat.skipCount)
     }
+
+    @Test
+    fun `tolerant tags and duration match accented and suffixed backup metadata`() {
+        val current = song(
+            id = 1L,
+            uri = "content://media/NEW",
+            title = "Jolé",
+            artist = "Don\u2019t Artist",
+            album = "Picture Perfect",
+            duration = 180_000L,
+        )
+        val bSong = backupSong(
+            id = 9L,
+            uri = "content://media/OLD",
+            title = "Jole",
+            artist = "Dont Artist",
+            album = "Picture_Perfect",
+            duration = 181_000L,
+        )
+        val b = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(current))
+
+        assertEquals(1, result.matchedRows.size)
+        assertEquals(current, result.matchedRows[0].first)
+        assertEquals(1, result.diagnostics.matchedByTagsDuration)
+    }
+
+    @Test
+    fun `tolerant match requires duration evidence`() {
+        val current = song(
+            id = 1L,
+            uri = "content://media/NEW",
+            title = "Still",
+            artist = "Artist",
+            album = "Album",
+            duration = 240_000L,
+        )
+        val bSong = backupSong(
+            id = 9L,
+            uri = "content://media/OLD",
+            title = "Still(256k)",
+            artist = "Artist",
+            album = "Album",
+            duration = 180_000L,
+        )
+        val b = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(current))
+
+        assertEquals(0, result.matchedRows.size)
+        assertEquals(1, result.unmatchedCount)
+    }
+
+    @Test
+    fun `ambiguous tolerant match is skipped instead of guessed`() {
+        val copy1 = song(1L, "content://media/1", "Jolé", "Artist", "Album")
+        val copy2 = song(2L, "content://media/2", "Jole", "Artist", "Album")
+        val bSong = backupSong(9L, "content://media/OLD", "Jolè", "Artist", "Album")
+        val b     = backup(listOf(bSong), listOf(stat(9L, "content://media/OLD")))
+
+        val result = WavdropBackupStatsMatcher.match(b, listOf(copy1, copy2))
+
+        assertEquals(0, result.matchedRows.size)
+        assertEquals(1, result.unmatchedCount)
+        assertEquals(1, result.diagnostics.ambiguous)
+    }
 }

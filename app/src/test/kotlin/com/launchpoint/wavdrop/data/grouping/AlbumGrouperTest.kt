@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.data.grouping
 
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AlbumGrouperTest {
@@ -37,6 +38,19 @@ class AlbumGrouperTest {
             song(3, "Album B"),
         )
         assertEquals(2, AlbumGrouper.group(songs).size)
+    }
+
+    @Test
+    fun `accented and plain album names remain separate display groups`() {
+        val songs = listOf(
+            song(1, "Jolé"),
+            song(2, "Jole"),
+        )
+        val keys = AlbumGrouper.group(songs).map { it.albumKey }
+
+        assertEquals(2, keys.size)
+        assertTrue(keys.contains("Jolé"))
+        assertTrue(keys.contains("Jole"))
     }
 
     @Test

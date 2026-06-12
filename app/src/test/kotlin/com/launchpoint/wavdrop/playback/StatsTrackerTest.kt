@@ -292,6 +292,86 @@ class StatsTrackerTest {
         assertEquals(35_000L, fakeWriter.plays[0].listenedMs)
     }
 
+    // ── writer failure resilience ─────────────────────────────────────────────
+
+    @Test
+    fun `play writer failure does not throw and does not affect subsequent plays`() {
+        val throwingWriter = ThrowingPlayEventWriter(throwOnPlay = true)
+        val resilientTracker = StatsTracker(throwingWriter).also {
+            it.scope = CoroutineScope(Dispatchers.Unconfined)
+            it.clock = { fakeClockMs }
+        }
+
+        // First play — writer throws internally; must not propagate.
+        resilientTracker.onSongSelected(song(1))
+        resilientTracker.onPlaybackStarted()
+        fakeClockMs += 30_000L
+        resilientTracker.onPlaybackPaused()   // threshold crossed, writer throws — no exception
+
+        // Second play on a different song — still works even after prior failure.
+        resilientTracker.onSongSelected(song(2))
+        resilientTracker.onPlaybackStarted()
+        fakeClockMs += 30_000L
+        resilientTracker.onPlaybackPaused()
+
+        // Writer recorded both attempts (even though they threw).
+        assertEquals(2, throwingWriter.playAttempts)
+    }
+
+    @Test
+    fun `skip writer failure does not throw and does not affect subsequent skips`() {
+        val throwingWriter = ThrowingPlayEventWriter(throwOnSkip = true)
+        val resilientTracker = StatsTracker(throwingWriter).also {
+            it.scope = CoroutineScope(Dispatchers.Unconfined)
+            it.clock = { fakeClockMs }
+        }
+
+        // Skip song 1 (some engagement but below threshold).
+        resilientTracker.onSongSelected(song(1))
+        resilientTracker.onPlaybackStarted()
+        fakeClockMs += 5_000L
+        resilientTracker.onPlaybackPaused()
+        resilientTracker.onSongSelected(song(2))  // finalises song 1 as skip — writer throws
+
+        // Skip song 2 — writer throws again; no exception expected.
+        resilientTracker.onPlaybackStarted()
+        fakeClockMs += 5_000L
+        resilientTracker.onPlaybackPaused()
+        resilientTracker.onSongSelected(song(3))  // finalises song 2 as skip
+
+        assertEquals(2, throwingWriter.skipAttempts)
+    }
+
+    @Test
+    fun `play writer failure does not prevent a normal play from being counted on next song`() {
+        val throwOnFirstWriter = object : PlayEventWriter {
+            var attempt = 0
+            val recorded = mutableListOf<Long>()
+            override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
+                attempt++
+                if (attempt == 1) throw RuntimeException("simulated DB failure")
+                recorded += songId
+            }
+            override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {}
+        }
+        val resilientTracker = StatsTracker(throwOnFirstWriter).also {
+            it.scope = CoroutineScope(Dispatchers.Unconfined)
+            it.clock = { fakeClockMs }
+        }
+
+        resilientTracker.onSongSelected(song(1))
+        resilientTracker.onPlaybackStarted()
+        fakeClockMs += 30_000L
+        resilientTracker.onPlaybackPaused()   // attempt 1 — throws internally, caught
+
+        resilientTracker.onSongSelected(song(2))
+        resilientTracker.onPlaybackStarted()
+        fakeClockMs += 30_000L
+        resilientTracker.onPlaybackPaused()   // attempt 2 — succeeds
+
+        assertEquals(listOf(2L), throwOnFirstWriter.recorded)
+    }
+
     // ── skip logic ────────────────────────────────────────────────────────────
 
     @Test
@@ -326,6 +406,25 @@ class StatsTrackerTest {
 
         override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
             skips += SkipCall(songId)
+        }
+    }
+
+    /** Always throws — used to verify [StatsTracker] catches and does not propagate failures. */
+    private class ThrowingPlayEventWriter(
+        private val throwOnPlay: Boolean = false,
+        private val throwOnSkip: Boolean = false,
+    ) : PlayEventWriter {
+        var playAttempts = 0
+        var skipAttempts = 0
+
+        override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
+            playAttempts++
+            if (throwOnPlay) throw RuntimeException("simulated play write failure")
+        }
+
+        override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
+            skipAttempts++
+            if (throwOnSkip) throw RuntimeException("simulated skip write failure")
         }
     }
 }

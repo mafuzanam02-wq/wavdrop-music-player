@@ -191,7 +191,7 @@ Items that must be resolved before any public release track.
 
 | Item | Notes |
 |---|---|
-| Migrate support email to domain address | `hello.launchpointdigital@gmail.com` → `support@launchpointdigital.co.za` (Under Evaluation in `PLANNED.md`) |
+| Migrate support email to domain address | Done — in-app contact and privacy policy now use `info@launchpointdigital.co.za`. Update Play Store developer contact field to match before submission. |
 | Add Privacy Policy URL reference to in-app Privacy Policy dialog | Once web page is live, add a "Full policy at [URL]" line to `WavdropAbout.PRIVACY_POLICY` |
 | Review OSS licenses via Gradle OSS Licenses Plugin | Current manual Apache 2.0 list is sufficient for launch; plugin automates future dependency additions |
 | Tablet layout review | Compose stretches gracefully but a tablet-specific layout pass would improve quality |

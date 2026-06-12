@@ -95,6 +95,19 @@ class ArtistGrouperTest {
     }
 
     @Test
+    fun `accented and plain artist names remain separate display groups`() {
+        val songs = listOf(
+            song(1, "Jolé"),
+            song(2, "Jole"),
+        )
+        val keys = ArtistGrouper.group(songs).map { it.artistKey }
+
+        assertEquals(2, keys.size)
+        assertTrue(keys.contains("Jolé"))
+        assertTrue(keys.contains("Jole"))
+    }
+
+    @Test
     fun `blank artist songs share Unknown Artist group`() {
         val songs = listOf(
             song(1, ""),

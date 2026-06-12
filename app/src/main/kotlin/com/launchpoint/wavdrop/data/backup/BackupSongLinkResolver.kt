@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.data.backup
 
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.text.MusicTextNormalizer
 
 /**
  * Resolves song-linked backup rows (lyrics overrides, playlist entries, listen
@@ -26,7 +27,13 @@ class BackupSongLinkResolver(
     // duplicate-tag songs to the last one, which mis-attaches data.
     private val uniqueByTags: Map<Triple<String, String, String>, Song> =
         currentSongs
-            .groupBy { Triple(it.title.norm(), it.artist.norm(), it.album.norm()) }
+            .groupBy {
+                Triple(
+                    MusicTextNormalizer.normalizeStrict(it.title),
+                    MusicTextNormalizer.normalizeStrict(it.artist),
+                    MusicTextNormalizer.normalizeStrict(it.album),
+                )
+            }
             .filterValues { it.size == 1 }
             .mapValues { (_, songs) -> songs.single() }
 
@@ -40,10 +47,14 @@ class BackupSongLinkResolver(
         resolvedBySongId[backupSongId]?.let { return it }
         contentUri?.let { uri -> byUri[uri]?.let { return it } }
         if (title != null && artist != null && album != null) {
-            return uniqueByTags[Triple(title.norm(), artist.norm(), album.norm())]
+            return uniqueByTags[
+                Triple(
+                    MusicTextNormalizer.normalizeStrict(title),
+                    MusicTextNormalizer.normalizeStrict(artist),
+                    MusicTextNormalizer.normalizeStrict(album),
+                )
+            ]
         }
         return null
     }
-
-    private fun String.norm() = trim().lowercase()
 }

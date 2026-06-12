@@ -146,7 +146,11 @@ class StatsTracker @Inject constructor(
             val durationMs = song.duration
             if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] → calling recordPlay songId=${song.id} listenedMs=$listenedMs durationMs=$durationMs")
             scope.launch {
-                playEventWriter.recordPlay(song.id, song.uri, listenedMs, durationMs)
+                runCatching {
+                    playEventWriter.recordPlay(song.id, song.uri, listenedMs, durationMs)
+                }.onFailure { e ->
+                    Log.w(TAG, "Failed to record play event for songId=${song.id}", e)
+                }
             }
         }
     }
@@ -163,7 +167,13 @@ class StatsTracker @Inject constructor(
             val song = currentSong ?: return
             // Only count as a skip if there was any engagement at all.
             if (accumulatedMs > 0L) {
-                scope.launch { playEventWriter.recordSkip(song.id, song.uri, song.duration) }
+                scope.launch {
+                    runCatching {
+                        playEventWriter.recordSkip(song.id, song.uri, song.duration)
+                    }.onFailure { e ->
+                        Log.w(TAG, "Failed to record skip event for songId=${song.id}", e)
+                    }
+                }
             }
         }
     }

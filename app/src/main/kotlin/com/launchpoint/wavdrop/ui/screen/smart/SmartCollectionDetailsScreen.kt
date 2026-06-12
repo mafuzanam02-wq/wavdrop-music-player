@@ -139,7 +139,12 @@ fun SmartCollectionDetailsScreen(
             )
         },
     ) { innerPadding ->
-        if (state.isLoading) {
+        if (viewModel.isInvalidType) {
+            InvalidCollectionContent(
+                onNavigateBack = onNavigateBack,
+                modifier       = Modifier.padding(innerPadding),
+            )
+        } else if (state.isLoading) {
             LoadingStateContent(
                 message = "Loading collection...",
                 modifier = Modifier.padding(innerPadding),
@@ -586,6 +591,36 @@ private fun PlaybackActions(
         ) {
             Icon(Icons.Default.Shuffle, null, modifier = Modifier.padding(end = 4.dp))
             Text("Shuffle")
+        }
+    }
+}
+
+// ── Invalid / not-found state ─────────────────────────────────────────────────
+
+@Composable
+private fun InvalidCollectionContent(
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier         = modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text      = "Collection not found.",
+                style     = MaterialTheme.typography.bodyLarge,
+                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+            FilledTonalButton(onClick = onNavigateBack) {
+                Text("Go back")
+            }
         }
     }
 }

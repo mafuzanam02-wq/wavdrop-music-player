@@ -402,7 +402,7 @@ private object WavdropAbout {
     const val PRODUCT_NAME    = "Wavdrop Music Player"
     const val PACKAGE_NAME    = "com.launchpoint.wavdrop"
     const val WEBSITE_URL     = "https://launchpointdigital.co.za"
-    const val CONTACT_EMAIL   = "hello.launchpointdigital@gmail.com"
+    const val CONTACT_EMAIL   = "info@launchpointdigital.co.za"
     const val SUPPORT_SUBJECT = "Wavdrop Music Player Support"
     const val COPYRIGHT       = "© 2026 LaunchPoint Digital. All rights reserved."
 
@@ -431,7 +431,7 @@ private object WavdropAbout {
         "Third-party services:\n" +
             "Wavdrop does not use advertising SDKs, analytics services, crash-reporting tools, or third-party tracking. External links, such as the LaunchPoint Digital website and support email, open in your device's browser or email app. Wavdrop itself makes no network requests.",
         "Contact:\n" +
-            "Questions about this policy: hello.launchpointdigital@gmail.com",
+            "Questions about this policy: info@launchpointdigital.co.za",
     )
 
     val TERMS_OF_USE = listOf(

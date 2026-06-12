@@ -155,6 +155,38 @@ class BpstatMatcherTest {
         val (_, row) = result.matchedRows[0]
         assertEquals(1_779_810_940_727L, row.lastPlayedMs)
     }
+
+    @Test
+    fun `tolerant metadata match handles accents apostrophes underscores and suffixes`() {
+        val library = listOf(
+            makeSong(10L, "Jolé", "Don\u2019t Artist", "Picture Perfect"),
+            makeSong(11L, "Still", "Artist", "Album"),
+        )
+        val importRows = listOf(
+            makeRow("Jole", "Dont Artist", "Picture_Perfect", plays = 3, skips = 0),
+            makeRow("Still(256k)", "Artist", "Album", plays = 4, skips = 0),
+        )
+
+        val result = match(importRows, library)
+
+        assertEquals(2, result.matchedCount)
+        assertEquals("Jolé", result.matchedRows[0].first.title)
+        assertEquals("Still", result.matchedRows[1].first.title)
+    }
+
+    @Test
+    fun `tolerant duplicate metadata is ambiguous and unmatched`() {
+        val library = listOf(
+            makeSong(10L, "Jolé", "Artist", "Album"),
+            makeSong(11L, "Jole", "Artist", "Album"),
+        )
+        val importRows = listOf(makeRow("Jolè", "Artist", "Album", plays = 3, skips = 0))
+
+        val result = match(importRows, library)
+
+        assertEquals(0, result.matchedCount)
+        assertEquals(1, result.unmatchedCount)
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

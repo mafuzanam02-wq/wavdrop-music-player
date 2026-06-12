@@ -78,6 +78,21 @@ class LibrarySearchTest {
         assertEquals(2, LibrarySearch.filterSongs(songs, "e").size)
     }
 
+    @Test
+    fun `song filter matches tolerant text while preserving display values`() {
+        val songs = listOf(
+            song(1, "Jolé"),
+            song(2, "Picture_Perfect"),
+            song(3, "Still(256k)"),
+            song(4, "軽注"),
+        )
+
+        assertEquals("Jolé", LibrarySearch.filterSongs(songs, "Jole").single().title)
+        assertEquals("Picture_Perfect", LibrarySearch.filterSongs(songs, "Picture Perfect").single().title)
+        assertEquals("Still(256k)", LibrarySearch.filterSongs(songs, "Still").single().title)
+        assertEquals("軽注", LibrarySearch.filterSongs(songs, "軽注").single().title)
+    }
+
     // ── Album filter ──────────────────────────────────────────────────────────
 
     @Test
@@ -212,5 +227,16 @@ class LibrarySearchTest {
         val artists = listOf(artist("Queen"), artist("Eagles"))
         val songs = listOf(song(1, "Bohemian Rhapsody", artist = "Queen"))
         assertTrue(LibrarySearch.filterArtists(artists, songs, "zzz").isEmpty())
+    }
+
+    @Test
+    fun `artist filter search does not normalize returned artist display`() {
+        val artists = listOf(artist("Jolé"))
+        val songs = listOf(song(1, "This City", artist = "Jolé"))
+
+        val result = LibrarySearch.filterArtists(artists, songs, "Jole")
+
+        assertEquals(1, result.size)
+        assertEquals("Jolé", result.first().artistKey)
     }
 }

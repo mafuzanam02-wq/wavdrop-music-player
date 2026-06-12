@@ -39,18 +39,20 @@ class StatsRepository @Inject constructor(
      */
     override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
         val nowMs = System.currentTimeMillis()
-        dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
-        dao.incrementPlayCount(songId, nowMs = nowMs, listenedMs = listenedMs)
-        listenEventDao.insert(
-            TrackListenEventEntity(
-                songId = songId,
-                eventType = TrackListenEventEntity.TYPE_PLAY,
-                occurredAt = nowMs,
-                listenedMs = listenedMs,
-                durationMs = durationMs,
-                source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+        db.withTransaction {
+            dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
+            dao.incrementPlayCount(songId, nowMs = nowMs, listenedMs = listenedMs)
+            listenEventDao.insert(
+                TrackListenEventEntity(
+                    songId = songId,
+                    eventType = TrackListenEventEntity.TYPE_PLAY,
+                    occurredAt = nowMs,
+                    listenedMs = listenedMs,
+                    durationMs = durationMs,
+                    source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+                )
             )
-        )
+        }
     }
 
     /**
@@ -59,23 +61,28 @@ class StatsRepository @Inject constructor(
      * [durationMs] is the track's total duration — 0 if unknown. Used only for the event record.
      */
     override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
-        dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
-        dao.incrementSkipCount(songId)
-        listenEventDao.insert(
-            TrackListenEventEntity(
-                songId = songId,
-                eventType = TrackListenEventEntity.TYPE_SKIP,
-                occurredAt = System.currentTimeMillis(),
-                listenedMs = 0L,
-                durationMs = durationMs,
-                source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+        db.withTransaction {
+            val nowMs = System.currentTimeMillis()
+            dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
+            dao.incrementSkipCount(songId)
+            listenEventDao.insert(
+                TrackListenEventEntity(
+                    songId = songId,
+                    eventType = TrackListenEventEntity.TYPE_SKIP,
+                    occurredAt = nowMs,
+                    listenedMs = 0L,
+                    durationMs = durationMs,
+                    source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+                )
             )
-        )
+        }
     }
 
     suspend fun toggleFavorite(songId: Long, contentUri: String) {
-        dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
-        dao.toggleFavorite(songId)
+        db.withTransaction {
+            dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
+            dao.toggleFavorite(songId)
+        }
     }
 
     // ── Read ops ──────────────────────────────────────────────────────────────

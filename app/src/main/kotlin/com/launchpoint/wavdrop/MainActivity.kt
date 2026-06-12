@@ -13,6 +13,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.ThemeMode
+import com.launchpoint.wavdrop.playback.PlaybackStartupCoordinator
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.ui.navigation.WavdropNavGraph
 import com.launchpoint.wavdrop.ui.theme.WavdropTheme
@@ -24,11 +25,13 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var appSettingsRepository: AppSettingsRepository
     @Inject lateinit var playerController: PlayerController
+    @Inject lateinit var playbackStartupCoordinator: PlaybackStartupCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleExternalAudioIntent(intent)
+        playbackStartupCoordinator.restoreOnce()
         setContent {
             val themeMode by appSettingsRepository.themeMode
                 .collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
