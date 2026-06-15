@@ -68,18 +68,20 @@ Stats imports use max/baseline-safe merge, not additive merge.
 
 Imports must be idempotent. Re-importing the same file should not inflate stats.
 
-Imports merge stored `totalListeningTimeMs` only. Derived `effectiveListeningTimeMs` is calculated after import for display, sorting, reports, and aggregate summaries:
+Imports merge stored `totalListeningTimeMs` only. Derived `effectiveListeningTimeMs` is calculated after import for user-facing display, sorting, reports, and aggregate summaries:
 
 ```text
-if totalListeningTimeMs > 0:
-    use totalListeningTimeMs
-else if playCount > 0 and durationMs > 0:
-    use playCount × durationMs
-else:
-    use 0
+estimatedListeningTimeMs =
+    if playCount > 0 and durationMs > 0:
+        playCount × durationMs, with overflow guard
+    else:
+        0
+
+effectiveListeningTimeMs =
+    max(totalListeningTimeMs, estimatedListeningTimeMs)
 ```
 
-Actual stored listening time always wins. The estimate is only a fallback when stored listening time is zero or missing but play count and duration are available. Imports must not read, write, export, or persist an `effectiveListeningTimeMs` field, and must not use it to overwrite `totalListeningTimeMs`.
+`effectiveListeningTimeMs` is the larger of stored actual/measured time and estimated time. Imports must not read, write, export, or persist an `effectiveListeningTimeMs` field, and must not use it to overwrite `totalListeningTimeMs`. No listen events are synthesized from aggregate stats.
 
 ## Listening Events
 

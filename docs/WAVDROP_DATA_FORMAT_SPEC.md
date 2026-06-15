@@ -74,26 +74,29 @@ Listening history and reports are separate from aggregate stats. Aggregate impor
 Wavdrop distinguishes between stored actual listening time and derived effective listening time.
 
 - `totalListeningTimeMs` is the stored/imported/exported backup value. It represents measured listening time when the platform has actual playback progress.
-- `effectiveListeningTimeMs` is derived locally for display, sorting, reports, and aggregate summaries. It is not a stored data field.
+- `estimatedListeningTimeMs` is derived from `playCount × durationMs` when play count and duration are available.
+- `effectiveListeningTimeMs` is derived locally for user-facing display, sorting, reports, and aggregate summaries. It is not a stored data field.
 
 Rule:
 
 ```text
-if totalListeningTimeMs > 0:
-    use totalListeningTimeMs
-else if playCount > 0 and durationMs > 0:
-    use playCount × durationMs
-else:
-    use 0
+estimatedListeningTimeMs =
+    if playCount > 0 and durationMs > 0:
+        playCount × durationMs, with overflow guard
+    else:
+        0
+
+effectiveListeningTimeMs =
+    max(totalListeningTimeMs, estimatedListeningTimeMs)
 ```
 
-Actual stored listening time always wins. The estimated fallback is used only when stored listening time is zero or missing but play count and duration are available.
+The stored actual/measured value and the estimate both contribute to the derived display value. `effectiveListeningTimeMs` uses the larger of stored actual time and estimated time so imported or legacy play-count stats remain useful even when measured listening time is partial.
 
-`effectiveListeningTimeMs` must not be added to backup files, added to any database schema, exported as a backup field, imported as a backup field, used to overwrite `totalListeningTimeMs`, or treated as measured playback time. This preserves the backup/import/export contract while making imported or legacy play-count stats useful.
+`effectiveListeningTimeMs` must not be added to backup files, added to any database schema, exported as a backup field, imported as a backup field, used to overwrite `totalListeningTimeMs`, or treated as measured playback time. Backup export still writes raw stored `totalListeningTimeMs`, and import still merges raw stored `totalListeningTimeMs`.
 
-Android uses `ListeningTimeRules.effectiveListeningTimeMs(...)` in read/display paths. Track Details, stats dashboard, all-time reports, artist insights, and all-time aggregate fallback use effective listening time. Event-backed monthly and Wrapped analytics continue to use actual listen-event `listenedMs`.
+No listen events are synthesized from aggregate stats. Event-backed monthly and Wrapped analytics continue to use actual listen-event `listenedMs` where applicable.
 
-Desktop uses the same effective listening-time rule. Desktop backup export still writes raw stored `totalListeningTimeMs`, Desktop import still merges raw stored `totalListeningTimeMs`, and no `effectiveListeningTimeMs` field exists in backups.
+Android and Desktop use the same effective listening-time rule. Desktop backup export still writes raw stored `totalListeningTimeMs`, Desktop import still merges raw stored `totalListeningTimeMs`, and no `effectiveListeningTimeMs` field exists in backups.
 
 ## Cross-Platform Merge Rules
 

@@ -140,15 +140,17 @@ All-time counters written on every play/skip since app install.
 **Effective listening time rule:** stored `totalListeningTimeMs` remains the actual
 listening-time value used for database, backup, import, and export contracts. For display,
 sorting, all-time reports, and aggregate summaries, Android derives
-`effectiveListeningTimeMs` with `ListeningTimeRules.effectiveListeningTimeMs(...)`:
-use `totalListeningTimeMs` when it is greater than zero; otherwise use
-`playCount × durationMs` when play count and duration are available; otherwise use zero.
-Actual stored listening time always wins, and the estimate must never overwrite
-`totalListeningTimeMs` or appear as a backup/database field. Track Details, stats dashboard,
-all-time reports, artist insights, and all-time aggregate fallback use effective listening
-time; event-backed Monthly Reports and Wrapped continue to use listen-event `listenedMs`.
-Desktop follows the same effective listening-time rule while still exporting/importing only
-raw stored `totalListeningTimeMs`; no `effectiveListeningTimeMs` backup field exists.
+`effectiveListeningTimeMs` with `ListeningTimeRules.effectiveListeningTimeMs(...)`.
+`estimatedListeningTimeMs` is `playCount × durationMs` when play count and duration are
+available, with overflow guard; otherwise it is zero. `effectiveListeningTimeMs` is the
+larger of stored `totalListeningTimeMs` and estimated listening time. The derived effective
+value is used only for user-facing display, sorting, reports, and aggregate summaries. It
+must never overwrite `totalListeningTimeMs`, appear as a backup/database field, or be treated
+as measured playback time. Track Details, stats dashboard, all-time reports, artist insights,
+and all-time aggregate fallback use effective listening time; event-backed Monthly Reports
+and Wrapped continue to use actual listen-event `listenedMs`. Android and Desktop share this
+rule while still exporting/importing only raw stored `totalListeningTimeMs`; no
+`effectiveListeningTimeMs` backup field exists.
 
 ### Event-backed (TrackListenEventEntity)
 Per-play/per-skip rows since DB v6 upgrade. Accurate time-scoped analytics.

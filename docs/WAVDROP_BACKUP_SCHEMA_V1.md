@@ -73,7 +73,7 @@ Display metadata must be preserved exactly as stored locally. Do not normalize t
 
 Aggregate stats must be exported from `trackStats`, not from `songs`.
 
-Backups store raw `totalListeningTimeMs` only. They do not store derived `effectiveListeningTimeMs`. Android and Desktop may derive effective listening time locally for display, sorting, reports, and aggregate summaries, but export/import must continue to read and write the stored `totalListeningTimeMs` field only.
+Backups store raw `totalListeningTimeMs` only. They do not store derived `effectiveListeningTimeMs`. Android and Desktop derive effective listening time locally as the larger of stored `totalListeningTimeMs` and estimated `playCount × durationMs` for user-facing display, sorting, reports, and aggregate summaries. Export/import must continue to read, write, and merge the stored `totalListeningTimeMs` field only; the derived value must not be exported, imported, persisted, used to overwrite `totalListeningTimeMs`, or treated as measured playback time.
 
 Stats fields use baseline-safe merge rules on import:
 
