@@ -109,7 +109,7 @@ class HomeViewModel @Inject constructor(
 
     val searchTapBehavior: StateFlow<SearchTapBehavior> = appSettingsRepository.searchTapBehavior.stateIn(
         scope        = viewModelScope,
-        started      = SharingStarted.WhileSubscribed(5_000),
+        started      = SharingStarted.Eagerly,
         initialValue = SearchTapBehavior.DEFAULT,
     )
 

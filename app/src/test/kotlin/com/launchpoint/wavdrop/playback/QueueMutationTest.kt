@@ -199,7 +199,21 @@ class QueueMutationTest {
     }
 
     @Test
-    fun `searchPreserveQueue builds searched song plus remaining queue after current`() {
+    fun `searchPreserveQueue inserts searched song after current while preserving next`() {
+        val x = song(99)
+
+        val result = QueueMutation.searchPreserveQueue(
+            playbackQueue = listOf(a, b, c),
+            currentPlaybackIndex = 0,
+            song = x,
+        )
+
+        assertEquals(listOf(a, x, b, c), result)
+        assertSearchPlaybackPosition(result, x, previous = a, next = b)
+    }
+
+    @Test
+    fun `searchPreserveQueue inserts searched song after middle current`() {
         val x = song(99)
 
         val result = QueueMutation.searchPreserveQueue(
@@ -208,20 +222,8 @@ class QueueMutationTest {
             song = x,
         )
 
-        assertEquals(listOf(x, c, d), result)
-    }
-
-    @Test
-    fun `searchPreserveQueue returns searched song when current is last`() {
-        val x = song(99)
-
-        val result = QueueMutation.searchPreserveQueue(
-            playbackQueue = listOf(a, b, c),
-            currentPlaybackIndex = 2,
-            song = x,
-        )
-
-        assertEquals(listOf(x), result)
+        assertEquals(listOf(a, b, x, c, d), result)
+        assertSearchPlaybackPosition(result, x, previous = b, next = c)
     }
 
     @Test
@@ -238,14 +240,52 @@ class QueueMutationTest {
     }
 
     @Test
-    fun `searchPreserveQueue removes selected song from continuation`() {
+    fun `searchPreserveQueue removes duplicate searched song from later upcoming queue`() {
+        val x = song(99)
+
         val result = QueueMutation.searchPreserveQueue(
-            playbackQueue = listOf(a, b, c, d, c),
-            currentPlaybackIndex = 1,
-            song = c,
+            playbackQueue = listOf(a, b, x, c),
+            currentPlaybackIndex = 0,
+            song = x,
         )
 
-        assertEquals(listOf(c, d), result)
+        assertEquals(listOf(a, x, b, c), result)
+        assertSearchPlaybackPosition(result, x, previous = a, next = b)
+    }
+
+    @Test
+    fun `replace queue behavior remains selected search context`() {
+        val x = song(99)
+        val searchResults = listOf(c, x, d)
+        val startIndex = searchResults.indexOfFirst { it.id == x.id }
+
+        assertEquals(1, startIndex)
+        assertEquals(listOf(c, x, d), searchResults)
+    }
+
+    private fun assertSearchPlaybackPosition(
+        queue: List<Song>,
+        current: Song,
+        previous: Song,
+        next: Song,
+    ) {
+        val currentIndex = queue.indexOfFirst { it.id == current.id }
+        val previousAction = QueueNavigator.previousAction(
+            queueSize = queue.size,
+            currentIndex = currentIndex,
+            currentPositionMs = 0L,
+            repeatMode = RepeatMode.OFF,
+        )
+        val nextIndex = QueueNavigator.nextIndex(
+            queueSize = queue.size,
+            currentIndex = currentIndex,
+            repeatMode = RepeatMode.OFF,
+        )
+
+        assertEquals(current, queue[currentIndex])
+        assertEquals(PreviousQueueAction.MoveTo(currentIndex - 1), previousAction)
+        assertEquals(previous, queue[currentIndex - 1])
+        assertEquals(next, queue[nextIndex!!])
     }
 
     // ── shiftPlaybackOrderForInsert ──────────────────────────────────────────────

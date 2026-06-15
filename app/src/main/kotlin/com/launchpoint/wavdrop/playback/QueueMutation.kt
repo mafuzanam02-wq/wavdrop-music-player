@@ -110,12 +110,12 @@ internal object QueueMutation {
         currentPlaybackIndex: Int?,
         song: Song,
     ): List<Song> {
-        val continuation = currentPlaybackIndex
-            ?.takeIf { it in playbackQueue.indices }
-            ?.let { playbackQueue.drop(it + 1) }
-            .orEmpty()
+        val currentIndex = currentPlaybackIndex?.takeIf { it in playbackQueue.indices }
+            ?: return listOf(song)
+        val history = playbackQueue.take(currentIndex + 1)
+        val continuation = playbackQueue.drop(currentIndex + 1)
             .filterNot { it.id == song.id }
-        return listOf(song) + continuation
+        return history + song + continuation
     }
 
     /**

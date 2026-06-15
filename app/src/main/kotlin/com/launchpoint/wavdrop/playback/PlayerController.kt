@@ -277,12 +277,12 @@ class PlayerController @Inject constructor(
     }
 
     fun playSearchResultPreservingQueue(song: Song) {
-        val newQueue = QueueMutation.searchPreserveQueue(
+        val plan = SearchPlaybackPlanner.preserveQueue(
             playbackQueue = playbackQueue,
             currentPlaybackIndex = currentPlaybackIndex(),
             song = song,
         )
-        playFromQueuePreservingPlaybackOrder(queue = newQueue, startSong = song)
+        playFromQueuePreservingPlaybackOrder(queue = plan.queue, startSong = song)
     }
 
     fun playExternalUri(uri: Uri, displayName: String? = null) {
@@ -1516,6 +1516,15 @@ class PlayerController @Inject constructor(
     }
 
     private fun currentPlaybackIndex(): Int? {
+        mediaController?.currentMediaItem?.mediaId?.toLongOrNull()
+            ?.let { id -> playbackQueue.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+            ?.let { return it }
+
+        mediaController?.currentMediaItemIndex
+            ?.takeIf { it in playbackQueue.indices }
+            ?.let { return it }
+
         _nowPlayingState.value.currentIndex
             .takeIf { it in playbackQueue.indices }
             ?.let { return it }
