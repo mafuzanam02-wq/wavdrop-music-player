@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.ui.screen.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.Song
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -266,9 +268,13 @@ class HomeViewModel @Inject constructor(
     }
 
     fun playSearchResult(song: Song) {
-        when (searchTapBehavior.value) {
-            SearchTapBehavior.REPLACE_QUEUE -> playSongFromLibraryQueue(song)
-            SearchTapBehavior.PRESERVE_QUEUE -> playerController.playSearchResultPreservingQueue(song)
+        viewModelScope.launch {
+            val behavior = appSettingsRepository.searchTapBehavior.first()
+            Log.d(SEARCH_TAG, "search result tap behavior=$behavior songId=${song.id}")
+            when (behavior) {
+                SearchTapBehavior.REPLACE_QUEUE -> playSongFromLibraryQueue(song)
+                SearchTapBehavior.PRESERVE_QUEUE -> playerController.playSearchResultPreservingQueue(song)
+            }
         }
     }
 
@@ -312,3 +318,5 @@ class HomeViewModel @Inject constructor(
 
     fun cycleRepeatMode() = playerController.cycleRepeatMode()
 }
+
+private const val SEARCH_TAG = "WavdropSearchPlayback"

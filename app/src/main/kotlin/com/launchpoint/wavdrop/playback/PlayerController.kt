@@ -63,6 +63,7 @@ class PlayerController @Inject constructor(
 ) {
     private companion object {
         const val TAG = "WavStats-PC"
+        const val SEARCH_TAG = "WavdropSearchPlayback"
         const val RESUME_TAG = "WavdropResume"
         const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
         const val BLUETOOTH_RESUME_DEBOUNCE_MS = 1_500L
@@ -82,8 +83,10 @@ class PlayerController @Inject constructor(
     private var mediaController: MediaController? = null
 
     private var pendingPlaybackRequest: PlaybackRequest? = null
+    private var pendingPreserveSearchRequest: PreserveSearchRequest? = null
     private var pendingExternalPlaybackRequest: ExternalPlaybackRequest? = null
     private var pendingRestorePositionMs: Long? = null
+    private var pendingPreserveSearchPlan: SearchPlaybackPlan? = null
     private var hasRestoredSession = false
     private var isExternalPlayback = false
 
@@ -230,15 +233,21 @@ class PlayerController @Inject constructor(
                     controller.repeatMode = repeatMode.toPlayerRepeatMode()
                     controller.shuffleModeEnabled = false
                     val playRequest = pendingPlaybackRequest
+                    val preserveSearchRequest = pendingPreserveSearchRequest
                     val externalRequest = pendingExternalPlaybackRequest
                     val restorePos = pendingRestorePositionMs
                     pendingPlaybackRequest = null
+                    pendingPreserveSearchRequest = null
                     pendingExternalPlaybackRequest = null
                     pendingRestorePositionMs = null
                     when {
                         externalRequest != null -> playExternalUri(
                             uri = externalRequest.uri,
                             displayName = externalRequest.displayName,
+                        )
+                        preserveSearchRequest != null -> playPreservedSearchPlan(
+                            plan = preserveSearchRequest.plan,
+                            startSong = preserveSearchRequest.startSong,
                         )
                         playRequest != null -> playFromQueueInternal(
                             queue = playRequest.queue,
@@ -277,12 +286,87 @@ class PlayerController @Inject constructor(
     }
 
     fun playSearchResultPreservingQueue(song: Song) {
+        val controller = mediaController
+        val currentMediaIndex = controller?.currentMediaItemIndex
+        val currentMediaSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
+        val effectiveQueueBefore = playbackQueue
+        val resolvedCurrentIndex = currentPlaybackIndex()
         val plan = SearchPlaybackPlanner.preserveQueue(
-            playbackQueue = playbackQueue,
-            currentPlaybackIndex = currentPlaybackIndex(),
+            playbackQueue = effectiveQueueBefore,
+            currentPlaybackIndex = resolvedCurrentIndex,
             song = song,
         )
-        playFromQueuePreservingPlaybackOrder(queue = plan.queue, startSong = song)
+        if (plan == null) {
+            Log.d(
+                SEARCH_TAG,
+                "preserve search tap ignored: unresolved current index " +
+                    "mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
+                    "stateSongId=${_nowPlayingState.value.song?.id} before=${effectiveQueueBefore.idList()} " +
+                    "tap=${song.id}",
+            )
+            return
+        }
+        Log.d(
+            SEARCH_TAG,
+            "preserve search tap mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
+                "resolvedIndex=$resolvedCurrentIndex before=${effectiveQueueBefore.idList()} " +
+                "tap=${song.id} after=${plan.queue.idList()} newIndex=${plan.currentIndex}",
+        )
+        playPreservedSearchPlan(plan = plan, startSong = song)
+    }
+
+    private fun playPreservedSearchPlan(
+        plan: SearchPlaybackPlan,
+        startSong: Song,
+    ) {
+        isExternalPlayback = false
+        libraryQueue = plan.queue.ifEmpty { listOf(startSong) }
+        playbackOrder = libraryQueue.indices.toList()
+        playbackQueue = libraryQueue
+        playerQueueNeedsSync = false
+
+        val playbackStartIndex = plan.currentIndex.takeIf { it in playbackQueue.indices }
+            ?: playbackQueue.indexOfFirst { it.id == startSong.id }.takeIf { it >= 0 }
+            ?: 0
+        pendingPreserveSearchPlan = SearchPlaybackPlan(
+            queue = playbackQueue,
+            currentIndex = playbackStartIndex,
+        )
+
+        lastKnownPositionMs = -1L
+        statsTracker.onSongSelected(startSong)
+        _nowPlayingState.update {
+            it.copy(
+                song = startSong,
+                queue = playbackQueue,
+                currentIndex = playbackStartIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+                positionMs = 0L,
+                durationMs = startSong.duration.coerceAtLeast(0L),
+                bufferedPositionMs = 0L,
+                isSeekable = false,
+            )
+        }
+
+        val controller = mediaController
+        if (controller == null) {
+            pendingPreserveSearchRequest = PreserveSearchRequest(
+                plan = SearchPlaybackPlan(
+                    queue = playbackQueue,
+                    currentIndex = playbackStartIndex,
+                ),
+                startSong = startSong,
+            )
+            return
+        }
+
+        controller.repeatMode = repeatMode.toPlayerRepeatMode()
+        controller.shuffleModeEnabled = false
+        controller.setMediaItems(playbackQueue.map { it.toMediaItem() }, playbackStartIndex, 0L)
+        controller.prepare()
+        controller.play()
+        saveSessionAsync()
     }
 
     fun playExternalUri(uri: Uri, displayName: String? = null) {
@@ -1216,17 +1300,19 @@ class PlayerController @Inject constructor(
         val state = _nowPlayingState.value
         val controller = mediaController
         val positionMs = controller?.currentPosition?.coerceAtLeast(0L) ?: state.positionMs
+        val preservePlan = pendingPreserveSearchPlan
 
-        val currentLibraryIndex = controller?.currentMediaItem?.mediaId?.toLongOrNull()
-            ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
-            ?.takeIf { it >= 0 }
+        val currentLibraryIndex = preservePlan?.currentIndex?.takeIf { it in libraryQueue.indices }
+            ?: controller?.currentMediaItem?.mediaId?.toLongOrNull()
+                ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
+                ?.takeIf { it >= 0 }
             ?: libraryQueue.indexOfFirst { it.id == state.song?.id }.takeIf { it >= 0 }
             ?: 0
 
         val snapshot = PlaybackSessionSnapshot(
             queueSongIds   = libraryQueue.map { it.id },
             playbackOrder  = playbackOrder.takeIf { it.size == libraryQueue.size },
-            currentSongId  = state.song?.id,
+            currentSongId  = preservePlan?.currentSongId ?: state.song?.id,
             currentIndex   = currentLibraryIndex,
             positionMs     = positionMs,
             repeatMode     = repeatMode,
@@ -1442,19 +1528,23 @@ class PlayerController @Inject constructor(
 
     private fun syncNowPlayingState(fromTransition: Boolean = false, notifyStats: Boolean = true) {
         val controller = mediaController
+        val preservePlan = pendingPreserveSearchPlanForSync(controller, fromTransition)
         val syncedCurrentSongId = if (playerQueueNeedsSync) {
             controller?.currentMediaItem?.mediaId?.toLongOrNull() ?: _nowPlayingState.value.song?.id
         } else {
             null
         }
-        val currentPlaybackIndex = syncedCurrentSongId
-            ?.let { id -> playbackQueue.indexOfFirst { it.id == id } }
-            ?.takeIf { it >= 0 }
+        val currentPlaybackIndex = preservePlan?.currentIndex?.takeIf { it in playbackQueue.indices }
+            ?: syncedCurrentSongId
+                ?.let { id -> playbackQueue.indexOfFirst { it.id == id } }
+                ?.takeIf { it >= 0 }
             ?: controller?.currentMediaItemIndex?.takeIf { it in playbackQueue.indices }
             ?: _nowPlayingState.value.currentIndex.takeIf { it in playbackQueue.indices }
             ?: 0
-        val currentSong = syncedCurrentSongId
-            ?.let { id -> libraryQueue.firstOrNull { it.id == id } }
+        val currentSong = preservePlan?.currentSongId
+            ?.let { id -> playbackQueue.firstOrNull { it.id == id } }
+            ?: syncedCurrentSongId
+                ?.let { id -> libraryQueue.firstOrNull { it.id == id } }
             ?: playbackQueue.getOrNull(currentPlaybackIndex)
 
         val songChanged = currentSong != null && currentSong.id != _nowPlayingState.value.song?.id
@@ -1487,6 +1577,25 @@ class PlayerController @Inject constructor(
         }
     }
 
+    private fun pendingPreserveSearchPlanForSync(
+        controller: MediaController?,
+        fromTransition: Boolean,
+    ): SearchPlaybackPlan? {
+        val mediaSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
+        val mediaIndex = controller?.currentMediaItemIndex
+        val decision = SearchPlaybackPlanner.preserveSyncDecision(
+            plan = pendingPreserveSearchPlan,
+            activeQueue = playbackQueue,
+            mediaSongId = mediaSongId,
+            mediaIndex = mediaIndex,
+            fromTransition = fromTransition,
+        )
+        if (decision.action == PreserveSearchSyncAction.ClearPlan) {
+            pendingPreserveSearchPlan = null
+        }
+        return decision.plan
+    }
+
     private fun MediaController.safePositionMs(durationMs: Long): Long =
         currentPosition.coerceAtLeast(0L).coerceForDuration(durationMs)
 
@@ -1498,6 +1607,9 @@ class PlayerController @Inject constructor(
 
     private fun Long.coerceForDuration(durationMs: Long): Long =
         if (durationMs > 0L) coerceIn(0L, durationMs) else coerceAtLeast(0L)
+
+    private fun List<Song>.idList(): String =
+        joinToString(prefix = "[", postfix = "]") { it.id.toString() }
 
     // Returns the library index of the current song.
     // controller.currentMediaItemIndex is a playback index; map via playbackOrder.
@@ -1584,8 +1696,14 @@ class PlayerController @Inject constructor(
         val preservePlaybackOrder: Boolean = false,
     )
 
+    private data class PreserveSearchRequest(
+        val plan: SearchPlaybackPlan,
+        val startSong: Song,
+    )
+
     private data class ExternalPlaybackRequest(
         val uri: Uri,
         val displayName: String?,
     )
+
 }
