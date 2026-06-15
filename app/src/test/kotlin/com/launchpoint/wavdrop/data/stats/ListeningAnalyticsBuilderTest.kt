@@ -421,7 +421,7 @@ class ListeningAnalyticsBuilderTest {
 
         assertEquals(45, result.totalPlayCount)
         assertEquals(7, result.totalSkipCount)
-        assertEquals(90_000L, result.totalListeningTimeMs)
+        assertEquals(9_000_000L, result.totalListeningTimeMs)
         assertEquals("Heavy", result.topSongs[0].song.title)
         assertEquals(ListeningAnalyticsEmptyReason.HAS_ACTIVITY, result.emptyState.reason)
     }
@@ -537,7 +537,7 @@ class ListeningAnalyticsBuilderTest {
 
         assertEquals(13, result.totalPlayCount)
         assertEquals(4, result.totalSkipCount)
-        assertEquals(130_000L, result.totalListeningTimeMs)
+        assertEquals(2_600_000L, result.totalListeningTimeMs)
         assertEquals(listOf(2L, 1L), result.topSongs.map { it.song.id })
         assertEquals(ListeningAnalyticsEmptyReason.HAS_ACTIVITY, result.emptyState.reason)
     }
@@ -554,9 +554,9 @@ class ListeningAnalyticsBuilderTest {
             zone = utc,
         )
 
-        assertEquals(290_000L, result.totalListeningTimeMs)
+        assertEquals(1_440_000L, result.totalListeningTimeMs)
         assertEquals(240_000L, result.topSongs.first { it.song.id == 1L }.totalListeningTimeMs)
-        assertEquals(50_000L, result.topSongs.first { it.song.id == 2L }.totalListeningTimeMs)
+        assertEquals(1_200_000L, result.topSongs.first { it.song.id == 2L }.totalListeningTimeMs)
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

@@ -64,7 +64,7 @@ class ListeningReportBuilderTest {
 
         assertEquals(5, report.totalPlayCount)
         assertEquals(7, report.totalSkipCount)
-        assertEquals(90_000L, report.totalListeningTimeMs)
+        assertEquals(1_000_000L, report.totalListeningTimeMs)
         assertEquals(2, report.tracksPlayed)
         assertEquals(1, report.artistsPlayed)
         assertEquals(2, report.albumsPlayed)
@@ -85,23 +85,23 @@ class ListeningReportBuilderTest {
             ),
         )
 
-        assertEquals(285_000L, report.totalListeningTimeMs)
+        assertEquals(1_170_000L, report.totalListeningTimeMs)
         assertEquals(120_000L, report.topSongs.first { it.song.id == 1L }.totalListeningTimeMs)
-        assertEquals(195_000L, report.topArtists.first { it.artistKey == "Artist A" }.totalListeningTimeMs)
-        assertEquals(195_000L, report.topAlbums.first { it.albumKey == "Album A" }.totalListeningTimeMs)
+        assertEquals(1_080_000L, report.topArtists.first { it.artistKey == "Artist A" }.totalListeningTimeMs)
+        assertEquals(1_080_000L, report.topAlbums.first { it.albumKey == "Album A" }.totalListeningTimeMs)
     }
 
     @Test
-    fun `listening report does not inflate actual listening time`() {
+    fun `listening report uses actual listening time when actual is greater than estimate`() {
         val report = ListeningReportBuilder.build(
             songs = listOf(song(id = 1, title = "Measured", duration = 60_000L)),
-            stats = listOf(stats(songId = 1, playCount = 10, totalListeningTimeMs = 40_000L)),
+            stats = listOf(stats(songId = 1, playCount = 1, totalListeningTimeMs = 90_000L)),
         )
 
-        assertEquals(40_000L, report.totalListeningTimeMs)
-        assertEquals(40_000L, report.topSongs.single().totalListeningTimeMs)
-        assertEquals(40_000L, report.topArtists.single().totalListeningTimeMs)
-        assertEquals(40_000L, report.topAlbums.single().totalListeningTimeMs)
+        assertEquals(90_000L, report.totalListeningTimeMs)
+        assertEquals(90_000L, report.topSongs.single().totalListeningTimeMs)
+        assertEquals(90_000L, report.topArtists.single().totalListeningTimeMs)
+        assertEquals(90_000L, report.topAlbums.single().totalListeningTimeMs)
     }
 
     @Test

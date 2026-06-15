@@ -6,14 +6,25 @@ import org.junit.Test
 class ListeningTimeRulesTest {
 
     @Test
-    fun `actual listening time wins over estimate`() {
+    fun `estimate is used when estimate is greater than actual listening time`() {
         val result = ListeningTimeRules.effectiveListeningTimeMs(
-            playCount = 10,
-            durationMs = 180_000L,
-            totalListeningTimeMs = 45_000L,
+            playCount = 323,
+            durationMs = 196_000L,
+            totalListeningTimeMs = 660_000L,
         )
 
-        assertEquals(45_000L, result)
+        assertEquals(63_308_000L, result)
+    }
+
+    @Test
+    fun `actual listening time is used when actual is greater than estimate`() {
+        val result = ListeningTimeRules.effectiveListeningTimeMs(
+            playCount = 1,
+            durationMs = 180_000L,
+            totalListeningTimeMs = 450_000L,
+        )
+
+        assertEquals(450_000L, result)
     }
 
     @Test
@@ -28,25 +39,25 @@ class ListeningTimeRulesTest {
     }
 
     @Test
-    fun `zero play count gives zero`() {
+    fun `zero play count still allows actual listening time to show`() {
         val result = ListeningTimeRules.effectiveListeningTimeMs(
             playCount = 0,
             durationMs = 200_000L,
-            totalListeningTimeMs = 0L,
+            totalListeningTimeMs = 90_000L,
         )
 
-        assertEquals(0L, result)
+        assertEquals(90_000L, result)
     }
 
     @Test
-    fun `zero duration gives zero`() {
+    fun `zero duration still allows actual listening time to show`() {
         val result = ListeningTimeRules.effectiveListeningTimeMs(
             playCount = 5,
             durationMs = 0L,
-            totalListeningTimeMs = 0L,
+            totalListeningTimeMs = 75_000L,
         )
 
-        assertEquals(0L, result)
+        assertEquals(75_000L, result)
     }
 
     @Test

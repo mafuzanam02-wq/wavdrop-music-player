@@ -49,7 +49,7 @@ class StatsDashboardBuilderTest {
         assertEquals(2, summary.totalPlayedTracks)
         assertEquals(5, summary.totalPlayCount)
         assertEquals(5, summary.totalSkipCount)
-        assertEquals(180_000L, summary.totalListeningTimeMs)
+        assertEquals(1_000_000L, summary.totalListeningTimeMs)
     }
 
     @Test
@@ -64,14 +64,25 @@ class StatsDashboardBuilderTest {
     }
 
     @Test
-    fun `dashboard does not inflate actual listening time`() {
+    fun `dashboard uses actual listening time when actual is greater than estimate`() {
         val summary = StatsDashboardBuilder.build(
             songs = listOf(song(1, "Measured")),
-            stats = listOf(stats(songId = 1, playCount = 20, totalListeningTimeMs = 90_000L)),
+            stats = listOf(stats(songId = 1, playCount = 2, totalListeningTimeMs = 900_000L)),
         )
 
-        assertEquals(90_000L, summary.totalListeningTimeMs)
-        assertEquals(90_000L, summary.mostPlayedSongs.single().totalListeningTimeMs)
+        assertEquals(900_000L, summary.totalListeningTimeMs)
+        assertEquals(900_000L, summary.mostPlayedSongs.single().totalListeningTimeMs)
+    }
+
+    @Test
+    fun `dashboard uses estimate when imported play count dwarfs actual listening time`() {
+        val summary = StatsDashboardBuilder.build(
+            songs = listOf(song(1, "Imported", duration = 196_000L)),
+            stats = listOf(stats(songId = 1, playCount = 323, totalListeningTimeMs = 660_000L)),
+        )
+
+        assertEquals(63_308_000L, summary.totalListeningTimeMs)
+        assertEquals(63_308_000L, summary.mostPlayedSongs.single().totalListeningTimeMs)
     }
 
     @Test
@@ -157,13 +168,17 @@ class StatsDashboardBuilderTest {
         assertEquals("Song 12", summary.mostPlayedSongs.first().song.title)
     }
 
-    private fun song(id: Long, title: String) = Song(
+    private fun song(
+        id: Long,
+        title: String,
+        duration: Long = 200_000L,
+    ) = Song(
         id = id,
         title = title,
         artist = "Artist",
         album = "Album",
         albumId = 0L,
-        duration = 200_000L,
+        duration = duration,
         uri = "content://media/$id",
         dateAdded = 0L,
         trackNumber = 0,

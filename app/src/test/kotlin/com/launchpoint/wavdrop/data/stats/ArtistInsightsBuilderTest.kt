@@ -39,7 +39,7 @@ class ArtistInsightsBuilderTest {
         assertEquals(2, summary.totalAlbums)
         assertEquals(7, summary.totalPlayCount)
         assertEquals(3, summary.totalSkipCount)
-        assertEquals(150_000L, summary.totalListeningTimeMs)
+        assertEquals(1_400_000L, summary.totalListeningTimeMs)
     }
 
     @Test
@@ -57,21 +57,21 @@ class ArtistInsightsBuilderTest {
             ),
         )
 
-        assertEquals(290_000L, summary.totalListeningTimeMs)
-        assertEquals(200_000L, summary.topAlbums.first { it.albumKey == "Album A" }.totalListeningTimeMs)
+        assertEquals(930_000L, summary.totalListeningTimeMs)
+        assertEquals(840_000L, summary.topAlbums.first { it.albumKey == "Album A" }.totalListeningTimeMs)
         assertEquals(90_000L, summary.topAlbums.first { it.albumKey == "Album B" }.totalListeningTimeMs)
     }
 
     @Test
-    fun `artist insights do not inflate actual listening time`() {
+    fun `artist insights use actual listening time when actual is greater than estimate`() {
         val summary = ArtistInsightsBuilder.build(
             songs = listOf(song(1, "Measured", album = "Album A", duration = 60_000L)),
-            stats = listOf(stats(songId = 1, playCount = 10, totalListeningTimeMs = 45_000L)),
+            stats = listOf(stats(songId = 1, playCount = 1, totalListeningTimeMs = 90_000L)),
         )
 
-        assertEquals(45_000L, summary.totalListeningTimeMs)
-        assertEquals(45_000L, summary.topSongs.single().totalListeningTimeMs)
-        assertEquals(45_000L, summary.topAlbums.single().totalListeningTimeMs)
+        assertEquals(90_000L, summary.totalListeningTimeMs)
+        assertEquals(90_000L, summary.topSongs.single().totalListeningTimeMs)
+        assertEquals(90_000L, summary.topAlbums.single().totalListeningTimeMs)
     }
 
     @Test
