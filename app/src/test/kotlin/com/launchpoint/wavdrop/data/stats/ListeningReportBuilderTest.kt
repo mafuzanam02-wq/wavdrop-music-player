@@ -71,6 +71,40 @@ class ListeningReportBuilderTest {
     }
 
     @Test
+    fun `song artist and album totals use effective listening time`() {
+        val report = ListeningReportBuilder.build(
+            songs = listOf(
+                song(id = 1, title = "Imported One", artist = "Artist A", album = "Album A", duration = 60_000L),
+                song(id = 2, title = "Measured Two", artist = "Artist A", album = "Album A", duration = 120_000L),
+                song(id = 3, title = "Imported Three", artist = "Artist B", album = "Album B", duration = 30_000L),
+            ),
+            stats = listOf(
+                stats(songId = 1, playCount = 2, totalListeningTimeMs = 0L),
+                stats(songId = 2, playCount = 8, totalListeningTimeMs = 75_000L),
+                stats(songId = 3, playCount = 3, totalListeningTimeMs = 0L),
+            ),
+        )
+
+        assertEquals(285_000L, report.totalListeningTimeMs)
+        assertEquals(120_000L, report.topSongs.first { it.song.id == 1L }.totalListeningTimeMs)
+        assertEquals(195_000L, report.topArtists.first { it.artistKey == "Artist A" }.totalListeningTimeMs)
+        assertEquals(195_000L, report.topAlbums.first { it.albumKey == "Album A" }.totalListeningTimeMs)
+    }
+
+    @Test
+    fun `listening report does not inflate actual listening time`() {
+        val report = ListeningReportBuilder.build(
+            songs = listOf(song(id = 1, title = "Measured", duration = 60_000L)),
+            stats = listOf(stats(songId = 1, playCount = 10, totalListeningTimeMs = 40_000L)),
+        )
+
+        assertEquals(40_000L, report.totalListeningTimeMs)
+        assertEquals(40_000L, report.topSongs.single().totalListeningTimeMs)
+        assertEquals(40_000L, report.topArtists.single().totalListeningTimeMs)
+        assertEquals(40_000L, report.topAlbums.single().totalListeningTimeMs)
+    }
+
+    @Test
     fun `top songs artists and albums are sorted by aggregated play count`() {
         val report = ListeningReportBuilder.build(
             songs = listOf(
@@ -166,13 +200,14 @@ class ListeningReportBuilderTest {
         title: String,
         artist: String = "Artist",
         album: String = "Album",
+        duration: Long = 200_000L,
     ) = Song(
         id = id,
         title = title,
         artist = artist,
         album = album,
         albumId = id,
-        duration = 200_000L,
+        duration = duration,
         uri = "content://media/$id",
         dateAdded = 0L,
         trackNumber = 0,

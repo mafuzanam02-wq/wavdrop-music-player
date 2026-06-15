@@ -43,6 +43,38 @@ class ArtistInsightsBuilderTest {
     }
 
     @Test
+    fun `artist and album insight totals use effective listening time`() {
+        val summary = ArtistInsightsBuilder.build(
+            songs = listOf(
+                song(1, "Imported One", album = "Album A", duration = 60_000L),
+                song(2, "Measured Two", album = "Album A", duration = 90_000L),
+                song(3, "Imported Three", album = "Album B", duration = 30_000L),
+            ),
+            stats = listOf(
+                stats(songId = 1, playCount = 2, totalListeningTimeMs = 0L),
+                stats(songId = 2, playCount = 8, totalListeningTimeMs = 80_000L),
+                stats(songId = 3, playCount = 3, totalListeningTimeMs = 0L),
+            ),
+        )
+
+        assertEquals(290_000L, summary.totalListeningTimeMs)
+        assertEquals(200_000L, summary.topAlbums.first { it.albumKey == "Album A" }.totalListeningTimeMs)
+        assertEquals(90_000L, summary.topAlbums.first { it.albumKey == "Album B" }.totalListeningTimeMs)
+    }
+
+    @Test
+    fun `artist insights do not inflate actual listening time`() {
+        val summary = ArtistInsightsBuilder.build(
+            songs = listOf(song(1, "Measured", album = "Album A", duration = 60_000L)),
+            stats = listOf(stats(songId = 1, playCount = 10, totalListeningTimeMs = 45_000L)),
+        )
+
+        assertEquals(45_000L, summary.totalListeningTimeMs)
+        assertEquals(45_000L, summary.topSongs.single().totalListeningTimeMs)
+        assertEquals(45_000L, summary.topAlbums.single().totalListeningTimeMs)
+    }
+
+    @Test
     fun `top songs are sorted by play count and exclude zero plays`() {
         val summary = ArtistInsightsBuilder.build(
             songs = listOf(song(1, "Middle"), song(2, "Top"), song(3, "Zero")),
@@ -111,13 +143,14 @@ class ArtistInsightsBuilderTest {
         id: Long,
         title: String,
         album: String = "Album",
+        duration: Long = 200_000L,
     ) = Song(
         id = id,
         title = title,
         artist = "Artist",
         album = album,
         albumId = id,
-        duration = 200_000L,
+        duration = duration,
         uri = "content://media/$id",
         dateAdded = 0L,
         trackNumber = 0,

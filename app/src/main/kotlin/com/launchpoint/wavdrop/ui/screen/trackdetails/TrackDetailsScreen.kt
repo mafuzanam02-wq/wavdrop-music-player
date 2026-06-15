@@ -58,6 +58,7 @@ import com.launchpoint.wavdrop.data.lyrics.LyricsResult
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.TrackStats
+import com.launchpoint.wavdrop.data.stats.ListeningTimeRules
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.shareSong
@@ -287,7 +288,16 @@ private fun ReadyContent(
         DetailRow("Play count",     (stats?.playCount ?: 0).toString())
         DetailRow("Skip count",     (stats?.skipCount ?: 0).toString())
         DetailRow("Last played",    TrackDetailsFormatters.formatLastPlayed(stats?.lastPlayedAt ?: 0L))
-        DetailRow("Total listened", TrackDetailsFormatters.formatListeningTime(stats?.totalListeningTimeMs ?: 0L))
+        DetailRow(
+            "Total listened",
+            TrackDetailsFormatters.formatListeningTime(
+                ListeningTimeRules.effectiveListeningTimeMs(
+                    playCount = stats?.playCount ?: 0,
+                    durationMs = song.duration,
+                    totalListeningTimeMs = stats?.totalListeningTimeMs ?: 0L,
+                ),
+            ),
+        )
 
         SectionDivider()
 

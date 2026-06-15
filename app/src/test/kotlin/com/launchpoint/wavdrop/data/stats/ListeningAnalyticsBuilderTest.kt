@@ -542,6 +542,23 @@ class ListeningAnalyticsBuilderTest {
         assertEquals(ListeningAnalyticsEmptyReason.HAS_ACTIVITY, result.emptyState.reason)
     }
 
+    @Test
+    fun `all time aggregate fallback uses effective listening time`() {
+        val result = ListeningAnalyticsBuilder.buildAllTimeAggregateFallback(
+            songs = listOf(song(1, duration = 60_000L), song(2, duration = 120_000L)),
+            stats = listOf(
+                stats(songId = 1, playCount = 4, totalListeningTimeMs = 0L),
+                stats(songId = 2, playCount = 10, totalListeningTimeMs = 50_000L),
+            ),
+            topListLimit = 10,
+            zone = utc,
+        )
+
+        assertEquals(290_000L, result.totalListeningTimeMs)
+        assertEquals(240_000L, result.topSongs.first { it.song.id == 1L }.totalListeningTimeMs)
+        assertEquals(50_000L, result.topSongs.first { it.song.id == 2L }.totalListeningTimeMs)
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     private fun epochMs(year: Int, month: Int, day: Int): Long =
@@ -555,13 +572,14 @@ class ListeningAnalyticsBuilderTest {
         title: String = "Song $id",
         artist: String = "Artist",
         album: String = "Album",
+        duration: Long = 200_000L,
     ) = Song(
         id = id,
         title = title,
         artist = artist,
         album = album,
         albumId = id,
-        duration = 200_000L,
+        duration = duration,
         uri = "content://media/$id",
         dateAdded = 0L,
         trackNumber = 0,

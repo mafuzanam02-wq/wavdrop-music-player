@@ -19,7 +19,11 @@ object StatsDashboardBuilder {
                 playCount = stat.playCount,
                 skipCount = stat.skipCount,
                 lastPlayedAt = stat.lastPlayedAt.takeIf { it > 0L },
-                totalListeningTimeMs = stat.totalListeningTimeMs,
+                totalListeningTimeMs = ListeningTimeRules.effectiveListeningTimeMs(
+                    playCount = stat.playCount,
+                    durationMs = song.duration,
+                    totalListeningTimeMs = stat.totalListeningTimeMs,
+                ),
             )
         }
 

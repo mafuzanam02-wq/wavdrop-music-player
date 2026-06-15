@@ -53,6 +53,28 @@ class StatsDashboardBuilderTest {
     }
 
     @Test
+    fun `dashboard uses estimated listening time when actual time is zero`() {
+        val summary = StatsDashboardBuilder.build(
+            songs = listOf(song(1, "Imported")),
+            stats = listOf(stats(songId = 1, playCount = 3, totalListeningTimeMs = 0L)),
+        )
+
+        assertEquals(600_000L, summary.totalListeningTimeMs)
+        assertEquals(600_000L, summary.mostPlayedSongs.single().totalListeningTimeMs)
+    }
+
+    @Test
+    fun `dashboard does not inflate actual listening time`() {
+        val summary = StatsDashboardBuilder.build(
+            songs = listOf(song(1, "Measured")),
+            stats = listOf(stats(songId = 1, playCount = 20, totalListeningTimeMs = 90_000L)),
+        )
+
+        assertEquals(90_000L, summary.totalListeningTimeMs)
+        assertEquals(90_000L, summary.mostPlayedSongs.single().totalListeningTimeMs)
+    }
+
+    @Test
     fun `most played is sorted by play count and excludes zero plays`() {
         val summary = StatsDashboardBuilder.build(
             songs = listOf(song(1, "Middle"), song(2, "Top"), song(3, "Zero")),

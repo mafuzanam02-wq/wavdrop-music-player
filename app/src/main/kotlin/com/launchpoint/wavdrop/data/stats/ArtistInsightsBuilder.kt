@@ -21,7 +21,11 @@ object ArtistInsightsBuilder {
                 playCount = stat?.playCount ?: 0,
                 skipCount = stat?.skipCount ?: 0,
                 lastPlayedAt = stat?.lastPlayedAt?.takeIf { it > 0L },
-                totalListeningTimeMs = stat?.totalListeningTimeMs ?: 0L,
+                totalListeningTimeMs = ListeningTimeRules.effectiveListeningTimeMs(
+                    playCount = stat?.playCount ?: 0,
+                    durationMs = song.duration,
+                    totalListeningTimeMs = stat?.totalListeningTimeMs ?: 0L,
+                ),
             )
         }
 
