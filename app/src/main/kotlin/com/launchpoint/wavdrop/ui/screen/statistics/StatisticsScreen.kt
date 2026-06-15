@@ -344,14 +344,14 @@ private fun SongStatsRow(
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = summary.song.title,
+                text = summary.song.displayTitle,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = summary.song.artist.ifBlank { "Unknown Artist" },
+                text = summary.song.displayArtist.ifBlank { "Unknown Artist" },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 maxLines = 1,

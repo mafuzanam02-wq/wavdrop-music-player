@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.data.backup
 data class WavdropBackupImportApplyResult(
     val matchedTracks: Int,
     val unmatchedTracks: Int,
+    val ambiguousTracks: Int = 0,
     /** Tracks where the backup had higher stats and local values were updated. */
     val statsUpdated: Int,
     val lyricsRestored: Int = 0,

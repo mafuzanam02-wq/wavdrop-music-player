@@ -162,4 +162,21 @@ class AppearanceSettingsTest {
         )
         assertTrue(plan.drop(1).all { !it.enabled })
     }
+
+    @Test
+    fun `SongSortMode invalid stored value falls back to A-Z`() {
+        assertEquals(SongSortMode.TITLE_ASC, SongSortMode.DEFAULT)
+        assertEquals(SongSortMode.TITLE_ASC, SongSortMode.fromStoredNameOrDefault("NOT_A_SORT"))
+        assertEquals(SongSortMode.TITLE_ASC, SongSortMode.fromStoredNameOrDefault(null))
+    }
+
+    @Test
+    fun `SearchTapBehavior invalid stored value falls back to replace queue`() {
+        assertEquals(SearchTapBehavior.REPLACE_QUEUE, SearchTapBehavior.DEFAULT)
+        assertEquals(
+            SearchTapBehavior.REPLACE_QUEUE,
+            SearchTapBehavior.fromStoredNameOrDefault("NOT_A_BEHAVIOR"),
+        )
+        assertEquals(SearchTapBehavior.REPLACE_QUEUE, SearchTapBehavior.fromStoredNameOrDefault(null))
+    }
 }

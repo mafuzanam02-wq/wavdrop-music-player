@@ -417,7 +417,7 @@ private fun FeaturedTrack(
     onDetailsClick: () -> Unit,
 ) {
     Text(
-        text = song.song.title,
+        text = song.song.displayTitle,
         style = MaterialTheme.typography.headlineMedium,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onSurface,
@@ -426,7 +426,7 @@ private fun FeaturedTrack(
     )
     Spacer(Modifier.height(6.dp))
     Text(
-        text = song.song.artist.ifBlank { "Unknown Artist" },
+        text = song.song.displayArtist.ifBlank { "Unknown Artist" },
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
         maxLines = 1,
@@ -634,7 +634,7 @@ private fun MostSkippedPage(
             NoDataText("No skips recorded for this year. Skips during this year will appear here.")
         } else {
             Text(
-                text = track.song.title,
+                text = track.song.displayTitle,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -643,7 +643,7 @@ private fun MostSkippedPage(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = track.song.artist.ifBlank { "Unknown Artist" },
+                text = track.song.displayArtist.ifBlank { "Unknown Artist" },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 maxLines = 1,
@@ -688,14 +688,14 @@ private fun RecentPlaysPage(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = summary.song.title,
+                                text = summary.song.displayTitle,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = summary.song.artist.ifBlank { "Unknown Artist" },
+                                text = summary.song.displayArtist.ifBlank { "Unknown Artist" },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                 maxLines = 1,

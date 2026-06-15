@@ -18,6 +18,7 @@ class PlaybackSessionRepository @Inject constructor(
 ) {
     private object Keys {
         val queueIds      = stringPreferencesKey("session_queue_ids")
+        val playbackOrder = stringPreferencesKey("session_playback_order")
         val currentSongId = longPreferencesKey("session_current_song_id")
         val currentIndex  = intPreferencesKey("session_current_index")
         val positionMs    = longPreferencesKey("session_position_ms")
@@ -29,6 +30,8 @@ class PlaybackSessionRepository @Inject constructor(
     suspend fun save(snapshot: PlaybackSessionSnapshot) {
         dataStore.edit { prefs ->
             prefs[Keys.queueIds]       = snapshot.queueSongIds.joinToString(",")
+            snapshot.playbackOrder?.let { prefs[Keys.playbackOrder] = it.joinToString(",") }
+                ?: prefs.remove(Keys.playbackOrder)
             prefs[Keys.currentSongId]  = snapshot.currentSongId ?: -1L
             prefs[Keys.currentIndex]   = snapshot.currentIndex
             prefs[Keys.positionMs]     = snapshot.positionMs
@@ -46,6 +49,7 @@ class PlaybackSessionRepository @Inject constructor(
         val songId = prefs[Keys.currentSongId]?.takeIf { it >= 0L }
         return PlaybackSessionSnapshot(
             queueSongIds  = ids,
+            playbackOrder = prefs[Keys.playbackOrder]?.let(PlaybackSessionRules::parsePlaybackOrder),
             currentSongId = songId,
             currentIndex  = prefs[Keys.currentIndex] ?: 0,
             positionMs    = prefs[Keys.positionMs] ?: 0L,
@@ -58,6 +62,7 @@ class PlaybackSessionRepository @Inject constructor(
     suspend fun clear() {
         dataStore.edit { prefs ->
             prefs.remove(Keys.queueIds)
+            prefs.remove(Keys.playbackOrder)
             prefs.remove(Keys.currentSongId)
             prefs.remove(Keys.currentIndex)
             prefs.remove(Keys.positionMs)

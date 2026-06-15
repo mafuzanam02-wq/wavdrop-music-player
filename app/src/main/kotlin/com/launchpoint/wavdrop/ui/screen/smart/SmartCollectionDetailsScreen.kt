@@ -506,7 +506,7 @@ private fun MostPlayedSongRow(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text     = summary.song.title,
+                    text     = summary.song.displayTitle,
                     style    = MaterialTheme.typography.titleMedium,
                     color    = if (isCurrent) MaterialTheme.colorScheme.primary
                                else MaterialTheme.colorScheme.onSurface,
@@ -524,7 +524,7 @@ private fun MostPlayedSongRow(
                 }
             }
             Text(
-                text     = summary.song.artist,
+                text     = summary.song.displayArtist,
                 style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 maxLines = 1,

@@ -32,6 +32,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
+import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -46,9 +47,11 @@ fun SettingsPlaybackScreen(
     val resumeBehavior              by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
     val sleepTimerState             by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     val notificationControlsSetting by viewModel.notificationControlsSetting.collectAsStateWithLifecycle()
+    val searchTapBehavior           by viewModel.searchTapBehavior.collectAsStateWithLifecycle()
     val timeDisplayMode             by viewModel.nowPlayingTimeDisplayMode.collectAsStateWithLifecycle()
     var showStartupDialog       by remember { mutableStateOf(false) }
     var showSleepTimerDialog    by remember { mutableStateOf(false) }
+    var showSearchTapDialog     by remember { mutableStateOf(false) }
     var showTimeDisplayDialog   by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -112,6 +115,16 @@ fun SettingsPlaybackScreen(
             }
             item { SectionDivider() }
 
+            item { SectionHeader("Search") }
+            item {
+                ClickableSettingsRow(
+                    title    = "Search result tap",
+                    subtitle = searchTapBehavior.displayName,
+                    onClick  = { showSearchTapDialog = true },
+                )
+            }
+            item { SectionDivider() }
+
             item { SectionHeader("Display") }
             item {
                 ClickableSettingsRow(
@@ -170,6 +183,16 @@ fun SettingsPlaybackScreen(
             onDismiss = { showStartupDialog = false },
         )
     }
+    if (showSearchTapDialog) {
+        SearchTapBehaviorDialog(
+            selected  = searchTapBehavior,
+            onSelect  = { behavior ->
+                viewModel.setSearchTapBehavior(behavior)
+                showSearchTapDialog = false
+            },
+            onDismiss = { showSearchTapDialog = false },
+        )
+    }
     if (showSleepTimerDialog) {
         SleepTimerDialog(
             selected = sleepTimerState.option,
@@ -180,6 +203,45 @@ fun SettingsPlaybackScreen(
             onDismiss = { showSleepTimerDialog = false },
         )
     }
+}
+
+@Composable
+private fun SearchTapBehaviorDialog(
+    selected: SearchTapBehavior,
+    onSelect: (SearchTapBehavior) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title            = { Text("Search result tap") },
+        text             = {
+            Column {
+                SearchTapBehavior.entries.forEach { behavior ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(behavior) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = behavior == selected,
+                            onClick  = { onSelect(behavior) },
+                        )
+                        Text(
+                            text     = behavior.displayName,
+                            style    = MaterialTheme.typography.bodyLarge,
+                            color    = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

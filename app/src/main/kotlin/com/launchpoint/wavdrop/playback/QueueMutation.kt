@@ -105,6 +105,19 @@ internal object QueueMutation {
     ): List<Song> =
         playbackQueue.toMutableList().also { it.add(song) }
 
+    fun searchPreserveQueue(
+        playbackQueue: List<Song>,
+        currentPlaybackIndex: Int?,
+        song: Song,
+    ): List<Song> {
+        val continuation = currentPlaybackIndex
+            ?.takeIf { it in playbackQueue.indices }
+            ?.let { playbackQueue.drop(it + 1) }
+            .orEmpty()
+            .filterNot { it.id == song.id }
+        return listOf(song) + continuation
+    }
+
     /**
      * Returns an updated [playbackOrder] after a new library item has been inserted at
      * [insertLibraryIndex].  All existing entries >= [insertLibraryIndex] are incremented

@@ -6,11 +6,12 @@ import android.content.Intent
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
-import android.util.Log
 import android.os.Bundle
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
@@ -21,9 +22,9 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.MainActivity
+import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
-import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -57,7 +58,7 @@ class PlaybackService : MediaSessionService() {
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) {
             val hasBluetooth = addedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }
-            val hasWired     = addedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }
+            val hasWired = addedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }
             logResume(
                 "audioDeviceCallback.onAudioDevicesAdded: count=${addedDevices.size} " +
                     "hasBluetooth=$hasBluetooth hasWired=$hasWired " +
@@ -68,19 +69,19 @@ class PlaybackService : MediaSessionService() {
                 val songs = songRepository.songs.first()
                 logResume("audioDeviceCallback: got ${songs.size} songs for resume")
                 if (hasBluetooth) playerController.resumeForBluetooth(songs)
-                if (hasWired)     playerController.resumeForWiredHeadphones(songs)
+                if (hasWired) playerController.resumeForWiredHeadphones(songs)
             }
         }
 
         override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) {
             val hasBluetooth = removedDevices.any { it.isSink && BluetoothAudioDetector.isBluetoothAudioType(it.type) }
-            val hasWired     = removedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }
+            val hasWired = removedDevices.any { it.isSink && WiredHeadphoneDetector.isWiredOutputType(it.type) }
             logResume(
                 "audioDeviceCallback.onAudioDevicesRemoved: count=${removedDevices.size} " +
                     "hasBluetooth=$hasBluetooth hasWired=$hasWired",
             )
             if (hasBluetooth) playerController.onBluetoothDeviceRemoved()
-            if (hasWired)     playerController.onWiredDeviceRemoved()
+            if (hasWired) playerController.onWiredDeviceRemoved()
         }
     }
 
@@ -150,7 +151,7 @@ class PlaybackService : MediaSessionService() {
                     logResume("onStartCommand: got ${songs.size} songs, dispatching resume for outputKind=$outputKind")
                     when (outputKind) {
                         OUTPUT_BLUETOOTH -> playerController.resumeForBluetooth(songs)
-                        OUTPUT_WIRED     -> playerController.resumeForWiredHeadphones(songs)
+                        OUTPUT_WIRED -> playerController.resumeForWiredHeadphones(songs)
                     }
                 }
             }
@@ -163,6 +164,7 @@ class PlaybackService : MediaSessionService() {
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
             .unregisterAudioDeviceCallback(audioDeviceCallback)
+
         // Cancel the settings observer before releasing the player to avoid
         // calling setHandleAudioBecomingNoisy on a released ExoPlayer instance.
         serviceScope.cancel()
@@ -179,33 +181,34 @@ class PlaybackService : MediaSessionService() {
     // controller). The custom layout (setCustomLayout) controls visibility; this controls
     // availability.
     private inner class WavdropSessionCallback : MediaSession.Callback {
-        override fun onConnect(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-        ): MediaSession.ConnectionResult {
-            val defaultResult = super.onConnect(session, controller)
-            val enrichedCommands = defaultResult.availableSessionCommands.buildUpon()
-                .add(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
-                .add(SessionCommand(CMD_CYCLE_REPEAT, Bundle.EMPTY))
-                .build()
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(enrichedCommands)
-                .build()
-        }
-
-        override fun onCustomCommand(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            customCommand: SessionCommand,
-            args: Bundle,
-        ): ListenableFuture<SessionResult> {
-            when (customCommand.customAction) {
-                CMD_TOGGLE_SHUFFLE -> playerController.toggleShuffle()
-                CMD_CYCLE_REPEAT   -> playerController.cycleRepeatMode()
-            }
-            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-        }
+    @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+    override fun onConnect(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+    ): MediaSession.ConnectionResult {
+        val defaultResult = super.onConnect(session, controller)
+        val enrichedCommands = defaultResult.availableSessionCommands.buildUpon()
+            .add(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
+            .add(SessionCommand(CMD_CYCLE_REPEAT, Bundle.EMPTY))
+            .build()
+        return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+            .setAvailableSessionCommands(enrichedCommands)
+            .build()
     }
+
+    override fun onCustomCommand(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        customCommand: SessionCommand,
+        args: Bundle,
+    ): ListenableFuture<SessionResult> {
+        when (customCommand.customAction) {
+            CMD_TOGGLE_SHUFFLE -> playerController.toggleShuffle()
+            CMD_CYCLE_REPEAT -> playerController.cycleRepeatMode()
+        }
+        return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+    }
+}
 
     // Builds the list of CommandButton instances for the notification based on the user's
     // notification-controls preference and the current shuffle/repeat state.
@@ -222,10 +225,11 @@ class PlaybackService : MediaSessionService() {
         val buttons = mutableListOf<CommandButton>()
 
         if (setting.includeShuffle) {
-            val iconRes = if (shuffleEnabled)
+            val iconRes = if (shuffleEnabled) {
                 androidx.media3.session.R.drawable.media3_icon_shuffle_on
-            else
+            } else {
                 androidx.media3.session.R.drawable.media3_icon_shuffle_off
+            }
             buttons += CommandButton.Builder()
                 .setDisplayName(if (shuffleEnabled) "Shuffle on" else "Shuffle off")
                 .setSessionCommand(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
@@ -260,11 +264,11 @@ class PlaybackService : MediaSessionService() {
 
     companion object {
         const val ACTION_AUDIO_OUTPUT_CONNECTED = "com.launchpoint.wavdrop.ACTION_AUDIO_OUTPUT_CONNECTED"
-        const val EXTRA_AUDIO_OUTPUT_KIND       = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
-        const val OUTPUT_BLUETOOTH              = "bluetooth"
-        const val OUTPUT_WIRED                  = "wired"
-        private const val CMD_TOGGLE_SHUFFLE    = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
-        private const val CMD_CYCLE_REPEAT      = "com.launchpoint.wavdrop.CYCLE_REPEAT"
-        private const val RESUME_TAG            = "WavdropResume"
+        const val EXTRA_AUDIO_OUTPUT_KIND = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
+        const val OUTPUT_BLUETOOTH = "bluetooth"
+        const val OUTPUT_WIRED = "wired"
+        private const val CMD_TOGGLE_SHUFFLE = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
+        private const val CMD_CYCLE_REPEAT = "com.launchpoint.wavdrop.CYCLE_REPEAT"
+        private const val RESUME_TAG = "WavdropResume"
     }
 }

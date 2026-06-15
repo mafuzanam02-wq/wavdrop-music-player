@@ -11,10 +11,14 @@ import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.search.LibrarySearch
+import com.launchpoint.wavdrop.data.search.SongSort
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettings
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
+import com.launchpoint.wavdrop.data.settings.SongSortMode
+import com.launchpoint.wavdrop.data.stats.MostPlayedBuilder
 import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
@@ -57,13 +61,17 @@ class HomeViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val smartCollectionRepository: SmartCollectionRepository,
     private val homeLayoutRepository: HomeLayoutSettingsRepository,
-    appSettingsRepository: AppSettingsRepository,
+    private val appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     fun setSearchQuery(query: String) { _searchQuery.value = query }
+
+    fun setSongSortMode(mode: SongSortMode) {
+        viewModelScope.launch { appSettingsRepository.setSongSortMode(mode) }
+    }
 
     private val allSongs: StateFlow<List<Song>?> = repository.songs
         .map<List<Song>, List<Song>?> { it }
@@ -86,6 +94,52 @@ class HomeViewModel @Inject constructor(
             songs == null -> HomeUiState.Loading
             songs.isEmpty() -> HomeUiState.Empty
             else            -> HomeUiState.Songs(LibrarySearch.filterSongs(songs, query))
+        }
+    }.stateIn(
+        scope        = viewModelScope,
+        started      = SharingStarted.WhileSubscribed(5_000),
+        initialValue = HomeUiState.Loading,
+    )
+
+    val songSortMode: StateFlow<SongSortMode> = appSettingsRepository.songSortMode.stateIn(
+        scope        = viewModelScope,
+        started      = SharingStarted.WhileSubscribed(5_000),
+        initialValue = SongSortMode.DEFAULT,
+    )
+
+    val searchTapBehavior: StateFlow<SearchTapBehavior> = appSettingsRepository.searchTapBehavior.stateIn(
+        scope        = viewModelScope,
+        started      = SharingStarted.WhileSubscribed(5_000),
+        initialValue = SearchTapBehavior.DEFAULT,
+    )
+
+    val songsUiState: StateFlow<HomeUiState> = combine(
+        allSongs,
+        _searchQuery,
+        songSortMode,
+        statsRepository.allPlayCounts(),
+        statsRepository.allListenEvents(),
+    ) { songs, query, sortMode, allTimePlayCounts, events ->
+        when {
+            songs == null -> HomeUiState.Loading
+            songs.isEmpty() -> HomeUiState.Empty
+            else -> {
+                val filtered = LibrarySearch.filterSongs(songs, query)
+                val thisMonthPlayCounts =
+                    if (sortMode == SongSortMode.MOST_PLAYED_THIS_MONTH) {
+                        MostPlayedBuilder.thisMonthPlayCounts(songs = songs, events = events)
+                    } else {
+                        emptyMap()
+                    }
+                HomeUiState.Songs(
+                    SongSort.sortSongs(
+                        songs = filtered,
+                        mode = sortMode,
+                        allTimePlayCounts = allTimePlayCounts,
+                        thisMonthPlayCounts = thisMonthPlayCounts,
+                    ),
+                )
+            }
         }
     }.stateIn(
         scope        = viewModelScope,
@@ -211,6 +265,18 @@ class HomeViewModel @Inject constructor(
         playerController.playFromQueue(queue = queue.ifEmpty { listOf(song) }, startSong = song)
     }
 
+    fun playSearchResult(song: Song) {
+        when (searchTapBehavior.value) {
+            SearchTapBehavior.REPLACE_QUEUE -> playSongFromLibraryQueue(song)
+            SearchTapBehavior.PRESERVE_QUEUE -> playerController.playSearchResultPreservingQueue(song)
+        }
+    }
+
+    fun playSongFromSongsList(song: Song) {
+        val queue = (songsUiState.value as? HomeUiState.Songs)?.songs.orEmpty()
+        playerController.playFromQueue(queue = queue.ifEmpty { listOf(song) }, startSong = song)
+    }
+
     fun playNext(song: Song) {
         playerController.playNext(song)
     }
@@ -221,6 +287,12 @@ class HomeViewModel @Inject constructor(
 
     fun shuffleAll() {
         val songs = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
+        if (songs.isEmpty()) return
+        playerController.playFromQueueShuffled(queue = songs)
+    }
+
+    fun shuffleSongsList() {
+        val songs = (songsUiState.value as? HomeUiState.Songs)?.songs.orEmpty()
         if (songs.isEmpty()) return
         playerController.playFromQueueShuffled(queue = songs)
     }

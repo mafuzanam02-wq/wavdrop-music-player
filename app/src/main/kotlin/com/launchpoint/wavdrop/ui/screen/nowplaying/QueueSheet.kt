@@ -539,7 +539,7 @@ private fun QueueNowPlayingRow(song: Song) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = song.title,
+                    text = song.displayTitle,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
@@ -556,7 +556,7 @@ private fun QueueNowPlayingRow(song: Song) {
                 )
             }
             Text(
-                text = song.artist,
+                text = song.displayArtist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 maxLines = 1,
@@ -606,14 +606,14 @@ private fun QueuePreviousItemRow(
                 .padding(start = 12.dp),
         ) {
             Text(
-                text = song.title,
+                text = song.displayTitle,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = song.artist,
+                text = song.displayArtist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                 maxLines = 1,
@@ -837,14 +837,14 @@ private fun QueueItemRow(
                 .padding(start = 12.dp),
         ) {
             Text(
-                text = song.title,
+                text = song.displayTitle,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = song.artist,
+                text = song.displayArtist,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 maxLines = 1,

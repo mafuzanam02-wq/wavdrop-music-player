@@ -119,39 +119,7 @@ object WavdropBackupParser {
                     )
                 } ?: emptyList()
 
-            val preferences = (root["preferences"] as? Map<*, *>)?.let { obj ->
-                BackupPreferences(
-                    startupDestination          = obj["startupDestination"] as? String,
-                    mostPlayedPeriod            = obj["mostPlayedPeriod"] as? String,
-                    mostPlayedLimit             = obj["mostPlayedLimit"] as? String,
-                    homeVisibleSections         = (obj["homeVisibleSections"] as? List<*>)
-                        ?.filterIsInstance<String>(),
-                    scanMode                    = obj["scanMode"] as? String,
-                    selectedFolderUris          = (obj["selectedFolderUris"] as? List<*>)
-                        ?.filterIsInstance<String>(),
-                    minimumTrackDurationSeconds = (obj["minimumTrackDurationSeconds"] as? Long)?.toInt(),
-                    themeMode                   = obj["themeMode"] as? String,
-                    accentColor                 = obj["accentColor"] as? String,
-                    launcherIcon                = obj["launcherIcon"] as? String,
-                    compactMode                 = obj["compactMode"] as? Boolean,
-                    backupFileMode              = obj["backupFileMode"] as? String,
-                    autoBackupInterval          = obj["autoBackupInterval"] as? String,
-                    artworkCornerStyle          = obj["artworkCornerStyle"] as? String,
-                    showSongThumbnails          = obj["showSongThumbnails"] as? Boolean,
-                    showAlbumInSongRows         = obj["showAlbumInSongRows"] as? Boolean,
-                    nowPlayingBackground        = obj["nowPlayingBackground"] as? String,
-                    showQueueCount              = obj["showQueueCount"] as? Boolean,
-                    nowPlayingTimeDisplayMode   = obj["nowPlayingTimeDisplayMode"] as? String,
-                    notificationControls        = obj["notificationControls"] as? String,
-                    includeWhatsAppVoiceNotes   = obj["includeWhatsAppVoiceNotes"] as? Boolean,
-                    pauseOnAudioDisconnect      = obj["pauseOnAudioDisconnect"] as? Boolean,
-                    rememberLastTrack           = obj["rememberLastTrack"] as? Boolean,
-                    rememberPosition            = obj["rememberPosition"] as? Boolean,
-                    restoreQueue                = obj["restoreQueue"] as? Boolean,
-                    bluetoothResumeMode         = obj["bluetoothResumeMode"] as? String,
-                    wiredResumeMode             = obj["wiredResumeMode"] as? String,
-                )
-            }
+            val preferences = root.parseAndroidPreferences()
 
             val playlists = (root["playlists"] as? List<*>)
                 ?.mapObjects("playlists") { pi, playlist ->
@@ -254,6 +222,54 @@ private fun Map<*, *>.hasField(name: String): Boolean = containsKey(name) && thi
 
 /** Lenient manifest count: missing or non-numeric values read as 0. */
 private fun Map<*, *>.optCount(name: String): Int = (this[name] as? Long)?.toInt() ?: 0
+
+private fun Map<*, *>.parseAndroidPreferences(): BackupPreferences? {
+    val preferences = this["preferences"] as? Map<*, *> ?: return null
+    val androidPreferences = preferences["android"] as? Map<*, *>
+    if (androidPreferences != null) return androidPreferences.toBackupPreferences()
+
+    val isPlatformScoped = preferences.containsKey("android") || preferences.containsKey("desktop")
+    if (isPlatformScoped) return null
+
+    // Legacy Android backups wrote Android-only settings directly under "preferences".
+    return preferences.toBackupPreferences()
+}
+
+private fun Map<*, *>.toBackupPreferences(): BackupPreferences = BackupPreferences(
+    startupDestination          = this["startupDestination"] as? String,
+    mostPlayedPeriod            = this["mostPlayedPeriod"] as? String,
+    mostPlayedLimit             = this["mostPlayedLimit"] as? String,
+    songSortMode                = this["songSortMode"] as? String,
+    searchTapBehavior           = this["searchTapBehavior"] as? String,
+    homeVisibleSections         = (this["homeVisibleSections"] as? List<*>)
+        ?.filterIsInstance<String>(),
+    scanMode                    = this["scanMode"] as? String,
+    selectedFolderUris          = (this["selectedFolderUris"] as? List<*>)
+        ?.filterIsInstance<String>(),
+    minimumTrackDurationSeconds = (this["minimumTrackDurationSeconds"] as? Long)
+        ?.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }
+        ?.toInt(),
+    themeMode                   = this["themeMode"] as? String,
+    accentColor                 = this["accentColor"] as? String,
+    launcherIcon                = this["launcherIcon"] as? String,
+    compactMode                 = this["compactMode"] as? Boolean,
+    backupFileMode              = this["backupFileMode"] as? String,
+    autoBackupInterval          = this["autoBackupInterval"] as? String,
+    artworkCornerStyle          = this["artworkCornerStyle"] as? String,
+    showSongThumbnails          = this["showSongThumbnails"] as? Boolean,
+    showAlbumInSongRows         = this["showAlbumInSongRows"] as? Boolean,
+    nowPlayingBackground        = this["nowPlayingBackground"] as? String,
+    showQueueCount              = this["showQueueCount"] as? Boolean,
+    nowPlayingTimeDisplayMode   = this["nowPlayingTimeDisplayMode"] as? String,
+    notificationControls        = this["notificationControls"] as? String,
+    includeWhatsAppVoiceNotes   = this["includeWhatsAppVoiceNotes"] as? Boolean,
+    pauseOnAudioDisconnect      = this["pauseOnAudioDisconnect"] as? Boolean,
+    rememberLastTrack           = this["rememberLastTrack"] as? Boolean,
+    rememberPosition            = this["rememberPosition"] as? Boolean,
+    restoreQueue                = this["restoreQueue"] as? Boolean,
+    bluetoothResumeMode         = this["bluetoothResumeMode"] as? String,
+    wiredResumeMode             = this["wiredResumeMode"] as? String,
+)
 
 private fun Map<*, *>.requiredArray(name: String): List<*> {
     if (!hasField(name)) throw BackupParseException("Missing field: $name")

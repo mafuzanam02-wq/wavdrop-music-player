@@ -919,7 +919,7 @@ private fun SongText(
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text     = song.title,
+                text     = song.displayTitle,
                 style    = MaterialTheme.typography.titleMedium,
                 color    = if (isCurrent) MaterialTheme.colorScheme.primary
                            else MaterialTheme.colorScheme.onSurface,
@@ -937,7 +937,7 @@ private fun SongText(
             }
         }
         Text(
-            text     = song.artist,
+            text     = song.displayArtist,
             style    = MaterialTheme.typography.bodyMedium,
             color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             maxLines = 1,

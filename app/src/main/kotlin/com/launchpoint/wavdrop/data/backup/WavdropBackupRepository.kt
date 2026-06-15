@@ -31,6 +31,8 @@ import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
+import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
+import com.launchpoint.wavdrop.data.settings.SongSortMode
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import kotlinx.coroutines.flow.first
@@ -146,6 +148,10 @@ class WavdropBackupRepository @Inject constructor(
                 .takeIf { it != MostPlayedPeriod.ALL_TIME }?.name,
             mostPlayedLimit = appSettingsRepository.mostPlayedDisplayLimit.first()
                 .takeIf { it != MostPlayedDisplayLimit.TOP_25 }?.name,
+            songSortMode = appSettingsRepository.songSortMode.first()
+                .takeIf { it != SongSortMode.DEFAULT }?.name,
+            searchTapBehavior = appSettingsRepository.searchTapBehavior.first()
+                .takeIf { it != SearchTapBehavior.DEFAULT }?.name,
             homeVisibleSections = homeSections
                 .takeIf { it != HomeLayoutSettings().visibleSections }
                 ?.map { it.name },

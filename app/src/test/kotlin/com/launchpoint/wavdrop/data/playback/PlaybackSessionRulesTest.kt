@@ -43,6 +43,21 @@ class PlaybackSessionRulesTest {
         assertEquals(listOf(1L, 2L), PlaybackSessionRules.parseQueueIds("1, 2"))
     }
 
+    @Test
+    fun `parsePlaybackOrder valid CSV returns indexes`() {
+        assertEquals(listOf(0, 3, 1, 2), PlaybackSessionRules.parsePlaybackOrder("0,3,1,2"))
+    }
+
+    @Test
+    fun `parsePlaybackOrder filters non-numeric entries`() {
+        assertEquals(listOf(0, 2), PlaybackSessionRules.parsePlaybackOrder("0,nope,2"))
+    }
+
+    @Test
+    fun `parsePlaybackOrder blank string returns empty list`() {
+        assertEquals(emptyList<Int>(), PlaybackSessionRules.parsePlaybackOrder(" "))
+    }
+
     // ── clampIndex ────────────────────────────────────────────────────────────
 
     @Test
@@ -63,6 +78,79 @@ class PlaybackSessionRulesTest {
     @Test
     fun `clampIndex empty queue returns zero`() {
         assertEquals(0, PlaybackSessionRules.clampIndex(3, 0))
+    }
+
+    @Test
+    fun `validatePlaybackOrder accepts full queue index permutation`() {
+        assertEquals(
+            listOf(2, 0, 3, 1),
+            PlaybackSessionRules.validatePlaybackOrder(listOf(2, 0, 3, 1), queueSize = 4),
+        )
+    }
+
+    @Test
+    fun `validatePlaybackOrder rejects duplicate indexes`() {
+        assertNull(PlaybackSessionRules.validatePlaybackOrder(listOf(0, 1, 1), queueSize = 3))
+    }
+
+    @Test
+    fun `validatePlaybackOrder rejects mismatched size`() {
+        assertNull(PlaybackSessionRules.validatePlaybackOrder(listOf(0, 1), queueSize = 3))
+    }
+
+    @Test
+    fun `validatePlaybackOrder rejects out of range indexes`() {
+        assertNull(PlaybackSessionRules.validatePlaybackOrder(listOf(0, 1, 3), queueSize = 3))
+    }
+
+    @Test
+    fun `restorePlaybackOrder with shuffle uses saved effective order when valid`() {
+        val result = PlaybackSessionRules.restorePlaybackOrder(
+            savedPlaybackOrder = listOf(1, 3, 2, 0),
+            queueSize = 4,
+            currentQueueIndex = 1,
+            shuffleEnabled = true,
+        )
+
+        assertEquals(listOf(1, 3, 2, 0), result)
+    }
+
+    @Test
+    fun `restorePlaybackOrder preserves search preserve queue continuation order`() {
+        val queue = listOf(song(99), song(3), song(4))
+        val order = PlaybackSessionRules.restorePlaybackOrder(
+            savedPlaybackOrder = listOf(0, 1, 2),
+            queueSize = queue.size,
+            currentQueueIndex = 0,
+            shuffleEnabled = true,
+        )
+        val restoredQueueIds = order.map { queue[it].id }
+
+        assertEquals(listOf(99L, 3L, 4L), restoredQueueIds)
+    }
+
+    @Test
+    fun `restorePlaybackOrder ignores invalid saved order and keeps non-shuffle identity behavior`() {
+        val result = PlaybackSessionRules.restorePlaybackOrder(
+            savedPlaybackOrder = listOf(0, 0, 1),
+            queueSize = 3,
+            currentQueueIndex = 1,
+            shuffleEnabled = false,
+        )
+
+        assertEquals(listOf(0, 1, 2), result)
+    }
+
+    @Test
+    fun `restorePlaybackOrder with no saved order keeps existing non-shuffle behavior`() {
+        val result = PlaybackSessionRules.restorePlaybackOrder(
+            savedPlaybackOrder = null,
+            queueSize = 4,
+            currentQueueIndex = 2,
+            shuffleEnabled = false,
+        )
+
+        assertEquals(listOf(0, 1, 2, 3), result)
     }
 
     // ── parseRepeatMode ───────────────────────────────────────────────────────
@@ -142,11 +230,13 @@ class PlaybackSessionRulesTest {
 
     private fun snapshot(
         queueIds: List<Long> = listOf(1L, 2L, 3L),
+        playbackOrder: List<Int>? = listOf(1, 0, 2),
         currentSongId: Long? = 2L,
         currentIndex: Int = 1,
         positionMs: Long = 45_000L,
     ) = PlaybackSessionSnapshot(
         queueSongIds   = queueIds,
+        playbackOrder  = playbackOrder,
         currentSongId  = currentSongId,
         currentIndex   = currentIndex,
         positionMs     = positionMs,
@@ -196,6 +286,7 @@ class PlaybackSessionRulesTest {
         val settings = allOn.copy(restoreQueue = false)
         val result = PlaybackSessionRules.applyResumeBehavior(snapshot(), settings)!!
         assertEquals(listOf(2L), result.queueSongIds)
+        assertNull(result.playbackOrder)
         assertEquals(0, result.currentIndex)
     }
 
@@ -213,6 +304,7 @@ class PlaybackSessionRulesTest {
         val settings = allOn.copy(restoreQueue = false)
         val result = PlaybackSessionRules.applyResumeBehavior(s, settings)!!
         assertEquals(listOf(30L), result.queueSongIds)
+        assertNull(result.playbackOrder)
         assertEquals(0, result.currentIndex)
     }
 

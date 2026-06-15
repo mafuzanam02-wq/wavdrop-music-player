@@ -46,8 +46,8 @@ class WavdropWidgetUpdater @Inject constructor(
                 .map { state ->
                     WidgetKey(
                         songId    = state.song?.id,
-                        title     = state.song?.title,
-                        artist    = state.song?.artist,
+                        title     = state.song?.displayTitle,
+                        artist    = state.song?.displayArtist,
                         isPlaying = state.isPlaying,
                     )
                 }

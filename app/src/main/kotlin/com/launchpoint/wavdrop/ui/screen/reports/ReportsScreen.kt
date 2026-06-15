@@ -291,7 +291,7 @@ private fun HabitsSection(
         report.mostPlayedTrack?.let { track ->
             ReportRow(
                 title = "Most played track",
-                subtitle = track.song.title,
+                subtitle = track.song.displayTitle,
                 metric = "${track.playCount} plays",
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
@@ -318,7 +318,7 @@ private fun HabitsSection(
         report.mostSkippedTrack?.let { track ->
             ReportRow(
                 title = "Most skipped track",
-                subtitle = track.song.title,
+                subtitle = track.song.displayTitle,
                 metric = "${track.skipCount} skips",
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
@@ -354,8 +354,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.songReportRows(
     }
     items(songs, key = { "song_${it.song.id}_${metric(it)}" }) { summary ->
         ReportRow(
-            title = summary.song.title,
-            subtitle = summary.song.artist.ifBlank { "Unknown Artist" },
+            title = summary.song.displayTitle,
+            subtitle = summary.song.displayArtist.ifBlank { "Unknown Artist" },
             metric = metric(summary),
             onClick = { onTrackDetailsClick(summary.song.id) },
         )

@@ -25,6 +25,7 @@ import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
+import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
@@ -152,6 +153,13 @@ class SettingsViewModel @Inject constructor(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = NotificationControlsSetting.STANDARD,
+        )
+
+    val searchTapBehavior: StateFlow<SearchTapBehavior> =
+        appSettingsRepository.searchTapBehavior.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = SearchTapBehavior.DEFAULT,
         )
 
     val appIconChoice: StateFlow<AppIconChoice> =
@@ -330,6 +338,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationControlsSetting(setting: NotificationControlsSetting) {
         viewModelScope.launch { appSettingsRepository.setNotificationControlsSetting(setting) }
+    }
+
+    fun setSearchTapBehavior(behavior: SearchTapBehavior) {
+        viewModelScope.launch { appSettingsRepository.setSearchTapBehavior(behavior) }
     }
 
     fun setBluetoothResumeMode(mode: HeadphoneResumeMode) {

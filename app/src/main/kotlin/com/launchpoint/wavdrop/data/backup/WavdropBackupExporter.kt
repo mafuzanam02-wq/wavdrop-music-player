@@ -22,7 +22,7 @@ object WavdropBackupExporter {
         put("trackStats", trackStatsArray(backup.trackStats))
         put("importBaselines", baselinesArray(backup.importBaselines))
         put("lyricsOverrides", lyricsOverridesArray(backup.lyricsOverrides))
-        backup.preferences?.let { put("preferences", preferencesObject(it)) }
+        backup.preferences?.let { put("preferences", platformPreferencesObject(it)) }
         put("playlists", playlistsArray(backup.playlists))
         put("listenEvents", listenEventsArray(backup.listenEvents))
     }.toString(2)
@@ -136,10 +136,16 @@ object WavdropBackupExporter {
         put("preferenceCount",     manifest.preferenceCount)
     }
 
+    private fun platformPreferencesObject(prefs: BackupPreferences): JSONObject = JSONObject().apply {
+        put("android", preferencesObject(prefs))
+    }
+
     private fun preferencesObject(prefs: BackupPreferences): JSONObject = JSONObject().apply {
         prefs.startupDestination?.let  { put("startupDestination",  it) }
         prefs.mostPlayedPeriod?.let    { put("mostPlayedPeriod",    it) }
         prefs.mostPlayedLimit?.let     { put("mostPlayedLimit",     it) }
+        prefs.songSortMode?.let        { put("songSortMode",        it) }
+        prefs.searchTapBehavior?.let   { put("searchTapBehavior",   it) }
         prefs.homeVisibleSections?.let { sections ->
             put("homeVisibleSections", JSONArray().apply { sections.forEach { put(it) } })
         }

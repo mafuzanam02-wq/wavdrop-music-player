@@ -18,6 +18,6 @@ fun shareSong(context: Context, song: Song, onFailure: () -> Unit) {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, song.title))
+        context.startActivity(Intent.createChooser(intent, song.displayTitle))
     }.onFailure { onFailure() }
 }

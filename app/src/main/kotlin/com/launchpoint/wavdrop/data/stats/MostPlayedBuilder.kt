@@ -49,4 +49,28 @@ object MostPlayedBuilder {
                 .topSongs
         }
     }
+
+    fun thisMonthPlayCounts(
+        songs: List<Song>,
+        events: List<TrackListenEventEntity>,
+        nowMs: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Map<Long, Int> {
+        val currentMonth = YearMonth.from(Instant.ofEpochMilli(nowMs).atZone(zone))
+        val range = ListeningPeriodRange.month(
+            year = currentMonth.year,
+            month = currentMonth.monthValue,
+            zone = zone,
+        )
+        return ListeningAnalyticsBuilder
+            .build(
+                range = range,
+                songs = songs,
+                stats = emptyList(),
+                events = events,
+                topListLimit = songs.size,
+            )
+            .topSongs
+            .associate { it.song.id to it.playCount }
+    }
 }

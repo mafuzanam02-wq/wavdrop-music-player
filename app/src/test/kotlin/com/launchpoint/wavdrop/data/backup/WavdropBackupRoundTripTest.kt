@@ -51,6 +51,7 @@ class WavdropBackupRoundTripTest {
         ),
         preferences = BackupPreferences(
             startupDestination = "SONGS", mostPlayedPeriod = "ALL_TIME", mostPlayedLimit = "TEN",
+            searchTapBehavior = "PRESERVE_QUEUE",
             homeVisibleSections = listOf("CONTINUE_LISTENING", "LIBRARY_SHORTCUT"),
             scanMode = "ALL_FOLDERS", selectedFolderUris = null, minimumTrackDurationSeconds = 30,
             themeMode = "DARK", accentColor = "MIDNIGHT_VIOLET", launcherIcon = "CLEAN_PURPLE",

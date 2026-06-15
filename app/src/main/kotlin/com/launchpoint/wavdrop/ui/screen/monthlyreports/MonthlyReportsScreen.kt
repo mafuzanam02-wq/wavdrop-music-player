@@ -419,7 +419,7 @@ private fun HabitsSection(
         report.mostSkippedTrack?.let { track ->
             ReportRow(
                 title = "Most skipped track",
-                subtitle = track.song.title,
+                subtitle = track.song.displayTitle,
                 metric = "${track.skipCount} skips this month",
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
@@ -461,8 +461,8 @@ private fun LazyListScope.monthSongRows(
     // inside the same LazyColumn, which would produce duplicate "song_${id}" keys and crash Compose.
     items(songs, key = { "${sectionKey}_${it.song.id}" }) { summary ->
         ReportRow(
-            title = summary.song.title,
-            subtitle = summary.song.artist.ifBlank { "Unknown Artist" },
+            title = summary.song.displayTitle,
+            subtitle = summary.song.displayArtist.ifBlank { "Unknown Artist" },
             metric = metric(summary),
             onClick = { onTrackDetailsClick(summary.song.id) },
         )

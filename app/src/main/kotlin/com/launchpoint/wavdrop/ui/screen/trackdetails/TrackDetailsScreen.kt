@@ -203,7 +203,7 @@ fun TrackDetailsScreen(
         val song = (uiState as? TrackDetailsUiState.Ready)?.song
         if (song != null) {
             DeleteConfirmationDialog(
-                songTitle = song.title,
+                songTitle = song.displayTitle,
                 onConfirm = {
                     showDeleteConfirmation = false
                     viewModel.deleteFromDevice(
@@ -562,4 +562,3 @@ private fun LyricsSection(result: LyricsResult) {
         }
     }
 }
-

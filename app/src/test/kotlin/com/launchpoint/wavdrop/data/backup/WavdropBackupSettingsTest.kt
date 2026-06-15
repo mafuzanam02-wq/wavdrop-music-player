@@ -28,6 +28,29 @@ class WavdropBackupSettingsTest {
         minimumTrackDurationSeconds = null,
     )
 
+    private fun androidPreferencesObject(json: String): JSONObject =
+        JSONObject(json).getJSONObject("preferences").getJSONObject("android")
+
+    private fun minimalBackupJson(preferencesJson: String? = null): String = buildString {
+        append(
+            """
+            {
+              "app": "Wavdrop",
+              "format": "wavdrop_backup",
+              "version": 1,
+              "exportedAt": "2026-06-11T10:00:00Z",
+              "songs": [],
+              "trackStats": [],
+              "importBaselines": []
+            """.trimIndent(),
+        )
+        preferencesJson?.let {
+            append(",\n  \"preferences\": ")
+            append(it)
+        }
+        append("\n}")
+    }
+
     // ── Default launcher icon ─────────────────────────────────────────────────
 
     @Test
@@ -44,6 +67,8 @@ class WavdropBackupSettingsTest {
             showSongThumbnails        = false,
             showQueueCount            = false,
             nowPlayingTimeDisplayMode = "REMAINING",
+            songSortMode              = "MOST_PLAYED_THIS_MONTH",
+            searchTapBehavior         = "PRESERVE_QUEUE",
             includeWhatsAppVoiceNotes = true,
             pauseOnAudioDisconnect    = false,
             bluetoothResumeMode       = "ALWAYS_RESUME",
@@ -55,22 +80,69 @@ class WavdropBackupSettingsTest {
         assertEquals(prefs, parsed!!.preferences)
     }
 
+    @Test
+    fun `non-default song sort is exported and parsed`() {
+        val json = WavdropBackupExporter.toJson(
+            minimalBackup(allNullPrefs().copy(songSortMode = "MOST_PLAYED_ALL_TIME")),
+        )
+        val prefsObj = androidPreferencesObject(json)
+        val parsed = WavdropBackupParser.parse(json).backup
+
+        assertEquals("MOST_PLAYED_ALL_TIME", prefsObj.getString("songSortMode"))
+        assertNotNull(parsed)
+        assertEquals("MOST_PLAYED_ALL_TIME", parsed!!.preferences?.songSortMode)
+    }
+
+    @Test
+    fun `non-default search tap behavior is exported and parsed`() {
+        val json = WavdropBackupExporter.toJson(
+            minimalBackup(allNullPrefs().copy(searchTapBehavior = "PRESERVE_QUEUE")),
+        )
+        val prefsObj = androidPreferencesObject(json)
+        val parsed = WavdropBackupParser.parse(json).backup
+
+        assertEquals("PRESERVE_QUEUE", prefsObj.getString("searchTapBehavior"))
+        assertNotNull(parsed)
+        assertEquals("PRESERVE_QUEUE", parsed!!.preferences?.searchTapBehavior)
+    }
+
+    @Test
+    fun `Android export contains platform-scoped android preferences only`() {
+        val json = WavdropBackupExporter.toJson(
+            minimalBackup(allNullPrefs().copy(startupDestination = "SONGS")),
+        )
+        val root = JSONObject(json)
+        val platformPrefs = root.getJSONObject("preferences")
+        val androidPrefs = platformPrefs.getJSONObject("android")
+
+        assertEquals("SONGS", androidPrefs.getString("startupDestination"))
+        assertFalse(platformPrefs.has("desktop"))
+        assertFalse(platformPrefs.has("startupDestination"))
+        assertFalse(root.has("startupDestination"))
+    }
+
     // ── Default omission ──────────────────────────────────────────────────────
 
     @Test
     fun `null settings are omitted from the exported JSON`() {
         val json = WavdropBackupExporter.toJson(minimalBackup(allNullPrefs()))
-        val prefsObj = JSONObject(json).getJSONObject("preferences")
+        val platformPrefs = JSONObject(json).getJSONObject("preferences")
+        val prefsObj = platformPrefs.getJSONObject("android")
+        assertFalse(platformPrefs.has("desktop"))
         assertEquals("All-default preferences should serialise empty", 0, prefsObj.length())
     }
 
     @Test
     fun `manifest preferenceCount counts only non-default settings`() {
-        val prefs = allNullPrefs().copy(showQueueCount = false, themeMode = "DARK")
+        val prefs = allNullPrefs().copy(
+            searchTapBehavior = "PRESERVE_QUEUE",
+            showQueueCount = false,
+            themeMode = "DARK",
+        )
         val parsed = WavdropBackupParser
             .parse(WavdropBackupExporter.toJson(minimalBackup(prefs)))
             .backup!!
-        assertEquals(2, parsed.manifest!!.preferenceCount)
+        assertEquals(3, parsed.manifest!!.preferenceCount)
     }
 
     // ── Legacy compatibility ──────────────────────────────────────────────────
@@ -88,6 +160,137 @@ class WavdropBackupSettingsTest {
         assertNull(p.bluetoothResumeMode)
         assertEquals("DARK", p.themeMode)
         assertEquals(true, p.compactMode)
+    }
+
+    @Test
+    fun `legacy flat Android preferences parse as import-only compatibility`() {
+        val parsed = WavdropBackupParser.parse(
+            minimalBackupJson(
+                """
+                {
+                  "startupDestination": "SONGS",
+                  "searchTapBehavior": "PRESERVE_QUEUE"
+                }
+                """.trimIndent(),
+            ),
+        ).backup
+
+        assertNotNull(parsed)
+        assertEquals("SONGS", parsed!!.preferences?.startupDestination)
+        assertEquals("PRESERVE_QUEUE", parsed.preferences?.searchTapBehavior)
+    }
+
+    @Test
+    fun `preferences android restores Android settings`() {
+        val parsed = WavdropBackupParser.parse(
+            minimalBackupJson(
+                """
+                {
+                  "android": {
+                    "startupDestination": "SETTINGS",
+                    "searchTapBehavior": "PRESERVE_QUEUE",
+                    "showQueueCount": false
+                  }
+                }
+                """.trimIndent(),
+            ),
+        ).backup
+
+        assertNotNull(parsed)
+        val prefs = parsed!!.preferences
+        assertEquals("SETTINGS", prefs?.startupDestination)
+        assertEquals("PRESERVE_QUEUE", prefs?.searchTapBehavior)
+        assertEquals(false, prefs?.showQueueCount)
+    }
+
+    @Test
+    fun `preferences desktop is ignored on Android`() {
+        val parsed = WavdropBackupParser.parse(
+            minimalBackupJson(
+                """
+                {
+                  "desktop": {
+                    "theme": "dark",
+                    "sidebarCollapsed": true
+                  }
+                }
+                """.trimIndent(),
+            ),
+        ).backup
+
+        assertNotNull(parsed)
+        assertNull(parsed!!.preferences)
+    }
+
+    @Test
+    fun `missing preferences is valid`() {
+        val parsed = WavdropBackupParser.parse(minimalBackupJson()).backup
+
+        assertNotNull(parsed)
+        assertNull(parsed!!.preferences)
+    }
+
+    @Test
+    fun `missing preferences android is valid`() {
+        val parsed = WavdropBackupParser.parse(
+            minimalBackupJson(
+                """
+                {
+                  "desktop": {
+                    "theme": "dark"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        ).backup
+
+        assertNotNull(parsed)
+        assertNull(parsed!!.preferences)
+    }
+
+    @Test
+    fun `unknown Android preference keys are ignored`() {
+        val parsed = WavdropBackupParser.parse(
+            minimalBackupJson(
+                """
+                {
+                  "android": {
+                    "startupDestination": "HOME",
+                    "desktopSidebarWidth": 320,
+                    "madeUpAndroidSetting": "ignored"
+                  }
+                }
+                """.trimIndent(),
+            ),
+        ).backup
+
+        assertNotNull(parsed)
+        assertEquals("HOME", parsed!!.preferences?.startupDestination)
+    }
+
+    @Test
+    fun `invalid Android preference values are sanitized while parsing`() {
+        val parsed = WavdropBackupParser.parse(
+            minimalBackupJson(
+                """
+                {
+                  "android": {
+                    "startupDestination": false,
+                    "compactMode": "yes",
+                    "minimumTrackDurationSeconds": 2147483648,
+                    "homeVisibleSections": ["CONTINUE_LISTENING", 42]
+                  }
+                }
+                """.trimIndent(),
+            ),
+        ).backup
+
+        assertNotNull(parsed)
+        val prefs = parsed!!.preferences
+        assertNull(prefs?.startupDestination)
+        assertNull(prefs?.compactMode)
+        assertNull(prefs?.minimumTrackDurationSeconds)
+        assertEquals(listOf("CONTINUE_LISTENING"), prefs?.homeVisibleSections)
     }
 
     // ── Checksum stability across the fingerprint extension ──────────────────

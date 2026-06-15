@@ -502,7 +502,7 @@ private fun ArtistSongInsightRow(
     modifier: Modifier = Modifier,
 ) {
     InsightRow(
-        title = summary.song.title,
+        title = summary.song.displayTitle,
         subtitle = summary.song.album.ifBlank { "Unknown Album" },
         metric = metric,
         onClick = onClick,

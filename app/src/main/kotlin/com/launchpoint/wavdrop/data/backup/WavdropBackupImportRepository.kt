@@ -29,10 +29,12 @@ import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
+import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
+import com.launchpoint.wavdrop.data.settings.SongSortMode
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import javax.inject.Inject
@@ -350,6 +352,14 @@ class WavdropBackupImportRepository @Inject constructor(
             prefs.mostPlayedLimit
                 ?.let { runCatching { MostPlayedDisplayLimit.valueOf(it) }.getOrNull() }
                 ?.let { appSettingsRepository.setMostPlayedDisplayLimit(it); preferencesRestored = true }
+
+            prefs.songSortMode
+                ?.let { SongSortMode.fromStoredName(it) }
+                ?.let { appSettingsRepository.setSongSortMode(it); preferencesRestored = true }
+
+            prefs.searchTapBehavior
+                ?.let { SearchTapBehavior.fromStoredName(it) }
+                ?.let { appSettingsRepository.setSearchTapBehavior(it); preferencesRestored = true }
 
             prefs.homeVisibleSections
                 ?.mapNotNull { runCatching { HomeSectionId.valueOf(it) }.getOrNull() }

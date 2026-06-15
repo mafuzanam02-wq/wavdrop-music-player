@@ -215,7 +215,7 @@ fun HomeScreen(
                     songActions = SongSearchActions(
                         currentSongId = nowPlaying.song?.id,
                         favoriteSongIds = favoriteSongIds,
-                        onSongClick = viewModel::playSongFromLibraryQueue,
+                        onSongClick = viewModel::playSearchResult,
                         onPlayNext = viewModel::playNext,
                         onAddToQueue = viewModel::addToQueue,
                         onToggleFavorite = { song, wasFavorite ->
@@ -673,7 +673,7 @@ private fun WrappedPreviewCard(
 ) {
     val highlight = when {
         wrapped.mostPlayedArtist != null -> "Top artist: ${wrapped.mostPlayedArtist.artistKey}"
-        wrapped.mostPlayedSong != null -> "Top track: ${wrapped.mostPlayedSong.song.title}"
+        wrapped.mostPlayedSong != null -> "Top track: ${wrapped.mostPlayedSong.song.displayTitle}"
         else -> "${wrapped.totalPlayCount} plays"
     }
 

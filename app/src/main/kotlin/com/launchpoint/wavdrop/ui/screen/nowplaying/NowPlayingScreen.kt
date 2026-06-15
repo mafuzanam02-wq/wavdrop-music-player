@@ -807,7 +807,7 @@ private fun UpperNowPlayingContent(
                 }
             }
             Text(
-                text = song.title,
+                text = song.displayTitle,
                 style = metrics.titleStyle,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -819,7 +819,7 @@ private fun UpperNowPlayingContent(
                     .clickableIfNotNull(onOpenTrackDetails),
             )
             Text(
-                text = song.artist,
+                text = song.displayArtist,
                 style = metrics.artistStyle,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
                 textAlign = TextAlign.Center,
@@ -1161,7 +1161,7 @@ private fun ArtworkWithLyricsOverlay(
 @Composable
 private fun LyricsOverlayContent(
     lyrics: LyricsResult,
-    onSearchOnline: () -> Unit,
+    onSearchOnline: (() -> Unit)?,
     compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -1203,17 +1203,13 @@ private fun LyricsOverlayContent(
                         textAlign = TextAlign.Center,
                     )
                     Text(
-                        text = if (compact) {
-                            "Long-press to add custom lyrics."
-                        } else {
-                            "Long-press to add custom lyrics, or add embedded/sidecar lyrics locally."
-                        },
+                        text = NowPlayingLyricsOverlayRules.NO_LYRICS_HELP_TEXT,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.50f),
                         textAlign = TextAlign.Center,
                     )
-                    if (!compact) {
-                        TextButton(onClick = onSearchOnline) {
+                    if (NowPlayingLyricsOverlayRules.showSearchOnlineAction(onSearchOnline)) {
+                        TextButton(onClick = { onSearchOnline?.invoke() }) {
                             Text(
                                 text = "Search lyrics online",
                                 style = MaterialTheme.typography.labelMedium,
@@ -1390,10 +1386,10 @@ private fun Long.coerceForDisplay(durationMs: Long): Long =
 private fun searchLyricsOnline(context: Context, song: Song) {
     val query = buildString {
         if (song.hasKnownArtist()) {
-            append(song.artist)
+            append(song.displayArtist)
             append(' ')
         }
-        append(song.title)
+        append(song.displayTitle)
         append(" lyrics")
     }
     val url = "https://www.google.com/search?q=${Uri.encode(query)}"
@@ -1406,7 +1402,7 @@ private fun searchLyricsOnline(context: Context, song: Song) {
 }
 
 private fun searchArtistOnline(context: Context, song: Song) {
-    val url = "https://www.google.com/search?q=${Uri.encode(song.artist)}"
+    val url = "https://www.google.com/search?q=${Uri.encode(song.displayArtist)}"
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
     try {
         context.startActivity(intent)

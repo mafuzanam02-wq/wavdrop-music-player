@@ -66,6 +66,34 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val songSortMode: Flow<SongSortMode> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            SongSortMode.fromStoredNameOrDefault(preferences[SONG_SORT_MODE_KEY])
+        }
+
+    suspend fun setSongSortMode(mode: SongSortMode) {
+        dataStore.edit { preferences ->
+            preferences[SONG_SORT_MODE_KEY] = mode.name
+        }
+    }
+
+    val searchTapBehavior: Flow<SearchTapBehavior> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            SearchTapBehavior.fromStoredNameOrDefault(preferences[SEARCH_TAP_BEHAVIOR_KEY])
+        }
+
+    suspend fun setSearchTapBehavior(behavior: SearchTapBehavior) {
+        dataStore.edit { preferences ->
+            preferences[SEARCH_TAP_BEHAVIOR_KEY] = behavior.name
+        }
+    }
+
     val appIconChoice: Flow<AppIconChoice> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -149,20 +177,6 @@ class AppSettingsRepository @Inject constructor(
             preferences[LAST_COMPLETED_ONBOARDING_VERSION_KEY] = version
             // Keep old boolean in sync so changelog gating (which reads the boolean) still works.
             if (version > 0) preferences[HAS_COMPLETED_ONBOARDING_KEY] = true
-        }
-    }
-
-    /**
-     * Atomically marks onboarding complete and seeds the changelog version in one DataStore
-     * write. Splitting these into two separate edits creates an intermediate state where
-     * hasCompletedOnboarding=true but lastSeenChangelogVersion=0, causing the changelog
-     * dialog to flash briefly on first-run.
-     */
-    suspend fun completeOnboardingAndSeedChangelog(onboardingVersion: Int, changelogVersion: Int) {
-        dataStore.edit { preferences ->
-            preferences[LAST_COMPLETED_ONBOARDING_VERSION_KEY] = onboardingVersion
-            preferences[HAS_COMPLETED_ONBOARDING_KEY] = true
-            preferences[LAST_SEEN_CHANGELOG_VERSION_KEY] = changelogVersion
         }
     }
 
@@ -377,6 +391,8 @@ class AppSettingsRepository @Inject constructor(
         val STARTUP_DESTINATION_KEY = stringPreferencesKey("startup_destination")
         val MOST_PLAYED_PERIOD_KEY  = stringPreferencesKey("most_played_period")
         val MOST_PLAYED_LIMIT_KEY   = stringPreferencesKey("most_played_limit")
+        val SONG_SORT_MODE_KEY           = stringPreferencesKey("song_sort_mode")
+        val SEARCH_TAP_BEHAVIOR_KEY      = stringPreferencesKey("search_tap_behavior")
         val APP_ICON_CHOICE_KEY          = stringPreferencesKey("app_icon_choice")
         val THEME_MODE_KEY               = stringPreferencesKey("theme_mode")
         val ACCENT_COLOR_KEY             = stringPreferencesKey("accent_color")

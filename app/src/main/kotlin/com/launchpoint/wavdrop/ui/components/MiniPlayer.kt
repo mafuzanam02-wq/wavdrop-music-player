@@ -45,6 +45,7 @@ fun MiniPlayer(
     applyNavigationBarsPadding: Boolean = true,
 ) {
     if (nowPlaying.song == null) return
+    val song = nowPlaying.song
 
     Surface(
         modifier       = modifier.fillMaxWidth(),
@@ -78,8 +79,8 @@ fun MiniPlayer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ArtworkImage(
-                    artworkUri         = ArtworkResolver.albumArtworkUri(nowPlaying.song.albumId),
-                    contentDescription = "Album artwork for ${nowPlaying.song.album}",
+                    artworkUri         = ArtworkResolver.albumArtworkUri(song.albumId),
+                    contentDescription = "Album artwork for ${song.album}",
                     placeholderIcon    = Icons.Default.MusicNote,
                     modifier           = Modifier.size(44.dp),
                 )
@@ -89,13 +90,13 @@ fun MiniPlayer(
                         .padding(horizontal = 12.dp),
                 ) {
                     Text(
-                        text     = nowPlaying.song.title,
+                        text     = song.displayTitle,
                         style    = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text     = nowPlaying.song.artist,
+                        text     = song.displayArtist,
                         style    = MaterialTheme.typography.bodyMedium,
                         color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         maxLines = 1,

@@ -19,9 +19,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -65,6 +68,7 @@ import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.data.search.LibrarySearch
+import com.launchpoint.wavdrop.data.settings.SongSortMode
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.GroupedSearchContent
 import com.launchpoint.wavdrop.ui.components.SongSearchActions
@@ -98,12 +102,13 @@ fun SongsScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
-    val uiState          by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState          by viewModel.songsUiState.collectAsStateWithLifecycle()
     val nowPlaying       by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val favoriteSongIds  by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val searchQuery      by viewModel.searchQuery.collectAsStateWithLifecycle()
     val librarySongs     by viewModel.librarySongs.collectAsStateWithLifecycle()
     val isRefreshing     by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val songSortMode     by viewModel.songSortMode.collectAsStateWithLifecycle()
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     var isSearchActive   by remember { mutableStateOf(false) }
@@ -190,7 +195,7 @@ fun SongsScreen(
                         val commonSongActions = SongSearchActions(
                             currentSongId = nowPlaying.song?.id,
                             favoriteSongIds = favoriteSongIds,
-                            onSongClick = viewModel::playSongFromLibraryQueue,
+                            onSongClick = viewModel::playSearchResult,
                             onPlayNext = viewModel::playNext,
                             onAddToQueue = viewModel::addToQueue,
                             onToggleFavorite = { song, wasFavorite ->
@@ -223,11 +228,13 @@ fun SongsScreen(
                         } else {
                             SongListContent(
                                 songs             = state.songs,
-                                showAlphabetIndex = !isSearchActive,
+                                sortMode          = songSortMode,
+                                onSortModeChange  = viewModel::setSongSortMode,
+                                showAlphabetIndex = !isSearchActive && songSortMode == SongSortMode.TITLE_ASC,
                                 currentSongId     = nowPlaying.song?.id,
                                 favoriteSongIds   = favoriteSongIds,
-                                onSongClick       = viewModel::playSongFromLibraryQueue,
-                                onShuffleAll      = viewModel::shuffleAll,
+                                onSongClick       = viewModel::playSongFromSongsList,
+                                onShuffleAll      = viewModel::shuffleSongsList,
                                 onPlayNext        = viewModel::playNext,
                                 onAddToQueue      = viewModel::addToQueue,
                                 onToggleFavorite  = { song, wasFavorite ->
@@ -283,6 +290,8 @@ fun SongsScreen(
 @Composable
 private fun SongListContent(
     songs: List<Song>,
+    sortMode: SongSortMode,
+    onSortModeChange: (SongSortMode) -> Unit,
     showAlphabetIndex: Boolean = true,
     currentSongId: Long?,
     favoriteSongIds: Set<Long>,
@@ -308,6 +317,7 @@ private fun SongListContent(
     }
     val listState      = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    var sortMenuExpanded by remember { mutableStateOf(false) }
 
     val songsRef = rememberUpdatedState(songs)
     val currentLetter: Char? by remember {
@@ -348,6 +358,38 @@ private fun SongListContent(
                             style    = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(start = 6.dp),
                         )
+                    }
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        TextButton(onClick = { sortMenuExpanded = true }) {
+                            Text(
+                                text = sortMode.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = sortMenuExpanded,
+                            onDismissRequest = { sortMenuExpanded = false },
+                        ) {
+                            SongSortMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(mode.label) },
+                                    onClick = {
+                                        sortMenuExpanded = false
+                                        onSortModeChange(mode)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
                 HorizontalDivider(

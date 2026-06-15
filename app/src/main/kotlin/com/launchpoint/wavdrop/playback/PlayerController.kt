@@ -240,7 +240,11 @@ class PlayerController @Inject constructor(
                             uri = externalRequest.uri,
                             displayName = externalRequest.displayName,
                         )
-                        playRequest != null -> playFromQueue(playRequest.queue, playRequest.startSong)
+                        playRequest != null -> playFromQueueInternal(
+                            queue = playRequest.queue,
+                            startSong = playRequest.startSong,
+                            preservePlaybackOrder = playRequest.preservePlaybackOrder,
+                        )
                         restorePos != null && libraryQueue.isNotEmpty() -> {
                             // libraryQueue/playbackOrder/playbackQueue were set by
                             // restoreSessionIfNeeded; ExoPlayer was not ready at that time.
@@ -270,6 +274,15 @@ class PlayerController @Inject constructor(
 
     fun playSong(song: Song) {
         playFromQueue(queue = listOf(song), startSong = song)
+    }
+
+    fun playSearchResultPreservingQueue(song: Song) {
+        val newQueue = QueueMutation.searchPreserveQueue(
+            playbackQueue = playbackQueue,
+            currentPlaybackIndex = currentPlaybackIndex(),
+            song = song,
+        )
+        playFromQueuePreservingPlaybackOrder(queue = newQueue, startSong = song)
     }
 
     fun playExternalUri(uri: Uri, displayName: String? = null) {
@@ -311,13 +324,30 @@ class PlayerController @Inject constructor(
     }
 
     fun playFromQueue(queue: List<Song>, startSong: Song) {
+        playFromQueueInternal(queue = queue, startSong = startSong, preservePlaybackOrder = false)
+    }
+
+    private fun playFromQueuePreservingPlaybackOrder(queue: List<Song>, startSong: Song) {
+        playFromQueueInternal(queue = queue, startSong = startSong, preservePlaybackOrder = true)
+    }
+
+    private fun playFromQueueInternal(
+        queue: List<Song>,
+        startSong: Song,
+        preservePlaybackOrder: Boolean,
+    ) {
         isExternalPlayback = false
         val normalizedQueue = queue.ifEmpty { listOf(startSong) }
         val originalStartIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
             .takeIf { it >= 0 } ?: 0
 
         libraryQueue = normalizedQueue
-        rebuildPlaybackQueue(currentQueueIndex = originalStartIndex)
+        if (preservePlaybackOrder) {
+            playbackOrder = normalizedQueue.indices.toList()
+            playbackQueue = normalizedQueue
+        } else {
+            rebuildPlaybackQueue(currentQueueIndex = originalStartIndex)
+        }
         playerQueueNeedsSync = false
         // When shuffle is OFF, playbackOrder is identity so playbackStartIndex == originalStartIndex.
         // When shuffle is ON, buildPlaybackOrder places the start song at position 0.
@@ -341,7 +371,11 @@ class PlayerController @Inject constructor(
 
         val controller = mediaController
         if (controller == null) {
-            pendingPlaybackRequest = PlaybackRequest(normalizedQueue, startSong)
+            pendingPlaybackRequest = PlaybackRequest(
+                queue = normalizedQueue,
+                startSong = startSong,
+                preservePlaybackOrder = preservePlaybackOrder,
+            )
             return
         }
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
@@ -735,7 +769,10 @@ class PlayerController @Inject constructor(
             shuffleEnabled = snapshot.shuffleEnabled
             repeatMode     = snapshot.repeatMode
             val startLibraryIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0)
-            rebuildPlaybackQueue(currentQueueIndex = startLibraryIndex)
+            restorePlaybackQueue(
+                currentQueueIndex = startLibraryIndex,
+                savedPlaybackOrder = snapshot.playbackOrder,
+            )
             playerQueueNeedsSync = false
             val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex).takeIf { it >= 0 } ?: 0
 
@@ -1018,7 +1055,10 @@ class PlayerController @Inject constructor(
         shuffleEnabled = snapshot.shuffleEnabled
         repeatMode     = snapshot.repeatMode
         val startLibraryIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0)
-        rebuildPlaybackQueue(currentQueueIndex = startLibraryIndex)
+        restorePlaybackQueue(
+            currentQueueIndex = startLibraryIndex,
+            savedPlaybackOrder = snapshot.playbackOrder,
+        )
         playerQueueNeedsSync = false
         val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex).takeIf { it >= 0 } ?: 0
 
@@ -1185,6 +1225,7 @@ class PlayerController @Inject constructor(
 
         val snapshot = PlaybackSessionSnapshot(
             queueSongIds   = libraryQueue.map { it.id },
+            playbackOrder  = playbackOrder.takeIf { it.size == libraryQueue.size },
             currentSongId  = state.song?.id,
             currentIndex   = currentLibraryIndex,
             positionMs     = positionMs,
@@ -1361,6 +1402,16 @@ class PlayerController @Inject constructor(
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
     }
 
+    private fun restorePlaybackQueue(currentQueueIndex: Int, savedPlaybackOrder: List<Int>?) {
+        playbackOrder = PlaybackSessionRules.restorePlaybackOrder(
+            savedPlaybackOrder = savedPlaybackOrder,
+            queueSize = libraryQueue.size,
+            currentQueueIndex = currentQueueIndex,
+            shuffleEnabled = shuffleEnabled,
+        )
+        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
+    }
+
     // Swap two items in playbackOrder (both must be strictly after current).
     // Calls moveMediaItem on the controller using playback indices.
     private fun swapPlaybackItems(fromIndex: Int, toIndex: Int, currentPlaybackIndex: Int) {
@@ -1479,8 +1530,8 @@ class PlayerController @Inject constructor(
             .setMediaId(id.toString())
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setArtist(artist)
+                    .setTitle(displayTitle)
+                    .setArtist(displayArtist)
                     .setAlbumTitle(album)
                     .build()
             )
@@ -1521,6 +1572,7 @@ class PlayerController @Inject constructor(
     private data class PlaybackRequest(
         val queue: List<Song>,
         val startSong: Song,
+        val preservePlaybackOrder: Boolean = false,
     )
 
     private data class ExternalPlaybackRequest(

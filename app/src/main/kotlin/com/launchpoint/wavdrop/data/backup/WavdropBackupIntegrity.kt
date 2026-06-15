@@ -85,6 +85,8 @@ object WavdropBackupIntegrity {
                 // string they were fingerprinted with, so their stored checksums still
                 // validate. Never add new fields to the fixed "prefs" record above.
                 optionalRecord("prefArtworkCornerStyle", prefs.artworkCornerStyle)
+                optionalRecord("prefSongSortMode", prefs.songSortMode)
+                optionalRecord("prefSearchTapBehavior", prefs.searchTapBehavior)
                 optionalRecord("prefShowSongThumbnails", prefs.showSongThumbnails)
                 optionalRecord("prefShowAlbumInSongRows", prefs.showAlbumInSongRows)
                 optionalRecord("prefNowPlayingBackground", prefs.nowPlayingBackground)

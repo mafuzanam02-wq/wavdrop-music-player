@@ -205,6 +205,7 @@ private fun PreviewContent(
 
     if (showDialog) {
         ConfirmApplyDialog(
+            isDesktopBackup = state.isDesktopBackup,
             onConfirm = { showDialog = false; onApplyConfirmed() },
             onDismiss = { showDialog = false },
         )
@@ -232,14 +233,34 @@ private fun PreviewContent(
             StatRow("Playlists",        state.playlistCount.toString())
             StatRow("Listen events",    state.listenEventsCount.toString())
         }
+        if (state.isDesktopBackup) {
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { SectionLabel("Desktop Match Preview", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+            item {
+                StatRow("Matched songs", state.matchedSongs.toString())
+                StatRow("Skipped unmatched", state.skippedUnmatched.toString())
+                StatRow("Skipped ambiguous", state.skippedAmbiguous.toString())
+                StatRow("Stats increasing", state.statsWillIncrease.toString())
+                StatRow("Favorites applying", state.favoritesWillApply.toString())
+            }
+        }
 
         item { Spacer(Modifier.height(16.dp)) }
-        item { PreviewNotice(modifier = Modifier.padding(horizontal = 16.dp)) }
+        item {
+            if (state.warning != null) {
+                PreviewNotice(
+                    text = state.warning,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            } else {
+                PreviewNotice(modifier = Modifier.padding(horizontal = 16.dp))
+            }
+        }
         item {
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick  = { showDialog = true },
-                enabled  = state.statsCount > 0 || state.lyricsOverridesCount > 0
+                enabled  = state.matchedSongs > 0 || state.statsCount > 0 || state.lyricsOverridesCount > 0
                         || state.playlistCount > 0 || state.listenEventsCount > 0
                         || state.baselineCount > 0 || state.hasPreferences,
                 modifier = Modifier
@@ -257,6 +278,7 @@ private fun PreviewContent(
 
 @Composable
 private fun ConfirmApplyDialog(
+    isDesktopBackup: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -265,9 +287,13 @@ private fun ConfirmApplyDialog(
         title = { Text("Restore Wavdrop backup?") },
         text  = {
             Text(
-                text  = "Stats will be restored from this backup. Matched tracks are set " +
+                text  = if (isDesktopBackup) {
+                    "Desktop stats will be imported using metadata matching. Play counts and listening time only increase, latest played time wins, and favorites can be applied."
+                } else {
+                    "Stats will be restored from this backup. Matched tracks are set " +
                         "to the exact backup values, replacing current stats. " +
-                        "Lyrics are only replaced if the backup copy is newer.",
+                        "Lyrics are only replaced if the backup copy is newer."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
             )
@@ -342,6 +368,9 @@ private fun AppliedContent(
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
                     StatRow("Songs matched",     result.matchedTracks.toString())
                     StatRow("Songs not matched", result.unmatchedTracks.toString())
+                    if (result.ambiguousTracks > 0) {
+                        StatRow("Songs ambiguous", result.ambiguousTracks.toString())
+                    }
                     StatRow("Stats updated",     result.statsUpdated.toString())
                     StatRow("Lyrics restored",   result.lyricsRestored.toString())
                     StatRow("Favorites restored", result.favoritesRestored.toString())
@@ -453,7 +482,10 @@ private fun StatRow(label: String, value: String, modifier: Modifier = Modifier)
 }
 
 @Composable
-private fun PreviewNotice(modifier: Modifier = Modifier) {
+private fun PreviewNotice(
+    text: String = "Stats will be restored from this backup. Matched tracks take the backup values exactly.",
+    modifier: Modifier = Modifier,
+) {
     Surface(
         modifier = modifier.fillMaxWidth(),
         color    = MaterialTheme.colorScheme.secondaryContainer,
@@ -476,7 +508,7 @@ private fun PreviewNotice(modifier: Modifier = Modifier) {
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text  = "Stats will be restored from this backup. Matched tracks take the backup values exactly.",
+                    text  = text,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
                 )

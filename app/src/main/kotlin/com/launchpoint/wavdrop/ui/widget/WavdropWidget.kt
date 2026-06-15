@@ -84,8 +84,8 @@ class WavdropWidget : GlanceAppWidget() {
             playerController(context).nowPlayingState.value
         }.getOrNull()
 
-        val title     = state?.song?.title?.takeIf { it.isNotBlank() } ?: "Wavdrop"
-        val artist    = state?.song?.artist?.takeIf { it.isNotBlank() } ?: "Ready to play"
+        val title     = state?.song?.displayTitle?.takeIf { it.isNotBlank() } ?: "Wavdrop"
+        val artist    = state?.song?.displayArtist?.takeIf { it.isNotBlank() } ?: "Ready to play"
         val isPlaying = state?.isPlaying == true
 
         // Decode artwork in-process (we hold the audio permission; the launcher

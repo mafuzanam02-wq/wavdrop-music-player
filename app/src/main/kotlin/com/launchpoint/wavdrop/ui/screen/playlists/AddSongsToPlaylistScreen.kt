@@ -168,14 +168,14 @@ private fun SelectableSongRow(
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text     = song.title,
+                text     = song.displayTitle,
                 style    = MaterialTheme.typography.titleMedium,
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text     = if (alreadyInPlaylist) "Already in playlist" else song.artist,
+                text     = if (alreadyInPlaylist) "Already in playlist" else song.displayArtist,
                 style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f * contentAlpha),
                 maxLines = 1,

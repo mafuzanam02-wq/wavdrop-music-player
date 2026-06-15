@@ -43,11 +43,16 @@ object ImportFileValidation {
 
     /**
      * Cheap structural sniff used when the file name is unavailable or not `.json`:
-     * a Wavdrop backup is a JSON object that declares the wavdrop_backup format.
+     * a Wavdrop backup is a JSON object that declares the Android wavdrop_backup
+     * format or the Desktop appName.
      * This avoids running the full parser on arbitrary binary/text files.
      */
     fun isLikelyWavdropBackupContent(content: String): Boolean {
         val head = content.trimStart()
-        return head.startsWith("{") && content.contains("\"${WavdropBackupParser.SUPPORTED_FORMAT}\"")
+        return head.startsWith("{") &&
+            (
+                content.contains("\"${WavdropBackupParser.SUPPORTED_FORMAT}\"") ||
+                    DesktopWavdropBackupParser.isDesktopBackupContent(content)
+                )
     }
 }

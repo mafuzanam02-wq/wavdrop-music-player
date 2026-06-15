@@ -4,6 +4,7 @@ import com.launchpoint.wavdrop.playback.RepeatMode
 
 data class PlaybackSessionSnapshot(
     val queueSongIds: List<Long>,
+    val playbackOrder: List<Int>? = null,
     val currentSongId: Long?,
     val currentIndex: Int,
     val positionMs: Long,

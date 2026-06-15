@@ -5,6 +5,9 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.ImportFileValidation
+import com.launchpoint.wavdrop.data.backup.DesktopWavdropBackup
+import com.launchpoint.wavdrop.data.backup.DesktopWavdropBackupImportRepository
+import com.launchpoint.wavdrop.data.backup.DesktopWavdropBackupParser
 import com.launchpoint.wavdrop.data.backup.WavdropBackup
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportApplyResult
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportRepository
@@ -35,6 +38,13 @@ sealed interface BackupImportUiState {
         val hasPreferences       : Boolean,
         val playlistCount        : Int,
         val listenEventsCount    : Int,
+        val isDesktopBackup      : Boolean = false,
+        val matchedSongs         : Int = 0,
+        val skippedUnmatched     : Int = 0,
+        val skippedAmbiguous     : Int = 0,
+        val statsWillIncrease    : Int = 0,
+        val favoritesWillApply   : Int = 0,
+        val warning              : String? = null,
     ) : BackupImportUiState
 
     data object Applying : BackupImportUiState
@@ -48,6 +58,7 @@ sealed interface BackupImportUiState {
 class BackupImportPreviewViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val importRepository: WavdropBackupImportRepository,
+    private val desktopImportRepository: DesktopWavdropBackupImportRepository,
     private val appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
@@ -55,6 +66,7 @@ class BackupImportPreviewViewModel @Inject constructor(
     val uiState: StateFlow<BackupImportUiState> = _uiState.asStateFlow()
 
     private var parsedBackup: WavdropBackup? = null
+    private var parsedDesktopBackup: DesktopWavdropBackup? = null
 
     // ── File loading ──────────────────────────────────────────────────────────
 
@@ -89,11 +101,42 @@ class BackupImportPreviewViewModel @Inject constructor(
             return BackupImportUiState.Error(ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE)
         }
 
+        if (DesktopWavdropBackupParser.isDesktopBackupContent(content)) {
+            val result = DesktopWavdropBackupParser.parse(content)
+            val backup = result.backup
+                ?: return BackupImportUiState.Error(userFacingParseError(result.error))
+            val plan = withContext(Dispatchers.IO) {
+                desktopImportRepository.previewImport(backup)
+            }
+            parsedBackup = null
+            parsedDesktopBackup = backup
+            return BackupImportUiState.Preview(
+                format               = DesktopWavdropBackupParser.APP_NAME,
+                version              = backup.schemaVersion,
+                exportedAt           = backup.exportedAt.ifBlank { "Unknown" },
+                songCount            = backup.songs.size,
+                statsCount           = backup.songs.size,
+                baselineCount        = 0,
+                lyricsOverridesCount = 0,
+                hasPreferences       = false,
+                playlistCount        = backup.playlists.size,
+                listenEventsCount    = 0,
+                isDesktopBackup      = true,
+                matchedSongs         = plan.matchedCount,
+                skippedUnmatched     = plan.unmatchedCount,
+                skippedAmbiguous     = plan.ambiguousCount,
+                statsWillIncrease    = plan.statsWillIncreaseCount,
+                favoritesWillApply   = plan.favoritesWillApplyCount,
+                warning              = "Desktop song IDs are not Android song IDs. Songs will be matched by title, artist, and album metadata.",
+            )
+        }
+
         val result = WavdropBackupParser.parse(content)
         val backup = result.backup
             ?: return BackupImportUiState.Error(userFacingParseError(result.error))
 
         parsedBackup = backup
+        parsedDesktopBackup = null
 
         return BackupImportUiState.Preview(
             format               = WavdropBackupParser.SUPPORTED_FORMAT,
@@ -142,13 +185,16 @@ class BackupImportPreviewViewModel @Inject constructor(
     // ── Apply ─────────────────────────────────────────────────────────────────
 
     fun applyImport() {
-        val backup = parsedBackup ?: return
         if (_uiState.value !is BackupImportUiState.Preview) return
 
         _uiState.value = BackupImportUiState.Applying
         viewModelScope.launch {
             _uiState.value = runCatching {
-                withContext(Dispatchers.IO) { importRepository.applyImport(backup) }
+                withContext(Dispatchers.IO) {
+                    parsedDesktopBackup?.let { desktopImportRepository.applyImport(it) }
+                        ?: parsedBackup?.let { importRepository.applyImport(it) }
+                        ?: error("No parsed backup to import.")
+                }
             }.fold(
                 onSuccess = { BackupImportUiState.Applied(it) },
                 onFailure = { e ->

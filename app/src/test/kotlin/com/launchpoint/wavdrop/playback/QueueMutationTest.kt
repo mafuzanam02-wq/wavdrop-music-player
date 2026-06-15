@@ -198,6 +198,56 @@ class QueueMutationTest {
         assertEquals(listOf(a, b, c, d, e, c), result)
     }
 
+    @Test
+    fun `searchPreserveQueue builds searched song plus remaining queue after current`() {
+        val x = song(99)
+
+        val result = QueueMutation.searchPreserveQueue(
+            playbackQueue = listOf(a, b, c, d),
+            currentPlaybackIndex = 1,
+            song = x,
+        )
+
+        assertEquals(listOf(x, c, d), result)
+    }
+
+    @Test
+    fun `searchPreserveQueue returns searched song when current is last`() {
+        val x = song(99)
+
+        val result = QueueMutation.searchPreserveQueue(
+            playbackQueue = listOf(a, b, c),
+            currentPlaybackIndex = 2,
+            song = x,
+        )
+
+        assertEquals(listOf(x), result)
+    }
+
+    @Test
+    fun `searchPreserveQueue returns searched song when no queue exists`() {
+        val x = song(99)
+
+        val result = QueueMutation.searchPreserveQueue(
+            playbackQueue = emptyList(),
+            currentPlaybackIndex = null,
+            song = x,
+        )
+
+        assertEquals(listOf(x), result)
+    }
+
+    @Test
+    fun `searchPreserveQueue removes selected song from continuation`() {
+        val result = QueueMutation.searchPreserveQueue(
+            playbackQueue = listOf(a, b, c, d, c),
+            currentPlaybackIndex = 1,
+            song = c,
+        )
+
+        assertEquals(listOf(c, d), result)
+    }
+
     // ── shiftPlaybackOrderForInsert ──────────────────────────────────────────────
 
     @Test

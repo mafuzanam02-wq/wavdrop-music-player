@@ -54,6 +54,8 @@ fun SongRow(
     val cornerStyle      = LocalArtworkCornerStyle.current
     val verticalPadding  = if (compact) 8.dp else 12.dp
     val artworkSize      = if (compact) 44.dp else 48.dp
+    val titleText        = song.displayTitle
+    val artistText       = song.displayArtist
 
     Row(
         modifier = modifier
@@ -100,7 +102,7 @@ fun SongRow(
                     )
                 } else {
                     Text(
-                        text     = song.title,
+                        text     = titleText,
                         style    = MaterialTheme.typography.titleMedium,
                         color    = if (isCurrent) MaterialTheme.colorScheme.primary
                                    else MaterialTheme.colorScheme.onSurface,
@@ -129,7 +131,7 @@ fun SongRow(
                 )
             } else {
                 Text(
-                    text     = song.artist,
+                    text     = artistText,
                     style    = MaterialTheme.typography.bodyMedium,
                     color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     maxLines = 1,

@@ -100,6 +100,43 @@ class MostPlayedBuilderTest {
     }
 
     @Test
+    fun `this month play count map uses event backed monthly definition`() {
+        val month = ListeningPeriodRange.month(2026, 6, utc)
+        val previousMonth = ListeningPeriodRange.month(2026, 5, utc)
+
+        val result = MostPlayedBuilder.thisMonthPlayCounts(
+            songs = listOf(song(1), song(2), song(3)),
+            events = listOf(
+                play(songId = 1, occurredAt = month.fromMs + 1_000L),
+                play(songId = 1, occurredAt = month.fromMs + 2_000L),
+                play(songId = 2, occurredAt = month.fromMs + 3_000L),
+                play(songId = 3, occurredAt = previousMonth.toMs),
+                skip(songId = 2, occurredAt = month.fromMs + 4_000L),
+            ),
+            nowMs = nowMs,
+            zone = utc,
+        )
+
+        assertEquals(mapOf(1L to 2, 2L to 1), result)
+    }
+
+    @Test
+    fun `this month play count map returns every played song without display limit cap`() {
+        val month = ListeningPeriodRange.month(2026, 6, utc)
+        val songs = (1L..12L).map { song(it) }
+        val events = songs.map { play(songId = it.id, occurredAt = month.fromMs + it.id) }
+
+        val result = MostPlayedBuilder.thisMonthPlayCounts(
+            songs = songs,
+            events = events,
+            nowMs = nowMs,
+            zone = utc,
+        )
+
+        assertEquals(12, result.size)
+    }
+
+    @Test
     fun `this month ignores orphan events`() {
         val month = ListeningPeriodRange.month(2026, 6, utc)
 

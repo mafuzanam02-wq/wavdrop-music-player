@@ -157,8 +157,8 @@ private fun SearchSongResultRow(
         onViewFolder     = song.searchFolderKey()?.let { key -> { actions.onFolderClick(key) } },
         onShare          = { actions.onShare(song) },
         modifier         = modifier,
-        highlightedTitle = highlightQuery(song.title, query, highlightStyle),
-        highlightedArtist = highlightQuery(song.artist, query, highlightStyle),
+        highlightedTitle = highlightQuery(song.displayTitle, query, highlightStyle),
+        highlightedArtist = highlightQuery(song.displayArtist, query, highlightStyle),
     )
 }
 
