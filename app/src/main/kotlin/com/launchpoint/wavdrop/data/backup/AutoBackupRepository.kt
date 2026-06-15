@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.AutoBackupCheckResult
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -41,21 +42,31 @@ class AutoBackupRepository @Inject constructor(
      * Call once per app session from the root navigation layer.
      */
     suspend fun runIfDue(): Result = withContext(Dispatchers.IO) {
+        val nowMs = System.currentTimeMillis()
         val interval = appSettingsRepository.autoBackupInterval.first()
-        if (interval == AutoBackupInterval.OFF) return@withContext Result.Skipped
+        if (interval == AutoBackupInterval.OFF) {
+            appSettingsRepository.setLastAutoBackupCheck(nowMs, AutoBackupCheckResult.OFF)
+            return@withContext Result.Skipped
+        }
 
         val folderUriString = appSettingsRepository.autoBackupFolderUri.first()
-            ?: return@withContext Result.NoFolderSelected
+        if (folderUriString == null) {
+            appSettingsRepository.setLastAutoBackupCheck(nowMs, AutoBackupCheckResult.NO_FOLDER_SELECTED)
+            return@withContext Result.NoFolderSelected
+        }
 
         val lastBackupAt = appSettingsRepository.lastAutoBackupAtMillis.first()
-        val nowMs        = System.currentTimeMillis()
 
-        if (nowMs - lastBackupAt < interval.toMillis()) return@withContext Result.NotDue
+        if (nowMs - lastBackupAt < interval.toMillis()) {
+            appSettingsRepository.setLastAutoBackupCheck(nowMs, AutoBackupCheckResult.NOT_DUE)
+            return@withContext Result.NotDue
+        }
 
         val result = performBackup(folderUriString)
         if (result is Result.Success) {
             appSettingsRepository.setLastAutoBackupAtMillis(nowMs)
         }
+        appSettingsRepository.setLastAutoBackupCheck(nowMs, result.toAutoBackupCheckResult())
         result
     }
 
@@ -226,6 +237,15 @@ class AutoBackupRepository @Inject constructor(
                 output.write(json.toByteArray(Charsets.UTF_8))
             }
         }.getOrNull()
+    }
+
+    private fun Result.toAutoBackupCheckResult(): AutoBackupCheckResult = when (this) {
+        Result.Skipped              -> AutoBackupCheckResult.OFF
+        Result.NoFolderSelected     -> AutoBackupCheckResult.NO_FOLDER_SELECTED
+        Result.NotDue               -> AutoBackupCheckResult.NOT_DUE
+        Result.Success              -> AutoBackupCheckResult.SUCCESS
+        is Result.FolderUnavailable -> AutoBackupCheckResult.FOLDER_UNAVAILABLE
+        is Result.Failure           -> AutoBackupCheckResult.FAILURE
     }
 
     private companion object {

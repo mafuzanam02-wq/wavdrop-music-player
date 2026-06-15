@@ -37,11 +37,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.backup.BackupVerificationResult
 import com.launchpoint.wavdrop.data.backup.VerificationStatus
+import com.launchpoint.wavdrop.data.settings.AutoBackupCheckResult
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import java.time.Instant
@@ -70,6 +72,8 @@ fun SettingsBackupScreen(
     val autoBackupFolderUri by viewModel.autoBackupFolderUri.collectAsStateWithLifecycle()
     val autoBackupInterval  by viewModel.autoBackupInterval.collectAsStateWithLifecycle()
     val lastBackupAtMillis  by viewModel.lastBackupAtMillis.collectAsStateWithLifecycle()
+    val lastAutoBackupCheckAtMillis by viewModel.lastAutoBackupCheckAtMillis.collectAsStateWithLifecycle()
+    val lastAutoBackupResult by viewModel.lastAutoBackupResult.collectAsStateWithLifecycle()
     val needsFolderAfterRestore by viewModel.needsBackupFolderAfterRestore.collectAsStateWithLifecycle()
 
     val suggestedExportName by remember {
@@ -189,10 +193,12 @@ fun SettingsBackupScreen(
             // ── Backup status ──────────────────────────────────────────────────
             item {
                 BackupStatusCard(
-                    lastBackupAtMillis = lastBackupAtMillis,
-                    folderSelected     = autoBackupFolderUri != null,
-                    folderName         = folderDisplayName,
-                    interval           = autoBackupInterval,
+                    lastBackupAtMillis           = lastBackupAtMillis,
+                    lastAutoBackupCheckAtMillis  = lastAutoBackupCheckAtMillis,
+                    lastAutoBackupResult         = lastAutoBackupResult,
+                    folderSelected               = autoBackupFolderUri != null,
+                    folderName                   = folderDisplayName,
+                    interval                     = autoBackupInterval,
                 )
             }
 
@@ -261,10 +267,17 @@ fun SettingsBackupScreen(
             item { SectionDivider() }
 
             // ── Automatic Backup ───────────────────────────────────────────────
-            item { SectionHeader("Automatic Backup") }
+            item { SectionHeader("Automatic backup check") }
             item {
                 SettingsMessageRow(
-                    message = "Wavdrop backs up automatically when you open the app, if the selected interval has passed.",
+                    message = when {
+                        autoBackupFolderUri != null ->
+                            "Backups are saved to your selected folder when Wavdrop opens and a backup is due."
+                        autoBackupInterval != AutoBackupInterval.OFF ->
+                            "Setup incomplete: choose a backup folder before automatic checks can save backups."
+                        else ->
+                            "Wavdrop checks for due backups when you open the app. Choose a backup folder first."
+                    },
                 )
             }
             item {
@@ -278,7 +291,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Daily",
-                    subtitle = "Back up once per day.",
+                    subtitle = "Check once per day when Wavdrop opens.",
                     selected = autoBackupInterval == AutoBackupInterval.DAILY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.DAILY) },
                 )
@@ -286,7 +299,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Weekly",
-                    subtitle = "Back up once per week.",
+                    subtitle = "Check once per week when Wavdrop opens.",
                     selected = autoBackupInterval == AutoBackupInterval.WEEKLY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.WEEKLY) },
                 )
@@ -294,7 +307,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Monthly",
-                    subtitle = "Back up once per month.",
+                    subtitle = "Check once per month when Wavdrop opens.",
                     selected = autoBackupInterval == AutoBackupInterval.MONTHLY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.MONTHLY) },
                 )
@@ -453,6 +466,8 @@ private const val RECENT_BACKUP_WINDOW_MS = 8L * 24 * 60 * 60 * 1000 // ~8 days
 @Composable
 private fun BackupStatusCard(
     lastBackupAtMillis: Long,
+    lastAutoBackupCheckAtMillis: Long,
+    lastAutoBackupResult: AutoBackupCheckResult?,
     folderSelected: Boolean,
     folderName: String?,
     interval: AutoBackupInterval,
@@ -482,8 +497,15 @@ private fun BackupStatusCard(
             )
             Spacer(Modifier.height(6.dp))
             BackupStatusLine(
-                label = "Last backup",
+                label = "Last successful backup",
                 value = if (hasBackup) formatBackupTime(lastBackupAtMillis) else "Never",
+            )
+            BackupStatusLine(
+                label = "Last automatic check",
+                value = formatAutoBackupCheckStatus(
+                    checkedAtMillis = lastAutoBackupCheckAtMillis,
+                    result = lastAutoBackupResult,
+                ),
             )
             BackupStatusLine(
                 label = "Backup folder",
@@ -525,12 +547,14 @@ private fun BackupStatusLine(label: String, value: String) {
             text     = label,
             style    = MaterialTheme.typography.bodySmall,
             color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(0.9f),
         )
         Text(
-            text  = value,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
+            text      = value,
+            style     = MaterialTheme.typography.bodySmall,
+            color     = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+            modifier  = Modifier.weight(1.2f),
         )
     }
 }
@@ -540,4 +564,33 @@ private fun formatBackupTime(epochMillis: Long): String {
         .atZone(ZoneId.systemDefault())
         .toLocalDateTime()
     return dateTime.format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
+}
+
+private fun formatAutoBackupCheckStatus(
+    checkedAtMillis: Long,
+    result: AutoBackupCheckResult?,
+): String {
+    if (checkedAtMillis <= 0L || result == null) return "Never"
+
+    val dateTime = Instant.ofEpochMilli(checkedAtMillis)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDateTime()
+    val date = dateTime.toLocalDate()
+    val today = LocalDate.now()
+    val dateLabel = if (date == today) {
+        "Today"
+    } else {
+        dateTime.format(DateTimeFormatter.ofPattern("d MMM yyyy"))
+    }
+    val timeLabel = dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))
+    return "$dateLabel, $timeLabel — ${result.toAutoBackupStatusText()}"
+}
+
+private fun AutoBackupCheckResult.toAutoBackupStatusText(): String = when (this) {
+    AutoBackupCheckResult.OFF                -> "Off"
+    AutoBackupCheckResult.NO_FOLDER_SELECTED -> "Choose backup folder"
+    AutoBackupCheckResult.NOT_DUE            -> "Not due yet"
+    AutoBackupCheckResult.SUCCESS            -> "Backup saved"
+    AutoBackupCheckResult.FOLDER_UNAVAILABLE -> "Folder unavailable"
+    AutoBackupCheckResult.FAILURE            -> "Failed"
 }

@@ -10,6 +10,7 @@ import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
+import com.launchpoint.wavdrop.data.settings.AutoBackupCheckResult
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
@@ -102,6 +103,20 @@ class SettingsViewModel @Inject constructor(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = 0L,
+        )
+
+    val lastAutoBackupCheckAtMillis: StateFlow<Long> =
+        appSettingsRepository.lastAutoBackupCheckAtMillis.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0L,
+        )
+
+    val lastAutoBackupResult: StateFlow<AutoBackupCheckResult?> =
+        appSettingsRepository.lastAutoBackupResult.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
         )
 
     /** Set by restore when auto-backup was re-enabled but no folder exists on this device. */

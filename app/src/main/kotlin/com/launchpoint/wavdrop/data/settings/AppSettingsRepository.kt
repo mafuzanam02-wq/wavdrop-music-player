@@ -232,6 +232,30 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val lastAutoBackupCheckAtMillis: Flow<Long> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[LAST_AUTO_BACKUP_CHECK_AT_MILLIS_KEY] ?: 0L }
+
+    val lastAutoBackupResult: Flow<AutoBackupCheckResult?> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[LAST_AUTO_BACKUP_RESULT_KEY]?.toAutoBackupCheckResult()
+        }
+
+    suspend fun setLastAutoBackupCheck(
+        checkedAtMillis: Long,
+        result: AutoBackupCheckResult,
+    ) {
+        dataStore.edit { preferences ->
+            preferences[LAST_AUTO_BACKUP_CHECK_AT_MILLIS_KEY] = checkedAtMillis
+            preferences[LAST_AUTO_BACKUP_RESULT_KEY] = result.name
+        }
+    }
+
     /**
      * True when a restore re-enabled automatic backup but the user has not yet granted a
      * backup folder on this device. Survives process death and launcher-icon relaunches.
@@ -366,6 +390,9 @@ class AppSettingsRepository @Inject constructor(
     private fun String.toAutoBackupInterval(): AutoBackupInterval? =
         runCatching { AutoBackupInterval.valueOf(this) }.getOrNull()
 
+    private fun String.toAutoBackupCheckResult(): AutoBackupCheckResult? =
+        runCatching { AutoBackupCheckResult.valueOf(this) }.getOrNull()
+
     private fun String.toBackupFileMode(): BackupFileMode? =
         runCatching { BackupFileMode.valueOf(this) }.getOrNull()
 
@@ -402,6 +429,8 @@ class AppSettingsRepository @Inject constructor(
         val AUTO_BACKUP_FOLDER_URI_KEY              = stringPreferencesKey("auto_backup_folder_uri")
         val AUTO_BACKUP_INTERVAL_KEY                = stringPreferencesKey("auto_backup_interval")
         val LAST_AUTO_BACKUP_AT_MILLIS_KEY          = longPreferencesKey("last_auto_backup_at_millis")
+        val LAST_AUTO_BACKUP_CHECK_AT_MILLIS_KEY    = longPreferencesKey("last_auto_backup_check_at_millis")
+        val LAST_AUTO_BACKUP_RESULT_KEY             = stringPreferencesKey("last_auto_backup_result")
         val BACKUP_FILE_MODE_KEY                    = stringPreferencesKey("backup_file_mode")
         val NOTIFICATION_CONTROLS_KEY               = stringPreferencesKey("notification_controls")
         val LAST_SEEN_CHANGELOG_VERSION_KEY         = intPreferencesKey("last_seen_changelog_version")
