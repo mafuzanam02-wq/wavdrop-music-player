@@ -8,7 +8,7 @@
 | Package | `com.launchpoint.wavdrop` |
 | Min SDK | 26 (Android 8.0 Oreo) |
 | Target SDK | 35 |
-| Version | 0.1.0 |
+| Version | 0.1.0-beta3.1 |
 
 ## Tech Stack
 | Layer | Library |
@@ -238,8 +238,33 @@ Delta-based idempotent: `ImportBaselineDao` tracks last-imported counts; re-impo
 file yields zero changes. **Never writes `TrackListenEventEntity` rows.**
 
 ## Backup & Restore
-`WavdropBackupExporter` serialises stats + playlists to JSON. `WavdropBackupParser` + 
-`WavdropBackupStatsMatcher` + `WavdropBackupImportRepository` for import.
+`WavdropBackupExporter` serialises stats + playlists to JSON. `WavdropBackupParser` +
+`WavdropBackupStatsMatcher` + `WavdropBackupImportRepository` for Android-origin import.
+`DesktopWavdropBackupParser` + `DesktopWavdropBackupImportPlanner` +
+`DesktopWavdropBackupImportRepository` for desktop-origin import (stats, favorites,
+and playlists via metadata translation).
+
+Desktop backups are detected by `appName: "wavdrop-desktop-lab"` or
+`sourcePlatform: "desktop"`. Shared desktop backups carry Android identity fields
+alongside these signals. Desktop song IDs are strings; Android song IDs are Longs.
+Desktop playlist entries use `songIds: string[]` and are translated to Android local
+song IDs through metadata matching before insertion.
+
+Playlist import is conservative and non-destructive (Phase 1): matched songs are
+appended, existing entries are not deleted or reordered, re-import is idempotent.
+This is playlist portability, not two-way playlist synchronization.
+
+## Shared Data Contract
+Before touching backup, import, export, or migration code, read
+`docs/WAVDROP_DATA_FORMAT_SPEC.md`, `docs/WAVDROP_BACKUP_SCHEMA_V1.md`, and
+`docs/WAVDROP_IMPORT_RULES.md`. Android backups must keep the Wavdrop V1 identity
+stable, treat song IDs as platform-local, merge aggregate stats safely, translate
+playlist references to local song IDs, and never fabricate listening events from
+aggregate imports.
+Android settings backup follows the platform-scoped preferences contract:
+new exports write Android settings under `preferences.android`, Android ignores
+`preferences.desktop`, and legacy flat `preferences` settings are import-only
+backward compatibility.
 
 ## Monthly Reports
 `MonthlyReportsScreen` ← `MonthlyReportsViewModel` ← `MonthlyReportBuilder`.
