@@ -137,6 +137,19 @@ All-time counters written on every play/skip since app install.
 | `ArtistInsightsBuilder` | songs + stats | `ArtistInsightsSummary` | Per-artist detail screen |
 | `MostPlayedBuilder` | songs + stats + events + period | `List<SongStatsSummary>` | Most-Played tab (ALL_TIME / THIS_MONTH) |
 
+**Effective listening time rule:** stored `totalListeningTimeMs` remains the actual
+listening-time value used for database, backup, import, and export contracts. For display,
+sorting, all-time reports, and aggregate summaries, Android derives
+`effectiveListeningTimeMs` with `ListeningTimeRules.effectiveListeningTimeMs(...)`:
+use `totalListeningTimeMs` when it is greater than zero; otherwise use
+`playCount × durationMs` when play count and duration are available; otherwise use zero.
+Actual stored listening time always wins, and the estimate must never overwrite
+`totalListeningTimeMs` or appear as a backup/database field. Track Details, stats dashboard,
+all-time reports, artist insights, and all-time aggregate fallback use effective listening
+time; event-backed Monthly Reports and Wrapped continue to use listen-event `listenedMs`.
+Desktop follows the same effective listening-time rule while still exporting/importing only
+raw stored `totalListeningTimeMs`; no `effectiveListeningTimeMs` backup field exists.
+
 ### Event-backed (TrackListenEventEntity)
 Per-play/per-skip rows since DB v6 upgrade. Accurate time-scoped analytics.
 

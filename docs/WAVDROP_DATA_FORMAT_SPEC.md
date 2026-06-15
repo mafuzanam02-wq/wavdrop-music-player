@@ -69,6 +69,32 @@ Android backup aggregate stats come from `trackStats`, not `songs`.
 
 Listening history and reports are separate from aggregate stats. Aggregate imports must not fabricate listen events.
 
+## Effective Listening Time
+
+Wavdrop distinguishes between stored actual listening time and derived effective listening time.
+
+- `totalListeningTimeMs` is the stored/imported/exported backup value. It represents measured listening time when the platform has actual playback progress.
+- `effectiveListeningTimeMs` is derived locally for display, sorting, reports, and aggregate summaries. It is not a stored data field.
+
+Rule:
+
+```text
+if totalListeningTimeMs > 0:
+    use totalListeningTimeMs
+else if playCount > 0 and durationMs > 0:
+    use playCount × durationMs
+else:
+    use 0
+```
+
+Actual stored listening time always wins. The estimated fallback is used only when stored listening time is zero or missing but play count and duration are available.
+
+`effectiveListeningTimeMs` must not be added to backup files, added to any database schema, exported as a backup field, imported as a backup field, used to overwrite `totalListeningTimeMs`, or treated as measured playback time. This preserves the backup/import/export contract while making imported or legacy play-count stats useful.
+
+Android uses `ListeningTimeRules.effectiveListeningTimeMs(...)` in read/display paths. Track Details, stats dashboard, all-time reports, artist insights, and all-time aggregate fallback use effective listening time. Event-backed monthly and Wrapped analytics continue to use actual listen-event `listenedMs`.
+
+Desktop uses the same effective listening-time rule. Desktop backup export still writes raw stored `totalListeningTimeMs`, Desktop import still merges raw stored `totalListeningTimeMs`, and no `effectiveListeningTimeMs` field exists in backups.
+
 ## Cross-Platform Merge Rules
 
 Imports must be idempotent and baseline-safe.
