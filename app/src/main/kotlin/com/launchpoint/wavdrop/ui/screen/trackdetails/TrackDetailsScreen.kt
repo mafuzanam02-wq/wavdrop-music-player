@@ -301,21 +301,12 @@ private fun ReadyContent(
         SectionDivider()
 
         // ── Lyrics section ───────────────────────────────────────────────────
-        SectionHeader("Lyrics")
+        LyricsHeader(
+            hasCustomLyrics = hasCustomLyrics,
+            onEditLyrics = onEditLyrics,
+            onClearLyrics = onClearLyrics,
+        )
         LyricsSection(lyrics)
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onEditLyrics) {
-                Text("Edit lyrics")
-            }
-            if (hasCustomLyrics) {
-                TextButton(onClick = onClearLyrics) {
-                    Text("Clear custom lyrics")
-                }
-            }
-        }
 
         SectionDivider()
 
@@ -470,6 +461,35 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
+private fun LyricsHeader(
+    hasCustomLyrics: Boolean,
+    onEditLyrics: () -> Unit,
+    onClearLyrics: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Lyrics",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onEditLyrics) {
+            Text("Edit")
+        }
+        if (hasCustomLyrics) {
+            TextButton(onClick = onClearLyrics) {
+                Text("Clear")
+            }
+        }
+    }
+}
+
+@Composable
 private fun SectionDivider() {
     HorizontalDivider(
         modifier  = Modifier.padding(vertical = 4.dp),
@@ -524,14 +544,29 @@ private fun LyricsSection(result: LyricsResult) {
             )
         }
         is LyricsResult.Available -> {
+            var expanded by remember(result.text) { mutableStateOf(false) }
+            var hasOverflow by remember(result.text) { mutableStateOf(false) }
             Text(
                 text     = result.text,
                 style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurface,
+                maxLines = if (expanded) Int.MAX_VALUE else LYRICS_PREVIEW_MAX_LINES,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { textLayoutResult ->
+                    if (!expanded) hasOverflow = textLayoutResult.hasVisualOverflow
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             )
+            if (hasOverflow || expanded) {
+                TextButton(
+                    onClick = { expanded = !expanded },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) {
+                    Text(if (expanded) "Show less" else "Show more")
+                }
+            }
         }
         is LyricsResult.Error -> {
             Text(
@@ -543,3 +578,5 @@ private fun LyricsSection(result: LyricsResult) {
         }
     }
 }
+
+private const val LYRICS_PREVIEW_MAX_LINES = 6
