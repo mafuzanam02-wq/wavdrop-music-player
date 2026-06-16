@@ -340,9 +340,14 @@ busiest day, average plays per active day, and `emptyState.reason`.
 `Lyra` → `EchoVault` → **Wavdrop** (final, do not rename again)
 
 ## Branding
-Official launcher icon: Midnight Violet  
-Approved alternates: Clean Purple, Deep Teal  
-Future: user-selectable icons via activity-alias (Settings → Appearance)
+Official launcher icon: Obsidian Black (default at install)
+Shipped icon choices (selectable via Settings → Appearance → App Icon):
+- Obsidian Black (default)
+- Midnight Violet
+- Clean Purple
+- Deep Teal
+- Ocean Blue
+- Sunset Orange
 
 ## Wrapped
 `WrappedScreen` ← `WrappedViewModel` ← `WrappedBuilder`.
@@ -380,7 +385,6 @@ embedded/sidecar lookup. No ID3 tag writing, online lookup, synced lyrics, or ka
 support is implemented.
 
 ## Not Yet Implemented
-- Theme switching / dark mode toggle
 - Tag editing
 - Cloud sync, streaming, equalizer
 - Wrapped sharing and export
