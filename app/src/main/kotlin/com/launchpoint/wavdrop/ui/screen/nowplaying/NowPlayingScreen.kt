@@ -503,7 +503,15 @@ private fun NowPlayingContent(
         } else {
             null
         }
-        val upNextCount = (state.queue.size - state.currentIndex - 1).coerceAtLeast(0)
+        val nextTrack = state.queue.getOrNull(state.currentIndex + 1)
+        val upNextLabel = nextTrack?.let { track ->
+            val artist = track.displayArtist.takeIf { track.hasKnownArtist() }
+            if (artist != null) {
+                "Up Next · ${track.displayTitle} — $artist"
+            } else {
+                "Up Next · ${track.displayTitle}"
+            }
+        } ?: "Up Next · Nothing queued"
 
         FixedBottomNowPlayingLayout(
             state = state,
@@ -526,7 +534,7 @@ private fun NowPlayingContent(
             onOpenAlbum = albumClick,
             onOpenQueue = onOpenQueue,
             sleepTimerLabel = sleepTimerLabel,
-            upNextCount = upNextCount,
+            upNextLabel = upNextLabel,
         )
     }
 }
@@ -688,7 +696,7 @@ private fun FixedBottomNowPlayingLayout(
     onOpenAlbum: (() -> Unit)?,
     onOpenQueue: () -> Unit,
     sleepTimerLabel: String?,
-    upNextCount: Int,
+    upNextLabel: String,
 ) {
     Column(
         modifier = Modifier
@@ -737,7 +745,7 @@ private fun FixedBottomNowPlayingLayout(
             onSeek = onSeek,
             onOpenQueue = onOpenQueue,
             sleepTimerLabel = sleepTimerLabel,
-            upNextCount = upNextCount,
+            upNextLabel = upNextLabel,
         )
     }
 }
@@ -865,7 +873,7 @@ private fun BottomPlaybackPanel(
     onSeek: (Long) -> Unit,
     onOpenQueue: () -> Unit,
     sleepTimerLabel: String?,
-    upNextCount: Int,
+    upNextLabel: String,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -898,7 +906,7 @@ private fun BottomPlaybackPanel(
             onCycleRepeatMode = onCycleRepeatMode,
         )
         QueueHandle(
-            upNextCount = upNextCount,
+            label = upNextLabel,
             onClick = onOpenQueue,
         )
     }
