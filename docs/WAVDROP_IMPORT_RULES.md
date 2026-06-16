@@ -42,6 +42,11 @@ When `appName` or `sourcePlatform` indicates desktop origin, route to the deskto
 
 Desktop-exported backups may contain portable Android-compatible sections such as `songs`, `playlists`, `listenEvents`, `importBaselines`, `lyricsOverrides`, and platform-scoped preferences. Android should accept supported `schemaVersion: 1`, consume Android-compatible fields, ignore Desktop-only preferences safely, and never modify audio files during backup/import/export.
 
+Android accepts Desktop backups with `schemaVersion: 1`. Android rejects Desktop backups
+with unsupported explicit `schemaVersion` values, such as `99`, and tolerates absent
+`schemaVersion` only for legacy compatibility. This is parser validation only; it did not
+introduce a backup schema version bump or database schema change.
+
 ## Matching Rules
 
 Cross-platform imports must match songs by metadata, not foreign IDs.
@@ -108,6 +113,16 @@ Desktop-origin listen event shape:
 ```
 
 Desktop IDs are platform-local and must not be trusted as Android IDs. Android resolves Desktop listen events to local Android songs through the Desktop backup song mapping and safe metadata fallback. Android does not require Android `contentUri` for Desktop-origin listen events. Matched events are stored in `track_listen_events` using local Android song IDs while preserving `occurredAt`, `eventType`, `listenedMs`, `durationMs`, and `source = "wavdrop_desktop_playback"`. Unmatched Desktop-origin listen events are skipped.
+
+Imported listen events with impossible numeric values are skipped safely:
+
+- `occurredAt <= 0`
+- `listenedMs <= 0`
+- `durationMs < 0`
+
+Invalid listen events are not imported, do not crash restore, and do not poison the whole
+backup where safe skipping is possible. No synthetic replacement events are created. Valid
+listen events still restore normally, and repeat import idempotency remains preserved.
 
 Exportable listen-event sources are `wavdrop_playback`, `manual_restore`, and `wavdrop_desktop_playback`. Unsupported or synthetic sources remain excluded, including `blackplayer_import` and unknown future sources unless explicitly supported later.
 
@@ -210,6 +225,11 @@ Import preview/apply flows should make skipped records visible:
 
 Validation failures should fail safely before any database mutation. Apply operations should use transactions where practical.
 
+Import preview should make clear that Desktop backups may include stats, favorites,
+playlists, and listening history. Preview/result wording should also make clear that
+backup import does not modify audio files. Backups contain metadata, history, settings,
+and playlist data only; they do not contain music files.
+
 ## Validated Android/Desktop QA
 
 Validated portability loop:
@@ -223,3 +243,14 @@ Validated portability loop:
 Result: `wavdrop_desktop_playback` events survived Android import/export, the second import did not duplicate Desktop-origin events, total `listenEvents` stayed stable after repeat import, `importBaselines` stayed stable, `lyricsOverrides` stayed stable, playlists stayed stable, aggregate play counts/listening time did not inflate, and no backup or database schema change was needed.
 
 Real QA counts: source Desktop backup had 732 songs and 1523 listen events, including 14 `wavdrop_desktop_playback` events. Android export after first import had 732 songs and 1525 listen events, including the same 14 Desktop-origin events. Android export after second import remained 732 songs and 1525 listen events with the same 14 Desktop-origin events. `importBaselines` stayed 723, `lyricsOverrides` stayed 28, playlists stayed 3.
+
+## Deferred Beyond Beta 3.1
+
+The following are P2/P3 items, not Beta 3.1 scope:
+
+- Desktop portable import of `importBaselines`, `lyricsOverrides`, and `preferences.android` beyond the current safe Android-side behavior.
+- Portable song identity layer or optional `portableSongKey`.
+- Partial audio hash or acoustic fingerprinting.
+- Backup schema v2.
+- Shared cross-platform validation library.
+- Unknown future-field preservation architecture.

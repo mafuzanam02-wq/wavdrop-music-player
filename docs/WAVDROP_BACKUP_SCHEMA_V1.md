@@ -47,6 +47,11 @@ Shared desktop format (overlays Android identity with desktop signals):
 
 `sourcePlatform: "desktop"` or `appName: "wavdrop-desktop-lab"` is sufficient to identify desktop origin. Android must not treat desktop song IDs as Android song IDs regardless of which identity form is used.
 
+Android accepts Desktop backups with `schemaVersion: 1`. Android rejects Desktop backups
+with unsupported explicit `schemaVersion` values, such as `99`, and tolerates absent
+`schemaVersion` only for legacy compatibility. This validation hardening did not introduce
+a backup schema version bump and did not require a database schema change.
+
 ## Android Backup Sections
 
 Android V1 backups may contain:
@@ -92,6 +97,16 @@ Imports must be idempotent. Re-importing the same backup should not increase cou
 Aggregate backup stats must not fabricate listening events.
 
 Android Monthly Reports, Wrapped, and other event-backed reports should continue to rely on real `TrackListenEventEntity` rows and verified portable Wavdrop playback events.
+
+Imported listen events with impossible numeric values are skipped safely:
+
+- `occurredAt <= 0`
+- `listenedMs <= 0`
+- `durationMs < 0`
+
+Invalid listen events are not imported, do not crash restore, and do not poison the whole
+backup where safe skipping is possible. No synthetic replacement events are created. Valid
+listen events still restore normally, and repeat import idempotency remains preserved.
 
 Exportable listen-event sources are:
 
@@ -214,6 +229,11 @@ Unmatched Desktop-origin listen events are skipped. Desktop-origin events should
 
 Desktop-exported backups may also contain portable Android-compatible sections such as `songs`, `playlists`, `listenEvents`, `importBaselines`, `lyricsOverrides`, and platform-scoped `preferences.android` / `preferences.desktop`. Android should accept `sourcePlatform: "desktop"` with supported `schemaVersion: 1`, consume Android-compatible fields, ignore Desktop-only preferences safely, and never modify audio files during backup/import/export.
 
+Import preview/result wording should make clear that Desktop backups may include stats,
+favorites, playlists, and listening history. It should also make clear that backup import
+does not modify audio files. Backups contain metadata, history, settings, and playlist data
+only; they do not contain music files.
+
 ## Playlist Import — Conservative Merge Rules
 
 Playlist import is conservative and non-destructive:
@@ -235,3 +255,14 @@ Import code should validate identity, version, and integrity metadata before app
 Unsupported versions should fail safely. Unknown fields should be ignored only when doing so does not change the meaning of the import.
 
 Validated Android/Desktop portability QA: Desktop exported 732 songs and 1523 listen events, including 14 `wavdrop_desktop_playback` events. Android export after first import had 732 songs and 1525 listen events, including the same 14 Desktop-origin events. Android export after second import remained 732 songs and 1525 listen events with the same 14 Desktop-origin events. `importBaselines` stayed 723, `lyricsOverrides` stayed 28, playlists stayed 3, aggregate play counts/listening time did not inflate, and no backup or database schema change was needed.
+
+## Deferred Beyond Beta 3.1
+
+The following are P2/P3 items, not Beta 3.1 scope:
+
+- Desktop portable import of `importBaselines`, `lyricsOverrides`, and `preferences.android` beyond the current safe Android-side behavior.
+- Portable song identity layer or optional `portableSongKey`.
+- Partial audio hash or acoustic fingerprinting.
+- Backup schema v2.
+- Shared cross-platform validation library.
+- Unknown future-field preservation architecture.
