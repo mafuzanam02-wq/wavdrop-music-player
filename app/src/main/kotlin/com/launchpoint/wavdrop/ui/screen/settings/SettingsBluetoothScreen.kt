@@ -93,17 +93,6 @@ fun SettingsBluetoothScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
-            item { SectionHeader("Audio Output") }
-            item {
-                ToggleSettingsRow(
-                    title           = "Pause when audio output disconnects",
-                    subtitle        = "Pause playback when headphones or Bluetooth audio disconnects.",
-                    checked         = resumeBehavior.pauseOnAudioDisconnect,
-                    onCheckedChange = viewModel::setPauseOnAudioDisconnect,
-                )
-            }
-            item { SectionDivider() }
-
             item { SectionHeader("Bluetooth Auto Resume") }
             item {
                 SettingsMessageRow(
