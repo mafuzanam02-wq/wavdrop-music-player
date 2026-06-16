@@ -41,6 +41,7 @@ import com.launchpoint.wavdrop.data.model.AlbumReportSummary
 import com.launchpoint.wavdrop.data.model.ArtistReportSummary
 import com.launchpoint.wavdrop.data.model.ListeningReportSummary
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,13 +90,7 @@ fun ReportsScreen(
 
 @Composable
 private fun LoadingContent(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text = "Loading reports...",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
-    }
+    LoadingStateContent(message = "Loading reports...", modifier = modifier)
 }
 
 @Composable

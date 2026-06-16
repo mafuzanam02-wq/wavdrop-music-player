@@ -61,6 +61,7 @@ import com.launchpoint.wavdrop.data.model.TrackStats
 import com.launchpoint.wavdrop.data.stats.ListeningTimeRules
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.screen.lyrics.LyricsViewModel
 import kotlinx.coroutines.launch
@@ -231,9 +232,7 @@ fun TrackDetailsScreen(
 
 @Composable
 private fun LoadingContent(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
-    }
+    LoadingStateContent(message = "Loading track details...", modifier = modifier)
 }
 
 // ── Not found ─────────────────────────────────────────────────────────────────
@@ -298,15 +297,6 @@ private fun ReadyContent(
                 ),
             ),
         )
-
-        SectionDivider()
-
-        // ── File section ─────────────────────────────────────────────────────
-        SectionHeader("File")
-
-        DetailRow("Song ID",  song.id.toString())
-        DetailRow("Album ID", song.albumId.toString())
-        UriRow("URI", song.uri)
 
         SectionDivider()
 
@@ -508,25 +498,6 @@ private fun DetailRow(label: String, value: String) {
             fontWeight = FontWeight.Medium,
             color      = MaterialTheme.colorScheme.onSurface,
             modifier   = Modifier.weight(0.62f),
-        )
-    }
-}
-
-@Composable
-private fun UriRow(label: String, value: String) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-        Text(
-            text  = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text     = value,
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }

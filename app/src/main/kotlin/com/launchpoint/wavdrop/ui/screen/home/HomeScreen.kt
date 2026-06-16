@@ -488,14 +488,14 @@ private fun EmptyLibraryContent(modifier: Modifier = Modifier) {
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            text      = "No music found",
+            text      = "No songs found",
             style     = MaterialTheme.typography.titleMedium,
             color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text      = "Add audio files to your device to see them here.",
+            text      = "Add audio files to your device, then rescan your library. If your music is in a specific folder, choose it in Settings.",
             style     = MaterialTheme.typography.bodyMedium,
             color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             textAlign = TextAlign.Center,
@@ -762,12 +762,12 @@ private fun DashboardEmptyLibraryCard(
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "No music found yet",
+                    text = "No songs found yet",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "Add audio files to your device, then browse your library here.",
+                    text = "Add audio files to your device, then rescan your library. If your music is in a specific folder, choose it in Settings.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                 )

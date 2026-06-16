@@ -75,6 +75,7 @@ import com.launchpoint.wavdrop.ui.components.SongSearchActions
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
@@ -448,21 +449,15 @@ private fun Song.validFolderKey(): String? {
 
 @Composable
 private fun LoadingSongs(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text  = "Loading songs...",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
-    }
+    LoadingStateContent(message = "Loading songs...", modifier = modifier)
 }
 
 @Composable
 private fun EmptySongs(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         EmptyStateText(
-            title = "No music found",
-            message = "Add audio files to your device, then pull to refresh your library.",
+            title = "No songs found",
+            message = "Add audio files to your device, then rescan your library. If your music is in a specific folder, choose it in Settings.",
         )
     }
 }

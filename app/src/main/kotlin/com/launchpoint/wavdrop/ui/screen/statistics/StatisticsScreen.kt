@@ -47,6 +47,7 @@ import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.model.StatsDashboardSummary
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,13 +99,7 @@ fun StatisticsScreen(
 
 @Composable
 private fun LoadingContent(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text = "Loading statistics...",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
-    }
+    LoadingStateContent(message = "Loading statistics...", modifier = modifier)
 }
 
 @Composable

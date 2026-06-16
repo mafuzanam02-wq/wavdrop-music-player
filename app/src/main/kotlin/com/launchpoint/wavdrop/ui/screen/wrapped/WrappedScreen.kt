@@ -53,6 +53,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.model.WrappedSummary
+import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -109,13 +110,7 @@ fun WrappedScreen(
 
 @Composable
 private fun LoadingContent(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text = "Loading Wrapped...",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
-    }
+    LoadingStateContent(message = "Loading Wrapped...", modifier = modifier)
 }
 
 @Composable
@@ -126,14 +121,14 @@ private fun EmptyContent(modifier: Modifier = Modifier) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "No event-backed Wrapped yet.",
+                text = "No Wrapped yet.",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Play music in Wavdrop to create yearly event history. Imported aggregate counts are not used for Wrapped.",
+                text = "Play music in Wavdrop to build your yearly listening history. Your summary will appear once there is enough listening activity.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -174,7 +169,7 @@ private fun WrappedContent(
 
         if (wrapped.emptyState.isEmpty) {
             Text(
-                text = "No matched plays found for ${wrapped.year}. Event history may point to tracks no longer in the library; play current library songs to rebuild it.",
+                text = "No listening summary found for ${wrapped.year}. Play current library songs to build a fresh yearly summary.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
                 modifier = Modifier

@@ -227,21 +227,21 @@ private fun PreviewContent(
         item {
             StatRow("Songs",            state.songCount.toString())
             StatRow("Statistics",       state.statsCount.toString())
-            StatRow("Import Baselines", state.baselineCount.toString())
+            StatRow("Import history",   state.baselineCount.toString())
             StatRow("Lyrics overrides", state.lyricsOverridesCount.toString())
             StatRow("Preferences",      if (state.hasPreferences) "Included" else "Not included")
             StatRow("Playlists",        state.playlistCount.toString())
-            StatRow("Listen events",    state.listenEventsCount.toString())
+            StatRow("Listening history", state.listenEventsCount.toString())
         }
         if (state.isDesktopBackup) {
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item { SectionLabel("Desktop Match Preview", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+            item { SectionLabel("Desktop Restore Preview", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
             item {
-                StatRow("Matched songs", state.matchedSongs.toString())
-                StatRow("Skipped unmatched", state.skippedUnmatched.toString())
-                StatRow("Skipped ambiguous", state.skippedAmbiguous.toString())
-                StatRow("Stats increasing", state.statsWillIncrease.toString())
-                StatRow("Favorites applying", state.favoritesWillApply.toString())
+                StatRow("Ready to restore", state.matchedSongs.toString())
+                StatRow("Could not match", state.skippedUnmatched.toString())
+                StatRow("Needs review", state.skippedAmbiguous.toString())
+                StatRow("Stats to update", state.statsWillIncrease.toString())
+                StatRow("Favorites to restore", state.favoritesWillApply.toString())
             }
         }
 
@@ -288,9 +288,9 @@ private fun ConfirmApplyDialog(
         text  = {
             Text(
                 text  = if (isDesktopBackup) {
-                    "Desktop stats, favorites, playlists, and listening history will be imported using metadata matching. Play counts and listening time only increase, and backup import does not modify audio files."
+                    "Desktop stats, favorites, playlists, and listening history will be restored by matching songs in your library. Play counts and listening time only increase, and backup import does not modify audio files."
                 } else {
-                    "Stats will be restored from this backup. Matched tracks are set " +
+                    "Stats will be restored from this backup. Songs that match are set " +
                         "to the exact backup values, replacing current stats. " +
                         "Lyrics are only replaced if the backup copy is newer. " +
                         "Backup import does not modify audio files."
@@ -367,10 +367,10 @@ private fun AppliedContent(
                 shape    = RoundedCornerShape(12.dp),
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                    StatRow("Songs matched",     result.matchedTracks.toString())
-                    StatRow("Songs not matched", result.unmatchedTracks.toString())
+                    StatRow("Songs restored",    result.matchedTracks.toString())
+                    StatRow("Could not match",   result.unmatchedTracks.toString())
                     if (result.ambiguousTracks > 0) {
-                        StatRow("Songs ambiguous", result.ambiguousTracks.toString())
+                        StatRow("Needs review", result.ambiguousTracks.toString())
                     }
                     StatRow("Stats updated",     result.statsUpdated.toString())
                     StatRow("Lyrics restored",   result.lyricsRestored.toString())
@@ -391,10 +391,10 @@ private fun AppliedContent(
                             StatRow("This month's listens", result.currentMonthEventsRestored.toString())
                         }
                         if (result.eventsSkippedDuplicate > 0) {
-                            StatRow("Already present", result.eventsSkippedDuplicate.toString())
+                            StatRow("Already restored", result.eventsSkippedDuplicate.toString())
                         }
                         if (result.eventsSkippedUnmatched > 0) {
-                            StatRow("History not matched", result.eventsSkippedUnmatched.toString())
+                            StatRow("History could not match", result.eventsSkippedUnmatched.toString())
                         }
                     }
                     result.warnings.forEach { warning ->
@@ -484,7 +484,7 @@ private fun StatRow(label: String, value: String, modifier: Modifier = Modifier)
 
 @Composable
 private fun PreviewNotice(
-    text: String = "Stats will be restored from this backup. Matched tracks take the backup values exactly.",
+    text: String = "Stats will be restored from this backup. Songs that match take the backup values exactly. Backup import does not modify audio files.",
     modifier: Modifier = Modifier,
 ) {
     Surface(
