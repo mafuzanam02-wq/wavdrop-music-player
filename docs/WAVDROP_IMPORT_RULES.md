@@ -40,6 +40,8 @@ The shared desktop format combines Android identity fields with desktop signals:
 
 When `appName` or `sourcePlatform` indicates desktop origin, route to the desktop import path regardless of whether Android identity fields are present. Song IDs are platform-local and not portable. Android must not use desktop string IDs as Android song IDs.
 
+Desktop-exported backups may contain portable Android-compatible sections such as `songs`, `playlists`, `listenEvents`, `importBaselines`, `lyricsOverrides`, and platform-scoped preferences. Android should accept supported `schemaVersion: 1`, consume Android-compatible fields, ignore Desktop-only preferences safely, and never modify audio files during backup/import/export.
+
 ## Matching Rules
 
 Cross-platform imports must match songs by metadata, not foreign IDs.
@@ -87,7 +89,37 @@ effectiveListeningTimeMs =
 
 Do not fabricate listening events from aggregate stats.
 
-Imported desktop aggregate stats may update Android aggregate stats, but they must not create `TrackListenEventEntity` rows. Monthly Reports and Wrapped remain event-backed unless a future verified event import contract is added.
+Imported Desktop aggregate stats may update Android aggregate stats, but they must not create synthetic `TrackListenEventEntity` rows. Valid Desktop-origin playback events are different: they are verified event rows exported by Wavdrop Desktop and may be restored when they can be matched safely to local Android songs.
+
+Desktop-origin listen event shape:
+
+```json
+{
+  "songId": "desktop-string-song-id",
+  "title": "Song title",
+  "artist": "Artist",
+  "album": "Album",
+  "durationMs": 123456,
+  "occurredAt": 1780000000000,
+  "listenedMs": 60000,
+  "eventType": "PLAY",
+  "source": "wavdrop_desktop_playback"
+}
+```
+
+Desktop IDs are platform-local and must not be trusted as Android IDs. Android resolves Desktop listen events to local Android songs through the Desktop backup song mapping and safe metadata fallback. Android does not require Android `contentUri` for Desktop-origin listen events. Matched events are stored in `track_listen_events` using local Android song IDs while preserving `occurredAt`, `eventType`, `listenedMs`, `durationMs`, and `source = "wavdrop_desktop_playback"`. Unmatched Desktop-origin listen events are skipped.
+
+Exportable listen-event sources are `wavdrop_playback`, `manual_restore`, and `wavdrop_desktop_playback`. Unsupported or synthetic sources remain excluded, including `blackplayer_import` and unknown future sources unless explicitly supported later.
+
+Restored/imported listen-event idempotency uses this identity concept:
+
+```text
+local Android songId + occurredAt + eventType + listenedMs
+```
+
+Do not dedupe only by song ID; multiple plays of the same song are valid. Repeat import of the same Desktop backup must not duplicate events, inflate `playCount`, inflate raw `totalListeningTimeMs`, duplicate playlist songs, or destabilize `importBaselines` and `lyricsOverrides`.
+
+Monthly Reports, Wrapped, and other event-backed reports should use real listen-event `listenedMs` where applicable. Desktop-origin events should count in event-backed reports if they have valid `occurredAt` and `listenedMs`.
 
 ## Settings
 
@@ -177,3 +209,17 @@ Import preview/apply flows should make skipped records visible:
 - playlist entries matched, skipped unmatched, and skipped as duplicates
 
 Validation failures should fail safely before any database mutation. Apply operations should use transactions where practical.
+
+## Validated Android/Desktop QA
+
+Validated portability loop:
+
+1. Desktop exported a backup containing Desktop-origin `wavdrop_desktop_playback` listen events.
+2. Android imported the Desktop backup.
+3. Android exported a backup.
+4. Android imported the same Desktop backup again.
+5. Android exported again.
+
+Result: `wavdrop_desktop_playback` events survived Android import/export, the second import did not duplicate Desktop-origin events, total `listenEvents` stayed stable after repeat import, `importBaselines` stayed stable, `lyricsOverrides` stayed stable, playlists stayed stable, aggregate play counts/listening time did not inflate, and no backup or database schema change was needed.
+
+Real QA counts: source Desktop backup had 732 songs and 1523 listen events, including 14 `wavdrop_desktop_playback` events. Android export after first import had 732 songs and 1525 listen events, including the same 14 Desktop-origin events. Android export after second import remained 732 songs and 1525 listen events with the same 14 Desktop-origin events. `importBaselines` stayed 723, `lyricsOverrides` stayed 28, playlists stayed 3.
