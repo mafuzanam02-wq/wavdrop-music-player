@@ -1,5 +1,7 @@
 package com.launchpoint.wavdrop.data.backup
 
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+
 data class DesktopBackupPlaylist(
     val id: String,
     val name: String,
@@ -15,6 +17,7 @@ data class DesktopWavdropBackup(
     val folderPath: String?,
     val songs: List<DesktopBackupSong>,
     val playlists: List<DesktopBackupPlaylist> = emptyList(),
+    val listenEvents: List<DesktopBackupListenEvent> = emptyList(),
 )
 
 data class DesktopBackupSong(
@@ -27,6 +30,19 @@ data class DesktopBackupSong(
     val totalListeningTimeMs: Long,
     val lastPlayedAt: Long,
     val favorite: Boolean,
+)
+
+data class DesktopBackupListenEvent(
+    /** Desktop-local string ID. Resolved through [DesktopWavdropBackup.songs] when possible. */
+    val songId: String?,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationMs: Long,
+    val occurredAt: Long,
+    val listenedMs: Long,
+    val eventType: String,
+    val source: String,
 )
 
 data class DesktopWavdropBackupParseResult(
@@ -101,6 +117,49 @@ object DesktopWavdropBackupParser {
             result
         }
 
+        val listenEvents = run {
+            val arr = root.optJSONArray("listenEvents") ?: return@run emptyList<DesktopBackupListenEvent>()
+            val result = mutableListOf<DesktopBackupListenEvent>()
+            for (i in 0 until arr.length()) {
+                val event = arr.optJSONObject(i) ?: continue
+                val source = event.optString("source")
+                if (source != TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK) continue
+
+                val songId = event.optString("songId").takeIf { it.isNotBlank() }
+                val title = event.optString("title")
+                val artist = event.optString("artist")
+                val album = event.optString("album")
+                val hasMetadataIdentity = title.isNotBlank() && artist.isNotBlank() && album.isNotBlank()
+                if (songId == null && !hasMetadataIdentity) continue
+
+                val occurredAt = event.optLong("occurredAt", 0L)
+                val listenedMs = event.optLong("listenedMs", 0L)
+                val durationMs = event.optLong("durationMs", 0L)
+                if (occurredAt <= 0L || listenedMs <= 0L || durationMs < 0L) continue
+
+                val eventType = event.optString("eventType")
+                    .ifBlank { TrackListenEventEntity.TYPE_PLAY }
+                if (eventType != TrackListenEventEntity.TYPE_PLAY &&
+                    eventType != TrackListenEventEntity.TYPE_SKIP
+                ) {
+                    continue
+                }
+
+                result += DesktopBackupListenEvent(
+                    songId     = songId,
+                    title      = title,
+                    artist     = artist,
+                    album      = album,
+                    durationMs = durationMs,
+                    occurredAt = occurredAt,
+                    listenedMs = listenedMs,
+                    eventType  = eventType,
+                    source     = source,
+                )
+            }
+            result
+        }
+
         return DesktopWavdropBackupParseResult(
             backup = DesktopWavdropBackup(
                 schemaVersion  = root.optInt("schemaVersion", 1),
@@ -110,6 +169,7 @@ object DesktopWavdropBackupParser {
                 folderPath     = root.optString("folderPath").takeIf { it.isNotBlank() },
                 songs          = songs,
                 playlists      = playlists,
+                listenEvents   = listenEvents,
             ),
             error = null,
         )

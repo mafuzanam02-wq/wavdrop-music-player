@@ -120,7 +120,7 @@ class BackupImportPreviewViewModel @Inject constructor(
                 lyricsOverridesCount = 0,
                 hasPreferences       = false,
                 playlistCount        = backup.playlists.size,
-                listenEventsCount    = 0,
+                listenEventsCount    = backup.listenEvents.size,
                 isDesktopBackup      = true,
                 matchedSongs         = plan.matchedCount,
                 skippedUnmatched     = plan.unmatchedCount,

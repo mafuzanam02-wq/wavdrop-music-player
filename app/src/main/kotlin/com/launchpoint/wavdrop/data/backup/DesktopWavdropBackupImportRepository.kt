@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
+import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.PlaylistEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistSongEntity
@@ -18,6 +19,7 @@ class DesktopWavdropBackupImportRepository @Inject constructor(
     private val songDao: SongDao,
     private val trackStatsDao: TrackStatsDao,
     private val playlistDao: PlaylistDao,
+    private val trackListenEventDao: TrackListenEventDao,
 ) {
     suspend fun previewImport(backup: DesktopWavdropBackup): DesktopBackupImportPlan =
         DesktopWavdropBackupImportPlanner.plan(
@@ -28,10 +30,22 @@ class DesktopWavdropBackupImportRepository @Inject constructor(
 
     suspend fun applyImport(backup: DesktopWavdropBackup): WavdropBackupImportApplyResult =
         db.withTransaction {
+            val currentSongs = currentSongs()
+            val existingEventFingerprints = if (backup.listenEvents.isNotEmpty()) {
+                val minMs = backup.listenEvents.minOf { it.occurredAt }
+                val maxMs = backup.listenEvents.maxOf { it.occurredAt }
+                trackListenEventDao
+                    .getInRangeSnapshot(minMs, maxMs)
+                    .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
+                    .toHashSet()
+            } else {
+                emptySet()
+            }
             val plan = DesktopWavdropBackupImportPlanner.plan(
                 backup = backup,
-                currentSongs = currentSongs(),
+                currentSongs = currentSongs,
                 currentStats = trackStatsDao.getAllStatsSnapshot(),
+                existingEventFingerprints = existingEventFingerprints,
             )
             val importedAt = System.currentTimeMillis()
 
@@ -91,6 +105,10 @@ class DesktopWavdropBackupImportRepository @Inject constructor(
                 }
             }
 
+            for (event in plan.listenEventPlan.toInsert) {
+                trackListenEventDao.insert(event)
+            }
+
             val favoritesInBackup = plan.matchedRows.count { it.desktopSong.favorite } +
                 plan.unmatchedSongs.count { it.favorite } +
                 plan.ambiguousSongs.count { it.favorite }
@@ -110,11 +128,14 @@ class DesktopWavdropBackupImportRepository @Inject constructor(
                 playlistSongsRestored    = playlistSongsRestored,
                 playlistEntriesInBackup  = plan.playlistEntriesInBackup,
                 playlistEntriesUnmatched = plan.playlistSongsSkippedCount,
-                eventsRestored           = 0,
-                eventsSkipped            = 0,
-                eventsSkippedDuplicate   = 0,
-                eventsSkippedUnmatched   = 0,
-                dataRestored             = plan.matchedRows.isNotEmpty() || playlistsRestored > 0,
+                eventsRestored           = plan.listenEventPlan.restored,
+                eventsSkipped            = plan.listenEventPlan.skippedTotal,
+                eventsSkippedDuplicate   = plan.listenEventPlan.skippedDuplicate,
+                eventsSkippedUnmatched   = plan.listenEventPlan.skippedUnmatched,
+                currentMonthEventsRestored = plan.listenEventPlan.currentMonthRestored,
+                dataRestored             = plan.matchedRows.isNotEmpty() ||
+                    playlistsRestored > 0 ||
+                    plan.listenEventPlan.restored > 0,
                 warnings                 = listOf(
                     "Desktop song IDs are not Android song IDs. Songs were matched by metadata.",
                 ),

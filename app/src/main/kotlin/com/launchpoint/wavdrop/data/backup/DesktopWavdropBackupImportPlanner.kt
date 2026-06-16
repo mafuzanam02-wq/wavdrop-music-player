@@ -1,8 +1,12 @@
 package com.launchpoint.wavdrop.data.backup
 
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
+import com.launchpoint.wavdrop.data.model.ListeningPeriodRange
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.text.MusicTextNormalizer
+import java.time.Instant
+import java.time.ZoneId
 
 data class DesktopBackupMatchedRow(
     val song: Song,
@@ -18,6 +22,18 @@ data class DesktopPlaylistPlan(
     val skippedUnmatched: Int,
 )
 
+data class DesktopListenEventPlan(
+    val toInsert: List<TrackListenEventEntity>,
+    val eventsInBackup: Int,
+    val restored: Int,
+    val skippedDuplicate: Int,
+    val skippedUnmatched: Int,
+    val skippedInvalid: Int,
+    val currentMonthRestored: Int,
+) {
+    val skippedTotal: Int get() = skippedDuplicate + skippedUnmatched + skippedInvalid
+}
+
 data class DesktopBackupImportPlan(
     val matchedRows: List<DesktopBackupMatchedRow>,
     val unmatchedSongs: List<DesktopBackupSong>,
@@ -26,6 +42,15 @@ data class DesktopBackupImportPlan(
     val playlistsSkippedEmpty: Int = 0,
     val playlistsInBackup: Int = 0,
     val playlistEntriesInBackup: Int = 0,
+    val listenEventPlan: DesktopListenEventPlan = DesktopListenEventPlan(
+        toInsert = emptyList(),
+        eventsInBackup = 0,
+        restored = 0,
+        skippedDuplicate = 0,
+        skippedUnmatched = 0,
+        skippedInvalid = 0,
+        currentMonthRestored = 0,
+    ),
 ) {
     val matchedCount: Int get() = matchedRows.size
     val unmatchedCount: Int get() = unmatchedSongs.size
@@ -35,6 +60,7 @@ data class DesktopBackupImportPlan(
     val playlistsToImportCount: Int get() = playlistPlans.size
     val playlistSongsMatchedCount: Int get() = playlistPlans.sumOf { it.resolvedSongIds.size }
     val playlistSongsSkippedCount: Int get() = playlistPlans.sumOf { it.skippedUnmatched }
+    val listenEventsInBackup: Int get() = listenEventPlan.eventsInBackup
 
     fun toApplyResult(): WavdropBackupImportApplyResult = WavdropBackupImportApplyResult(
         matchedTracks            = matchedCount,
@@ -49,11 +75,12 @@ data class DesktopBackupImportPlan(
         playlistsInBackup        = playlistsInBackup,
         playlistEntriesInBackup  = playlistEntriesInBackup,
         playlistEntriesUnmatched = playlistSongsSkippedCount,
-        eventsRestored           = 0,
-        eventsSkipped            = 0,
-        eventsSkippedDuplicate   = 0,
-        eventsSkippedUnmatched   = 0,
-        dataRestored             = matchedRows.isNotEmpty(),
+        eventsRestored           = listenEventPlan.restored,
+        eventsSkipped            = listenEventPlan.skippedTotal,
+        eventsSkippedDuplicate   = listenEventPlan.skippedDuplicate,
+        eventsSkippedUnmatched   = listenEventPlan.skippedUnmatched,
+        currentMonthEventsRestored = listenEventPlan.currentMonthRestored,
+        dataRestored             = matchedRows.isNotEmpty() || listenEventPlan.restored > 0,
         warnings                 = listOf(
             "Desktop song IDs are not Android song IDs. Songs were matched by metadata.",
         ),
@@ -68,6 +95,9 @@ object DesktopWavdropBackupImportPlanner {
         backup: DesktopWavdropBackup,
         currentSongs: List<Song>,
         currentStats: List<TrackStatsEntity>,
+        existingEventFingerprints: Set<String> = emptySet(),
+        nowMs: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
     ): DesktopBackupImportPlan {
         val matcher = DesktopSongMatcher(currentSongs)
         val currentStatsById = currentStats.associateBy { it.songId }
@@ -104,6 +134,7 @@ object DesktopWavdropBackupImportPlanner {
                 else -> null
             }
         }.toMap()
+        val desktopSongById = backup.songs.associateBy { it.id }
 
         val playlistPlans = mutableListOf<DesktopPlaylistPlan>()
         var playlistsSkippedEmpty = 0
@@ -150,7 +181,118 @@ object DesktopWavdropBackupImportPlanner {
             playlistsSkippedEmpty  = playlistsSkippedEmpty,
             playlistsInBackup      = backup.playlists.size,
             playlistEntriesInBackup = totalPlaylistEntries,
+            listenEventPlan        = planListenEvents(
+                events = backup.listenEvents,
+                desktopSongById = desktopSongById,
+                desktopIdToAndroidSong = desktopIdToAndroidSong,
+                matcher = matcher,
+                existingFingerprints = existingEventFingerprints,
+                nowMs = nowMs,
+                zone = zone,
+            ),
         )
+    }
+
+    fun fingerprint(songId: Long, event: DesktopBackupListenEvent): String =
+        "$songId|${event.occurredAt}|${event.eventType}|${event.listenedMs}"
+
+    private fun planListenEvents(
+        events: List<DesktopBackupListenEvent>,
+        desktopSongById: Map<String, DesktopBackupSong>,
+        desktopIdToAndroidSong: Map<String, Song>,
+        matcher: DesktopSongMatcher,
+        existingFingerprints: Set<String>,
+        nowMs: Long,
+        zone: ZoneId,
+    ): DesktopListenEventPlan {
+        val validEventTypes = setOf(
+            TrackListenEventEntity.TYPE_PLAY,
+            TrackListenEventEntity.TYPE_SKIP,
+        )
+        val now = Instant.ofEpochMilli(nowMs).atZone(zone)
+        val currentMonth = ListeningPeriodRange.month(now.year, now.monthValue, zone)
+        val seen = existingFingerprints.toHashSet()
+        val toInsert = mutableListOf<TrackListenEventEntity>()
+        var skippedDuplicate = 0
+        var skippedUnmatched = 0
+        var skippedInvalid = 0
+        var currentMonthRestored = 0
+
+        for (event in events) {
+            if (event.source != TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK ||
+                event.eventType !in validEventTypes ||
+                event.occurredAt <= 0L ||
+                event.listenedMs <= 0L ||
+                event.durationMs < 0L
+            ) {
+                skippedInvalid++
+                continue
+            }
+
+            val song = resolveEventSong(event, desktopSongById, desktopIdToAndroidSong, matcher)
+            if (song == null) {
+                skippedUnmatched++
+                continue
+            }
+
+            val key = fingerprint(song.id, event)
+            if (key in seen) {
+                skippedDuplicate++
+                continue
+            }
+            seen += key
+            toInsert += TrackListenEventEntity(
+                songId = song.id,
+                eventType = event.eventType,
+                occurredAt = event.occurredAt,
+                listenedMs = event.listenedMs,
+                durationMs = event.durationMs,
+                source = TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK,
+            )
+            if (currentMonth.contains(event.occurredAt)) currentMonthRestored++
+        }
+
+        return DesktopListenEventPlan(
+            toInsert = toInsert,
+            eventsInBackup = events.size,
+            restored = toInsert.size,
+            skippedDuplicate = skippedDuplicate,
+            skippedUnmatched = skippedUnmatched,
+            skippedInvalid = skippedInvalid,
+            currentMonthRestored = currentMonthRestored,
+        )
+    }
+
+    private fun resolveEventSong(
+        event: DesktopBackupListenEvent,
+        desktopSongById: Map<String, DesktopBackupSong>,
+        desktopIdToAndroidSong: Map<String, Song>,
+        matcher: DesktopSongMatcher,
+    ): Song? {
+        event.songId?.let { desktopId ->
+            desktopIdToAndroidSong[desktopId]?.let { return it }
+            desktopSongById[desktopId]?.let { desktopSong ->
+                return when (val result = matcher.resolve(desktopSong)) {
+                    is DesktopSongMatch.Matched -> result.song
+                    else -> null
+                }
+            }
+        }
+
+        val metadataSong = DesktopBackupSong(
+            id = event.songId.orEmpty(),
+            title = event.title,
+            artist = event.artist,
+            album = event.album,
+            playCount = 0,
+            totalListeningTimeMs = 0L,
+            lastPlayedAt = 0L,
+            favorite = false,
+        )
+        return when (val result = matcher.resolve(metadataSong)) {
+            is DesktopSongMatch.Matched -> result.song
+            else -> null
+        }
     }
 
     private fun Candidate.toMatchedRow(

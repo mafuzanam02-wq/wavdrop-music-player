@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.data.backup
 
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.model.Song
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -65,6 +66,19 @@ class DesktopWavdropBackupImportTest {
             ),
             playlist.songIds,
         )
+    }
+
+    @Test
+    fun `shared backup parser reads desktop listen events`() {
+        val result = DesktopWavdropBackupParser.parse(sharedDesktopJson())
+
+        val event = result.backup!!.listenEvents.single()
+        assertEquals("ace76dacba47849f27d6b2515e600190ad52f51f", event.songId)
+        assertEquals("This City", event.title)
+        assertEquals(1710000002000L, event.occurredAt)
+        assertEquals(60_000L, event.listenedMs)
+        assertEquals(TrackListenEventEntity.TYPE_PLAY, event.eventType)
+        assertEquals(TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK, event.source)
     }
 
     @Test
@@ -184,6 +198,67 @@ class DesktopWavdropBackupImportTest {
 
         assertEquals(0, result.eventsRestored)
         assertEquals(0, result.currentMonthEventsRestored)
+    }
+
+    @Test
+    fun `desktop listen event matches local song and plans insert`() {
+        val desktopId = "desktop-song-1"
+        val androidSong = song(id = 42, title = "Song", artist = "Artist", album = "Album")
+        val event = desktopListenEvent(songId = desktopId)
+
+        val plan = DesktopWavdropBackupImportPlanner.plan(
+            backup = backup(
+                desktopSong(id = desktopId),
+                listenEvents = listOf(event),
+            ),
+            currentSongs = listOf(androidSong),
+            currentStats = emptyList(),
+        )
+
+        val entity = plan.listenEventPlan.toInsert.single()
+        assertEquals(1, plan.listenEventPlan.restored)
+        assertEquals(42L, entity.songId)
+        assertEquals(event.occurredAt, entity.occurredAt)
+        assertEquals(event.listenedMs, entity.listenedMs)
+        assertEquals(event.durationMs, entity.durationMs)
+        assertEquals(TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK, entity.source)
+    }
+
+    @Test
+    fun `reimporting desktop listen event is deduped by local song timestamp type and listened time`() {
+        val desktopId = "desktop-song-1"
+        val androidSong = song(id = 42, title = "Song", artist = "Artist", album = "Album")
+        val event = desktopListenEvent(songId = desktopId)
+        val existing = setOf(DesktopWavdropBackupImportPlanner.fingerprint(androidSong.id, event))
+
+        val plan = DesktopWavdropBackupImportPlanner.plan(
+            backup = backup(
+                desktopSong(id = desktopId),
+                listenEvents = listOf(event),
+            ),
+            currentSongs = listOf(androidSong),
+            currentStats = emptyList(),
+            existingEventFingerprints = existing,
+        )
+
+        assertEquals(0, plan.listenEventPlan.restored)
+        assertEquals(1, plan.listenEventPlan.skippedDuplicate)
+        assertEquals(emptyList<TrackListenEventEntity>(), plan.listenEventPlan.toInsert)
+    }
+
+    @Test
+    fun `unmatched desktop listen event is skipped and counted`() {
+        val plan = DesktopWavdropBackupImportPlanner.plan(
+            backup = backup(
+                desktopSong(id = "known", title = "Known"),
+                listenEvents = listOf(desktopListenEvent(songId = "missing", title = "Missing")),
+            ),
+            currentSongs = listOf(song(id = 1, title = "Known")),
+            currentStats = emptyList(),
+        )
+
+        assertEquals(0, plan.listenEventPlan.restored)
+        assertEquals(1, plan.listenEventPlan.skippedUnmatched)
     }
 
     @Test
@@ -473,6 +548,19 @@ class DesktopWavdropBackupImportTest {
               "createdAt": "2026-06-13T05:36:17.634Z",
               "updatedAt": "2026-06-13T07:53:14.921Z"
             }
+          ],
+          "listenEvents": [
+            {
+              "songId": "ace76dacba47849f27d6b2515e600190ad52f51f",
+              "title": "This City",
+              "artist": "JolÃ©",
+              "album": "Single",
+              "durationMs": 123456,
+              "occurredAt": 1710000002000,
+              "listenedMs": 60000,
+              "eventType": "PLAY",
+              "source": "wavdrop_desktop_playback"
+            }
           ]
         }
     """.trimIndent()
@@ -480,6 +568,7 @@ class DesktopWavdropBackupImportTest {
     private fun backup(
         vararg songs: DesktopBackupSong,
         playlists: List<DesktopBackupPlaylist> = emptyList(),
+        listenEvents: List<DesktopBackupListenEvent> = emptyList(),
     ) = DesktopWavdropBackup(
         schemaVersion  = 1,
         exportedAt     = "2026-06-13T00:00:00Z",
@@ -488,6 +577,7 @@ class DesktopWavdropBackupImportTest {
         folderPath     = "Music",
         songs          = songs.toList(),
         playlists      = playlists,
+        listenEvents   = listenEvents,
     )
 
     private fun playlist(name: String, vararg songIds: String) = DesktopBackupPlaylist(
@@ -514,6 +604,28 @@ class DesktopWavdropBackupImportTest {
         totalListeningTimeMs = totalListeningTimeMs,
         lastPlayedAt         = lastPlayedAt,
         favorite             = favorite,
+    )
+
+    private fun desktopListenEvent(
+        songId: String? = "desktop-id-999",
+        title: String = "Song",
+        artist: String = "Artist",
+        album: String = "Album",
+        durationMs: Long = 180_000L,
+        occurredAt: Long = 1710000002000L,
+        listenedMs: Long = 60_000L,
+        eventType: String = TrackListenEventEntity.TYPE_PLAY,
+        source: String = TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK,
+    ) = DesktopBackupListenEvent(
+        songId = songId,
+        title = title,
+        artist = artist,
+        album = album,
+        durationMs = durationMs,
+        occurredAt = occurredAt,
+        listenedMs = listenedMs,
+        eventType = eventType,
+        source = source,
     )
 
     private fun song(

@@ -32,7 +32,7 @@ data class TrackListenEventEntity(
     val occurredAt: Long,       // epoch ms — wall-clock time when the event was finalised
     val listenedMs: Long = 0L,  // accumulated continuous listening time (0 for SKIP events)
     val durationMs: Long = 0L,  // track duration at event time (0 if unknown)
-    val source: String,         // SOURCE_WAVDROP_PLAYBACK for native playback events
+    val source: String,         // playback/restored source identifier
 ) {
     companion object {
         const val TYPE_PLAY = "PLAY"
@@ -46,5 +46,8 @@ data class TrackListenEventEntity(
 
         /** Reserved — for future Wavdrop JSON restore support. */
         const val SOURCE_MANUAL_RESTORE = "manual_restore"
+
+        /** Preserved from verified Wavdrop Desktop playback event imports. */
+        const val SOURCE_DESKTOP_PLAYBACK = "wavdrop_desktop_playback"
     }
 }

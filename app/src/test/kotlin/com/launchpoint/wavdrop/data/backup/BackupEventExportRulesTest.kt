@@ -23,6 +23,11 @@ class BackupEventExportRulesTest {
     }
 
     @Test
+    fun `desktop playback events are exported so desktop history survives android round trip`() {
+        assertTrue(BackupEventExportRules.shouldExport(TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK))
+    }
+
+    @Test
     fun `imported synthetic history is never exported`() {
         assertFalse(BackupEventExportRules.shouldExport(TrackListenEventEntity.SOURCE_BLACKPLAYER_IMPORT))
     }
