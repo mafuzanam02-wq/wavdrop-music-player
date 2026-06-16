@@ -127,7 +127,7 @@ class BackupImportPreviewViewModel @Inject constructor(
                 skippedAmbiguous     = plan.ambiguousCount,
                 statsWillIncrease    = plan.statsWillIncreaseCount,
                 favoritesWillApply   = plan.favoritesWillApplyCount,
-                warning              = "Desktop song IDs are not Android song IDs. Songs will be matched by title, artist, and album metadata.",
+                warning              = "Desktop stats, favorites, playlists, and listening history are matched by title, artist, and album. Backup import does not modify audio files.",
             )
         }
 

@@ -39,6 +39,36 @@ class DesktopWavdropBackupImportTest {
     }
 
     @Test
+    fun `desktop backup with schemaVersion 1 parses`() {
+        val result = DesktopWavdropBackupParser.parse(legacyDesktopJson())
+
+        assertNotNull(result.backup)
+        assertEquals(1, result.backup!!.schemaVersion)
+        assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `desktop backup with absent schemaVersion remains legacy compatible`() {
+        val result = DesktopWavdropBackupParser.parse(
+            legacyDesktopJson().replace("\"schemaVersion\": 1,", ""),
+        )
+
+        assertNotNull(result.backup)
+        assertEquals(1, result.backup!!.schemaVersion)
+        assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `desktop backup with unsupported explicit schemaVersion is rejected`() {
+        val result = DesktopWavdropBackupParser.parse(
+            legacyDesktopJson().replace("\"schemaVersion\": 1", "\"schemaVersion\": 99"),
+        )
+
+        assertEquals(null, result.backup)
+        assertEquals("Unsupported desktop backup version: 99", result.error)
+    }
+
+    @Test
     fun `shared backup parser reads songs and identity fields`() {
         val result = DesktopWavdropBackupParser.parse(sharedDesktopJson())
 

@@ -288,11 +288,12 @@ private fun ConfirmApplyDialog(
         text  = {
             Text(
                 text  = if (isDesktopBackup) {
-                    "Desktop stats will be imported using metadata matching. Play counts and listening time only increase, latest played time wins, and favorites can be applied."
+                    "Desktop stats, favorites, playlists, and listening history will be imported using metadata matching. Play counts and listening time only increase, and backup import does not modify audio files."
                 } else {
                     "Stats will be restored from this backup. Matched tracks are set " +
                         "to the exact backup values, replacing current stats. " +
-                        "Lyrics are only replaced if the backup copy is newer."
+                        "Lyrics are only replaced if the backup copy is newer. " +
+                        "Backup import does not modify audio files."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),

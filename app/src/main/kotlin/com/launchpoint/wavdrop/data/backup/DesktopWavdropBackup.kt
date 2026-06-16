@@ -53,6 +53,7 @@ data class DesktopWavdropBackupParseResult(
 object DesktopWavdropBackupParser {
     const val APP_NAME = "wavdrop-desktop-lab"
     const val SOURCE_PLATFORM_DESKTOP = "desktop"
+    const val SUPPORTED_SCHEMA_VERSION = 1
 
     /**
      * Detects desktop-origin backup content before full parsing.
@@ -73,6 +74,9 @@ object DesktopWavdropBackupParser {
 
         val isDesktop = appName == APP_NAME || sourcePlatform == SOURCE_PLATFORM_DESKTOP
         if (!isDesktop) return failure("Invalid desktop backup format")
+
+        val schemaVersion = parseSchemaVersion(root)
+            ?: return failure("Unsupported desktop backup version: ${root.opt("schemaVersion")}")
 
         val songsArray = root.optJSONArray("songs") ?: return failure("Missing field: songs")
         val songs = buildList {
@@ -162,7 +166,7 @@ object DesktopWavdropBackupParser {
 
         return DesktopWavdropBackupParseResult(
             backup = DesktopWavdropBackup(
-                schemaVersion  = root.optInt("schemaVersion", 1),
+                schemaVersion  = schemaVersion,
                 exportedAt     = root.optString("exportedAt"),
                 appName        = appName.ifBlank { APP_NAME },
                 sourcePlatform = sourcePlatform,
@@ -173,6 +177,22 @@ object DesktopWavdropBackupParser {
             ),
             error = null,
         )
+    }
+
+    private fun parseSchemaVersion(root: org.json.JSONObject): Int? {
+        if (!root.has("schemaVersion") || root.isNull("schemaVersion")) {
+            return SUPPORTED_SCHEMA_VERSION
+        }
+        val raw = root.opt("schemaVersion")
+        val version = when (raw) {
+            is Int -> raw
+            is Long -> raw
+                .takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }
+                ?.toInt()
+            is Number -> raw.toInt().takeIf { raw.toDouble() == it.toDouble() }
+            else -> null
+        }
+        return version?.takeIf { it == SUPPORTED_SCHEMA_VERSION }
     }
 
     private fun failure(message: String) = DesktopWavdropBackupParseResult(

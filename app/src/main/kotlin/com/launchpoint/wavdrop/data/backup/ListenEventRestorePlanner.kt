@@ -62,7 +62,11 @@ object ListenEventRestorePlanner {
         var currentMonthRestored = 0
 
         for (event in events) {
-            if (event.eventType !in validEventTypes) {
+            if (event.eventType !in validEventTypes ||
+                event.occurredAt <= 0L ||
+                event.listenedMs <= 0L ||
+                event.durationMs < 0L
+            ) {
                 skippedInvalidType++
                 continue
             }

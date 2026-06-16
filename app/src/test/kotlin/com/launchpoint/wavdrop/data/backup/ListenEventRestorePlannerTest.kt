@@ -32,11 +32,12 @@ class ListenEventRestorePlannerTest {
         uri: String = "content://media/OLD/$songId",
         type: String = TrackListenEventEntity.TYPE_PLAY,
         listenedMs: Long = 30_000L,
+        durationMs: Long = 180_000L,
     ) = BackupListenEvent(
         songId = songId, contentUri = uri,
         title = "Title $songId", artist = "Artist $songId", album = "Album $songId",
         eventType = type, occurredAt = occurredAt,
-        listenedMs = listenedMs, durationMs = 180_000L, source = "wavdrop_playback",
+        listenedMs = listenedMs, durationMs = durationMs, source = "wavdrop_playback",
     )
 
     @Test
@@ -139,6 +140,48 @@ class ListenEventRestorePlannerTest {
     }
 
     @Test
+    fun `negative listenedMs is skipped as invalid`() {
+        val plan = planInvalidEvent(event(songId = 1L, occurredAt = epochMs(2026, 6, 5), listenedMs = -1L))
+
+        assertEquals(0, plan.restored)
+        assertEquals(1, plan.skippedInvalidType)
+    }
+
+    @Test
+    fun `zero listenedMs is skipped as invalid`() {
+        val plan = planInvalidEvent(event(songId = 1L, occurredAt = epochMs(2026, 6, 5), listenedMs = 0L))
+
+        assertEquals(0, plan.restored)
+        assertEquals(1, plan.skippedInvalidType)
+    }
+
+    @Test
+    fun `negative occurredAt is skipped as invalid`() {
+        val plan = planInvalidEvent(event(songId = 1L, occurredAt = -1L))
+
+        assertEquals(0, plan.restored)
+        assertEquals(1, plan.skippedInvalidType)
+    }
+
+    @Test
+    fun `zero occurredAt is skipped as invalid`() {
+        val plan = planInvalidEvent(event(songId = 1L, occurredAt = 0L))
+
+        assertEquals(0, plan.restored)
+        assertEquals(1, plan.skippedInvalidType)
+    }
+
+    @Test
+    fun `negative durationMs is skipped as invalid`() {
+        val plan = planInvalidEvent(
+            event(songId = 1L, occurredAt = epochMs(2026, 6, 5), durationMs = -1L),
+        )
+
+        assertEquals(0, plan.restored)
+        assertEquals(1, plan.skippedInvalidType)
+    }
+
+    @Test
     fun `event with matched track after URI change restores to new song id`() {
         // Simulates reinstall: backup URIs are dead, but the tier matcher resolves
         // the backup song to the rescanned library song with a new id.
@@ -168,4 +211,13 @@ class ListenEventRestorePlannerTest {
         assertEquals(1, plan.restored)
         assertEquals(42L, plan.toInsert.single().songId)
     }
+
+    private fun planInvalidEvent(event: BackupListenEvent): ListenEventRestorePlanner.Plan =
+        ListenEventRestorePlanner.plan(
+            events = listOf(event),
+            resolveSong = { song(7L) },
+            existingFingerprints = emptySet(),
+            nowMs = nowMs,
+            zone = utc,
+        )
 }
