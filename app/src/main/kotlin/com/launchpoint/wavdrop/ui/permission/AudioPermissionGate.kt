@@ -26,8 +26,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +48,7 @@ fun AudioPermissionGate(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentOnPermissionGranted by rememberUpdatedState(onPermissionGranted)
-    var permissionStatus by rememberSaveable {
+    var permissionStatus by remember {
         mutableStateOf(
             if (context.hasAudioPermission()) AudioPermissionStatus.Granted
             else AudioPermissionStatus.NotRequested,
