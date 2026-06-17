@@ -14,15 +14,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,7 +43,7 @@ import kotlinx.coroutines.launch
 fun OnboardingScreen(
     onComplete: () -> Unit,
 ) {
-    val pagerState    = rememberPagerState(pageCount = { OnboardingPages.size })
+    val pagerState     = rememberPagerState(pageCount = { OnboardingPages.size })
     val coroutineScope = rememberCoroutineScope()
     val isLastPage     = pagerState.currentPage == OnboardingPages.lastIndex
 
@@ -52,7 +55,7 @@ fun OnboardingScreen(
                 .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier              = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(onClick = onComplete) {
@@ -74,12 +77,56 @@ fun OnboardingScreen(
                 }
             }
 
-            PageIndicators(
-                selectedIndex = pagerState.currentPage,
-                count         = OnboardingPages.size,
-                modifier      = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(18.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                IconButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            val target = if (pagerState.currentPage == 0) {
+                                OnboardingPages.lastIndex
+                            } else {
+                                pagerState.currentPage - 1
+                            }
+                            pagerState.animateScrollToPage(target)
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = "Previous onboarding page",
+                        tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+
+                PageIndicators(
+                    selectedIndex = pagerState.currentPage,
+                    count         = OnboardingPages.size,
+                )
+
+                IconButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            val target = if (pagerState.currentPage == OnboardingPages.lastIndex) {
+                                0
+                            } else {
+                                pagerState.currentPage + 1
+                            }
+                            pagerState.animateScrollToPage(target)
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Next onboarding page",
+                        tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
             Button(
                 onClick = {
                     if (isLastPage) {
@@ -107,7 +154,7 @@ private fun OnboardingPageCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
     ) {
         Column(
@@ -162,7 +209,7 @@ private fun PageIndicators(
                         containerColor = if (selected) {
                             MaterialTheme.colorScheme.primary
                         } else {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.30f)
                         },
                     ),
                 ) {}
