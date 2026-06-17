@@ -16,6 +16,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.Button
@@ -196,5 +197,10 @@ private val OnboardingPages = listOf(
         title = "Ready when you are",
         body  = "Scan your device, restore a Wavdrop backup, or import BlackPlayer stats when you need them.",
         icon  = Icons.Default.Backup,
+    ),
+    OnboardingPage(
+        title = "Allow access to find your music",
+        body  = "Wavdrop reads audio files already saved on this device. Tap Allow when prompted — your music never leaves your phone. No account, no cloud, no ads.",
+        icon  = Icons.Default.PhoneAndroid,
     ),
 )

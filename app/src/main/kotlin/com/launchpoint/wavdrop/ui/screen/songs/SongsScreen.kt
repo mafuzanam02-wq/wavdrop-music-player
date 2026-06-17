@@ -96,6 +96,7 @@ fun SongsScreen(
     onLibraryClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onLibrarySettingsClick: () -> Unit = {},
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
     onAlbumClick: (String) -> Unit,
@@ -190,7 +191,7 @@ fun SongsScreen(
             ) {
                 when (val state = uiState) {
                     HomeUiState.Loading -> LoadingSongs()
-                    HomeUiState.Empty   -> EmptySongs()
+                    HomeUiState.Empty   -> EmptySongs(onLibrarySettingsClick = onLibrarySettingsClick)
                     is HomeUiState.Songs -> {
                         val trimmedQuery = searchQuery.trim()
                         val commonSongActions = SongSearchActions(
@@ -453,12 +454,21 @@ private fun LoadingSongs(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun EmptySongs(modifier: Modifier = Modifier) {
+private fun EmptySongs(
+    onLibrarySettingsClick: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        EmptyStateText(
-            title = "No songs found",
-            message = "Add audio files to your device, then rescan your library. If your music is in a specific folder, choose it in Settings.",
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            EmptyStateText(
+                title   = "No songs found",
+                message = "Wavdrop scans your device for audio files. Make sure audio access is granted, then open Library Settings to choose your music folder.",
+            )
+            Spacer(Modifier.height(16.dp))
+            TextButton(onClick = onLibrarySettingsClick) {
+                Text("Open Library Settings")
+            }
+        }
     }
 }
 

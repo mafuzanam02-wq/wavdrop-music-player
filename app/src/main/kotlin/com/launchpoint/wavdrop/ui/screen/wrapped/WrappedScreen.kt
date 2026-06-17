@@ -121,14 +121,14 @@ private fun EmptyContent(modifier: Modifier = Modifier) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "No Wrapped yet.",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = "Your year in music starts here.",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
-                text = "Play music in Wavdrop to build your yearly listening history. Your summary will appear once there is enough listening activity.",
+                text = "Play music in Wavdrop and your yearly listening summary will appear here. Every play counts toward your Wrapped.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -321,7 +321,7 @@ private fun InsightCard(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
@@ -449,7 +449,7 @@ private fun FeaturedTrack(
 
 @Composable
 private fun OverviewPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
-    InsightCard(label = "${wrapped.year} Overview", modifier = modifier) {
+    InsightCard(label = "${wrapped.year} in Review", modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp),

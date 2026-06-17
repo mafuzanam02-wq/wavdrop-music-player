@@ -234,7 +234,6 @@ private fun AppIdentityCard(modifier: Modifier = Modifier) {
             CompactInfoLine(label = "App", value = WavdropAbout.APP_NAME)
             CompactInfoLine(label = "Version", value = BuildConfig.VERSION_NAME)
             CompactInfoLine(label = "Build", value = BuildConfig.VERSION_CODE.toString())
-            CompactInfoLine(label = "Package", value = WavdropAbout.PACKAGE_NAME)
         }
     }
 }
@@ -425,7 +424,6 @@ private fun Context.openSupportEmail(email: String, subject: String) {
 private object WavdropAbout {
     const val APP_NAME        = "Wavdrop"
     const val PRODUCT_NAME    = "Wavdrop Music Player"
-    const val PACKAGE_NAME    = "com.launchpoint.wavdrop"
     const val WEBSITE_URL     = "https://launchpointdigital.co.za"
     const val CONTACT_EMAIL   = "info@launchpointdigital.co.za"
     const val SUPPORT_SUBJECT = "Wavdrop Feedback"

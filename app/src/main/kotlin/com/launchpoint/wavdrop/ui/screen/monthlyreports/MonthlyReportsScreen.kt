@@ -303,7 +303,7 @@ private fun AccuracyBanner(report: MonthlyReportSummary, modifier: Modifier = Mo
             modifier = Modifier.size(15.dp).padding(top = 1.dp),
         )
         Text(
-            text = "$message Status: ${emptyStateLabel(report.emptyStateReason)}.",
+            text = message,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )
@@ -604,13 +604,6 @@ private fun formatBusiestDay(day: LocalDate?): String =
 
 private fun formatAveragePlays(value: Double): String =
     if (value <= 0.0) "0.0" else String.format(Locale.US, "%.1f", value)
-
-private fun emptyStateLabel(reason: ListeningAnalyticsEmptyReason): String = when (reason) {
-    ListeningAnalyticsEmptyReason.HAS_ACTIVITY -> "has activity"
-    ListeningAnalyticsEmptyReason.NO_EVENTS_IN_RANGE -> "no events in range"
-    ListeningAnalyticsEmptyReason.ONLY_ORPHAN_EVENTS -> "only orphan events"
-    ListeningAnalyticsEmptyReason.NO_AGGREGATE_ACTIVITY -> "no aggregate activity"
-}
 
 private val BUSIEST_DAY_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("MMM d", Locale.US)
