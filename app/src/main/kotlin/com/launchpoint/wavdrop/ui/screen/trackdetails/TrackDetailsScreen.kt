@@ -21,7 +21,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -136,6 +140,15 @@ fun TrackDetailsScreen(
                 stats             = state.stats,
                 lyrics            = lyricsState,
                 hasCustomLyrics   = hasCustomLyrics,
+                onPlayNow         = { viewModel.playNow() },
+                onPlayNext        = {
+                    viewModel.playNext()
+                    coroutineScope.launch { snackbarHostState.showSnackbar("Added to play next") }
+                },
+                onAddToQueue      = {
+                    viewModel.addToQueue()
+                    coroutineScope.launch { snackbarHostState.showSnackbar("Added to queue") }
+                },
                 onAddToPlaylist   = { showAddToPlaylist = true },
                 onShare           = {
                     shareSong(context, state.song) {
@@ -257,6 +270,9 @@ private fun ReadyContent(
     stats: TrackStats?,
     lyrics: LyricsResult,
     hasCustomLyrics: Boolean,
+    onPlayNow: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onShare: () -> Unit,
     onDeleteFromDevice: (() -> Unit)? = null,
@@ -278,6 +294,50 @@ private fun ReadyContent(
         DetailRow("Album",    song.album.ifBlank { "Unknown" })
         DetailRow("Duration", TrackDetailsFormatters.formatDuration(song.duration))
         if (song.year > 0) DetailRow("Year", song.year.toString())
+
+        SectionDivider()
+
+        // ── Playback actions ─────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AssistChip(
+                onClick = onPlayNow,
+                label   = { Text("Play now") },
+                leadingIcon = {
+                    Icon(
+                        imageVector        = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                },
+            )
+            AssistChip(
+                onClick = onPlayNext,
+                label   = { Text("Play next") },
+                leadingIcon = {
+                    Icon(
+                        imageVector        = Icons.Default.SkipNext,
+                        contentDescription = null,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                },
+            )
+            AssistChip(
+                onClick = onAddToQueue,
+                label   = { Text("Add to queue") },
+                leadingIcon = {
+                    Icon(
+                        imageVector        = Icons.AutoMirrored.Filled.PlaylistAdd,
+                        contentDescription = null,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                },
+            )
+        }
 
         SectionDivider()
 

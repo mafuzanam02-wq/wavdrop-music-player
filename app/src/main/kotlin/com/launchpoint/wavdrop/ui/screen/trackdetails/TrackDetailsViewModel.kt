@@ -110,6 +110,21 @@ class TrackDetailsViewModel @Inject constructor(
         }
     }
 
+    fun playNow() {
+        val song = (uiState.value as? TrackDetailsUiState.Ready)?.song ?: return
+        playerController.playSearchResultPreservingQueue(song)
+    }
+
+    fun playNext() {
+        val song = (uiState.value as? TrackDetailsUiState.Ready)?.song ?: return
+        playerController.playNext(song)
+    }
+
+    fun addToQueue() {
+        val song = (uiState.value as? TrackDetailsUiState.Ready)?.song ?: return
+        playerController.addToQueue(song)
+    }
+
     fun deleteFromDevice(
         song: Song,
         onDeleteRequested: (IntentSender) -> Unit,
