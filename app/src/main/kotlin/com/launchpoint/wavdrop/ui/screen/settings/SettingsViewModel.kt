@@ -247,6 +247,13 @@ class SettingsViewModel @Inject constructor(
             initialValue = NowPlayingTimeDisplayMode.DURATION,
         )
 
+    val showMilestoneCelebrations: StateFlow<Boolean> =
+        appSettingsRepository.showMilestoneCelebrations.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true,
+        )
+
     private val _libraryScanUiState =
         MutableStateFlow<LibraryScanUiState>(LibraryScanUiState.Idle)
     val libraryScanUiState: StateFlow<LibraryScanUiState> =
@@ -401,6 +408,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setNowPlayingTimeDisplayMode(mode: NowPlayingTimeDisplayMode) {
         viewModelScope.launch { appSettingsRepository.setNowPlayingTimeDisplayMode(mode) }
+    }
+
+    fun setShowMilestoneCelebrations(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setShowMilestoneCelebrations(enabled) }
     }
 
     fun setAppIcon(choice: AppIconChoice) {

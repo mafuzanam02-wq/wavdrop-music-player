@@ -371,6 +371,18 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val showMilestoneCelebrations: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[SHOW_MILESTONE_CELEBRATIONS_KEY] ?: true }
+
+    suspend fun setShowMilestoneCelebrations(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[SHOW_MILESTONE_CELEBRATIONS_KEY] = enabled
+        }
+    }
+
     val notificationControlsSetting: Flow<NotificationControlsSetting> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -441,5 +453,6 @@ class AppSettingsRepository @Inject constructor(
         val SHOW_QUEUE_COUNT_KEY                    = booleanPreferencesKey("show_queue_count")
         val NOW_PLAYING_TIME_DISPLAY_MODE_KEY       = stringPreferencesKey("now_playing_time_display_mode")
         val NEEDS_BACKUP_FOLDER_AFTER_RESTORE_KEY   = booleanPreferencesKey("needs_auto_backup_folder_selection_after_restore")
+        val SHOW_MILESTONE_CELEBRATIONS_KEY         = booleanPreferencesKey("show_milestone_celebrations")
     }
 }

@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.ui.screen.wrapped
 
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,11 +9,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -23,6 +26,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -38,6 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +54,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,7 +77,9 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private const val WRAPPED_PAGE_COUNT = 8
+// Base page count: Intro + 8 existing pages (Overview, Streaks, Patterns, Top Track/Artist/Album,
+// Most Skipped, Recent Plays). Milestone page appended conditionally.
+private const val WRAPPED_BASE_COUNT = 9
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +88,7 @@ fun WrappedScreen(
     onTrackDetailsClick: (Long) -> Unit,
     onArtistClick: (String) -> Unit,
     onAlbumClick: (String) -> Unit,
+    onNavigateToSongs: () -> Unit = {},
     viewModel: WrappedViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -95,7 +114,10 @@ fun WrappedScreen(
     ) { innerPadding ->
         when (val state = uiState) {
             WrappedUiState.Loading -> LoadingContent(Modifier.padding(innerPadding))
-            WrappedUiState.Empty -> EmptyContent(Modifier.padding(innerPadding))
+            WrappedUiState.Empty -> EmptyContent(
+                onNavigateToSongs = onNavigateToSongs,
+                modifier = Modifier.padding(innerPadding),
+            )
             is WrappedUiState.Content -> WrappedContent(
                 state = state,
                 onSelectYear = viewModel::selectYear,
@@ -114,7 +136,10 @@ private fun LoadingContent(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun EmptyContent(modifier: Modifier = Modifier) {
+private fun EmptyContent(
+    onNavigateToSongs: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Box(
         modifier = modifier.fillMaxSize().padding(32.dp),
         contentAlignment = Alignment.Center,
@@ -128,11 +153,15 @@ private fun EmptyContent(modifier: Modifier = Modifier) {
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = "Play music in Wavdrop and your yearly listening summary will appear here. Every play counts toward your Wrapped.",
+                text = "Play music in Wavdrop and your private yearly recap will appear here.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
             )
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onNavigateToSongs) {
+                Text("Start listening")
+            }
         }
     }
 }
@@ -146,10 +175,30 @@ private fun WrappedContent(
     onAlbumClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val reduceMotion = remember {
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) < 0.1f
+    }
+
     val years = state.availableYears
     val selectedIndex = years.indexOf(state.selectedYear)
     val wrapped = state.wrapped
-    val pagerState = rememberPagerState(pageCount = { WRAPPED_PAGE_COUNT })
+
+    val milestones = remember(wrapped) { computeMilestones(wrapped) }
+    val showMilestonePage = state.showMilestoneCelebrations && milestones.isNotEmpty()
+    val pageCount = if (showMilestonePage) WRAPPED_BASE_COUNT + 1 else WRAPPED_BASE_COUNT
+
+    val pagerState = rememberPagerState(pageCount = { pageCount })
+
+    LaunchedEffect(pageCount) {
+    if (pageCount > 0 && pagerState.currentPage >= pageCount) {
+        pagerState.scrollToPage(pageCount - 1)
+    }
+}
 
     Column(modifier = modifier.fillMaxSize()) {
         YearSelector(
@@ -185,19 +234,22 @@ private fun WrappedContent(
                 .fillMaxWidth(),
         ) { page ->
             when (page) {
-                0 -> OverviewPage(wrapped)
-                1 -> StreaksPage(wrapped)
-                2 -> PatternsPage(wrapped)
-                3 -> TopTrackPage(wrapped, onTrackDetailsClick)
-                4 -> TopArtistPage(wrapped, onArtistClick)
-                5 -> TopAlbumPage(wrapped, onAlbumClick)
-                6 -> MostSkippedPage(wrapped, onTrackDetailsClick)
-                else -> RecentPlaysPage(wrapped, onTrackDetailsClick)
+                0    -> IntroPage(wrapped)
+                1    -> OverviewPage(wrapped)
+                2    -> StreaksPage(wrapped)
+                3    -> PatternsPage(wrapped)
+                4    -> TopTrackPage(wrapped, onTrackDetailsClick)
+                5    -> TopArtistPage(wrapped, onArtistClick)
+                6    -> TopAlbumPage(wrapped, onAlbumClick)
+                7    -> MostSkippedPage(wrapped, onTrackDetailsClick)
+                8    -> RecentPlaysPage(wrapped, onTrackDetailsClick)
+                else -> if (showMilestonePage) MilestonePage(milestones, wrapped.year, reduceMotion)
+                        else RecentPlaysPage(wrapped, onTrackDetailsClick)
             }
         }
 
         PageIndicator(
-            pageCount = WRAPPED_PAGE_COUNT,
+            pageCount = pageCount,
             currentPage = pagerState.currentPage,
             modifier = Modifier
                 .align(Alignment.CenterHorizontally)
@@ -296,11 +348,11 @@ private fun PageIndicator(
         repeat(pageCount) { index ->
             Box(
                 modifier = Modifier
-                    .size(if (index == currentPage) 8.dp else 6.dp)
+                    .size(if (index == currentPage) 10.dp else 7.dp)
                     .clip(CircleShape)
                     .background(
                         if (index == currentPage) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                     ),
             )
         }
@@ -325,18 +377,27 @@ private fun InsightCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 28.dp),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+        Row(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
             )
-            Spacer(Modifier.height(20.dp))
-            content()
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(start = 20.dp, end = 24.dp, top = 28.dp, bottom = 28.dp),
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(20.dp))
+                content()
+            }
         }
     }
 }
@@ -448,6 +509,74 @@ private fun FeaturedTrack(
 // ── Pages ─────────────────────────────────────────────────────────────────────
 
 @Composable
+private fun IntroPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
+    val artworkUri = ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId)
+    var artworkLoaded by remember(artworkUri) { mutableStateOf(false) }
+
+    Card(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = artworkUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                onSuccess = { artworkLoaded = true },
+                onError = { artworkLoaded = false },
+            )
+            if (artworkLoaded) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+            }
+            val onColor = if (artworkLoaded) Color.White
+                          else MaterialTheme.colorScheme.onPrimaryContainer
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 28.dp, vertical = 32.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text(
+                        text = wrapped.year.toString(),
+                        style = MaterialTheme.typography.displayMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = onColor,
+                    )
+                    Text(
+                        text = "in Review",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Normal,
+                        color = onColor.copy(alpha = 0.75f),
+                    )
+                }
+                Column {
+                    Text(
+                        text = "Your music stayed with you.",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = onColor,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "No account. No cloud. No ads. Just your listening history, preserved on this device.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = onColor.copy(alpha = 0.72f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun OverviewPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
     InsightCard(label = "${wrapped.year} in Review", modifier = modifier) {
         Row(
@@ -527,6 +656,13 @@ private fun TopTrackPage(
         if (song == null) {
             NoDataText("No tracks played this year yet. Play music in Wavdrop to choose a top track.")
         } else {
+            ArtworkImage(
+                artworkUri = ArtworkResolver.albumArtworkUri(song.song.albumId),
+                contentDescription = null,
+                modifier = Modifier.size(88.dp),
+                placeholderIcon = Icons.Default.MusicNote,
+            )
+            Spacer(Modifier.height(16.dp))
             FeaturedTrack(
                 song = song,
                 subline = "${song.playCount} plays",
@@ -681,6 +817,11 @@ private fun RecentPlaysPage(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        ArtworkImage(
+                            artworkUri = ArtworkResolver.albumArtworkUri(summary.song.albumId),
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                        )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = summary.song.displayTitle,
@@ -712,6 +853,166 @@ private fun RecentPlaysPage(
             }
         }
     }
+}
+
+@Composable
+private fun MilestonePage(
+    milestones: List<WrappedMilestone>,
+    year: Int,
+    reduceMotion: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val cardColor = if (reduceMotion) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+    }
+
+    Card(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 28.dp),
+        ) {
+            Text(
+                text = "Milestones",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Moments from your $year.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
+            Spacer(Modifier.height(20.dp))
+            milestones.forEach { milestone ->
+                MilestoneRow(milestone)
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MilestoneRow(milestone: WrappedMilestone) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = milestone.icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(24.dp),
+        )
+        Column {
+            Text(
+                text = milestone.label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = milestone.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+    }
+}
+
+// ── Milestone model + computation ─────────────────────────────────────────────
+
+private data class WrappedMilestone(
+    val icon: ImageVector,
+    val label: String,
+    val detail: String,
+)
+
+private fun computeMilestones(wrapped: WrappedSummary): List<WrappedMilestone> {
+    val result = mutableListOf<WrappedMilestone>()
+
+    val playMilestones = listOf(100, 500, 1_000, 5_000, 10_000)
+    playMilestones.lastOrNull { it <= wrapped.totalPlayCount }?.let { threshold ->
+        val label = when (threshold) {
+            100     -> "First hundred plays"
+            500     -> "Five hundred plays"
+            1_000   -> "One thousand plays"
+            5_000   -> "Five thousand plays"
+            else    -> "Ten thousand plays"
+        }
+        result += WrappedMilestone(
+            icon   = Icons.Default.MusicNote,
+            label  = label,
+            detail = "${wrapped.totalPlayCount} plays this year",
+        )
+    }
+
+    val hourMs = 3_600_000L
+    val timeMilestones = listOf(10L, 50L, 100L, 250L, 500L)
+    timeMilestones.lastOrNull { it * hourMs <= wrapped.totalListeningTimeMs }?.let { threshold ->
+        val label = when (threshold) {
+            10L  -> "Ten-hour listener"
+            50L  -> "Fifty-hour listener"
+            100L -> "Hundred-hour listener"
+            250L -> "Quarter-thousand hours"
+            else -> "Five-hundred-hour listener"
+        }
+        result += WrappedMilestone(
+            icon   = Icons.Default.Timer,
+            label  = label,
+            detail = StatisticsFormatters.formatDurationSummary(wrapped.totalListeningTimeMs) + " this year",
+        )
+    }
+
+    val songMilestones = listOf(25, 50, 100, 250, 500)
+    songMilestones.lastOrNull { it <= wrapped.uniqueSongsPlayedCount }?.let { threshold ->
+        val label = when (threshold) {
+            25  -> "Library explorer"
+            50  -> "Broad taste"
+            100 -> "Hundred-track discovery"
+            250 -> "Deep explorer"
+            else -> "Five-hundred-track library"
+        }
+        result += WrappedMilestone(
+            icon   = Icons.Default.LibraryMusic,
+            label  = label,
+            detail = "${wrapped.uniqueSongsPlayedCount} different tracks played",
+        )
+    }
+
+    val dayMilestones = listOf(7, 14, 30, 50, 100, 180, 365)
+    dayMilestones.lastOrNull { it <= wrapped.listeningDaysCount }?.let { threshold ->
+        val label = when (threshold) {
+            7   -> "A week of music"
+            14  -> "Two weeks of music"
+            30  -> "A month of music"
+            50  -> "Fifty listening days"
+            100 -> "A hundred listening days"
+            180 -> "Half a year of music"
+            else -> "Every day, all year"
+        }
+        result += WrappedMilestone(
+            icon   = Icons.Default.DateRange,
+            label  = label,
+            detail = "${wrapped.listeningDaysCount} days with music this year",
+        )
+    }
+
+    return result
+}
+
+private fun formatCount(n: Int): String = when {
+    n >= 1_000 -> "${n / 1_000}k"
+    else       -> n.toString()
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────

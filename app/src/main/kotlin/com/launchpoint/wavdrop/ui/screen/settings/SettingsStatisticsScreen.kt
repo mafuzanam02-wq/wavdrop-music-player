@@ -16,8 +16,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,7 +30,10 @@ fun SettingsStatisticsScreen(
     onReportsClick: () -> Unit,
     onMonthlyReportsClick: () -> Unit,
     onWrappedClick: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
 ) {
+    val showMilestoneCelebrations by viewModel.showMilestoneCelebrations.collectAsStateWithLifecycle()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -78,6 +84,16 @@ fun SettingsStatisticsScreen(
                     title    = "Wrapped",
                     subtitle = "Review your year in music.",
                     onClick  = onWrappedClick,
+                )
+            }
+            item { SectionDivider() }
+            item { SectionHeader("Wrapped") }
+            item {
+                ToggleSettingsRow(
+                    title           = "Show milestone celebrations",
+                    subtitle        = "Display a milestone summary inside your yearly Wrapped recap.",
+                    checked         = showMilestoneCelebrations,
+                    onCheckedChange = viewModel::setShowMilestoneCelebrations,
                 )
             }
             item { Spacer(Modifier.height(24.dp)) }

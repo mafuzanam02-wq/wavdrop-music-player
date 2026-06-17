@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -21,6 +22,7 @@ sealed interface WrappedUiState {
         val availableYears: List<Int>,
         val selectedYear: Int,
         val wrapped: WrappedSummary,
+        val showMilestoneCelebrations: Boolean,
     ) : WrappedUiState
 }
 
@@ -28,6 +30,7 @@ sealed interface WrappedUiState {
 class WrappedViewModel @Inject constructor(
     songRepository: SongRepository,
     statsRepository: StatsRepository,
+    appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
     private val selectedYear = MutableStateFlow<Int?>(null)
@@ -36,7 +39,8 @@ class WrappedViewModel @Inject constructor(
         songRepository.songs,
         statsRepository.allListenEvents(),
         selectedYear,
-    ) { songs, events, requestedYear ->
+        appSettingsRepository.showMilestoneCelebrations,
+    ) { songs, events, requestedYear, showMilestones ->
         val years = WrappedBuilder.availableYears(events)
         if (years.isEmpty()) return@combine WrappedUiState.Empty
 
@@ -49,6 +53,7 @@ class WrappedViewModel @Inject constructor(
                 songs = songs,
                 events = events,
             ),
+            showMilestoneCelebrations = showMilestones,
         )
     }.stateIn(
         scope = viewModelScope,

@@ -116,11 +116,20 @@ sealed class Screen(val route: String) {
 }
 
 private fun NavHostController.navigatePrimary(route: String) {
-    navigate(route) {
-        launchSingleTop = true
-        restoreState = true
-        popUpTo(Screen.Home.route) {
-            saveState = true
+    if (route == Screen.Home.route) {
+        // popBackStack avoids the saveState/restoreState cycle that would re-add
+        // nested screens (e.g. NowPlaying) on top of Home. If Home is not in the
+        // back stack (startup != Home), navigate to it fresh.
+        if (!popBackStack(route, inclusive = false)) {
+            navigate(route) { launchSingleTop = true }
+        }
+    } else {
+        navigate(route) {
+            launchSingleTop = true
+            restoreState = true
+            popUpTo(Screen.Home.route) {
+                saveState = true
+            }
         }
     }
 }
@@ -354,6 +363,7 @@ fun WavdropNavGraph(
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
                 onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+                onNavigateToSongs   = { navController.navigatePrimary(Screen.Songs.route) },
             )
         }
         composable(Screen.Playlists.route) {
