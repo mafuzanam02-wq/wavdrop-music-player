@@ -53,13 +53,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material3.ButtonDefaults
 import coil.compose.AsyncImage
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -402,6 +411,196 @@ private fun InsightCard(
     }
 }
 
+// ── Artwork card (entity-backed pages) ────────────────────────────────────────
+
+@Composable
+private fun WrappedArtworkCard(
+    label: String,
+    artworkUri: String?,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.(artworkLoaded: Boolean) -> Unit,
+) {
+    var artworkLoaded by remember(artworkUri) { mutableStateOf(false) }
+    Card(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = artworkUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                onSuccess = { artworkLoaded = true },
+                onError = { artworkLoaded = false },
+            )
+            if (artworkLoaded) {
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.28f),
+                            1f to Color.Black.copy(alpha = 0.68f),
+                        )
+                    )
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 28.dp),
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (artworkLoaded) Color.White.copy(alpha = 0.85f)
+                             else MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(20.dp))
+                content(artworkLoaded)
+            }
+        }
+    }
+}
+
+// ── Decorative card (insight/stat pages without a safe artwork source) ─────────
+
+private enum class WrappedDecorativeMotif { Milestones, Patterns }
+
+@Composable
+private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier: Modifier = Modifier) {
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    Canvas(modifier = modifier) {
+        when (motif) {
+            WrappedDecorativeMotif.Milestones -> {
+                // Concentric badge rings anchored top-right
+                val cx = size.width * 0.87f
+                val cy = size.height * 0.19f
+                for (i in 1..5) {
+                    drawCircle(
+                        color = primary.copy(alpha = (0.065f - i * 0.01f).coerceAtLeast(0.01f)),
+                        radius = i * 50.dp.toPx(),
+                        center = Offset(cx, cy),
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                }
+                // Scattered accent dots
+                val dots = listOf(
+                    0.10f to 0.72f, 0.06f to 0.47f, 0.93f to 0.64f,
+                    0.77f to 0.90f, 0.52f to 0.94f, 0.30f to 0.84f,
+                )
+                dots.forEachIndexed { idx, (rx, ry) ->
+                    val r = if (idx % 2 == 0) 3f else 2f
+                    drawCircle(
+                        color = primary.copy(alpha = 0.09f),
+                        radius = r.dp.toPx(),
+                        center = Offset(rx * size.width, ry * size.height),
+                    )
+                }
+            }
+            WrappedDecorativeMotif.Patterns -> {
+                // Layered sine waves (listening rhythm motif)
+                val amplitude = size.height * 0.065f
+                val waveLen = size.width * 0.55f
+                for (w in 0..2) {
+                    val yBase = size.height * (0.30f + w * 0.22f)
+                    val phase = w * (PI / 3.0)
+                    val path = Path()
+                    path.moveTo(0f, yBase.toFloat())
+                    var x = 0f
+                    while (x <= size.width + 3f) {
+                        val y = (yBase + amplitude * sin(x / waveLen * 2.0 * PI + phase)).toFloat()
+                        path.lineTo(x, y)
+                        x += 3f
+                    }
+                    drawPath(
+                        path = path,
+                        color = primary.copy(alpha = (0.062f - w * 0.014f).coerceAtLeast(0.02f)),
+                        style = Stroke(width = 1.2.dp.toPx()),
+                    )
+                }
+                // Mini clock-face motif bottom-right
+                val ccx = size.width * 0.90f
+                val ccy = size.height * 0.83f
+                val cr = 27.dp.toPx()
+                drawCircle(
+                    color = secondary.copy(alpha = 0.05f),
+                    radius = cr,
+                    center = Offset(ccx, ccy),
+                    style = Stroke(width = 0.8.dp.toPx()),
+                )
+                for (tick in 0..11) {
+                    val angle = tick * (PI / 6.0) - PI / 2.0
+                    val inner = if (tick % 3 == 0) 0.68f else 0.84f
+                    drawLine(
+                        color = secondary.copy(alpha = 0.055f),
+                        start = Offset(
+                            (ccx + cr * inner * cos(angle)).toFloat(),
+                            (ccy + cr * inner * sin(angle)).toFloat(),
+                        ),
+                        end = Offset(
+                            (ccx + cr * cos(angle)).toFloat(),
+                            (ccy + cr * sin(angle)).toFloat(),
+                        ),
+                        strokeWidth = (if (tick % 3 == 0) 1.1 else 0.7).dp.toPx(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WrappedDecorativeCard(
+    label: String,
+    motif: WrappedDecorativeMotif,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            WrappedDecorativeBackground(motif = motif, modifier = Modifier.fillMaxSize())
+            Row(Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(start = 20.dp, end = 24.dp, top = 28.dp, bottom = 28.dp),
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    content()
+                }
+            }
+        }
+    }
+}
+
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
 @Composable
@@ -471,12 +670,17 @@ private fun FeaturedTrack(
     subline: String,
     caption: String,
     onDetailsClick: () -> Unit,
+    onArtwork: Boolean = false,
 ) {
+    val titleColor   = if (onArtwork) Color.White else MaterialTheme.colorScheme.onSurface
+    val subColor     = if (onArtwork) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+    val accentColor  = if (onArtwork) Color.White else MaterialTheme.colorScheme.primary
+    val captionColor = if (onArtwork) Color.White.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
     Text(
         text = song.song.displayTitle,
         style = MaterialTheme.typography.headlineMedium,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = titleColor,
         maxLines = 3,
         overflow = TextOverflow.Ellipsis,
     )
@@ -484,7 +688,7 @@ private fun FeaturedTrack(
     Text(
         text = song.song.displayArtist.ifBlank { "Unknown Artist" },
         style = MaterialTheme.typography.bodyLarge,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+        color = subColor,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
@@ -492,16 +696,21 @@ private fun FeaturedTrack(
     Text(
         text = subline,
         style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
+        color = accentColor,
     )
     Spacer(Modifier.height(4.dp))
     Text(
         text = caption,
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        color = captionColor,
     )
     Spacer(Modifier.height(16.dp))
-    TextButton(onClick = onDetailsClick) {
+    TextButton(
+        onClick = onDetailsClick,
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = if (onArtwork) Color.White else MaterialTheme.colorScheme.primary,
+        ),
+    ) {
         Text("View track details")
     }
 }
@@ -621,7 +830,7 @@ private fun StreaksPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) 
 
 @Composable
 private fun PatternsPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
-    InsightCard(label = "Listening Patterns", modifier = modifier) {
+    WrappedDecorativeCard(label = "Listening Patterns", motif = WrappedDecorativeMotif.Patterns, modifier = modifier) {
         val hasData = wrapped.mostActiveDayOfWeek != null || wrapped.mostActiveHour != null
         if (!hasData) {
             NoDataText("No listening patterns for this year. Play music across days or hours to reveal patterns.")
@@ -651,8 +860,12 @@ private fun TopTrackPage(
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    InsightCard(label = "Top Track", modifier = modifier) {
-        val song = wrapped.mostPlayedSong
+    val song = wrapped.mostPlayedSong
+    WrappedArtworkCard(
+        label = "Top Track",
+        artworkUri = ArtworkResolver.albumArtworkUri(song?.song?.albumId),
+        modifier = modifier,
+    ) { artworkLoaded ->
         if (song == null) {
             NoDataText("No tracks played this year yet. Play music in Wavdrop to choose a top track.")
         } else {
@@ -668,6 +881,7 @@ private fun TopTrackPage(
                 subline = "${song.playCount} plays",
                 caption = "Your most-played track of ${wrapped.year}",
                 onDetailsClick = { onTrackDetailsClick(song.song.id) },
+                onArtwork = artworkLoaded,
             )
         }
     }
@@ -679,16 +893,32 @@ private fun TopArtistPage(
     onArtistClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    InsightCard(label = "Top Artist", modifier = modifier) {
-        val artist = wrapped.mostPlayedArtist
+    val artist = wrapped.mostPlayedArtist
+    // Resolve representative artwork: first recently-played song by this artist
+    val artworkUri = remember(wrapped) {
+        if (artist == null) return@remember null
+        wrapped.recentlyPlayed
+            .firstOrNull { it.song.artist.trim() == artist.artistKey }
+            ?.let { ArtworkResolver.albumArtworkUri(it.song.albumId) }
+            ?: if (wrapped.mostPlayedSong?.song?.artist?.trim() == artist.artistKey)
+                ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId) else null
+    }
+    WrappedArtworkCard(
+        label = "Top Artist",
+        artworkUri = artworkUri,
+        modifier = modifier,
+    ) { artworkLoaded ->
         if (artist == null) {
             NoDataText("No artists played this year yet. Play music in Wavdrop to choose a top artist.")
         } else {
+            val titleColor   = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.onSurface
+            val accentColor  = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary
+            val captionColor = if (artworkLoaded) Color.White.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
             Text(
                 text = artist.artistKey,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = titleColor,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -696,16 +926,21 @@ private fun TopArtistPage(
             Text(
                 text = "${artist.playCount} plays",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = accentColor,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 text = "You couldn't stop listening to ${artist.artistKey} this year",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                color = captionColor,
             )
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = { onArtistClick(artist.artistKey) }) {
+            TextButton(
+                onClick = { onArtistClick(artist.artistKey) },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary,
+                ),
+            ) {
                 Text("View artist")
             }
         }
@@ -718,16 +953,37 @@ private fun TopAlbumPage(
     onAlbumClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    InsightCard(label = "Top Album", modifier = modifier) {
-        val album = wrapped.mostPlayedAlbum
+    val album = wrapped.mostPlayedAlbum
+    // albumKey == song.album.trim() — match via recentlyPlayed, fall back to mostPlayedSong
+    val artworkUri = remember(wrapped) {
+        if (album == null) return@remember null
+        wrapped.recentlyPlayed
+            .firstOrNull { it.song.album.trim() == album.albumKey }
+            ?.let { ArtworkResolver.albumArtworkUri(it.song.albumId) }
+            ?: ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId)
+    }
+    WrappedArtworkCard(
+        label = "Top Album",
+        artworkUri = artworkUri,
+        modifier = modifier,
+    ) { artworkLoaded ->
         if (album == null) {
             NoDataText("No albums played this year yet. Play music in Wavdrop to choose a top album.")
         } else {
+            val titleColor   = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.onSurface
+            val subColor     = if (artworkLoaded) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            val accentColor  = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary
+            ArtworkImage(
+                artworkUri = artworkUri,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp),
+            )
+            Spacer(Modifier.height(12.dp))
             Text(
                 text = album.albumKey,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = titleColor,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -735,7 +991,7 @@ private fun TopAlbumPage(
             Text(
                 text = album.artist,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                color = subColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -743,10 +999,15 @@ private fun TopAlbumPage(
             Text(
                 text = "${album.playCount} plays",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = accentColor,
             )
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = { onAlbumClick(album.albumKey) }) {
+            TextButton(
+                onClick = { onAlbumClick(album.albumKey) },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary,
+                ),
+            ) {
                 Text("View album")
             }
         }
@@ -759,16 +1020,23 @@ private fun MostSkippedPage(
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    InsightCard(label = "Most Skipped", modifier = modifier) {
-        val track = wrapped.mostSkippedTrack
+    val track = wrapped.mostSkippedTrack
+    WrappedArtworkCard(
+        label = "Most Skipped",
+        artworkUri = ArtworkResolver.albumArtworkUri(track?.song?.albumId),
+        modifier = modifier,
+    ) { artworkLoaded ->
         if (track == null) {
             NoDataText("No skips recorded for this year. Skips during this year will appear here.")
         } else {
+            val titleColor   = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.onSurface
+            val subColor     = if (artworkLoaded) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            val accentColor  = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary
             Text(
                 text = track.song.displayTitle,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = titleColor,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -776,7 +1044,7 @@ private fun MostSkippedPage(
             Text(
                 text = track.song.displayArtist.ifBlank { "Unknown Artist" },
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                color = subColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -784,10 +1052,15 @@ private fun MostSkippedPage(
             Text(
                 text = "${track.skipCount} skips",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = accentColor,
             )
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = { onTrackDetailsClick(track.song.id) }) {
+            TextButton(
+                onClick = { onTrackDetailsClick(track.song.id) },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary,
+                ),
+            ) {
                 Text("View track details")
             }
         }
@@ -859,44 +1132,23 @@ private fun RecentPlaysPage(
 private fun MilestonePage(
     milestones: List<WrappedMilestone>,
     year: Int,
-    reduceMotion: Boolean,
+    @Suppress("UNUSED_PARAMETER") reduceMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val cardColor = if (reduceMotion) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-    } else {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-    }
-
-    Card(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    WrappedDecorativeCard(
+        label = "Milestones",
+        motif = WrappedDecorativeMotif.Milestones,
+        modifier = modifier,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 28.dp),
-        ) {
-            Text(
-                text = "Milestones",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "Moments from your $year.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            )
-            Spacer(Modifier.height(20.dp))
-            milestones.forEach { milestone ->
-                MilestoneRow(milestone)
-                Spacer(Modifier.height(16.dp))
-            }
+        Text(
+            text = "Moments from your $year.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
+        Spacer(Modifier.height(16.dp))
+        milestones.forEach { milestone ->
+            MilestoneRow(milestone)
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
