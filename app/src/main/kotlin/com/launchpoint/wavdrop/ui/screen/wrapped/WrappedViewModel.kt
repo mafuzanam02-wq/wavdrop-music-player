@@ -6,6 +6,8 @@ import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
+import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -23,6 +25,9 @@ sealed interface WrappedUiState {
         val selectedYear: Int,
         val wrapped: WrappedSummary,
         val showMilestoneCelebrations: Boolean,
+        val useArtworkBackgrounds: Boolean,
+        val backgroundIntensity: WrappedBackgroundIntensity,
+        val fallbackTheme: WrappedFallbackTheme,
     ) : WrappedUiState
 }
 
@@ -34,13 +39,25 @@ class WrappedViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val selectedYear = MutableStateFlow<Int?>(null)
+    private val visualPreferences = combine(
+        appSettingsRepository.wrappedUseArtworkBackgrounds,
+        appSettingsRepository.wrappedBackgroundIntensity,
+        appSettingsRepository.wrappedFallbackTheme,
+    ) { useArtworkBackgrounds, backgroundIntensity, fallbackTheme ->
+        WrappedVisualPreferences(
+            useArtworkBackgrounds = useArtworkBackgrounds,
+            backgroundIntensity = backgroundIntensity,
+            fallbackTheme = fallbackTheme,
+        )
+    }
 
     val uiState: StateFlow<WrappedUiState> = combine(
         songRepository.songs,
         statsRepository.allListenEvents(),
         selectedYear,
         appSettingsRepository.showMilestoneCelebrations,
-    ) { songs, events, requestedYear, showMilestones ->
+        visualPreferences,
+    ) { songs, events, requestedYear, showMilestones, visualPreferences ->
         val years = WrappedBuilder.availableYears(events)
         if (years.isEmpty()) return@combine WrappedUiState.Empty
 
@@ -54,6 +71,9 @@ class WrappedViewModel @Inject constructor(
                 events = events,
             ),
             showMilestoneCelebrations = showMilestones,
+            useArtworkBackgrounds = visualPreferences.useArtworkBackgrounds,
+            backgroundIntensity = visualPreferences.backgroundIntensity,
+            fallbackTheme = visualPreferences.fallbackTheme,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -65,3 +85,9 @@ class WrappedViewModel @Inject constructor(
         selectedYear.value = year
     }
 }
+
+private data class WrappedVisualPreferences(
+    val useArtworkBackgrounds: Boolean,
+    val backgroundIntensity: WrappedBackgroundIntensity,
+    val fallbackTheme: WrappedFallbackTheme,
+)

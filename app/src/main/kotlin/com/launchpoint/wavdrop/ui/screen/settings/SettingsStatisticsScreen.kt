@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
+import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +35,9 @@ fun SettingsStatisticsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val showMilestoneCelebrations by viewModel.showMilestoneCelebrations.collectAsStateWithLifecycle()
+    val wrappedUseArtworkBackgrounds by viewModel.wrappedUseArtworkBackgrounds.collectAsStateWithLifecycle()
+    val wrappedBackgroundIntensity by viewModel.wrappedBackgroundIntensity.collectAsStateWithLifecycle()
+    val wrappedFallbackTheme by viewModel.wrappedFallbackTheme.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -95,6 +100,46 @@ fun SettingsStatisticsScreen(
                     checked         = showMilestoneCelebrations,
                     onCheckedChange = viewModel::setShowMilestoneCelebrations,
                 )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Use artwork backgrounds in Wrapped",
+                    subtitle        = "Use your music artwork as atmospheric card backgrounds when available.",
+                    checked         = wrappedUseArtworkBackgrounds,
+                    onCheckedChange = viewModel::setWrappedUseArtworkBackgrounds,
+                )
+            }
+            item { SectionHeader("Wrapped background intensity") }
+            item {
+                SettingsMessageRow(
+                    message = "Control how bold Wrapped backgrounds feel.",
+                )
+            }
+            WrappedBackgroundIntensity.entries.forEach { intensity ->
+                item {
+                    ScanModeRow(
+                        title    = intensity.displayName,
+                        subtitle = intensity.description,
+                        selected = wrappedBackgroundIntensity == intensity,
+                        onClick  = { viewModel.setWrappedBackgroundIntensity(intensity) },
+                    )
+                }
+            }
+            item { SectionHeader("Wrapped fallback theme") }
+            item {
+                SettingsMessageRow(
+                    message = "Choose the visual mood used when artwork is unavailable.",
+                )
+            }
+            WrappedFallbackTheme.entries.forEach { theme ->
+                item {
+                    ScanModeRow(
+                        title    = theme.displayName,
+                        subtitle = theme.description,
+                        selected = wrappedFallbackTheme == theme,
+                        onClick  = { viewModel.setWrappedFallbackTheme(theme) },
+                    )
+                }
             }
             item { Spacer(Modifier.height(24.dp)) }
         }

@@ -383,6 +383,50 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val wrappedUseArtworkBackgrounds: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[WRAPPED_USE_ARTWORK_BACKGROUNDS_KEY] ?: true }
+
+    suspend fun setWrappedUseArtworkBackgrounds(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[WRAPPED_USE_ARTWORK_BACKGROUNDS_KEY] = enabled
+        }
+    }
+
+    val wrappedBackgroundIntensity: Flow<WrappedBackgroundIntensity> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[WRAPPED_BACKGROUND_INTENSITY_KEY]
+                ?.let { runCatching { WrappedBackgroundIntensity.valueOf(it) }.getOrNull() }
+                ?: WrappedBackgroundIntensity.MEDIUM
+        }
+
+    suspend fun setWrappedBackgroundIntensity(intensity: WrappedBackgroundIntensity) {
+        dataStore.edit { preferences ->
+            preferences[WRAPPED_BACKGROUND_INTENSITY_KEY] = intensity.name
+        }
+    }
+
+    val wrappedFallbackTheme: Flow<WrappedFallbackTheme> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            preferences[WRAPPED_FALLBACK_THEME_KEY]
+                ?.let { runCatching { WrappedFallbackTheme.valueOf(it) }.getOrNull() }
+                ?: WrappedFallbackTheme.AUTO
+        }
+
+    suspend fun setWrappedFallbackTheme(theme: WrappedFallbackTheme) {
+        dataStore.edit { preferences ->
+            preferences[WRAPPED_FALLBACK_THEME_KEY] = theme.name
+        }
+    }
+
     val notificationControlsSetting: Flow<NotificationControlsSetting> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -454,5 +498,8 @@ class AppSettingsRepository @Inject constructor(
         val NOW_PLAYING_TIME_DISPLAY_MODE_KEY       = stringPreferencesKey("now_playing_time_display_mode")
         val NEEDS_BACKUP_FOLDER_AFTER_RESTORE_KEY   = booleanPreferencesKey("needs_auto_backup_folder_selection_after_restore")
         val SHOW_MILESTONE_CELEBRATIONS_KEY         = booleanPreferencesKey("show_milestone_celebrations")
+        val WRAPPED_USE_ARTWORK_BACKGROUNDS_KEY     = booleanPreferencesKey("wrapped_use_artwork_backgrounds")
+        val WRAPPED_BACKGROUND_INTENSITY_KEY         = stringPreferencesKey("wrapped_background_intensity")
+        val WRAPPED_FALLBACK_THEME_KEY               = stringPreferencesKey("wrapped_fallback_theme")
     }
 }

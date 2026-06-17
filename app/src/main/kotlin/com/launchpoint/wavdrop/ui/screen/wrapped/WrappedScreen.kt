@@ -78,6 +78,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.model.WrappedSummary
+import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
+import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
 import java.time.DayOfWeek
@@ -89,6 +91,79 @@ import java.util.Locale
 // Base page count: Intro + 8 existing pages (Overview, Streaks, Patterns, Top Track/Artist/Album,
 // Most Skipped, Recent Plays). Milestone page appended conditionally.
 private const val WRAPPED_BASE_COUNT = 9
+
+private data class WrappedVisualSettings(
+    val useArtworkBackgrounds: Boolean,
+    val backgroundIntensity: WrappedBackgroundIntensity,
+    val fallbackTheme: WrappedFallbackTheme,
+)
+
+private data class WrappedIntensityStyle(
+    val artworkTopScrimAlpha: Float,
+    val artworkBottomScrimAlpha: Float,
+    val decorativeContainerAlpha: Float,
+    val decorativeMotifMultiplier: Float,
+)
+
+private fun WrappedBackgroundIntensity.toVisualStyle(): WrappedIntensityStyle = when (this) {
+    WrappedBackgroundIntensity.SUBTLE -> WrappedIntensityStyle(
+        artworkTopScrimAlpha = 0.38f,
+        artworkBottomScrimAlpha = 0.78f,
+        decorativeContainerAlpha = 0.055f,
+        decorativeMotifMultiplier = 0.65f,
+    )
+    WrappedBackgroundIntensity.MEDIUM -> WrappedIntensityStyle(
+        artworkTopScrimAlpha = 0.28f,
+        artworkBottomScrimAlpha = 0.68f,
+        decorativeContainerAlpha = 0.08f,
+        decorativeMotifMultiplier = 1f,
+    )
+    WrappedBackgroundIntensity.BOLD -> WrappedIntensityStyle(
+        artworkTopScrimAlpha = 0.22f,
+        artworkBottomScrimAlpha = 0.62f,
+        decorativeContainerAlpha = 0.13f,
+        decorativeMotifMultiplier = 1.45f,
+    )
+}
+
+private data class WrappedFallbackPalette(
+    val containerColor: Color,
+    val primary: Color,
+    val secondary: Color,
+)
+
+@Composable
+private fun WrappedFallbackTheme.toPalette(
+    motif: WrappedDecorativeMotif,
+    intensityStyle: WrappedIntensityStyle,
+): WrappedFallbackPalette {
+    val fallbackColor = when (this) {
+        WrappedFallbackTheme.AUTO -> when (motif) {
+            WrappedDecorativeMotif.Milestones -> MaterialTheme.colorScheme.primary
+            WrappedDecorativeMotif.Patterns -> MaterialTheme.colorScheme.secondary
+        }
+        WrappedFallbackTheme.OBSIDIAN -> Color(0xFF3A3A42)
+        WrappedFallbackTheme.OCEAN -> Color(0xFF0B6F92)
+        WrappedFallbackTheme.DEEP_TEAL -> Color(0xFF08746A)
+        WrappedFallbackTheme.MIDNIGHT_VIOLET -> Color(0xFF6D4DBA)
+        WrappedFallbackTheme.SUNSET_ORANGE -> Color(0xFFC66B2E)
+        WrappedFallbackTheme.CLEAN_PURPLE -> Color(0xFF6D5BD0)
+    }
+    val secondary = when (this) {
+        WrappedFallbackTheme.AUTO -> MaterialTheme.colorScheme.secondary
+        WrappedFallbackTheme.OBSIDIAN -> Color(0xFF8F8F99)
+        WrappedFallbackTheme.OCEAN -> Color(0xFF14B8D4)
+        WrappedFallbackTheme.DEEP_TEAL -> Color(0xFF2CC8A7)
+        WrappedFallbackTheme.MIDNIGHT_VIOLET -> Color(0xFFB08CFF)
+        WrappedFallbackTheme.SUNSET_ORANGE -> Color(0xFFE9A85B)
+        WrappedFallbackTheme.CLEAN_PURPLE -> Color(0xFF8EA1FF)
+    }
+    return WrappedFallbackPalette(
+        containerColor = fallbackColor.copy(alpha = intensityStyle.decorativeContainerAlpha),
+        primary = fallbackColor,
+        secondary = secondary,
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -196,6 +271,11 @@ private fun WrappedContent(
     val years = state.availableYears
     val selectedIndex = years.indexOf(state.selectedYear)
     val wrapped = state.wrapped
+    val visualSettings = WrappedVisualSettings(
+        useArtworkBackgrounds = state.useArtworkBackgrounds,
+        backgroundIntensity = state.backgroundIntensity,
+        fallbackTheme = state.fallbackTheme,
+    )
 
     val milestones = remember(wrapped) { computeMilestones(wrapped) }
     val showMilestonePage = state.showMilestoneCelebrations && milestones.isNotEmpty()
@@ -243,16 +323,16 @@ private fun WrappedContent(
                 .fillMaxWidth(),
         ) { page ->
             when (page) {
-                0    -> IntroPage(wrapped)
+                0    -> IntroPage(wrapped, visualSettings)
                 1    -> OverviewPage(wrapped)
                 2    -> StreaksPage(wrapped)
-                3    -> PatternsPage(wrapped)
-                4    -> TopTrackPage(wrapped, onTrackDetailsClick)
-                5    -> TopArtistPage(wrapped, onArtistClick)
-                6    -> TopAlbumPage(wrapped, onAlbumClick)
-                7    -> MostSkippedPage(wrapped, onTrackDetailsClick)
+                3    -> PatternsPage(wrapped, visualSettings)
+                4    -> TopTrackPage(wrapped, visualSettings, onTrackDetailsClick)
+                5    -> TopArtistPage(wrapped, visualSettings, onArtistClick)
+                6    -> TopAlbumPage(wrapped, visualSettings, onAlbumClick)
+                7    -> MostSkippedPage(wrapped, visualSettings, onTrackDetailsClick)
                 8    -> RecentPlaysPage(wrapped, onTrackDetailsClick)
-                else -> if (showMilestonePage) MilestonePage(milestones, wrapped.year, reduceMotion)
+                else -> if (showMilestonePage) MilestonePage(milestones, wrapped.year, visualSettings, reduceMotion)
                         else RecentPlaysPage(wrapped, onTrackDetailsClick)
             }
         }
@@ -417,37 +497,54 @@ private fun InsightCard(
 private fun WrappedArtworkCard(
     label: String,
     artworkUri: String?,
+    visualSettings: WrappedVisualSettings,
     modifier: Modifier = Modifier,
+    fallbackMotif: WrappedDecorativeMotif = WrappedDecorativeMotif.Patterns,
     content: @Composable ColumnScope.(artworkLoaded: Boolean) -> Unit,
 ) {
-    var artworkLoaded by remember(artworkUri) { mutableStateOf(false) }
+    val effectiveArtworkUri = artworkUri.takeIf { visualSettings.useArtworkBackgrounds }
+    var artworkLoaded by remember(effectiveArtworkUri) { mutableStateOf(false) }
+    val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
+    val fallbackPalette = visualSettings.fallbackTheme.toPalette(fallbackMotif, intensityStyle)
     Card(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            containerColor = if (effectiveArtworkUri != null) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                fallbackPalette.containerColor
+            },
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
-            AsyncImage(
-                model = artworkUri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                onSuccess = { artworkLoaded = true },
-                onError = { artworkLoaded = false },
-            )
-            if (artworkLoaded) {
+            if (effectiveArtworkUri != null) {
+                AsyncImage(
+                    model = effectiveArtworkUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onSuccess = { artworkLoaded = true },
+                    onError = { artworkLoaded = false },
+                )
+            }
+            if (artworkLoaded && effectiveArtworkUri != null) {
                 Box(
                     Modifier.fillMaxSize().background(
                         Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = 0.28f),
-                            1f to Color.Black.copy(alpha = 0.68f),
+                            0f to Color.Black.copy(alpha = intensityStyle.artworkTopScrimAlpha),
+                            1f to Color.Black.copy(alpha = intensityStyle.artworkBottomScrimAlpha),
                         )
                     )
+                )
+            } else {
+                WrappedDecorativeBackground(
+                    motif = fallbackMotif,
+                    visualSettings = visualSettings,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
             Column(
@@ -473,9 +570,16 @@ private fun WrappedArtworkCard(
 private enum class WrappedDecorativeMotif { Milestones, Patterns }
 
 @Composable
-private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier: Modifier = Modifier) {
-    val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
+private fun WrappedDecorativeBackground(
+    motif: WrappedDecorativeMotif,
+    visualSettings: WrappedVisualSettings,
+    modifier: Modifier = Modifier,
+) {
+    val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
+    val palette = visualSettings.fallbackTheme.toPalette(motif, intensityStyle)
+    val primary = palette.primary
+    val secondary = palette.secondary
+    val motifMultiplier = intensityStyle.decorativeMotifMultiplier
     Canvas(modifier = modifier) {
         when (motif) {
             WrappedDecorativeMotif.Milestones -> {
@@ -484,7 +588,10 @@ private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier:
                 val cy = size.height * 0.19f
                 for (i in 1..5) {
                     drawCircle(
-                        color = primary.copy(alpha = (0.065f - i * 0.01f).coerceAtLeast(0.01f)),
+                        color = primary.copy(
+                            alpha = ((0.065f - i * 0.01f).coerceAtLeast(0.01f) * motifMultiplier)
+                                .coerceAtMost(0.16f),
+                        ),
                         radius = i * 50.dp.toPx(),
                         center = Offset(cx, cy),
                         style = Stroke(width = 1.dp.toPx()),
@@ -498,7 +605,7 @@ private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier:
                 dots.forEachIndexed { idx, (rx, ry) ->
                     val r = if (idx % 2 == 0) 3f else 2f
                     drawCircle(
-                        color = primary.copy(alpha = 0.09f),
+                        color = primary.copy(alpha = (0.09f * motifMultiplier).coerceAtMost(0.18f)),
                         radius = r.dp.toPx(),
                         center = Offset(rx * size.width, ry * size.height),
                     )
@@ -521,7 +628,10 @@ private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier:
                     }
                     drawPath(
                         path = path,
-                        color = primary.copy(alpha = (0.062f - w * 0.014f).coerceAtLeast(0.02f)),
+                        color = primary.copy(
+                            alpha = ((0.062f - w * 0.014f).coerceAtLeast(0.02f) * motifMultiplier)
+                                .coerceAtMost(0.15f),
+                        ),
                         style = Stroke(width = 1.2.dp.toPx()),
                     )
                 }
@@ -530,7 +640,7 @@ private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier:
                 val ccy = size.height * 0.83f
                 val cr = 27.dp.toPx()
                 drawCircle(
-                    color = secondary.copy(alpha = 0.05f),
+                    color = secondary.copy(alpha = (0.05f * motifMultiplier).coerceAtMost(0.13f)),
                     radius = cr,
                     center = Offset(ccx, ccy),
                     style = Stroke(width = 0.8.dp.toPx()),
@@ -539,7 +649,7 @@ private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier:
                     val angle = tick * (PI / 6.0) - PI / 2.0
                     val inner = if (tick % 3 == 0) 0.68f else 0.84f
                     drawLine(
-                        color = secondary.copy(alpha = 0.055f),
+                        color = secondary.copy(alpha = (0.055f * motifMultiplier).coerceAtMost(0.14f)),
                         start = Offset(
                             (ccx + cr * inner * cos(angle)).toFloat(),
                             (ccy + cr * inner * sin(angle)).toFloat(),
@@ -560,21 +670,28 @@ private fun WrappedDecorativeBackground(motif: WrappedDecorativeMotif, modifier:
 private fun WrappedDecorativeCard(
     label: String,
     motif: WrappedDecorativeMotif,
+    visualSettings: WrappedVisualSettings,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
+    val palette = visualSettings.fallbackTheme.toPalette(motif, intensityStyle)
     Card(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+            containerColor = palette.containerColor,
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
-            WrappedDecorativeBackground(motif = motif, modifier = Modifier.fillMaxSize())
+            WrappedDecorativeBackground(
+                motif = motif,
+                visualSettings = visualSettings,
+                modifier = Modifier.fillMaxSize(),
+            )
             Row(Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
@@ -718,9 +835,19 @@ private fun FeaturedTrack(
 // ── Pages ─────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun IntroPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
+private fun IntroPage(
+    wrapped: WrappedSummary,
+    visualSettings: WrappedVisualSettings,
+    modifier: Modifier = Modifier,
+) {
     val artworkUri = ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId)
+        .takeIf { visualSettings.useArtworkBackgrounds }
     var artworkLoaded by remember(artworkUri) { mutableStateOf(false) }
+    val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
+    val fallbackPalette = visualSettings.fallbackTheme.toPalette(
+        motif = WrappedDecorativeMotif.Patterns,
+        intensityStyle = intensityStyle,
+    )
 
     Card(
         modifier = modifier
@@ -728,24 +855,42 @@ private fun IntroPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            containerColor = if (artworkUri != null) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                fallbackPalette.containerColor
+            },
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            AsyncImage(
-                model = artworkUri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                onSuccess = { artworkLoaded = true },
-                onError = { artworkLoaded = false },
-            )
-            if (artworkLoaded) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+            if (artworkUri != null) {
+                AsyncImage(
+                    model = artworkUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onSuccess = { artworkLoaded = true },
+                    onError = { artworkLoaded = false },
+                )
+            }
+            if (artworkLoaded && artworkUri != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(
+                        Color.Black.copy(
+                            alpha = (intensityStyle.artworkTopScrimAlpha + intensityStyle.artworkBottomScrimAlpha) / 2f,
+                        ),
+                    ),
+                )
+            } else {
+                WrappedDecorativeBackground(
+                    motif = WrappedDecorativeMotif.Patterns,
+                    visualSettings = visualSettings,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
             val onColor = if (artworkLoaded) Color.White
-                          else MaterialTheme.colorScheme.onPrimaryContainer
+                          else MaterialTheme.colorScheme.onSurface
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -829,8 +974,17 @@ private fun StreaksPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) 
 }
 
 @Composable
-private fun PatternsPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
-    WrappedDecorativeCard(label = "Listening Patterns", motif = WrappedDecorativeMotif.Patterns, modifier = modifier) {
+private fun PatternsPage(
+    wrapped: WrappedSummary,
+    visualSettings: WrappedVisualSettings,
+    modifier: Modifier = Modifier,
+) {
+    WrappedDecorativeCard(
+        label = "Listening Patterns",
+        motif = WrappedDecorativeMotif.Patterns,
+        visualSettings = visualSettings,
+        modifier = modifier,
+    ) {
         val hasData = wrapped.mostActiveDayOfWeek != null || wrapped.mostActiveHour != null
         if (!hasData) {
             NoDataText("No listening patterns for this year. Play music across days or hours to reveal patterns.")
@@ -857,6 +1011,7 @@ private fun PatternsPage(wrapped: WrappedSummary, modifier: Modifier = Modifier)
 @Composable
 private fun TopTrackPage(
     wrapped: WrappedSummary,
+    visualSettings: WrappedVisualSettings,
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -864,6 +1019,7 @@ private fun TopTrackPage(
     WrappedArtworkCard(
         label = "Top Track",
         artworkUri = ArtworkResolver.albumArtworkUri(song?.song?.albumId),
+        visualSettings = visualSettings,
         modifier = modifier,
     ) { artworkLoaded ->
         if (song == null) {
@@ -890,6 +1046,7 @@ private fun TopTrackPage(
 @Composable
 private fun TopArtistPage(
     wrapped: WrappedSummary,
+    visualSettings: WrappedVisualSettings,
     onArtistClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -906,6 +1063,7 @@ private fun TopArtistPage(
     WrappedArtworkCard(
         label = "Top Artist",
         artworkUri = artworkUri,
+        visualSettings = visualSettings,
         modifier = modifier,
     ) { artworkLoaded ->
         if (artist == null) {
@@ -950,6 +1108,7 @@ private fun TopArtistPage(
 @Composable
 private fun TopAlbumPage(
     wrapped: WrappedSummary,
+    visualSettings: WrappedVisualSettings,
     onAlbumClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -965,6 +1124,7 @@ private fun TopAlbumPage(
     WrappedArtworkCard(
         label = "Top Album",
         artworkUri = artworkUri,
+        visualSettings = visualSettings,
         modifier = modifier,
     ) { artworkLoaded ->
         if (album == null) {
@@ -1017,6 +1177,7 @@ private fun TopAlbumPage(
 @Composable
 private fun MostSkippedPage(
     wrapped: WrappedSummary,
+    visualSettings: WrappedVisualSettings,
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1024,6 +1185,7 @@ private fun MostSkippedPage(
     WrappedArtworkCard(
         label = "Most Skipped",
         artworkUri = ArtworkResolver.albumArtworkUri(track?.song?.albumId),
+        visualSettings = visualSettings,
         modifier = modifier,
     ) { artworkLoaded ->
         if (track == null) {
@@ -1132,12 +1294,14 @@ private fun RecentPlaysPage(
 private fun MilestonePage(
     milestones: List<WrappedMilestone>,
     year: Int,
+    visualSettings: WrappedVisualSettings,
     @Suppress("UNUSED_PARAMETER") reduceMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
     WrappedDecorativeCard(
         label = "Milestones",
         motif = WrappedDecorativeMotif.Milestones,
+        visualSettings = visualSettings,
         modifier = modifier,
     ) {
         Text(

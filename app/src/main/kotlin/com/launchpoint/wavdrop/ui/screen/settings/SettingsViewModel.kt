@@ -28,6 +28,8 @@ import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
+import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
+import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -254,6 +256,27 @@ class SettingsViewModel @Inject constructor(
             initialValue = true,
         )
 
+    val wrappedUseArtworkBackgrounds: StateFlow<Boolean> =
+        appSettingsRepository.wrappedUseArtworkBackgrounds.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = true,
+        )
+
+    val wrappedBackgroundIntensity: StateFlow<WrappedBackgroundIntensity> =
+        appSettingsRepository.wrappedBackgroundIntensity.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = WrappedBackgroundIntensity.MEDIUM,
+        )
+
+    val wrappedFallbackTheme: StateFlow<WrappedFallbackTheme> =
+        appSettingsRepository.wrappedFallbackTheme.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = WrappedFallbackTheme.AUTO,
+        )
+
     private val _libraryScanUiState =
         MutableStateFlow<LibraryScanUiState>(LibraryScanUiState.Idle)
     val libraryScanUiState: StateFlow<LibraryScanUiState> =
@@ -412,6 +435,18 @@ class SettingsViewModel @Inject constructor(
 
     fun setShowMilestoneCelebrations(enabled: Boolean) {
         viewModelScope.launch { appSettingsRepository.setShowMilestoneCelebrations(enabled) }
+    }
+
+    fun setWrappedUseArtworkBackgrounds(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setWrappedUseArtworkBackgrounds(enabled) }
+    }
+
+    fun setWrappedBackgroundIntensity(intensity: WrappedBackgroundIntensity) {
+        viewModelScope.launch { appSettingsRepository.setWrappedBackgroundIntensity(intensity) }
+    }
+
+    fun setWrappedFallbackTheme(theme: WrappedFallbackTheme) {
+        viewModelScope.launch { appSettingsRepository.setWrappedFallbackTheme(theme) }
     }
 
     fun setAppIcon(choice: AppIconChoice) {
