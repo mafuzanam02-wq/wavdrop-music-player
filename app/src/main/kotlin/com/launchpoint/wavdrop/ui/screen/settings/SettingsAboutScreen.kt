@@ -51,6 +51,8 @@ fun SettingsAboutScreen(
     var showDisclaimerDialog     by remember { mutableStateOf(false) }
     var showOpenSourceDialog     by remember { mutableStateOf(false) }
     var showWhatsNewDialog       by remember { mutableStateOf(false) }
+    var showWhatWeStoreDialog    by remember { mutableStateOf(false) }
+    var showDataOwnershipDialog  by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     Scaffold(
@@ -98,6 +100,21 @@ fun SettingsAboutScreen(
                 AboutPromiseCard(
                     title = "Your library stays yours",
                     body = "Library data, playlists, lyrics overrides, preferences, backups, statistics, and listening history stay local unless you manually export or import backup files.",
+                )
+            }
+            item { SectionHeader("Data & Your Rights") }
+            item {
+                ClickableSettingsRow(
+                    title    = "What Wavdrop stores",
+                    subtitle = "Library metadata, statistics, and settings — all local.",
+                    onClick  = { showWhatWeStoreDialog = true },
+                )
+            }
+            item {
+                ClickableSettingsRow(
+                    title    = "Your music stays on this device",
+                    subtitle = "No account, no uploads, no cloud sync.",
+                    onClick  = { showDataOwnershipDialog = true },
                 )
             }
             item { SectionHeader("Built By") }
@@ -205,6 +222,20 @@ fun SettingsAboutScreen(
     }
     if (showWhatsNewDialog) {
         ChangelogDialog(onDismiss = { showWhatsNewDialog = false })
+    }
+    if (showWhatWeStoreDialog) {
+        LegalInfoDialog(
+            title      = "What Wavdrop stores",
+            paragraphs = WavdropAbout.WHAT_WE_STORE,
+            onDismiss  = { showWhatWeStoreDialog = false },
+        )
+    }
+    if (showDataOwnershipDialog) {
+        LegalInfoDialog(
+            title      = "Your music stays on this device",
+            paragraphs = WavdropAbout.DATA_OWNERSHIP,
+            onDismiss  = { showDataOwnershipDialog = false },
+        )
     }
 }
 
@@ -486,6 +517,35 @@ private object WavdropAbout {
         "The Delete from device feature permanently removes audio files from your device and cannot be undone. Android does not provide a recycle bin for shared media storage. Wavdrop cannot recover deleted files.",
         "When you share a track using the Share feature, Wavdrop provides a content link to the app you choose. Wavdrop is not responsible for how the receiving app handles the shared file.",
         "Wavdrop statistics, reports, and Wrapped are computed from listening activity recorded locally on your device. History begins from when you started using Wavdrop; prior listening activity is not available unless imported via BlackPlayer import or a Wavdrop backup.",
+    )
+
+    val WHAT_WE_STORE = listOf(
+        "Wavdrop stores data locally on your device only. Nothing is uploaded to any server, and none of this data is shared with Wavdrop, LaunchPoint Digital, or any third party.",
+        "Library metadata:\n" +
+            "Song titles, artists, albums, file references, track duration, and folder paths are read from your device's media library. Wavdrop does not modify your audio files.",
+        "Listening statistics:\n" +
+            "Play counts, skip counts, favorite status, and total listening time per track. Per-play and per-skip event records with timestamps, used for statistics, monthly reports, and Wrapped summaries.",
+        "Playlists and preferences:\n" +
+            "Playlists and their track order. App settings such as startup screen, scan folders, theme, icon choice, and compact mode.",
+        "Custom lyrics:\n" +
+            "Lyrics you manually add or paste inside the app are stored locally. They are not fetched from any online service.",
+        "Backup and export files:\n" +
+            "Backup files are only created when you explicitly use the Export feature. They are saved to a location you choose — Wavdrop does not upload them. You are responsible for protecting your backup files.",
+    )
+
+    val DATA_OWNERSHIP = listOf(
+        "Wavdrop is designed around one principle: your music library and listening data are yours alone.",
+        "No account required:\n" +
+            "You do not need to create an account, sign in, or provide any personal information to use Wavdrop.",
+        "No cloud music upload:\n" +
+            "Wavdrop does not upload your audio files. It reads them directly from your device's storage using the Android media permission.",
+        "No streaming library sync:\n" +
+            "Wavdrop does not connect to any streaming service or sync your library with an online database.",
+        "Media permission:\n" +
+            "The audio permission (READ_MEDIA_AUDIO on Android 13+, READ_EXTERNAL_STORAGE on earlier versions) is used only to find and play audio files already stored on your device. Wavdrop does not request internet, location, contacts, camera, microphone, or advertising ID permissions.",
+        "Exporting your data:\n" +
+            "You can export your library metadata, statistics, playlists, custom lyrics, and settings at any time from Settings → Backup. The resulting file is saved to a location you control.",
+        "Wavdrop makes no network requests. All app functionality works completely offline.",
     )
 
     val OPEN_SOURCE_LICENSES = listOf(
