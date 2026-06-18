@@ -70,6 +70,7 @@ import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.SleepTimerDialog
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
@@ -116,7 +117,8 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope    = rememberCoroutineScope()
     val context           = LocalContext.current
-    var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
+    var addToPlaylistSong  by remember { mutableStateOf<Song?>(null) }
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
     var sleepTimerNowMs  by remember { mutableStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(sleepTimerState.isActive, sleepTimerState.endsAtMs) {
@@ -142,7 +144,10 @@ fun HomeScreen(
                 },
                 actions = {
                     if (sleepTimerLabel != null) {
-                        SleepTimerChip(label = sleepTimerLabel)
+                        SleepTimerChip(
+                            label = sleepTimerLabel,
+                            onClick = { showSleepTimerDialog = true },
+                        )
                     }
                     IconButton(onClick = onGlobalSearchClick) {
                         Icon(
@@ -224,6 +229,21 @@ fun HomeScreen(
         }
     }
 
+    if (showSleepTimerDialog) {
+        SleepTimerDialog(
+            state = sleepTimerState,
+            onOptionSelected = { option ->
+                viewModel.setSleepTimer(option)
+                showSleepTimerDialog = false
+            },
+            onCustomDurationSelected = { durationMs ->
+                viewModel.setCustomSleepTimer(durationMs)
+                showSleepTimerDialog = false
+            },
+            onDismiss = { showSleepTimerDialog = false },
+        )
+    }
+
     addToPlaylistSong?.let { song ->
         AddToPlaylistDialog(
             playlists           = playlists,
@@ -288,10 +308,13 @@ private fun HomeHeaderTitle(
 @Composable
 private fun SleepTimerChip(
     label: String,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.padding(end = 2.dp),
+        modifier = modifier
+            .padding(end = 2.dp)
+            .clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         shape = CircleShape,
@@ -303,7 +326,7 @@ private fun SleepTimerChip(
         ) {
             Icon(
                 imageVector = Icons.Default.Timer,
-                contentDescription = null,
+                contentDescription = "Sleep timer active — tap to adjust",
                 modifier = Modifier.size(14.dp),
             )
             Text(

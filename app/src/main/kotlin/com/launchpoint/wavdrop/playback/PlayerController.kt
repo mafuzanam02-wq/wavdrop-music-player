@@ -751,6 +751,22 @@ class PlayerController @Inject constructor(
         }
     }
 
+    fun setCustomSleepTimer(durationMs: Long) {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        val nowMs = System.currentTimeMillis()
+        _sleepTimerState.value = SleepTimerState(
+            option = SleepTimerOption.OFF,
+            startedAtMs = nowMs,
+            endsAtMs = nowMs + durationMs,
+            customDurationMs = durationMs,
+        )
+        sleepTimerJob = scope.launch {
+            delay(durationMs)
+            triggerSleepTimer()
+        }
+    }
+
     fun skipToNext() {
         val controller = mediaController ?: return
         val currentPlaybackIndex = currentPlaybackIndex() ?: controller.currentMediaItemIndex

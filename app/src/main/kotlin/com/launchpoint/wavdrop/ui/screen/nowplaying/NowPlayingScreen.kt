@@ -51,7 +51,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -99,6 +98,7 @@ import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.RepeatMode
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.SleepTimerDialog
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
@@ -367,9 +367,13 @@ fun NowPlayingScreen(
 
     if (showSleepTimerDialog) {
         SleepTimerDialog(
-            selected = sleepTimerState.option,
-            onSelect = { option ->
+            state = sleepTimerState,
+            onOptionSelected = { option ->
                 viewModel.setSleepTimer(option)
+                showSleepTimerDialog = false
+            },
+            onCustomDurationSelected = { durationMs ->
+                viewModel.setCustomSleepTimer(durationMs)
                 showSleepTimerDialog = false
             },
             onDismiss = { showSleepTimerDialog = false },
@@ -414,45 +418,6 @@ fun NowPlayingScreen(
             },
         )
     }
-}
-
-@Composable
-private fun SleepTimerDialog(
-    selected: SleepTimerOption,
-    onSelect: (SleepTimerOption) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Sleep Timer") },
-        text = {
-            Column {
-                SleepTimerOption.entries.forEach { option ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(option) }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = option == selected,
-                            onClick = { onSelect(option) },
-                        )
-                        Text(
-                            text = option.displayName,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
 }
 
 @Composable

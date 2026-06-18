@@ -16,6 +16,7 @@ data class SleepTimerState(
     val option: SleepTimerOption = SleepTimerOption.OFF,
     val startedAtMs: Long? = null,
     val endsAtMs: Long? = null,
+    val customDurationMs: Long? = null,
 ) {
-    val isActive: Boolean get() = option != SleepTimerOption.OFF
+    val isActive: Boolean get() = option != SleepTimerOption.OFF || customDurationMs != null
 }

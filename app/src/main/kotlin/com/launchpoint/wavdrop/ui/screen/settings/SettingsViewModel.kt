@@ -381,6 +381,10 @@ class SettingsViewModel @Inject constructor(
         playerController.setSleepTimer(option)
     }
 
+    fun setCustomSleepTimer(durationMs: Long) {
+        playerController.setCustomSleepTimer(durationMs)
+    }
+
     fun setNotificationControlsSetting(setting: NotificationControlsSetting) {
         viewModelScope.launch { appSettingsRepository.setNotificationControlsSetting(setting) }
     }

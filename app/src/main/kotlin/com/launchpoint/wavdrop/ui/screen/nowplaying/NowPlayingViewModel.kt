@@ -108,6 +108,8 @@ class NowPlayingViewModel @Inject constructor(
 
     fun setSleepTimer(option: SleepTimerOption) = playerController.setSleepTimer(option)
 
+    fun setCustomSleepTimer(durationMs: Long) = playerController.setCustomSleepTimer(durationMs)
+
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
 
     fun jumpToQueueItem(playbackIndex: Int) = playerController.jumpToQueueItem(playbackIndex)

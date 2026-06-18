@@ -36,6 +36,7 @@ import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
+import com.launchpoint.wavdrop.ui.components.SleepTimerDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -195,9 +196,13 @@ fun SettingsPlaybackScreen(
     }
     if (showSleepTimerDialog) {
         SleepTimerDialog(
-            selected = sleepTimerState.option,
-            onSelect = { option ->
+            state = sleepTimerState,
+            onOptionSelected = { option ->
                 viewModel.setSleepTimer(option)
+                showSleepTimerDialog = false
+            },
+            onCustomDurationSelected = { durationMs ->
+                viewModel.setCustomSleepTimer(durationMs)
                 showSleepTimerDialog = false
             },
             onDismiss = { showSleepTimerDialog = false },
@@ -323,43 +328,8 @@ private fun TimeDisplayDialog(
 }
 
 @Composable
-private fun SleepTimerDialog(
-    selected: SleepTimerOption,
-    onSelect: (SleepTimerOption) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Sleep Timer") },
-        text = {
-            Column {
-                SleepTimerOption.entries.forEach { option ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(option) }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = option == selected,
-                            onClick = { onSelect(option) },
-                        )
-                        Text(
-                            text = option.displayName,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
+private fun SleepTimerState.summary(): String = when {
+    customDurationMs != null -> "Custom (${customDurationMs / 60_000L} min)"
+    isActive -> option.displayName
+    else -> SleepTimerOption.OFF.displayName
 }
-
-private fun SleepTimerState.summary(): String =
-    if (isActive) option.displayName else SleepTimerOption.OFF.displayName
