@@ -47,7 +47,27 @@ Historical record of completed and shipped work. Newest changes first.
 
 ---
 
-## Unreleased
+## Beta 3.1 — Widget, Wrapped Visual Refresh & Polish
+
+### Home Screen Widget
+
+- **New home screen widget.** Add Wavdrop to your home screen to see the currently playing track at a glance. Shows album artwork, song title, and artist name.
+- **Playback controls on your home screen.** Previous, Play/Pause, and Next buttons work directly from the widget without opening the app.
+- **Widget stays in sync with playback.** The widget updates immediately when you skip a track, pause, or resume — matching what you see in the notification and the app.
+- **Album artwork in the widget.** When artwork is available, it appears as both the track thumbnail and as a blurred atmospheric background behind the controls.
+- **Adapts to different widget sizes.** The widget adjusts its layout when you resize it on your home screen, using the available space to show more or less detail.
+
+### Wrapped Visual Refresh
+
+- **Artwork-backed highlight cards.** Wrapped slides now use your most-played album artwork as dynamic backgrounds, making each year's summary feel personal.
+- **Decorative insight cards.** Listening milestones and pattern highlights appear as styled cards throughout your Wrapped summary.
+- **Better visual hierarchy.** Improved spacing, typography, and contrast across all Wrapped slides for a cleaner, more polished presentation.
+
+### Wrapped Personalization
+
+- **Artwork backgrounds on or off.** A new setting in Settings → Statistics → Wrapped lets you enable or disable artwork-backed backgrounds across all Wrapped slides.
+- **Background intensity control.** Adjust how prominently artwork colours show through the background with a simple intensity slider.
+- **Fallback themes.** Choose a fallback visual style for Wrapped slides when no artwork is available.
 
 ### Added
 - Delete from device on Track Details for Android 11+. A "Delete from device" button appears

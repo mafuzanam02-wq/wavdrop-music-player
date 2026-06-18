@@ -84,6 +84,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -327,6 +328,7 @@ fun NowPlayingScreen(
                 showLyricsOverlay = showLyricsOverlay,
                 onToggleLyrics    = { showLyricsOverlay = !showLyricsOverlay },
                 onEditLyrics      = { overlayBeforeEdit = showLyricsOverlay; showLyricsEditor = true },
+                onPasteLyrics     = { text -> viewModel.saveCustomLyrics(text) },
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenAlbum        = onOpenAlbum,
                 onOpenArtist       = onOpenArtist,
@@ -466,6 +468,7 @@ private fun NowPlayingContent(
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
     onEditLyrics: () -> Unit,
+    onPasteLyrics: ((String) -> Unit)? = null,
     onOpenTrackDetails: (Long) -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
@@ -523,6 +526,7 @@ private fun NowPlayingContent(
             showLyricsOverlay = showLyricsOverlay,
             onToggleLyrics = onToggleLyrics,
             onEditLyrics = onEditLyrics,
+            onPasteLyrics = onPasteLyrics,
             onPrevious = onPrevious,
             onTogglePlayPause = onTogglePlayPause,
             onNext = onNext,
@@ -685,6 +689,7 @@ private fun FixedBottomNowPlayingLayout(
     showLyricsOverlay: Boolean,
     onToggleLyrics: () -> Unit,
     onEditLyrics: () -> Unit,
+    onPasteLyrics: ((String) -> Unit)? = null,
     onPrevious: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -728,6 +733,7 @@ private fun FixedBottomNowPlayingLayout(
                 onPrevious = onPrevious,
                 onNext = onNext,
                 onEditLyrics = onEditLyrics,
+                onPasteLyrics = onPasteLyrics,
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenArtist = onOpenArtist,
                 onOpenAlbum = onOpenAlbum,
@@ -761,6 +767,7 @@ private fun UpperNowPlayingContent(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onEditLyrics: () -> Unit,
+    onPasteLyrics: ((String) -> Unit)? = null,
     onOpenTrackDetails: (() -> Unit)?,
     onOpenArtist: (() -> Unit)?,
     onOpenAlbum: (() -> Unit)?,
@@ -788,6 +795,7 @@ private fun UpperNowPlayingContent(
                     onPrevious = onPrevious,
                     onNext = onNext,
                     onEditLyrics = onEditLyrics,
+                    onPasteLyrics = onPasteLyrics,
                     compactLyricsOverlay = !metrics.showLyricsHint,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -802,6 +810,7 @@ private fun UpperNowPlayingContent(
                     onPrevious = onPrevious,
                     onNext = onNext,
                     onEditLyrics = onEditLyrics,
+                    onPasteLyrics = onPasteLyrics,
                     modifier = Modifier.size(metrics.artworkSize),
                 )
                 if (metrics.showLyricsHint) {
@@ -1071,6 +1080,7 @@ private fun ArtworkWithLyricsOverlay(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onEditLyrics: () -> Unit,
+    onPasteLyrics: ((String) -> Unit)? = null,
     compactLyricsOverlay: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -1139,6 +1149,7 @@ private fun ArtworkWithLyricsOverlay(
                 LyricsOverlayContent(
                     lyrics = lyrics,
                     onSearchOnline = { searchLyricsOnline(context, song) },
+                    onPasteLyrics = onPasteLyrics,
                     compact = compactLyricsOverlay,
                     modifier = Modifier
                         .fillMaxSize()
@@ -1170,9 +1181,13 @@ private fun ArtworkWithLyricsOverlay(
 private fun LyricsOverlayContent(
     lyrics: LyricsResult,
     onSearchOnline: (() -> Unit)?,
+    onPasteLyrics: ((String) -> Unit)? = null,
     compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val clipboardManager = LocalClipboardManager.current
+    var clipboardEmpty by remember { mutableStateOf(false) }
+
     when (lyrics) {
         LyricsResult.Loading -> {
             Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -1216,6 +1231,31 @@ private fun LyricsOverlayContent(
                         color = Color.White.copy(alpha = 0.50f),
                         textAlign = TextAlign.Center,
                     )
+                    if (onPasteLyrics != null) {
+                        TextButton(onClick = {
+                            clipboardEmpty = false
+                            val clip = clipboardManager.getText()
+                            if (clip != null && clip.text.isNotBlank()) {
+                                onPasteLyrics(clip.text)
+                            } else {
+                                clipboardEmpty = true
+                            }
+                        }) {
+                            Text(
+                                text = "Paste from clipboard",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.75f),
+                            )
+                        }
+                        if (clipboardEmpty) {
+                            Text(
+                                text = "Clipboard is empty",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.50f),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
                     if (NowPlayingLyricsOverlayRules.showSearchOnlineAction(onSearchOnline)) {
                         TextButton(onClick = { onSearchOnline?.invoke() }) {
                             Text(
