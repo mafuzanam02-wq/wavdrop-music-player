@@ -270,6 +270,12 @@ private fun InsightsSection(summary: StatsDashboardSummary, insights: Statistics
                 modifier = Modifier.weight(1f),
             )
         }
+        Text(
+            text = "Streak and active-day insights use recent listening events and may not include imported history.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 

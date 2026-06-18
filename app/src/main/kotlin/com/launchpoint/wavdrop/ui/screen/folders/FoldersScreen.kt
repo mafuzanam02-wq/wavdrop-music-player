@@ -167,6 +167,7 @@ fun FoldersScreen(
             is FoldersUiState.Ready -> FolderListContent(
                 folders = s.folders,
                 onFolderClick = onFolderClick,
+                sortMode = sortMode,
                 modifier = Modifier.padding(innerPadding),
             )
         }
@@ -177,6 +178,7 @@ fun FoldersScreen(
 private fun FolderListContent(
     folders: List<FolderSummary>,
     onFolderClick: (String) -> Unit,
+    sortMode: FolderSortMode,
     modifier: Modifier = Modifier,
 ) {
     if (folders.isEmpty()) {
@@ -206,14 +208,16 @@ private fun FolderListContent(
                 )
             }
         }
-        AlphabetSideIndex(
-            onLetterSelected = { letter ->
-                AlphabetIndex.firstIndexForFolderLetter(folders, letter)?.let { index ->
-                    coroutineScope.launch { listState.animateScrollToItem(index) }
-                }
-            },
-            modifier = Modifier.align(Alignment.CenterEnd),
-        )
+        if (sortMode == FolderSortMode.NAME) {
+            AlphabetSideIndex(
+                onLetterSelected = { letter ->
+                    AlphabetIndex.firstIndexForFolderLetter(folders, letter)?.let { index ->
+                        coroutineScope.launch { listState.animateScrollToItem(index) }
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
     }
 }
 

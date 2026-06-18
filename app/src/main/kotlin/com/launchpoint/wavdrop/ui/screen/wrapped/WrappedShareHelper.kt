@@ -13,7 +13,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import java.io.File
 
-private const val FILEPROVIDER_AUTHORITY = "com.launchpoint.wavdrop.fileprovider"
 private const val SHARE_DIR = "wrapped_share"
 private const val SHARE_FILE = "wavdrop_wrapped.png"
 
@@ -62,7 +61,7 @@ private fun dispatchShare(activity: Activity, bitmap: Bitmap) {
         return
     }
 
-    val uri = FileProvider.getUriForFile(activity, FILEPROVIDER_AUTHORITY, file)
+    val uri = FileProvider.getUriForFile(activity, activity.packageName + ".fileprovider", file)
     val shareIntent = Intent(Intent.ACTION_SEND).apply {
         type = "image/png"
         putExtra(Intent.EXTRA_STREAM, uri)

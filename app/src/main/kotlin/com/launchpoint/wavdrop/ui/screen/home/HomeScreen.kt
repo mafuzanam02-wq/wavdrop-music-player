@@ -1,6 +1,5 @@
 package com.launchpoint.wavdrop.ui.screen.home
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -71,15 +70,12 @@ import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
-import com.launchpoint.wavdrop.ui.components.GroupedSearchContent
-import com.launchpoint.wavdrop.ui.components.SongSearchActions
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
-import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.components.SongRow
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
@@ -112,8 +108,6 @@ fun HomeScreen(
     val homeLayout      by viewModel.homeLayout.collectAsStateWithLifecycle()
     val nowPlaying      by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val favoriteSongIds by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
-    val searchQuery     by viewModel.searchQuery.collectAsStateWithLifecycle()
-    val librarySongs    by viewModel.librarySongs.collectAsStateWithLifecycle()
     val appIconChoice   by viewModel.appIconChoice.collectAsStateWithLifecycle()
     val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
 
@@ -122,7 +116,6 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope    = rememberCoroutineScope()
     val context           = LocalContext.current
-    var isSearchActive   by remember { mutableStateOf(false) }
     var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
     var sleepTimerNowMs  by remember { mutableStateOf(System.currentTimeMillis()) }
 
@@ -136,51 +129,34 @@ fun HomeScreen(
 
     val sleepTimerLabel = sleepTimerState.homeHeaderLabel(sleepTimerNowMs)
 
-    BackHandler(enabled = isSearchActive) {
-        isSearchActive = false
-        viewModel.setSearchQuery("")
-    }
-
     // ── Layout ────────────────────────────────────────────────────────────────
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (isSearchActive) {
-                SearchTopAppBar(
-                    query        = searchQuery,
-                    onQueryChange = viewModel::setSearchQuery,
-                    onClose      = {
-                        isSearchActive = false
-                        viewModel.setSearchQuery("")
-                    },
-                    placeholder  = "Search songs, artists, albums…",
-                )
-            } else {
-                TopAppBar(
-                    title = {
-                        HomeHeaderTitle(
-                            appIconChoice = appIconChoice,
-                            subtitle = dashboardState.librarySummary(),
+            TopAppBar(
+                title = {
+                    HomeHeaderTitle(
+                        appIconChoice = appIconChoice,
+                        subtitle = dashboardState.librarySummary(),
+                    )
+                },
+                actions = {
+                    if (sleepTimerLabel != null) {
+                        SleepTimerChip(label = sleepTimerLabel)
+                    }
+                    IconButton(onClick = onGlobalSearchClick) {
+                        Icon(
+                            imageVector        = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint               = MaterialTheme.colorScheme.onSurface,
                         )
-                    },
-                    actions = {
-                        if (sleepTimerLabel != null) {
-                            SleepTimerChip(label = sleepTimerLabel)
-                        }
-                        IconButton(onClick = onGlobalSearchClick) {
-                            Icon(
-                                imageVector        = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint               = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor    = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
-                )
-            }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor    = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+            )
         },
         bottomBar = {
             Column {
@@ -208,50 +184,21 @@ fun HomeScreen(
             onPermissionGranted = viewModel::syncIfNeeded,
             modifier = Modifier.padding(innerPadding),
         ) {
-            val trimmedQuery = searchQuery.trim()
-            if (isSearchActive && trimmedQuery.isNotEmpty()) {
-                GroupedSearchContent(
-                    songs = librarySongs,
-                    query = trimmedQuery,
-                    songActions = SongSearchActions(
-                        currentSongId = nowPlaying.song?.id,
-                        favoriteSongIds = favoriteSongIds,
-                        onSongClick = viewModel::playSearchResult,
-                        onPlayNext = viewModel::playNext,
-                        onAddToQueue = viewModel::addToQueue,
-                        onToggleFavorite = { song, wasFavorite ->
-                            viewModel.toggleFavorite(song.id)
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
-                                )
-                            }
-                        },
-                        onAddToPlaylist = { song -> addToPlaylistSong = song },
-                        onTrackDetailsClick = onTrackDetailsClick,
-                        onFolderClick = onFolderClick,
-                        onShare = { song ->
-                            shareSong(context, song) {
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("Could not share this track")
-                                }
-                            }
-                        },
-                    ),
-                    onAlbumClick = onAlbumClick,
-                    onArtistClick = onArtistClick,
-                    onFolderClick = onFolderClick,
-                    modifier = Modifier.padding(innerPadding),
-                )
-            } else if (isSearchActive) {
-                LibraryContent(
-                    uiState             = uiState,
+            if (uiState == HomeUiState.Loading) {
+                ScanningContent(Modifier.padding(innerPadding))
+            } else {
+                HomeDashboardContent(
+                    dashboard           = dashboardState,
+                    visibleSections     = homeLayout.visibleSections,
                     currentSongId       = nowPlaying.song?.id,
                     favoriteSongIds     = favoriteSongIds,
+                    nowPlayingSong      = nowPlaying.song,
+                    onNowPlayingClick   = onNowPlayingClick,
+                    onLibraryClick      = onLibraryClick,
+                    onPlaylistsClick    = onPlaylistsClick,
+                    onSmartCollectionsClick = onSmartCollectionsClick,
+                    onWrappedClick      = onWrappedClick,
                     onSongClick         = viewModel::playSong,
-                    onShuffleAll        = viewModel::shuffleAll,
-                    onPlayNext          = viewModel::playNext,
-                    onAddToQueue        = viewModel::addToQueue,
                     onToggleFavorite    = { song, wasFavorite ->
                         viewModel.toggleFavorite(song.id)
                         coroutineScope.launch {
@@ -260,9 +207,10 @@ fun HomeScreen(
                             )
                         }
                     },
-                    onAddToPlaylist     = { song -> addToPlaylistSong = song },
                     onTrackDetailsClick = onTrackDetailsClick,
-                    onFolderClick       = onFolderClick,
+                    onPlayNext          = viewModel::playNext,
+                    onAddToQueue        = viewModel::addToQueue,
+                    onAddToPlaylist     = { song -> addToPlaylistSong = song },
                     onShare             = { song ->
                         shareSong(context, song) {
                             coroutineScope.launch {
@@ -272,44 +220,6 @@ fun HomeScreen(
                     },
                     modifier            = Modifier.padding(innerPadding),
                 )
-            } else {
-                if (uiState == HomeUiState.Loading) {
-                    ScanningContent(Modifier.padding(innerPadding))
-                } else {
-                    HomeDashboardContent(
-                        dashboard           = dashboardState,
-                        visibleSections     = homeLayout.visibleSections,
-                        currentSongId       = nowPlaying.song?.id,
-                        favoriteSongIds     = favoriteSongIds,
-                        nowPlayingSong      = nowPlaying.song,
-                        onNowPlayingClick   = onNowPlayingClick,
-                        onLibraryClick      = onLibraryClick,
-                        onPlaylistsClick    = onPlaylistsClick,
-                        onSmartCollectionsClick = onSmartCollectionsClick,
-                        onWrappedClick      = onWrappedClick,
-                        onSongClick         = viewModel::playSong,
-                        onToggleFavorite    = { song, wasFavorite ->
-                            viewModel.toggleFavorite(song.id)
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    if (wasFavorite) "Removed from Favorites" else "Added to Favorites",
-                                )
-                            }
-                        },
-                        onTrackDetailsClick = onTrackDetailsClick,
-                        onPlayNext          = viewModel::playNext,
-                        onAddToQueue        = viewModel::addToQueue,
-                        onAddToPlaylist     = { song -> addToPlaylistSong = song },
-                        onShare             = { song ->
-                            shareSong(context, song) {
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("Could not share this track")
-                                }
-                            }
-                        },
-                        modifier            = Modifier.padding(innerPadding),
-                    )
-                }
             }
         }
     }

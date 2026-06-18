@@ -1,8 +1,10 @@
 package com.launchpoint.wavdrop.ui.screen.statistics
 
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StatisticsFormattersTest {
@@ -27,5 +29,28 @@ class StatisticsFormattersTest {
         assertEquals("Yesterday", StatisticsFormatters.formatLastPlayed(yesterdayMs, nowMs))
         assertEquals("May 1, 2026", StatisticsFormatters.formatLastPlayed(oldMs, nowMs))
         assertEquals("Never", StatisticsFormatters.formatLastPlayed(null, nowMs))
+    }
+
+    @Test
+    fun `formatStreakDays returns dash for zero and correct pluralisation`() {
+        assertEquals("—", StatisticsFormatters.formatStreakDays(0))
+        assertEquals("1 day", StatisticsFormatters.formatStreakDays(1))
+        assertEquals("2 days", StatisticsFormatters.formatStreakDays(2))
+        assertEquals("30 days", StatisticsFormatters.formatStreakDays(30))
+    }
+
+    @Test
+    fun `formatSkipRatio returns dash when no plays and percentage otherwise`() {
+        assertEquals("—", StatisticsFormatters.formatSkipRatio(totalPlays = 0, totalSkips = 0))
+        assertEquals("0%", StatisticsFormatters.formatSkipRatio(totalPlays = 10, totalSkips = 0))
+        assertEquals("25%", StatisticsFormatters.formatSkipRatio(totalPlays = 4, totalSkips = 1))
+        assertEquals("100%", StatisticsFormatters.formatSkipRatio(totalPlays = 3, totalSkips = 3))
+    }
+
+    @Test
+    fun `formatDayOfWeekShort returns dash for null and non-empty string for known day`() {
+        assertEquals("—", StatisticsFormatters.formatDayOfWeekShort(null))
+        assertTrue(StatisticsFormatters.formatDayOfWeekShort(DayOfWeek.MONDAY).isNotEmpty())
+        assertTrue(StatisticsFormatters.formatDayOfWeekShort(DayOfWeek.FRIDAY).isNotEmpty())
     }
 }
