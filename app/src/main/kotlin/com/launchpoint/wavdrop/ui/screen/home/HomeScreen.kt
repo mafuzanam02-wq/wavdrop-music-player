@@ -101,6 +101,7 @@ fun HomeScreen(
     onWrappedClick: () -> Unit = {},
     onAlbumClick: (String) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
+    onGlobalSearchClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
@@ -166,7 +167,7 @@ fun HomeScreen(
                         if (sleepTimerLabel != null) {
                             SleepTimerChip(label = sleepTimerLabel)
                         }
-                        IconButton(onClick = { isSearchActive = true }) {
+                        IconButton(onClick = onGlobalSearchClick) {
                             Icon(
                                 imageVector        = Icons.Default.Search,
                                 contentDescription = "Search",

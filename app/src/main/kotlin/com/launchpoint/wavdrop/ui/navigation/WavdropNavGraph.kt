@@ -62,6 +62,7 @@ import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.ui.screen.songs.SongsScreen
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsScreen
 import com.launchpoint.wavdrop.ui.screen.trackdetails.TrackDetailsScreen
+import com.launchpoint.wavdrop.ui.screen.search.GlobalSearchRoute
 import com.launchpoint.wavdrop.ui.screen.wrapped.WrappedScreen
 
 sealed class Screen(val route: String) {
@@ -89,6 +90,7 @@ sealed class Screen(val route: String) {
     data object Statistics          : Screen("statistics")
     data object Reports             : Screen("reports")
     data object MonthlyReports      : Screen("monthly_reports")
+    data object GlobalSearch        : Screen("global_search")
     data object Wrapped             : Screen("wrapped")
     data object Playlists              : Screen("playlists")
     data object SmartCollections      : Screen("smart_collections")
@@ -217,6 +219,7 @@ fun WavdropNavGraph(
                 onWrappedClick           = { navController.navigate(Screen.Wrapped.route) },
                 onAlbumClick             = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
                 onArtistClick            = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onGlobalSearchClick      = { navController.navigate(Screen.GlobalSearch.route) },
             )
         }
         composable(Screen.Library.route) {
@@ -437,6 +440,15 @@ fun WavdropNavGraph(
                 onNavigateBack      = { navController.popBackStack() },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onNowPlayingClick   = { navController.navigateNowPlaying() },
+            )
+        }
+        composable(Screen.GlobalSearch.route) {
+            GlobalSearchRoute(
+                onNavigateBack      = { navController.popBackStack() },
+                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onFolderClick       = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
             )
         }
         composable(Screen.Settings.route) {
