@@ -7,10 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,7 +37,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -49,6 +46,7 @@ import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.EmptyStateText
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import kotlinx.coroutines.launch
@@ -249,29 +247,6 @@ private fun EmptyContent(modifier: Modifier = Modifier) {
         EmptyStateText(
             title = "No albums found",
             message = "Albums appear after Wavdrop scans music files with album metadata.",
-        )
-    }
-}
-
-@Composable
-private fun EmptyStateText(
-    title: String,
-    message: String,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp),
         )
     }
 }

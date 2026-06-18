@@ -223,6 +223,8 @@ fun HomeScreen(
                             }
                         }
                     },
+                    onRescan            = viewModel::refreshLibrary,
+                    onSettingsClick     = onSettingsClick,
                     modifier            = Modifier.padding(innerPadding),
                 )
             }
@@ -382,7 +384,7 @@ private fun LibraryContent(
 ) {
     when (uiState) {
         HomeUiState.Loading  -> ScanningContent(modifier)
-        HomeUiState.Empty    -> EmptyLibraryContent(modifier)
+        HomeUiState.Empty    -> EmptyLibraryContent(onRescan = {}, onSettingsClick = {}, modifier = modifier)
         is HomeUiState.Songs -> SongListContent(
             songs               = uiState.songs,
             currentSongId       = currentSongId,
@@ -413,7 +415,11 @@ private fun ScanningContent(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun EmptyLibraryContent(modifier: Modifier = Modifier) {
+private fun EmptyLibraryContent(
+    onRescan: () -> Unit,
+    onSettingsClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     CenteredColumn(modifier) {
         Icon(
             imageVector        = Icons.Default.LibraryMusic,
@@ -430,12 +436,23 @@ private fun EmptyLibraryContent(modifier: Modifier = Modifier) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text      = "Add audio files to your device, then rescan your library. If your music is in a specific folder, choose it in Settings.",
+            text      = "Add audio files to your device, then rescan your library.",
             style     = MaterialTheme.typography.bodyMedium,
             color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             textAlign = TextAlign.Center,
             modifier  = Modifier.padding(horizontal = 32.dp),
         )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text      = "Wavdrop only scans music stored on this device.",
+            style     = MaterialTheme.typography.bodySmall,
+            color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+            textAlign = TextAlign.Center,
+            modifier  = Modifier.padding(horizontal = 32.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        TextButton(onClick = onRescan) { Text("Rescan library") }
+        TextButton(onClick = onSettingsClick) { Text("Choose folder in Settings") }
     }
 }
 
@@ -458,6 +475,8 @@ private fun HomeDashboardContent(
     onAddToQueue: (Song) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
     onShare: (Song) -> Unit,
+    onRescan: () -> Unit,
+    onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -477,6 +496,8 @@ private fun HomeDashboardContent(
         if (dashboard.totalSongs == 0) {
             item {
                 DashboardEmptyLibraryCard(
+                    onRescan = onRescan,
+                    onSettingsClick = onSettingsClick,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
@@ -677,6 +698,8 @@ private fun WrappedPreviewCard(
 
 @Composable
 private fun DashboardEmptyLibraryCard(
+    onRescan: () -> Unit,
+    onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -684,28 +707,41 @@ private fun DashboardEmptyLibraryCard(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         shape = MaterialTheme.shapes.small,
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Default.LibraryMusic,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "No songs found yet",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.LibraryMusic,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp),
                 )
-                Text(
-                    text = "Add audio files to your device, then rescan your library. If your music is in a specific folder, choose it in Settings.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "No songs found yet",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Add audio files to your device, then rescan your library.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                    )
+                    Text(
+                        text = "Wavdrop only scans music stored on this device.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onRescan) { Text("Rescan library") }
+                TextButton(onClick = onSettingsClick) { Text("Choose folder in Settings") }
             }
         }
     }
