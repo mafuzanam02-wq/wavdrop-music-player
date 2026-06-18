@@ -1,8 +1,10 @@
 package com.launchpoint.wavdrop.ui.screen.statistics
 
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 
 internal object StatisticsFormatters {
@@ -34,6 +36,17 @@ internal object StatisticsFormatters {
             else -> DATE_FORMATTER.format(playedDate)
         }
     }
+
+    fun formatStreakDays(days: Int): String =
+        if (days == 0) "—" else "$days day${if (days == 1) "" else "s"}"
+
+    fun formatSkipRatio(totalPlays: Int, totalSkips: Int): String {
+        if (totalPlays == 0) return "—"
+        return "${totalSkips * 100 / totalPlays}%"
+    }
+
+    fun formatDayOfWeekShort(dow: DayOfWeek?): String =
+        dow?.getDisplayName(TextStyle.SHORT, Locale.getDefault()) ?: "—"
 
     private val DATE_FORMATTER: DateTimeFormatter =
         DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US)

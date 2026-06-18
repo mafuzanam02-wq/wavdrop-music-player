@@ -16,9 +16,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -57,6 +60,7 @@ fun StatisticsScreen(
     viewModel: StatisticsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val insights by viewModel.insightsState.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -90,6 +94,7 @@ fun StatisticsScreen(
                 StatisticsUiState.Empty -> EmptyContent()
                 is StatisticsUiState.Content -> DashboardContent(
                     summary = state.summary,
+                    insights = insights,
                     onTrackDetailsClick = onTrackDetailsClick,
                 )
             }
@@ -131,6 +136,7 @@ private fun EmptyContent(modifier: Modifier = Modifier) {
 @Composable
 private fun DashboardContent(
     summary: StatsDashboardSummary,
+    insights: StatisticsInsights,
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -140,6 +146,9 @@ private fun DashboardContent(
     ) {
         item {
             OverviewSection(summary = summary)
+        }
+        item {
+            InsightsSection(summary = summary, insights = insights)
         }
 
         statsSection(
@@ -217,6 +226,50 @@ private fun OverviewSection(summary: StatsDashboardSummary) {
             value = StatisticsFormatters.formatDurationSummary(summary.totalListeningTimeMs),
             icon = Icons.Default.Timer,
         )
+    }
+}
+
+@Composable
+private fun InsightsSection(summary: StatsDashboardSummary, insights: StatisticsInsights) {
+    SectionHeader("Insights")
+    Column(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OverviewCard(
+                label = "Favorites",
+                value = insights.favoritesCount.toString(),
+                icon = Icons.Default.Favorite,
+                modifier = Modifier.weight(1f),
+            )
+            OverviewCard(
+                label = "Skip Ratio",
+                value = StatisticsFormatters.formatSkipRatio(summary.totalPlayCount, summary.totalSkipCount),
+                icon = Icons.Default.SkipNext,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OverviewCard(
+                label = "Streak",
+                value = StatisticsFormatters.formatStreakDays(insights.currentStreakDays),
+                icon = Icons.Default.Star,
+                modifier = Modifier.weight(1f),
+            )
+            OverviewCard(
+                label = "Active Day",
+                value = StatisticsFormatters.formatDayOfWeekShort(insights.mostActiveDayOfWeek),
+                icon = Icons.Default.DateRange,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
