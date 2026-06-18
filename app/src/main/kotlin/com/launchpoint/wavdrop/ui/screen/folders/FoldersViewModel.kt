@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
+enum class FolderSortMode { NAME, MOST_SONGS, LONGEST }
+
 sealed interface FoldersUiState {
     data object Loading : FoldersUiState
     data object Empty : FoldersUiState
@@ -30,8 +32,15 @@ class FoldersViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _sortMode = MutableStateFlow(FolderSortMode.NAME)
+    val sortMode: StateFlow<FolderSortMode> = _sortMode.asStateFlow()
+
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
+    }
+
+    fun setSortMode(mode: FolderSortMode) {
+        _sortMode.value = mode
     }
 
     // Grouping runs only when the song list changes, not on every search keystroke.
@@ -39,11 +48,19 @@ class FoldersViewModel @Inject constructor(
         .map { songs -> FolderGrouper.groupSongsByFolder(songs) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val uiState: StateFlow<FoldersUiState> = combine(allFolders, _searchQuery) { folders, query ->
+    val uiState: StateFlow<FoldersUiState> = combine(allFolders, _searchQuery, _sortMode) { folders, query, sort ->
         when {
             folders == null   -> FoldersUiState.Loading
             folders.isEmpty() -> FoldersUiState.Empty
-            else              -> FoldersUiState.Ready(LibrarySearch.filterFolders(folders, query))
+            else              -> {
+                val filtered = LibrarySearch.filterFolders(folders, query)
+                val sorted = when (sort) {
+                    FolderSortMode.NAME       -> filtered.sortedBy { it.displayName.lowercase() }
+                    FolderSortMode.MOST_SONGS -> filtered.sortedByDescending { it.songCount }
+                    FolderSortMode.LONGEST    -> filtered.sortedByDescending { it.totalDurationMs }
+                }
+                FoldersUiState.Ready(sorted)
+            }
         }
     }.stateIn(
         scope        = viewModelScope,

@@ -226,6 +226,7 @@ fun SongsScreen(
                                 songActions = commonSongActions,
                                 onAlbumClick = onAlbumClick,
                                 onArtistClick = onArtistClick,
+                                onFolderClick = onFolderClick,
                             )
                         } else {
                             SongListContent(

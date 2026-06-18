@@ -20,6 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -63,7 +66,9 @@ fun FoldersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val nowPlaying by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val sortMode by viewModel.sortMode.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
+    var isSortMenuExpanded by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isSearchActive) {
         isSearchActive = false
@@ -100,6 +105,41 @@ fun FoldersScreen(
                                 contentDescription = "Search",
                                 tint = MaterialTheme.colorScheme.onSurface,
                             )
+                        }
+                        Box {
+                            IconButton(onClick = { isSortMenuExpanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Sort,
+                                    contentDescription = "Sort",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = isSortMenuExpanded,
+                                onDismissRequest = { isSortMenuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Name A–Z") },
+                                    onClick = { viewModel.setSortMode(FolderSortMode.NAME); isSortMenuExpanded = false },
+                                    trailingIcon = if (sortMode == FolderSortMode.NAME) ({
+                                        Icon(Icons.Default.Sort, null, tint = MaterialTheme.colorScheme.primary)
+                                    }) else null,
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Most songs") },
+                                    onClick = { viewModel.setSortMode(FolderSortMode.MOST_SONGS); isSortMenuExpanded = false },
+                                    trailingIcon = if (sortMode == FolderSortMode.MOST_SONGS) ({
+                                        Icon(Icons.Default.Sort, null, tint = MaterialTheme.colorScheme.primary)
+                                    }) else null,
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Longest") },
+                                    onClick = { viewModel.setSortMode(FolderSortMode.LONGEST); isSortMenuExpanded = false },
+                                    trailingIcon = if (sortMode == FolderSortMode.LONGEST) ({
+                                        Icon(Icons.Default.Sort, null, tint = MaterialTheme.colorScheme.primary)
+                                    }) else null,
+                                )
+                            }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(

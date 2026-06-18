@@ -90,6 +90,7 @@ fun GlobalSearchRoute(
             ),
             onAlbumClick  = onAlbumClick,
             onArtistClick = onArtistClick,
+            onFolderClick = onFolderClick,
             modifier      = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),

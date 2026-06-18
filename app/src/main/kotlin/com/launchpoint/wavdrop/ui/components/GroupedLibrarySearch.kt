@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -63,9 +65,10 @@ private data class GroupedSearchResults(
     val songs: List<Song>,
     val artists: List<ArtistSummary>,
     val albums: List<AlbumSummary>,
+    val folders: List<com.launchpoint.wavdrop.data.model.FolderSummary>,
 ) {
     val isEmpty: Boolean
-        get() = songs.isEmpty() && artists.isEmpty() && albums.isEmpty()
+        get() = songs.isEmpty() && artists.isEmpty() && albums.isEmpty() && folders.isEmpty()
 }
 
 @Composable
@@ -75,6 +78,7 @@ fun GroupedSearchContent(
     songActions: SongSearchActions,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
+    onFolderClick: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val results = remember(songs, query) { buildGroupedSearchResults(songs, query) }
@@ -128,6 +132,19 @@ fun GroupedSearchContent(
                     album = album,
                     query = query,
                     onClick = { onAlbumClick(album.albumKey) },
+                )
+                SearchDivider()
+            }
+        }
+        if (results.folders.isNotEmpty()) {
+            item(key = "folders_header") {
+                SearchSectionHeader(title = "Folders", count = results.folders.size)
+            }
+            items(results.folders, key = { "folder_${it.folderKey}" }) { folder ->
+                SearchFolderRow(
+                    folder = folder,
+                    query = query,
+                    onClick = { onFolderClick(folder.folderKey) },
                 )
                 SearchDivider()
             }
@@ -258,6 +275,48 @@ private fun SearchAlbumRow(
 }
 
 @Composable
+private fun SearchFolderRow(
+    folder: com.launchpoint.wavdrop.data.model.FolderSummary,
+    query: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 10.dp else 14.dp
+    val iconSize = if (compact) 36.dp else 40.dp
+    val highlightStyle = searchHighlightStyle()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.Folder,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+            modifier = Modifier.size(iconSize),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = highlightQuery(folder.displayName, query, highlightStyle),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${folder.songCount} songs",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
+        }
+    }
+}
+
+@Composable
 private fun SearchSectionHeader(
     title: String,
     count: Int,
@@ -320,8 +379,10 @@ private fun buildGroupedSearchResults(
             songs = songs,
             artists = emptyList(),
             albums = emptyList(),
+            folders = emptyList(),
         )
     }
+    val allFolders = FolderGrouper.groupSongsByFolder(songs)
     return GroupedSearchResults(
         songs = LibrarySearch.filterSongs(songs, trimmedQuery),
         artists = ArtistGrouper.group(songs)
@@ -333,6 +394,7 @@ private fun buildGroupedSearchResults(
                     album.artist.containsSearch(queryLower)
             }
             .take(24),
+        folders = LibrarySearch.filterFolders(allFolders, trimmedQuery).take(24),
     )
 }
 

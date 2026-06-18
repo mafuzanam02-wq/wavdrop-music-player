@@ -240,6 +240,7 @@ fun HomeScreen(
                     ),
                     onAlbumClick = onAlbumClick,
                     onArtistClick = onArtistClick,
+                    onFolderClick = onFolderClick,
                     modifier = Modifier.padding(innerPadding),
                 )
             } else if (isSearchActive) {
