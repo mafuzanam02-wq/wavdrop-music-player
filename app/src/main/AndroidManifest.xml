@@ -188,6 +188,21 @@
                 android:resource="@xml/wavdrop_widget_info" />
         </receiver>
 
+        <!--
+            FileProvider for sharing Wrapped slide images via cacheDir.
+            exported=false: the system grants temporary read access via FLAG_GRANT_READ_URI_PERMISSION.
+            No runtime permission required on API 29+.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

@@ -1,5 +1,7 @@
 package com.launchpoint.wavdrop.ui.screen.wrapped
 
+import android.app.Activity
+import android.graphics.Rect as AndroidRect
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -62,6 +65,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.material3.ButtonDefaults
 import coil.compose.AsyncImage
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
@@ -260,6 +265,7 @@ private fun WrappedContent(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val reduceMotion = remember {
         Settings.Global.getFloat(
             context.contentResolver,
@@ -282,6 +288,7 @@ private fun WrappedContent(
     val pageCount = if (showMilestonePage) WRAPPED_BASE_COUNT + 1 else WRAPPED_BASE_COUNT
 
     val pagerState = rememberPagerState(pageCount = { pageCount })
+    var pagerBoundsInWindow by remember { mutableStateOf<AndroidRect?>(null) }
 
     LaunchedEffect(pageCount) {
     if (pageCount > 0 && pagerState.currentPage >= pageCount) {
@@ -320,7 +327,16 @@ private fun WrappedContent(
             state = pagerState,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .onGloballyPositioned { coordinates ->
+                    val b = coordinates.boundsInWindow()
+                    pagerBoundsInWindow = AndroidRect(
+                        b.left.toInt(),
+                        b.top.toInt(),
+                        b.right.toInt(),
+                        b.bottom.toInt(),
+                    )
+                },
         ) { page ->
             when (page) {
                 0    -> IntroPage(wrapped, visualSettings)
@@ -337,13 +353,31 @@ private fun WrappedContent(
             }
         }
 
-        PageIndicator(
-            pageCount = pageCount,
-            currentPage = pagerState.currentPage,
+        Box(
             modifier = Modifier
-                .align(Alignment.CenterHorizontally)
-                .padding(vertical = 12.dp),
-        )
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+        ) {
+            PageIndicator(
+                pageCount = pageCount,
+                currentPage = pagerState.currentPage,
+                modifier = Modifier.align(Alignment.Center),
+            )
+            IconButton(
+                onClick = {
+                    val rect = pagerBoundsInWindow ?: return@IconButton
+                    val act = activity ?: return@IconButton
+                    shareWrappedSlide(act, rect)
+                },
+                enabled = !pagerState.isScrollInProgress && pagerBoundsInWindow != null && activity != null,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = "Share this slide",
+                )
+            }
+        }
     }
 }
 
