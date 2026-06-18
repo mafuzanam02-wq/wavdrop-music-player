@@ -59,12 +59,10 @@ class WavdropWidgetUpdater @Inject constructor(
         private const val RC_PLAY_PAUSE = 202
         private const val RC_NEXT      = 203
 
-        // Size bands derived from Samsung One UI measurements.
-        // short:    minH < 170dp  (~108dp default)
-        // tall:     minH 170–299dp (~238dp)
-        // expanded: minH >= 300dp  (~368dp+)
-        private const val HEIGHT_TALL_DP     = 170
-        private const val HEIGHT_EXPANDED_DP = 300
+        // Layout bands. Full player is the normal supported placement (4×2 declared minimum).
+        // Short fallback only activates for a legacy already-bound widget below the declared min.
+        private const val MIN_FULL_PLAYER_HEIGHT_DP = 115
+        private const val HEIGHT_EXPANDED_DP        = 300
 
         // Singleton scope: SupervisorJob ensures individual coroutine failures
         // do not cancel the scope. Lives for the process lifetime.
@@ -105,7 +103,7 @@ class WavdropWidgetUpdater @Inject constructor(
                 try {
                     val options = manager.getAppWidgetOptions(id)
                     val minW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
-                    val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 60)
+                    val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, MIN_FULL_PLAYER_HEIGHT_DP)
                     val maxW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0)
                     val maxH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
                     val layout = chooseLayout(hasActive, minH)
@@ -133,9 +131,9 @@ class WavdropWidgetUpdater @Inject constructor(
         private fun chooseLayout(hasActive: Boolean, minHeightDp: Int): Int {
             if (!hasActive) return R.layout.wavdrop_widget_idle
             return when {
-                minHeightDp >= HEIGHT_EXPANDED_DP -> R.layout.wavdrop_widget_expanded
-                minHeightDp >= HEIGHT_TALL_DP     -> R.layout.wavdrop_widget_tall
-                else                              -> R.layout.wavdrop_widget_short
+                minHeightDp >= HEIGHT_EXPANDED_DP       -> R.layout.wavdrop_widget_expanded
+                minHeightDp < MIN_FULL_PLAYER_HEIGHT_DP -> R.layout.wavdrop_widget_short
+                else                                    -> R.layout.wavdrop_widget_tall
             }
         }
 
@@ -238,8 +236,8 @@ class WavdropWidgetUpdater @Inject constructor(
 
         private fun layoutName(res: Int): String = when (res) {
             R.layout.wavdrop_widget_idle     -> "idle"
-            R.layout.wavdrop_widget_short    -> "short"
-            R.layout.wavdrop_widget_tall     -> "tall"
+            R.layout.wavdrop_widget_short    -> "short_fallback"
+            R.layout.wavdrop_widget_tall     -> "full"
             R.layout.wavdrop_widget_expanded -> "expanded"
             else                             -> res.toString()
         }

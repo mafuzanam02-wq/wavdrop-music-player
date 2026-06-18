@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tall layout: minH 170dp–299dp (~238dp target). Medium card: centred content block,
-     artwork + metadata row, controls in lower third. -->
+<!-- Full Player layout (wavdrop_widget_tall.xml): 4×2 default placement, minH 115–299dp.
+     Vertically centred content block. 48dp minimum touch targets on all controls. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_body"
     android:layout_width="match_parent"
@@ -26,16 +26,16 @@
         android:background="#CC16131F"
         android:visibility="gone" />
 
-    <!-- Content block — vertically centred within the widget surface -->
+    <!-- Content block — vertically centred -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:gravity="center_vertical"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
-        android:paddingTop="22dp"
-        android:paddingBottom="22dp">
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="14dp">
 
         <!-- Track info row: artwork beside title/artist -->
         <LinearLayout
@@ -83,41 +83,45 @@
 
         </LinearLayout>
 
-        <!-- Controls row — moderate gap below metadata -->
+        <!-- Controls row — 48dp minimum touch target on all buttons.
+             Padding keeps the icon glyph visually restrained. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginTop="16dp">
+            android:layout_marginTop="8dp">
 
+            <!-- Previous: 48×48dp container, ~24dp effective glyph area -->
             <ImageButton
                 android:id="@+id/widget_previous"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
                 android:src="@drawable/widget_ic_skip_previous"
                 android:background="@android:color/transparent"
-                android:padding="5dp"
+                android:padding="12dp"
                 android:contentDescription="@string/widget_prev_desc" />
 
+            <!-- Play/Pause: 56×56dp container, ~28dp effective glyph area -->
             <ImageButton
                 android:id="@+id/widget_play_pause"
-                android:layout_width="42dp"
-                android:layout_height="42dp"
-                android:layout_marginStart="20dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginStart="16dp"
                 android:src="@drawable/widget_ic_play"
                 android:background="@drawable/widget_btn_idle_bg"
-                android:padding="9dp"
+                android:padding="14dp"
                 android:contentDescription="@string/widget_play_pause_desc" />
 
+            <!-- Next: 48×48dp container, ~24dp effective glyph area -->
             <ImageButton
                 android:id="@+id/widget_next"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="20dp"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="16dp"
                 android:src="@drawable/widget_ic_skip_next"
                 android:background="@android:color/transparent"
-                android:padding="5dp"
+                android:padding="12dp"
                 android:contentDescription="@string/widget_next_desc" />
 
         </LinearLayout>
