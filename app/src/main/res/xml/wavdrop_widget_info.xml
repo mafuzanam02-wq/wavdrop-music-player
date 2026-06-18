@@ -8,5 +8,5 @@
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:updatePeriodMillis="0"
-    android:initialLayout="@layout/wavdrop_widget_loading"
+    android:initialLayout="@layout/wavdrop_widget_idle"
     android:description="@string/widget_description" />

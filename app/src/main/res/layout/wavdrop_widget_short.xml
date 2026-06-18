@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Short layout: minH < 170dp (~108dp target). Balanced horizontal playback strip. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_body"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wavdrop_widget_loading_background"
+    android:clickable="true"
+    android:focusable="true">
+
+    <!-- Artwork atmosphere background — hidden when no artwork -->
+    <ImageView
+        android:id="@+id/widget_background"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:contentDescription="@null" />
+
+    <!-- Dark scrim over artwork — hidden when no artwork -->
+    <TextView
+        android:id="@+id/widget_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC16131F"
+        android:visibility="gone" />
+
+    <!-- Single content row: artwork | metadata | controls -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp">
+
+        <!-- Artwork thumbnail -->
+        <ImageView
+            android:id="@+id/widget_artwork"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
+            android:scaleType="centerCrop"
+            android:background="#FF2A2536"
+            android:contentDescription="@string/widget_artwork_desc" />
+
+        <!-- Title and artist — takes remaining width -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="8dp">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#EDEAF4"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="#A9A3B8"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+        </LinearLayout>
+
+        <!-- Previous -->
+        <ImageButton
+            android:id="@+id/widget_previous"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:src="@drawable/widget_ic_skip_previous"
+            android:background="@android:color/transparent"
+            android:padding="4dp"
+            android:contentDescription="@string/widget_prev_desc" />
+
+        <!-- Play / Pause — visibly larger than side controls -->
+        <ImageButton
+            android:id="@+id/widget_play_pause"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginStart="6dp"
+            android:src="@drawable/widget_ic_play"
+            android:background="@drawable/widget_btn_idle_bg"
+            android:padding="8dp"
+            android:contentDescription="@string/widget_play_pause_desc" />
+
+        <!-- Next -->
+        <ImageButton
+            android:id="@+id/widget_next"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_marginStart="6dp"
+            android:src="@drawable/widget_ic_skip_next"
+            android:background="@android:color/transparent"
+            android:padding="4dp"
+            android:contentDescription="@string/widget_next_desc" />
+
+    </LinearLayout>
+
+</FrameLayout>

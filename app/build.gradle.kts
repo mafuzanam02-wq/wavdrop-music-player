@@ -92,8 +92,6 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    implementation(libs.androidx.glance.appwidget)
-
     testImplementation(libs.junit)
     // Real org.json for JVM unit tests: the Android stubs return null/0 under
     // isReturnDefaultValues, which would silently break exporter round-trip tests.

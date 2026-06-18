@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -719,8 +720,10 @@ class PlayerController @Inject constructor(
 
     fun togglePlayPause() {
         val controller = mediaController ?: return
+        if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] before: controller.isPlaying=${controller.isPlaying}")
         if (controller.isPlaying) controller.pause() else controller.play()
         syncNowPlayingState()
+        if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] after syncNPS: nowPlaying.isPlaying=${_nowPlayingState.value.isPlaying}")
     }
 
     fun setSleepTimer(option: SleepTimerOption) {
@@ -1654,6 +1657,7 @@ class PlayerController @Inject constructor(
                     .setTitle(displayTitle)
                     .setArtist(displayArtist)
                     .setAlbumTitle(album)
+                    .setExtras(Bundle().apply { putLong("wavdrop_album_id", albumId) })
                     .build()
             )
             .build()

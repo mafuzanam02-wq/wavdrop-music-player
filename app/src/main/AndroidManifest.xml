@@ -177,15 +177,9 @@
             </intent-filter>
         </receiver>
 
-        <!--
-            Widget v1 is kept dormant for a future release.
-            Re-enable by restoring this receiver declaration and setting
-            WavdropApp.ENABLE_WIDGET = true. Source lives in ui/widget/.
-
         <receiver
-            android:name=".ui.widget.WavdropWidgetReceiver"
-            android:exported="true"
-            android:label="@string/launcher_label">
+            android:name=".ui.widget.WavdropWidgetProvider"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -193,7 +187,6 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/wavdrop_widget_info" />
         </receiver>
-        -->
 
     </application>
 

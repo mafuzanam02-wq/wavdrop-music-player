@@ -3,4 +3,9 @@
     <string name="app_name">Wavdrop Music Player</string>
     <string name="launcher_label">Wavdrop</string>
     <string name="widget_description">Now Playing controls for Wavdrop.</string>
+    <string name="widget_idle_hint">Tap to open your music</string>
+    <string name="widget_artwork_desc">Album artwork</string>
+    <string name="widget_prev_desc">Previous</string>
+    <string name="widget_play_pause_desc">Play or pause</string>
+    <string name="widget_next_desc">Next</string>
 </resources>

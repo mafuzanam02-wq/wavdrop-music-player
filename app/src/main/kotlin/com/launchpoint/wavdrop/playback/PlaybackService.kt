@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -28,6 +29,9 @@ import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
+import com.launchpoint.wavdrop.ui.widget.WidgetPlaybackSnapshot
+import com.launchpoint.wavdrop.ui.widget.WidgetStateStore
+import com.launchpoint.wavdrop.ui.widget.WavdropWidgetUpdater
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +56,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var appSettingsRepository: AppSettingsRepository
     @Inject lateinit var playerController: PlayerController
     @Inject lateinit var songRepository: SongRepository
+    @Inject lateinit var widgetStateStore: WidgetStateStore
 
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -104,6 +109,82 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
+        // Authoritative widget state source: direct ExoPlayer listener fires on the
+        // player thread without the MediaController → MediaSession IPC round-trip.
+        // This covers notification controls, lock-screen controls, Bluetooth buttons,
+        // and widget action intents — all paths that previously bypassed PlayerController.
+        player.addListener(object : Player.Listener {
+
+            private fun buildSnapshot(isPlaying: Boolean): WidgetPlaybackSnapshot {
+                val item = player.currentMediaItem
+                return WidgetPlaybackSnapshot(
+                    title          = item?.mediaMetadata?.title?.toString()?.takeIf { it.isNotBlank() } ?: "Wavdrop",
+                    artist         = item?.mediaMetadata?.artist?.toString()?.takeIf { it.isNotBlank() } ?: "",
+                    albumId        = item?.mediaMetadata?.extras?.getLong("wavdrop_album_id", 0L) ?: 0L,
+                    isPlaying      = isPlaying,
+                    hasActiveMedia = item != null,
+                    updatedAt      = System.currentTimeMillis(),
+                )
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged=$isPlaying")
+                serviceScope.launch {
+                    try {
+                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: store write START isPlaying=$isPlaying")
+                        widgetStateStore.updateIsPlaying(isPlaying)
+                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: store write COMPLETE isPlaying=$isPlaying")
+                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: calling requestUpdate")
+                        WavdropWidgetUpdater.requestUpdate(applicationContext)
+                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: requestUpdate returned (fire-and-forget launched)")
+                    } catch (e: Throwable) {
+                        Log.e(WIDGET_TAG, "[service] onIsPlayingChanged: EXCEPTION ${e::class.simpleName} ${e.message}", e)
+                    }
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged=$playbackState")
+                if (playbackState == Player.STATE_IDLE) {
+                    serviceScope.launch {
+                        try {
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: store clear START")
+                            widgetStateStore.clear()
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: store clear COMPLETE")
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: calling requestUpdate")
+                            WavdropWidgetUpdater.requestUpdate(applicationContext)
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: requestUpdate returned")
+                        } catch (e: Throwable) {
+                            Log.e(WIDGET_TAG, "[service] onPlaybackStateChanged: EXCEPTION ${e::class.simpleName} ${e.message}", e)
+                        }
+                    }
+                }
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition reason=$reason title=${mediaItem?.mediaMetadata?.title}")
+                serviceScope.launch {
+                    try {
+                        if (mediaItem == null) {
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store clear START (null item)")
+                            widgetStateStore.clear()
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store clear COMPLETE")
+                        } else {
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store save START title=${mediaItem.mediaMetadata.title}")
+                            widgetStateStore.save(buildSnapshot(player.isPlaying))
+                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store save COMPLETE")
+                        }
+                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: calling requestUpdate")
+                        WavdropWidgetUpdater.requestUpdate(applicationContext)
+                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: requestUpdate returned")
+                    } catch (e: Throwable) {
+                        Log.e(WIDGET_TAG, "[service] onMediaItemTransition: EXCEPTION ${e::class.simpleName} ${e.message}", e)
+                    }
+                }
+            }
+
+        })
+
         // Keep ExoPlayer's noisy-audio handling in sync with the user's preference.
         // Default is true (matches the builder value above), so there is no gap on
         // the first emission even if the coroutine hasn't fired yet.
@@ -150,18 +231,34 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         logResume("onStartCommand: action=${intent?.action}")
-        if (intent?.action == ACTION_AUDIO_OUTPUT_CONNECTED) {
-            val outputKind = intent.getStringExtra(EXTRA_AUDIO_OUTPUT_KIND)
-            logResume("onStartCommand: ACTION_AUDIO_OUTPUT_CONNECTED outputKind=$outputKind")
-            if (outputKind != null) {
-                serviceScope.launch {
-                    val songs = songRepository.songs.first()
-                    logResume("onStartCommand: got ${songs.size} songs, dispatching resume for outputKind=$outputKind")
-                    when (outputKind) {
-                        OUTPUT_BLUETOOTH -> playerController.resumeForBluetooth(songs)
-                        OUTPUT_WIRED -> playerController.resumeForWiredHeadphones(songs)
+        when (intent?.action) {
+            ACTION_AUDIO_OUTPUT_CONNECTED -> {
+                val outputKind = intent.getStringExtra(EXTRA_AUDIO_OUTPUT_KIND)
+                logResume("onStartCommand: ACTION_AUDIO_OUTPUT_CONNECTED outputKind=$outputKind")
+                if (outputKind != null) {
+                    serviceScope.launch {
+                        val songs = songRepository.songs.first()
+                        logResume("onStartCommand: got ${songs.size} songs, dispatching resume for outputKind=$outputKind")
+                        when (outputKind) {
+                            OUTPUT_BLUETOOTH -> playerController.resumeForBluetooth(songs)
+                            OUTPUT_WIRED -> playerController.resumeForWiredHeadphones(songs)
+                        }
                     }
                 }
+            }
+            // Widget action intents — routed directly to ExoPlayer, same path as notification controls.
+            ACTION_WIDGET_PLAY_PAUSE -> {
+                val p = mediaSession?.player ?: return super.onStartCommand(intent, flags, startId)
+                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] ACTION_WIDGET_PLAY_PAUSE isPlaying=${p.isPlaying}")
+                if (p.isPlaying) p.pause() else p.play()
+            }
+            ACTION_WIDGET_NEXT -> {
+                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] ACTION_WIDGET_NEXT")
+                mediaSession?.player?.seekToNext()
+            }
+            ACTION_WIDGET_PREVIOUS -> {
+                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] ACTION_WIDGET_PREVIOUS")
+                mediaSession?.player?.seekToPrevious()
             }
         }
         return super.onStartCommand(intent, flags, startId)
@@ -275,8 +372,13 @@ class PlaybackService : MediaSessionService() {
         const val EXTRA_AUDIO_OUTPUT_KIND = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
         const val OUTPUT_BLUETOOTH = "bluetooth"
         const val OUTPUT_WIRED = "wired"
+        // Widget action intents — handled in onStartCommand, forwarded directly to ExoPlayer.
+        const val ACTION_WIDGET_PLAY_PAUSE = "com.launchpoint.wavdrop.ACTION_WIDGET_PLAY_PAUSE"
+        const val ACTION_WIDGET_NEXT       = "com.launchpoint.wavdrop.ACTION_WIDGET_NEXT"
+        const val ACTION_WIDGET_PREVIOUS   = "com.launchpoint.wavdrop.ACTION_WIDGET_PREVIOUS"
         private const val CMD_TOGGLE_SHUFFLE = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
         private const val CMD_CYCLE_REPEAT = "com.launchpoint.wavdrop.CYCLE_REPEAT"
         private const val RESUME_TAG = "WavdropResume"
+        private const val WIDGET_TAG = "WavdropWidget"
     }
 }

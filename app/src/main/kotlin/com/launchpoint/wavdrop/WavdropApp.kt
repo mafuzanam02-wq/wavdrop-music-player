@@ -18,9 +18,8 @@ class WavdropApp : Application() {
     }
 
     companion object {
-        // Widget v1 is kept dormant for a future release. Flipping this to true
-        // also requires restoring the WavdropWidgetReceiver entry in
-        // AndroidManifest.xml so the widget appears in the launcher picker.
-        const val ENABLE_WIDGET = false
+        // Widget V1 — AppWidgetProvider (WavdropWidgetProvider) is registered in
+        // AndroidManifest.xml. Flip this flag to false to disable widget update calls.
+        const val ENABLE_WIDGET = true
     }
 }
