@@ -16,8 +16,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -60,7 +64,9 @@ fun AlbumsScreen(
 ) {
     val state       by viewModel.uiState.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val sortMode    by viewModel.sortMode.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isSearchActive) {
         isSearchActive = false
@@ -98,6 +104,36 @@ fun AlbumsScreen(
                                 tint               = MaterialTheme.colorScheme.onSurface,
                             )
                         }
+                        Box {
+                            IconButton(onClick = { sortMenuExpanded = true }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Sort,
+                                    contentDescription = "Sort",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = sortMenuExpanded,
+                                onDismissRequest = { sortMenuExpanded = false },
+                            ) {
+                                AlbumSortMode.entries.forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = { Text(mode.label) },
+                                        trailingIcon = if (sortMode == mode) ({
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }) else null,
+                                        onClick = {
+                                            viewModel.setSortMode(mode)
+                                            sortMenuExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor    = MaterialTheme.colorScheme.surface,
@@ -112,7 +148,7 @@ fun AlbumsScreen(
             AlbumsUiState.Empty    -> EmptyContent(Modifier.padding(innerPadding))
             is AlbumsUiState.Ready -> AlbumListContent(
                 albums            = s.albums,
-                showAlphabetIndex = !isSearchActive,
+                showAlphabetIndex = !isSearchActive && sortMode.usesAlphabetIndex,
                 onAlbumClick      = onAlbumClick,
                 modifier          = Modifier.padding(innerPadding),
             )
