@@ -645,7 +645,7 @@ private fun QueuePreviousItemRow(
                     onClick = { expanded = false; onAddToQueue() },
                 )
                 DropdownMenuItem(
-                    text = { Text("View stats") },
+                    text = { Text("Track Details") },
                     onClick = { expanded = false; onViewStats() },
                 )
                 DropdownMenuItem(
@@ -886,7 +886,7 @@ private fun QueueItemRow(
                     onClick = { expanded = false; onRemove() },
                 )
                 DropdownMenuItem(
-                    text = { Text("View stats") },
+                    text = { Text("Track Details") },
                     onClick = { expanded = false; onViewStats() },
                 )
                 DropdownMenuItem(

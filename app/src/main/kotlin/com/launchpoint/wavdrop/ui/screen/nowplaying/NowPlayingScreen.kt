@@ -86,6 +86,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
@@ -235,13 +238,6 @@ fun NowPlayingScreen(
                                 onDismissRequest = { showMoreActions = false },
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("Open Queue") },
-                                    onClick = {
-                                        showMoreActions = false
-                                        showQueueSheet = true
-                                    },
-                                )
-                                DropdownMenuItem(
                                     text = { Text("Share") },
                                     onClick = {
                                         showMoreActions = false
@@ -270,7 +266,7 @@ fun NowPlayingScreen(
                                         },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Stats") },
+                                        text = { Text("Listening Statistics") },
                                         onClick = {
                                             showMoreActions = false
                                             onOpenStatistics()
@@ -778,15 +774,17 @@ private fun UpperNowPlayingContent(
                     onPasteLyrics = onPasteLyrics,
                     modifier = Modifier.size(metrics.artworkSize),
                 )
-                if (metrics.showLyricsHint) {
-                    Text(
-                        text = "Double-tap for lyrics · Long-press to edit lyrics",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                Text(
+                    text = if (metrics.showLyricsHint) {
+                        "Double-tap for lyrics · Long-press to edit lyrics"
+                    } else {
+                        "Double-tap for lyrics"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             Text(
                 text = song.displayTitle,
@@ -1093,6 +1091,24 @@ private fun ArtworkWithLyricsOverlay(
                         dragDistance = Offset.Zero
                     },
                     onDragCancel = { dragDistance = Offset.Zero },
+                )
+            }
+            .semantics(mergeDescendants = true) {
+                customActions = listOf(
+                    CustomAccessibilityAction(
+                        label = if (showLyricsOverlay) "Hide lyrics" else "Show lyrics",
+                        action = {
+                            currentToggleLyrics()
+                            true
+                        },
+                    ),
+                    CustomAccessibilityAction(
+                        label = "Edit lyrics",
+                        action = {
+                            currentEdit()
+                            true
+                        },
+                    ),
                 )
             },
     ) {
