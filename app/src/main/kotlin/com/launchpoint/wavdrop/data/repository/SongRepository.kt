@@ -1,11 +1,14 @@
 ﻿package com.launchpoint.wavdrop.data.repository
 
 import android.util.Log
+import androidx.room.withTransaction
+import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
 import com.launchpoint.wavdrop.data.mediastore.MediaStoreScanner
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.playlists.PlaylistSongRemapPlanner
 import com.launchpoint.wavdrop.data.search.SongSort
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +19,7 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 class SongRepository @Inject constructor(
+    private val db: WavdropDatabase,
     private val dao: SongDao,
     private val playlistDao: PlaylistDao,
     private val scanner: MediaStoreScanner,
@@ -36,36 +40,57 @@ class SongRepository @Inject constructor(
         val scanSettings = scanSettingsRepository.settings.first()
         val found = scanner.scanSongs(scanSettings)
 
-        val currentIds = dao.getAllSongIds().toSet()
+        db.withTransaction {
+            val existingEntities = dao.getAllSongsSnapshot()
+            val existingIds = existingEntities.mapTo(mutableSetOf()) { it.id }
 
-        if (found.isEmpty()) {
-            if (SongSyncPolicy.shouldPreserveOnEmptyScan(scanSettings, currentIds.size)) {
-                Log.w(TAG,
-                    "Scan returned 0 songs — preserving ${currentIds.size} existing songs. " +
-                    "Mode: ${scanSettings.scanMode}"
+            if (found.isEmpty()) {
+                if (SongSyncPolicy.shouldPreserveOnEmptyScan(scanSettings, existingIds.size)) {
+                    Log.w(TAG,
+                        "Scan returned 0 songs — preserving ${existingIds.size} existing songs. " +
+                        "Mode: ${scanSettings.scanMode}"
+                    )
+                    return@withTransaction LibrarySyncResult.EmptyPreserved(
+                        SongSyncPolicy.emptyPreservedReason(scanSettings)
+                    )
+                }
+                dao.deleteAll()
+                return@withTransaction LibrarySyncResult.Success(0)
+            }
+
+            val scannedIds = found.mapTo(mutableSetOf()) { it.id }
+            val staleSongs = existingEntities
+                .filter { it.id !in scannedIds }
+                .map(SongEntity::toDomain)
+            val newSongs = found.filter { it.id !in existingIds }
+            val remapPlan = PlaylistSongRemapPlanner.plan(
+                staleSongs = staleSongs,
+                newSongs = newSongs,
+            )
+
+            dao.upsertAll(found.map(Song::toEntity))
+
+            remapPlan.mappings.forEach { mapping ->
+                playlistDao.removeRedundantEntriesForRemap(
+                    oldSongId = mapping.oldSongId,
+                    newSongId = mapping.newSongId,
                 )
-                return@withContext LibrarySyncResult.EmptyPreserved(
-                    SongSyncPolicy.emptyPreservedReason(scanSettings)
+                playlistDao.remapSongId(
+                    oldSongId = mapping.oldSongId,
+                    newSongId = mapping.newSongId,
                 )
             }
-            dao.deleteAll()
-            return@withContext LibrarySyncResult.Success(0)
+
+            val staleIds = SongSyncPolicy.computeStaleIds(existingIds, scannedIds)
+            staleIds.chunked(PRUNE_CHUNK_SIZE).forEach { chunk ->
+                dao.deleteByIds(chunk)
+                // Unmatched or ambiguous playlist memberships are intentionally retained as
+                // hidden orphan entries. Confirmed user deletion still removes memberships
+                // through the explicit delete flow.
+            }
+
+            LibrarySyncResult.Success(found.size)
         }
-
-        dao.upsertAll(found.map(Song::toEntity))
-
-        val activeIds = found.map { it.id }.toSet()
-        val staleIds = SongSyncPolicy.computeStaleIds(currentIds, activeIds)
-        staleIds.chunked(PRUNE_CHUNK_SIZE).forEach { chunk ->
-            dao.deleteByIds(chunk)
-            // Remove playlist memberships for songs that are no longer in the library.
-            // track_stats, track_listen_events, lyrics_overrides, and import_baselines are
-            // intentionally kept: they reconnect automatically if the file reappears with the
-            // same MediaStore ID, and they preserve listening history across temporary scan gaps.
-            playlistDao.removeEntriesForSongs(chunk)
-        }
-
-        LibrarySyncResult.Success(found.size)
     }
 
     private companion object {

@@ -29,6 +29,31 @@ class SongCleanupPolicyTest {
     }
 
     @Test
+    fun `partial scan still identifies stale song rows without implying playlist cleanup`() {
+        val currentSongIds = setOf(1L, 2L, 3L, 4L)
+        val partialScanIds = setOf(1L, 3L)
+
+        val staleSongRows = SongSyncPolicy.computeStaleIds(currentSongIds, partialScanIds)
+
+        assertEquals(setOf(2L, 4L), staleSongRows)
+        // Routine sync consumes this set only for SongDao deletion. Playlist membership
+        // cleanup is reserved for the explicit user-deletion path.
+    }
+
+    @Test
+    fun `selected folder exclusion still identifies stale song rows without playlist cleanup`() {
+        val currentSongIds = setOf(10L, 20L, 30L)
+        val selectedFolderScanIds = setOf(10L, 30L)
+
+        val staleSongRows = SongSyncPolicy.computeStaleIds(
+            currentIds = currentSongIds,
+            activeIds = selectedFolderScanIds,
+        )
+
+        assertEquals(setOf(20L), staleSongRows)
+    }
+
+    @Test
     fun `scan prune preserves all songs when every current id appears in active scan`() {
         val ids = (1L..50L).toSet()
         assertTrue(SongSyncPolicy.computeStaleIds(ids, ids).isEmpty())

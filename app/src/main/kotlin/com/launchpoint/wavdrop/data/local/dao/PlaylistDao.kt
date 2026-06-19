@@ -23,9 +23,10 @@ interface PlaylistDao {
 
     @Query("""
         SELECT p.playlistId, p.name, p.createdAt, p.updatedAt,
-               COUNT(ps.songId) AS songCount
+               COUNT(s.id) AS songCount
         FROM playlists p
         LEFT JOIN playlist_songs ps ON p.playlistId = ps.playlistId
+        LEFT JOIN songs s ON s.id = ps.songId
         GROUP BY p.playlistId
         ORDER BY p.name COLLATE NOCASE ASC
     """)
@@ -80,6 +81,20 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlist_songs WHERE songId IN (:songIds)")
     suspend fun removeEntriesForSongs(songIds: List<Long>)
+
+    @Query("""
+        DELETE FROM playlist_songs
+        WHERE songId = :oldSongId
+          AND playlistId IN (
+              SELECT playlistId
+              FROM playlist_songs
+              WHERE songId = :newSongId
+          )
+    """)
+    suspend fun removeRedundantEntriesForRemap(oldSongId: Long, newSongId: Long): Int
+
+    @Query("UPDATE playlist_songs SET songId = :newSongId WHERE songId = :oldSongId")
+    suspend fun remapSongId(oldSongId: Long, newSongId: Long): Int
 
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun clearPlaylist(playlistId: Long)
