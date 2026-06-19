@@ -32,8 +32,60 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
+
+internal class PlaybackSessionRestoreClaim {
+    private var claimed = false
+
+    @Synchronized
+    fun claim(): Boolean {
+        if (claimed) return false
+        claimed = true
+        return true
+    }
+}
+
+internal enum class PlaybackSessionPersistenceAction {
+    NONE,
+    CLEAR,
+    SAVE,
+}
+
+internal fun playbackSessionPersistenceAction(
+    isExternalPlayback: Boolean,
+    queueIsEmpty: Boolean,
+): PlaybackSessionPersistenceAction = when {
+    isExternalPlayback -> PlaybackSessionPersistenceAction.NONE
+    queueIsEmpty       -> PlaybackSessionPersistenceAction.CLEAR
+    else               -> PlaybackSessionPersistenceAction.SAVE
+}
+
+internal class PlaybackSessionPersistenceGate {
+    private val mutex = Mutex()
+    private val revisionLock = Any()
+    private var latestRevision = 0L
+
+    fun nextRevision(): Long = synchronized(revisionLock) {
+        ++latestRevision
+    }
+
+    suspend fun runIfLatest(revision: Long, operation: suspend () -> Unit): Boolean =
+        mutex.withLock {
+            val isLatest = synchronized(revisionLock) { revision == latestRevision }
+            if (!isLatest) return@withLock false
+            operation()
+            true
+        }
+}
+
+internal fun shouldSkipStartupSessionRestore(
+    isExternalPlayback: Boolean,
+    hasLogicalQueue: Boolean,
+    hasMediaQueue: Boolean,
+): Boolean = isExternalPlayback || hasLogicalQueue || hasMediaQueue
 
 /**
  * Singleton bridge between the UI layer and PlaybackService.
@@ -88,7 +140,8 @@ class PlayerController @Inject constructor(
     private var pendingExternalPlaybackRequest: ExternalPlaybackRequest? = null
     private var pendingRestorePositionMs: Long? = null
     private var pendingPreserveSearchPlan: SearchPlaybackPlan? = null
-    private var hasRestoredSession = false
+    private val sessionRestoreClaim = PlaybackSessionRestoreClaim()
+    private val sessionPersistenceGate = PlaybackSessionPersistenceGate()
     private var isExternalPlayback = false
 
     // libraryQueue: source order. playbackOrder: indices into libraryQueue (identity or shuffled).
@@ -852,8 +905,8 @@ class PlayerController @Inject constructor(
     }
 
     fun restoreSessionIfNeeded(availableSongs: List<Song>) {
-        if (hasRestoredSession || isExternalPlayback) return
-        hasRestoredSession = true
+        if (hasActiveSessionForStartupRestore()) return
+        if (!sessionRestoreClaim.claim()) return
         scope.launch {
             val rawSnapshot = sessionRepository.load() ?: return@launch
             val resumeSettings = resumeBehaviorRepository.settings.first()
@@ -867,6 +920,10 @@ class PlayerController @Inject constructor(
                 sessionIndex  = PlaybackSessionRules.clampIndex(snapshot.currentIndex, mappedQueue.size),
                 mappedQueue   = mappedQueue,
             ) ?: return@launch
+
+            // A queue may have become active while DataStore and settings were loading.
+            // Never replace a user-started or reconnect-restored Media3 session.
+            if (hasActiveSessionForStartupRestore()) return@launch
 
             libraryQueue   = mappedQueue
             shuffleEnabled = snapshot.shuffleEnabled
@@ -1129,6 +1186,10 @@ class PlayerController @Inject constructor(
         availableSongs: List<Song>,
         settings: ResumeBehaviorSettings,
     ): Boolean {
+        if (!sessionRestoreClaim.claim()) {
+            logResume("resumeSessionCold: session restore already claimed, aborting")
+            return false
+        }
         logResume("resumeSessionCold: availableSongs=${availableSongs.size}")
         val rawSnapshot = sessionRepository.load()
         if (rawSnapshot == null) {
@@ -1314,8 +1375,22 @@ class PlayerController @Inject constructor(
     }
 
     private fun saveSessionAsync() {
-        if (isExternalPlayback) return
-        if (libraryQueue.isEmpty()) return
+        val action = playbackSessionPersistenceAction(
+            isExternalPlayback = isExternalPlayback,
+            queueIsEmpty = libraryQueue.isEmpty(),
+        )
+        if (action == PlaybackSessionPersistenceAction.NONE) return
+
+        val revision = sessionPersistenceGate.nextRevision()
+        if (action == PlaybackSessionPersistenceAction.CLEAR) {
+            scope.launch {
+                sessionPersistenceGate.runIfLatest(revision) {
+                    sessionRepository.clear()
+                }
+            }
+            return
+        }
+
         val state = _nowPlayingState.value
         val controller = mediaController
         val positionMs = controller?.currentPosition?.coerceAtLeast(0L) ?: state.positionMs
@@ -1338,7 +1413,21 @@ class PlayerController @Inject constructor(
             shuffleEnabled = shuffleEnabled,
             updatedAtMs    = System.currentTimeMillis(),
         )
-        scope.launch { sessionRepository.save(snapshot) }
+        scope.launch {
+            sessionPersistenceGate.runIfLatest(revision) {
+                sessionRepository.save(snapshot)
+            }
+        }
+    }
+
+    private fun hasActiveSessionForStartupRestore(): Boolean {
+        val controller = mediaController
+        return shouldSkipStartupSessionRestore(
+            isExternalPlayback = isExternalPlayback,
+            hasLogicalQueue = libraryQueue.isNotEmpty() || playbackQueue.isNotEmpty(),
+            hasMediaQueue = controller?.mediaItemCount?.let { it > 0 } == true ||
+                controller?.currentMediaItem != null,
+        )
     }
 
     fun release() {
