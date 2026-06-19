@@ -220,6 +220,7 @@ fun WavdropNavGraph(
                 onAlbumClick             = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
                 onArtistClick            = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
                 onGlobalSearchClick      = { navController.navigate(Screen.GlobalSearch.route) },
+                onReportsAndInsightsClick = { navController.navigate(Screen.SettingsStatistics.route) },
             )
         }
         composable(Screen.Library.route) {

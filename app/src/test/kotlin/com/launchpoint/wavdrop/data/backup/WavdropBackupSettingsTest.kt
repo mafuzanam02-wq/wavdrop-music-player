@@ -1,5 +1,7 @@
 package com.launchpoint.wavdrop.data.backup
 
+import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRules
+import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -291,6 +293,34 @@ class WavdropBackupSettingsTest {
         assertNull(prefs?.compactMode)
         assertNull(prefs?.minimumTrackDurationSeconds)
         assertEquals(listOf("CONTINUE_LISTENING"), prefs?.homeVisibleSections)
+    }
+
+    @Test
+    fun `legacy home section ids remain accepted in backup preferences`() {
+        val parsed = WavdropBackupParser.parse(
+            minimalBackupJson(
+                """
+                {
+                  "android": {
+                    "homeVisibleSections": ["FAVORITES", "PLAYLISTS", "RECENTLY_PLAYED", "MOST_PLAYED"]
+                  }
+                }
+                """.trimIndent(),
+            ),
+        ).backup
+
+        assertNotNull(parsed)
+        assertEquals(
+            listOf("FAVORITES", "PLAYLISTS", "RECENTLY_PLAYED", "MOST_PLAYED"),
+            parsed!!.preferences?.homeVisibleSections,
+        )
+        val restoredSections = parsed.preferences?.homeVisibleSections
+            .orEmpty()
+            .mapNotNull { runCatching { HomeSectionId.valueOf(it) }.getOrNull() }
+            .toSet()
+            .let(HomeLayoutSettingsRules::normalizeVisibleSections)
+        assertTrue(HomeSectionId.FAVORITES in restoredSections)
+        assertTrue(HomeSectionId.PLAYLISTS in restoredSections)
     }
 
     // ── Checksum stability across the fingerprint extension ──────────────────

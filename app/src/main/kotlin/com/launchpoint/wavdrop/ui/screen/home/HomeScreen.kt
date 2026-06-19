@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -99,6 +100,7 @@ fun HomeScreen(
     onAlbumClick: (String) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
     onGlobalSearchClick: () -> Unit = {},
+    onReportsAndInsightsClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
@@ -156,6 +158,13 @@ fun HomeScreen(
                             tint               = MaterialTheme.colorScheme.onSurface,
                         )
                     }
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(
+                            imageVector        = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint               = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor    = MaterialTheme.colorScheme.surface,
@@ -203,6 +212,7 @@ fun HomeScreen(
                     onPlaylistsClick    = onPlaylistsClick,
                     onSmartCollectionsClick = onSmartCollectionsClick,
                     onWrappedClick      = onWrappedClick,
+                    onReportsAndInsightsClick = onReportsAndInsightsClick,
                     onSongClick         = viewModel::playSong,
                     onToggleFavorite    = { song, wasFavorite ->
                         viewModel.toggleFavorite(song.id)
@@ -344,6 +354,27 @@ private fun SleepTimerChip(
 private fun HomeDashboardUiState.librarySummary(): String =
     if (totalSongs > 0) "$totalSongs local songs" else "Your local music library"
 
+internal enum class HomeListeningActivityPreview {
+    RECENTLY_PLAYED,
+    MOST_PLAYED,
+}
+
+internal fun selectHomeListeningActivityPreview(
+    visibleSections: Set<HomeSectionId>,
+    hasRecentlyPlayed: Boolean,
+    hasMostPlayed: Boolean,
+): HomeListeningActivityPreview? {
+    val enabled =
+        HomeSectionId.RECENTLY_PLAYED in visibleSections ||
+            HomeSectionId.MOST_PLAYED in visibleSections
+    if (!enabled) return null
+    return when {
+        hasRecentlyPlayed -> HomeListeningActivityPreview.RECENTLY_PLAYED
+        hasMostPlayed     -> HomeListeningActivityPreview.MOST_PLAYED
+        else              -> null
+    }
+}
+
 private fun SleepTimerState.homeHeaderLabel(nowMs: Long): String? = when {
     !isActive -> null
     option == SleepTimerOption.END_OF_CURRENT_SONG -> "Timer: End of song"
@@ -468,6 +499,7 @@ private fun HomeDashboardContent(
     onPlaylistsClick: () -> Unit,
     onSmartCollectionsClick: () -> Unit,
     onWrappedClick: () -> Unit,
+    onReportsAndInsightsClick: () -> Unit,
     onSongClick: (Song) -> Unit,
     onToggleFavorite: (Song, Boolean) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
@@ -502,37 +534,50 @@ private fun HomeDashboardContent(
                 )
             }
         } else {
-            val previewTitle: String
-            val previewSongs: List<Song>
-            val previewEmptyText: String
-            if (HomeSectionId.RECENTLY_PLAYED in visibleSections && dashboard.recentlyPlayed.isNotEmpty()) {
-                previewTitle = "Recently Played"
-                previewSongs = dashboard.recentlyPlayed
-                previewEmptyText = "Play a song and recent listens will land here."
-            } else {
-                previewTitle = "Most Played"
-                previewSongs = dashboard.mostPlayed
-                previewEmptyText = "No repeat listens yet. Play songs again to build this preview."
-            }
-
-            if (
-                HomeSectionId.RECENTLY_PLAYED in visibleSections ||
-                HomeSectionId.MOST_PLAYED in visibleSections
-            ) {
-                dashboardSection(
-                    title = previewTitle,
-                    songs = previewSongs,
-                    emptyText = previewEmptyText,
-                    currentSongId = currentSongId,
-                    favoriteSongIds = favoriteSongIds,
-                    onSongClick = onSongClick,
-                    onToggleFavorite = onToggleFavorite,
-                    onTrackDetailsClick = onTrackDetailsClick,
-                    onPlayNext = onPlayNext,
-                    onAddToQueue = onAddToQueue,
-                    onAddToPlaylist = onAddToPlaylist,
-                    onShare = onShare,
+            when (
+                selectHomeListeningActivityPreview(
+                    visibleSections = visibleSections,
+                    hasRecentlyPlayed = dashboard.recentlyPlayed.isNotEmpty(),
+                    hasMostPlayed = dashboard.mostPlayed.isNotEmpty(),
                 )
+            ) {
+                HomeListeningActivityPreview.RECENTLY_PLAYED -> {
+                    dashboardSection(
+                        title = "Recently Played",
+                        songs = dashboard.recentlyPlayed,
+                        emptyText = "",
+                        currentSongId = currentSongId,
+                        favoriteSongIds = favoriteSongIds,
+                        onSongClick = onSongClick,
+                        onToggleFavorite = onToggleFavorite,
+                        onTrackDetailsClick = onTrackDetailsClick,
+                        onPlayNext = onPlayNext,
+                        onAddToQueue = onAddToQueue,
+                        onAddToPlaylist = onAddToPlaylist,
+                        onShare = onShare,
+                        actionLabel = "View insights",
+                        onActionClick = onReportsAndInsightsClick,
+                    )
+                }
+                HomeListeningActivityPreview.MOST_PLAYED -> {
+                    dashboardSection(
+                        title = "Most Played",
+                        songs = dashboard.mostPlayed,
+                        emptyText = "",
+                        currentSongId = currentSongId,
+                        favoriteSongIds = favoriteSongIds,
+                        onSongClick = onSongClick,
+                        onToggleFavorite = onToggleFavorite,
+                        onTrackDetailsClick = onTrackDetailsClick,
+                        onPlayNext = onPlayNext,
+                        onAddToQueue = onAddToQueue,
+                        onAddToPlaylist = onAddToPlaylist,
+                        onShare = onShare,
+                        actionLabel = "View insights",
+                        onActionClick = onReportsAndInsightsClick,
+                    )
+                }
+                null -> Unit
             }
             if (HomeSectionId.WRAPPED in visibleSections && dashboard.wrapped != null) {
                 item {
@@ -593,8 +638,16 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
     onAddToQueue: (Song) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
     onShare: (Song) -> Unit,
+    actionLabel: String? = null,
+    onActionClick: (() -> Unit)? = null,
 ) {
-    item { DashboardListSectionHeader(title = title) }
+    item {
+        DashboardListSectionHeader(
+            title = title,
+            actionLabel = actionLabel,
+            onActionClick = onActionClick,
+        )
+    }
     if (songs.isEmpty()) {
         item { DashboardEmptyText(emptyText) }
     } else {

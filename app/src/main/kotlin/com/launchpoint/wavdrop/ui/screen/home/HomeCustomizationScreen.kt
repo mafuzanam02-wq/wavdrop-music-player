@@ -77,11 +77,11 @@ fun HomeCustomizationScreen(
                     thickness = 0.5.dp,
                 )
             }
-            HomeLayoutSettingsRules.DISPLAY_ORDER.forEach { id ->
+            HomeLayoutSettingsRules.EXPOSED_SECTION_IDS.forEach { id ->
                 item(key = id.name) {
                     HomeSectionToggleRow(
                         id          = id,
-                        isVisible   = id in settings.visibleSections,
+                        isVisible   = HomeLayoutSettingsRules.isSectionVisible(settings, id),
                         isToggleable = HomeLayoutSettingsRules.isToggleable(id),
                         onToggle    = { viewModel.setSectionVisible(id, it) },
                     )

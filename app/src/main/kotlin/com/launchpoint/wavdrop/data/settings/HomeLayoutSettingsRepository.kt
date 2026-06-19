@@ -29,7 +29,7 @@ class HomeLayoutSettingsRepository @Inject constructor(
                     .mapNotNull { name -> runCatching { HomeSectionId.valueOf(name) }.getOrNull() }
                     .toSet()
                 HomeLayoutSettings(
-                    visibleSections = parsed + HomeLayoutSettingsRules.ALWAYS_VISIBLE_SECTIONS,
+                    visibleSections = HomeLayoutSettingsRules.normalizeVisibleSections(parsed),
                 )
             }
         }
@@ -37,7 +37,7 @@ class HomeLayoutSettingsRepository @Inject constructor(
     suspend fun setVisibleSections(sections: Set<HomeSectionId>) {
         dataStore.edit { prefs ->
             prefs[HOME_VISIBLE_SECTIONS_KEY] =
-                (sections + HomeLayoutSettingsRules.ALWAYS_VISIBLE_SECTIONS)
+                HomeLayoutSettingsRules.normalizeVisibleSections(sections)
                     .map { it.name }
                     .toSet()
         }
