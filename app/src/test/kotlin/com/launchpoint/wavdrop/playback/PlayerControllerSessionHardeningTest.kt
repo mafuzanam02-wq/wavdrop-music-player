@@ -132,4 +132,79 @@ class PlayerControllerSessionHardeningTest {
             ),
         )
     }
+
+    @Test
+    fun `continuous playback checkpoint becomes eligible after interval`() {
+        assertTrue(
+            shouldCheckpointPlaybackPosition(
+                isPlaying = true,
+                isExternalPlayback = false,
+                queueIsEmpty = false,
+                nowElapsedRealtimeMs = 10_000L,
+                lastCheckpointElapsedRealtimeMs = 0L,
+                currentPositionMs = 10_000L,
+                lastCheckpointPositionMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun `continuous playback checkpoint is not eligible before interval`() {
+        assertFalse(
+            shouldCheckpointPlaybackPosition(
+                isPlaying = true,
+                isExternalPlayback = false,
+                queueIsEmpty = false,
+                nowElapsedRealtimeMs = 9_999L,
+                lastCheckpointElapsedRealtimeMs = 0L,
+                currentPositionMs = 9_999L,
+                lastCheckpointPositionMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun `external playback is not checkpointed`() {
+        assertFalse(
+            shouldCheckpointPlaybackPosition(
+                isPlaying = true,
+                isExternalPlayback = true,
+                queueIsEmpty = false,
+                nowElapsedRealtimeMs = 20_000L,
+                lastCheckpointElapsedRealtimeMs = 0L,
+                currentPositionMs = 20_000L,
+                lastCheckpointPositionMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun `empty queue is not checkpointed`() {
+        assertFalse(
+            shouldCheckpointPlaybackPosition(
+                isPlaying = true,
+                isExternalPlayback = false,
+                queueIsEmpty = true,
+                nowElapsedRealtimeMs = 20_000L,
+                lastCheckpointElapsedRealtimeMs = 0L,
+                currentPositionMs = 20_000L,
+                lastCheckpointPositionMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun `position without meaningful change is not checkpointed`() {
+        assertFalse(
+            shouldCheckpointPlaybackPosition(
+                isPlaying = true,
+                isExternalPlayback = false,
+                queueIsEmpty = false,
+                nowElapsedRealtimeMs = 20_000L,
+                lastCheckpointElapsedRealtimeMs = 0L,
+                currentPositionMs = 4_999L,
+                lastCheckpointPositionMs = 0L,
+            ),
+        )
+    }
 }

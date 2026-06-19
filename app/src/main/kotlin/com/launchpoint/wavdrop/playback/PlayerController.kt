@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -87,6 +88,27 @@ internal fun shouldSkipStartupSessionRestore(
     hasMediaQueue: Boolean,
 ): Boolean = isExternalPlayback || hasLogicalQueue || hasMediaQueue
 
+internal const val PLAYBACK_POSITION_CHECKPOINT_INTERVAL_MS = 10_000L
+internal const val PLAYBACK_POSITION_CHECKPOINT_MIN_DELTA_MS = 5_000L
+
+internal fun shouldCheckpointPlaybackPosition(
+    isPlaying: Boolean,
+    isExternalPlayback: Boolean,
+    queueIsEmpty: Boolean,
+    nowElapsedRealtimeMs: Long,
+    lastCheckpointElapsedRealtimeMs: Long,
+    currentPositionMs: Long,
+    lastCheckpointPositionMs: Long,
+): Boolean {
+    if (!isPlaying || isExternalPlayback || queueIsEmpty) return false
+    if (lastCheckpointElapsedRealtimeMs < 0L || lastCheckpointPositionMs < 0L) return false
+    if (nowElapsedRealtimeMs - lastCheckpointElapsedRealtimeMs <
+        PLAYBACK_POSITION_CHECKPOINT_INTERVAL_MS
+    ) return false
+    return kotlin.math.abs(currentPositionMs - lastCheckpointPositionMs) >=
+        PLAYBACK_POSITION_CHECKPOINT_MIN_DELTA_MS
+}
+
 /**
  * Singleton bridge between the UI layer and PlaybackService.
  *
@@ -158,6 +180,8 @@ class PlayerController @Inject constructor(
     // Reset to -1 whenever a new song/session starts so the loop detector doesn't see
     // a false wrap from the old song's late position to the new song's early position.
     private var lastKnownPositionMs: Long = -1L
+    private var lastPositionCheckpointElapsedRealtimeMs: Long = -1L
+    private var lastPositionCheckpointMs: Long = -1L
 
     private val _nowPlayingState = MutableStateFlow(NowPlayingState())
     val nowPlayingState: StateFlow<NowPlayingState> = _nowPlayingState.asStateFlow()
@@ -191,6 +215,12 @@ class PlayerController @Inject constructor(
             if (isPlaying) {
                 if (!isExternalPlayback) {
                     statsTracker.onPlaybackStarted()
+                }
+                if (lastPositionCheckpointElapsedRealtimeMs < 0L) {
+                    lastPositionCheckpointElapsedRealtimeMs = SystemClock.elapsedRealtime()
+                    lastPositionCheckpointMs =
+                        mediaController?.currentPosition?.coerceAtLeast(0L)
+                            ?: _nowPlayingState.value.positionMs.coerceAtLeast(0L)
                 }
                 startPositionTicker()
             } else {
@@ -1383,6 +1413,8 @@ class PlayerController @Inject constructor(
 
         val revision = sessionPersistenceGate.nextRevision()
         if (action == PlaybackSessionPersistenceAction.CLEAR) {
+            lastPositionCheckpointElapsedRealtimeMs = -1L
+            lastPositionCheckpointMs = -1L
             scope.launch {
                 sessionPersistenceGate.runIfLatest(revision) {
                     sessionRepository.clear()
@@ -1394,6 +1426,8 @@ class PlayerController @Inject constructor(
         val state = _nowPlayingState.value
         val controller = mediaController
         val positionMs = controller?.currentPosition?.coerceAtLeast(0L) ?: state.positionMs
+        lastPositionCheckpointElapsedRealtimeMs = SystemClock.elapsedRealtime()
+        lastPositionCheckpointMs = positionMs
         val preservePlan = pendingPreserveSearchPlan
 
         val currentLibraryIndex = preservePlan?.currentIndex?.takeIf { it in libraryQueue.indices }
@@ -1504,6 +1538,20 @@ class PlayerController @Inject constructor(
                 bufferedPositionMs = controller.safeBufferedPositionMs(durationMs),
                 isSeekable         = controller.isCurrentMediaItemSeekable,
             )
+        }
+
+        val nowElapsedRealtimeMs = SystemClock.elapsedRealtime()
+        if (shouldCheckpointPlaybackPosition(
+                isPlaying = controller.isPlaying,
+                isExternalPlayback = isExternalPlayback,
+                queueIsEmpty = libraryQueue.isEmpty(),
+                nowElapsedRealtimeMs = nowElapsedRealtimeMs,
+                lastCheckpointElapsedRealtimeMs = lastPositionCheckpointElapsedRealtimeMs,
+                currentPositionMs = currentPos,
+                lastCheckpointPositionMs = lastPositionCheckpointMs,
+            )
+        ) {
+            saveSessionAsync()
         }
     }
 

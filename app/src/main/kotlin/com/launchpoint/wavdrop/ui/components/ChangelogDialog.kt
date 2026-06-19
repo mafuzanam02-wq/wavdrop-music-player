@@ -19,7 +19,27 @@ private sealed interface ChangelogEntry {
     data class Item(val text: String) : ChangelogEntry
 }
 
-private val CHANGELOG_ENTRIES: List<ChangelogEntry> = listOf(
+private val BETA_4_ENTRIES: List<ChangelogEntry> = listOf(
+    ChangelogEntry.Section("Discover & Browse"),
+    ChangelogEntry.Item("Global Search now finds songs, albums, artists, and folders across your library."),
+    ChangelogEntry.Item("Folder browsing has improved sorting and search polish."),
+    ChangelogEntry.Item("Empty-library guidance now provides clearer next steps and rescan actions."),
+
+    ChangelogEntry.Section("Insights & Sharing"),
+    ChangelogEntry.Item("Statistics now includes expanded listening insights, reports, and monthly recaps."),
+    ChangelogEntry.Item("Wrapped cards can now be shared as images."),
+
+    ChangelogEntry.Section("Playback & Lyrics"),
+    ChangelogEntry.Item("Lyrics are easier to paste, edit, and manage from Now Playing and track details."),
+    ChangelogEntry.Item("Sleep Timer now supports custom durations and a Home timer status chip."),
+    ChangelogEntry.Item("Playback session restore is more reliable, with safer queue recovery and more accurate position resume."),
+
+    ChangelogEntry.Section("Privacy & Reliability"),
+    ChangelogEntry.Item("Clearer privacy and data-ownership information explains what Wavdrop stores locally."),
+    ChangelogEntry.Item("Release hardening improves stability, recovery, and edge-case handling throughout the app."),
+)
+
+private val BETA_3_1_ENTRIES: List<ChangelogEntry> = listOf(
     ChangelogEntry.Section("Search Playback"),
     ChangelogEntry.Item("Added a Search result tap setting: Replace Queue keeps the existing behavior, while Preserve Queue plays the searched track and then continues the remaining queue."),
     ChangelogEntry.Item("Shuffle/session restore now preserves the effective playback order more reliably after app restarts."),
@@ -60,12 +80,39 @@ private val CHANGELOG_ENTRIES: List<ChangelogEntry> = listOf(
 
 @Composable
 fun ChangelogDialog(onDismiss: () -> Unit) {
+    ChangelogEntriesDialog(
+        title = "What's new in Beta 4",
+        entries = BETA_4_ENTRIES,
+        onDismiss = onDismiss,
+    )
+}
+
+@Composable
+fun FullChangelogDialog(onDismiss: () -> Unit) {
+    ChangelogEntriesDialog(
+        title = "Wavdrop Changelog",
+        entries = buildList {
+            add(ChangelogEntry.Section("Beta 4"))
+            addAll(BETA_4_ENTRIES)
+            add(ChangelogEntry.Section("Beta 3.1"))
+            addAll(BETA_3_1_ENTRIES)
+        },
+        onDismiss = onDismiss,
+    )
+}
+
+@Composable
+private fun ChangelogEntriesDialog(
+    title: String,
+    entries: List<ChangelogEntry>,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("What's new in Beta 3") },
+        title = { Text(title) },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                CHANGELOG_ENTRIES.forEachIndexed { index, entry ->
+                entries.forEachIndexed { index, entry ->
                     when (entry) {
                         is ChangelogEntry.Section -> {
                             if (index > 0) Spacer(Modifier.height(12.dp))

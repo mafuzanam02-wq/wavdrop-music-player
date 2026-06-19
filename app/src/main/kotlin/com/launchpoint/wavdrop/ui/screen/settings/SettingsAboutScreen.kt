@@ -37,7 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.launchpoint.wavdrop.BuildConfig
-import com.launchpoint.wavdrop.ui.components.ChangelogDialog
+import com.launchpoint.wavdrop.ui.components.FullChangelogDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -221,7 +221,7 @@ fun SettingsAboutScreen(
         )
     }
     if (showWhatsNewDialog) {
-        ChangelogDialog(onDismiss = { showWhatsNewDialog = false })
+        FullChangelogDialog(onDismiss = { showWhatsNewDialog = false })
     }
     if (showWhatWeStoreDialog) {
         LegalInfoDialog(
