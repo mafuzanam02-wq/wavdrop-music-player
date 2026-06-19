@@ -109,6 +109,29 @@ internal fun shouldCheckpointPlaybackPosition(
         PLAYBACK_POSITION_CHECKPOINT_MIN_DELTA_MS
 }
 
+internal sealed interface PlayAllNextPlan {
+    data object NoOp : PlayAllNextPlan
+    data class StartQueue(
+        val queue: List<Song>,
+        val startSong: Song,
+    ) : PlayAllNextPlan
+    data class InsertAfterCurrent(
+        val songs: List<Song>,
+    ) : PlayAllNextPlan
+}
+
+internal fun planPlayAllNext(
+    songs: List<Song>,
+    hasActiveCurrentItem: Boolean,
+): PlayAllNextPlan {
+    if (songs.isEmpty()) return PlayAllNextPlan.NoOp
+    return if (hasActiveCurrentItem) {
+        PlayAllNextPlan.InsertAfterCurrent(songs)
+    } else {
+        PlayAllNextPlan.StartQueue(queue = songs, startSong = songs.first())
+    }
+}
+
 /**
  * Singleton bridge between the UI layer and PlaybackService.
  *
@@ -595,9 +618,16 @@ class PlayerController @Inject constructor(
 
     /** Inserts [songs] immediately after the current item in their original order. */
     fun playAllNext(songs: List<Song>) {
-        if (songs.isEmpty()) return
-        // Inserting each song at currentIndex+1 in reversed order produces the original order.
-        songs.reversed().forEach { playNext(it) }
+        val hasActiveCurrentItem = libraryQueue.isNotEmpty() && currentPlaybackIndex() != null
+        when (val plan = planPlayAllNext(songs, hasActiveCurrentItem)) {
+            PlayAllNextPlan.NoOp -> Unit
+            is PlayAllNextPlan.StartQueue ->
+                playFromQueue(queue = plan.queue, startSong = plan.startSong)
+            is PlayAllNextPlan.InsertAfterCurrent -> {
+                // Inserting each song at currentIndex+1 in reversed order produces the original order.
+                plan.songs.asReversed().forEach { playNext(it) }
+            }
+        }
     }
 
     /** Appends [songs] to the end of the queue in their original order. */

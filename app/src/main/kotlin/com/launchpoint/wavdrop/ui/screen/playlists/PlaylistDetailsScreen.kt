@@ -355,6 +355,8 @@ fun PlaylistDetailsScreen(
                     PlaybackActions(
                         onPlayAll     = viewModel::playAll,
                         onShufflePlay = viewModel::shufflePlay,
+                        onPlayNext    = viewModel::playAllNext,
+                        onAddToQueue  = viewModel::addAllToQueue,
                         modifier      = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                     HorizontalDivider(
@@ -657,11 +659,15 @@ private fun NoPlaylistSearchResults() {
 private fun PlaybackActions(
     onPlayAll: () -> Unit,
     onShufflePlay: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var moreExpanded by remember { mutableStateOf(false) }
     Row(
         modifier            = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment     = Alignment.CenterVertically,
     ) {
         FilledTonalButton(
             onClick   = onPlayAll,
@@ -676,6 +682,30 @@ private fun PlaybackActions(
         ) {
             Icon(Icons.Default.Shuffle, null, modifier = Modifier.padding(end = 4.dp))
             Text("Shuffle")
+        }
+        Box {
+            IconButton(onClick = { moreExpanded = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "More queue actions")
+            }
+            DropdownMenu(
+                expanded = moreExpanded,
+                onDismissRequest = { moreExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Play next") },
+                    onClick = {
+                        moreExpanded = false
+                        onPlayNext()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to queue") },
+                    onClick = {
+                        moreExpanded = false
+                        onAddToQueue()
+                    },
+                )
+            }
         }
     }
 }

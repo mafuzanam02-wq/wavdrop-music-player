@@ -43,6 +43,9 @@ data class PlaylistDetailsUiState(
     val isSearchActive: Boolean get() = searchQuery.isNotBlank()
 }
 
+internal fun playlistQueueSongs(entries: List<PlaylistSongItem>): List<Song> =
+    entries.map { it.song }
+
 @HiltViewModel
 class PlaylistDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -123,6 +126,18 @@ class PlaylistDetailsViewModel @Inject constructor(
 
     fun playNext(song: Song)   = playerController.playNext(song)
     fun addToQueue(song: Song) = playerController.addToQueue(song)
+
+    fun playAllNext() {
+        val songs = playlistQueueSongs(uiState.value.visibleEntries)
+        if (songs.isEmpty()) return
+        playerController.playAllNext(songs)
+    }
+
+    fun addAllToQueue() {
+        val songs = playlistQueueSongs(uiState.value.visibleEntries)
+        if (songs.isEmpty()) return
+        playerController.addAllToQueue(songs)
+    }
 
     fun playEntry(entry: PlaylistSongItem, shuffle: Boolean = false) {
         val songs = uiState.value.visibleEntries.map { it.song }
