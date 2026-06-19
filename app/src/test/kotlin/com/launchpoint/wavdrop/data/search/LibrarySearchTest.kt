@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.data.search
 import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.FolderSummary
+import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -26,6 +27,14 @@ class LibrarySearchTest {
 
     private fun folder(key: String, displayName: String = key) = FolderSummary(
         folderKey = key, displayName = displayName, songCount = 1, totalDurationMs = 200_000L,
+    )
+
+    private fun playlist(id: Long, name: String, songCount: Int = 1) = PlaylistSummary(
+        id = id,
+        name = name,
+        songCount = songCount,
+        createdAt = 0L,
+        updatedAt = 0L,
     )
 
     // ── Song filter ───────────────────────────────────────────────────────────
@@ -121,6 +130,16 @@ class LibrarySearchTest {
     }
 
     @Test
+    fun `album filter matches normalized text`() {
+        val result = LibrarySearch.filterAlbums(
+            listOf(album("Café Sessions")),
+            "cafe",
+        )
+
+        assertEquals(listOf("Café Sessions"), result.map { it.albumKey })
+    }
+
+    @Test
     fun `blank query returns all folders`() {
         val folders = listOf(folder("Music"), folder("Download"))
 
@@ -159,6 +178,83 @@ class LibrarySearchTest {
         val folders = listOf(folder("Music"), folder("Download"))
 
         assertTrue(LibrarySearch.filterFolders(folders, "zzz").isEmpty())
+    }
+
+    // ── Playlist filter ───────────────────────────────────────────────────────
+
+    @Test
+    fun `blank query returns all playlists`() {
+        val playlists = listOf(playlist(1, "Road Trip"), playlist(2, "Workout"))
+
+        assertEquals(playlists, LibrarySearch.filterPlaylists(playlists, ""))
+    }
+
+    @Test
+    fun `whitespace query returns all playlists`() {
+        val playlists = listOf(playlist(1, "Road Trip"), playlist(2, "Workout"))
+
+        assertEquals(playlists, LibrarySearch.filterPlaylists(playlists, "   "))
+    }
+
+    @Test
+    fun `playlist filter is case insensitive`() {
+        val result = LibrarySearch.filterPlaylists(
+            listOf(playlist(1, "Road Trip"), playlist(2, "Workout")),
+            "ROAD",
+        )
+
+        assertEquals(listOf("Road Trip"), result.map { it.name })
+    }
+
+    @Test
+    fun `playlist filter matches partial name`() {
+        val result = LibrarySearch.filterPlaylists(
+            listOf(playlist(1, "Road Trip"), playlist(2, "Workout")),
+            "work",
+        )
+
+        assertEquals(listOf("Workout"), result.map { it.name })
+    }
+
+    @Test
+    fun `playlist filter matches normalized text`() {
+        val result = LibrarySearch.filterPlaylists(
+            listOf(playlist(1, "Café Mix")),
+            "cafe",
+        )
+
+        assertEquals(listOf("Café Mix"), result.map { it.name })
+    }
+
+    @Test
+    fun `playlist filter returns empty when nothing matches`() {
+        assertTrue(
+            LibrarySearch.filterPlaylists(
+                listOf(playlist(1, "Road Trip")),
+                "classical",
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `playlist filter matches name only`() {
+        val result = LibrarySearch.filterPlaylists(
+            listOf(playlist(1, "Focus", songCount = 42)),
+            "42",
+        )
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `playlist filter preserves input order`() {
+        val playlists = listOf(
+            playlist(3, "Mix Gamma"),
+            playlist(1, "Mix Alpha"),
+            playlist(2, "Mix Beta"),
+        )
+
+        assertEquals(playlists, LibrarySearch.filterPlaylists(playlists, "mix"))
     }
 
     // ── Artist filter ─────────────────────────────────────────────────────────

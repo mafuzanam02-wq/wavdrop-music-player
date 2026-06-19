@@ -32,6 +32,7 @@ fun GlobalSearchRoute(
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
     onFolderClick: (String) -> Unit,
+    onPlaylistClick: (Long) -> Unit,
     viewModel: GlobalSearchViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
@@ -56,7 +57,7 @@ fun GlobalSearchRoute(
                 query         = searchQuery,
                 onQueryChange = viewModel::setSearchQuery,
                 onClose       = onNavigateBack,
-                placeholder   = "Search songs, artists, albums…",
+                placeholder   = "Search songs, artists, albums, playlists…",
             )
         },
     ) { innerPadding ->
@@ -91,6 +92,8 @@ fun GlobalSearchRoute(
             onAlbumClick  = onAlbumClick,
             onArtistClick = onArtistClick,
             onFolderClick = onFolderClick,
+            playlists = playlists,
+            onPlaylistClick = onPlaylistClick,
             modifier      = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),

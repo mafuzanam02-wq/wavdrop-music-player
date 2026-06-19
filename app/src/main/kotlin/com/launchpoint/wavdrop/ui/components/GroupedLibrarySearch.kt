@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Folder
@@ -40,6 +41,7 @@ import com.launchpoint.wavdrop.data.grouping.ArtistGrouper
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.model.ArtistSummary
+import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.LibrarySearch
 
@@ -61,14 +63,19 @@ data class SongSearchActions(
     val onShare: (Song) -> Unit,
 )
 
-private data class GroupedSearchResults(
+internal data class GroupedSearchResults(
     val songs: List<Song>,
     val artists: List<ArtistSummary>,
     val albums: List<AlbumSummary>,
+    val playlists: List<PlaylistSummary>,
     val folders: List<com.launchpoint.wavdrop.data.model.FolderSummary>,
 ) {
     val isEmpty: Boolean
-        get() = songs.isEmpty() && artists.isEmpty() && albums.isEmpty() && folders.isEmpty()
+        get() = songs.isEmpty() &&
+            artists.isEmpty() &&
+            albums.isEmpty() &&
+            playlists.isEmpty() &&
+            folders.isEmpty()
 }
 
 @Composable
@@ -79,14 +86,22 @@ fun GroupedSearchContent(
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
     onFolderClick: (String) -> Unit = {},
+    playlists: List<PlaylistSummary> = emptyList(),
+    onPlaylistClick: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val results = remember(songs, query) { buildGroupedSearchResults(songs, query) }
+    val results = remember(songs, playlists, query) {
+        buildGroupedSearchResults(
+            songs = songs,
+            playlists = playlists,
+            query = query,
+        )
+    }
     if (results.isEmpty) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             SearchEmptyState(
                 title = "No results",
-                message = "Try a song title, artist, or album name.",
+                message = "Try a song, artist, album, playlist, or folder name.",
             )
         }
         return
@@ -132,6 +147,19 @@ fun GroupedSearchContent(
                     album = album,
                     query = query,
                     onClick = { onAlbumClick(album.albumKey) },
+                )
+                SearchDivider()
+            }
+        }
+        if (results.playlists.isNotEmpty()) {
+            item(key = "playlists_header") {
+                SearchSectionHeader(title = "Playlists", count = results.playlists.size)
+            }
+            items(results.playlists, key = { "playlist_${it.id}" }) { playlist ->
+                SearchPlaylistRow(
+                    playlist = playlist,
+                    query = query,
+                    onClick = { onPlaylistClick(playlist.id) },
                 )
                 SearchDivider()
             }
@@ -275,6 +303,48 @@ private fun SearchAlbumRow(
 }
 
 @Composable
+private fun SearchPlaylistRow(
+    playlist: PlaylistSummary,
+    query: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 10.dp else 14.dp
+    val iconSize = if (compact) 36.dp else 40.dp
+    val highlightStyle = searchHighlightStyle()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+            modifier = Modifier.size(iconSize),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = highlightQuery(playlist.name, query, highlightStyle),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${playlist.songCount} songs",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
+        }
+    }
+}
+
+@Composable
 private fun SearchFolderRow(
     folder: com.launchpoint.wavdrop.data.model.FolderSummary,
     query: String,
@@ -368,38 +438,38 @@ private fun searchHighlightStyle(): SpanStyle =
         fontWeight = FontWeight.SemiBold,
     )
 
-private fun buildGroupedSearchResults(
+internal fun buildGroupedSearchResults(
     songs: List<Song>,
     query: String,
+    playlists: List<PlaylistSummary> = emptyList(),
 ): GroupedSearchResults {
     val trimmedQuery = query.trim()
-    val queryLower = trimmedQuery.lowercase()
-    if (queryLower.isEmpty()) {
+    if (trimmedQuery.isEmpty()) {
         return GroupedSearchResults(
             songs = songs,
             artists = emptyList(),
             albums = emptyList(),
+            playlists = emptyList(),
             folders = emptyList(),
         )
     }
     val allFolders = FolderGrouper.groupSongsByFolder(songs)
     return GroupedSearchResults(
         songs = LibrarySearch.filterSongs(songs, trimmedQuery),
-        artists = ArtistGrouper.group(songs)
-            .filter { it.artistKey.containsSearch(queryLower) }
+        artists = LibrarySearch.filterArtists(
+            artists = ArtistGrouper.group(songs),
+            songs = songs,
+            query = trimmedQuery,
+        ).take(24),
+        albums = LibrarySearch
+            .filterAlbums(AlbumGrouper.group(songs), trimmedQuery)
             .take(24),
-        albums = AlbumGrouper.group(songs)
-            .filter { album ->
-                album.albumKey.containsSearch(queryLower) ||
-                    album.artist.containsSearch(queryLower)
-            }
+        playlists = LibrarySearch
+            .filterPlaylists(playlists, trimmedQuery)
             .take(24),
         folders = LibrarySearch.filterFolders(allFolders, trimmedQuery).take(24),
     )
 }
-
-private fun String.containsSearch(queryLower: String): Boolean =
-    lowercase().contains(queryLower)
 
 private fun highlightQuery(
     text: String,

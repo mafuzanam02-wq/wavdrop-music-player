@@ -4,6 +4,7 @@ import com.launchpoint.wavdrop.data.grouping.ArtistGrouper
 import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.FolderSummary
+import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.text.MusicTextNormalizer
 
@@ -34,6 +35,17 @@ object LibrarySearch {
         return folders.filter { folder ->
             MusicTextNormalizer.normalizeSearch(folder.displayName).contains(q) ||
             MusicTextNormalizer.normalizeSearch(folder.folderKey).contains(q)
+        }
+    }
+
+    fun filterPlaylists(
+        playlists: List<PlaylistSummary>,
+        query: String,
+    ): List<PlaylistSummary> {
+        val q = MusicTextNormalizer.normalizeSearch(query)
+        if (q.isEmpty()) return playlists
+        return playlists.filter { playlist ->
+            MusicTextNormalizer.normalizeSearch(playlist.name).contains(q)
         }
     }
 
