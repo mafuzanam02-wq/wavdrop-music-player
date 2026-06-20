@@ -11,6 +11,7 @@ object HomeLayoutSettingsRules {
     val EXPOSED_SECTION_IDS: List<HomeSectionId> = listOf(
         HomeSectionId.CONTINUE_LISTENING,
         HomeSectionId.RECENTLY_PLAYED,
+        HomeSectionId.PLAYLISTS,
         HomeSectionId.SMART_COLLECTIONS,
         HomeSectionId.WRAPPED,
     )

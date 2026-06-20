@@ -597,6 +597,22 @@ private fun HomeDashboardContent(
                     )
                 }
             }
+            if (HomeSectionId.PLAYLISTS in visibleSections) {
+                item {
+                    DashboardListSectionHeader(
+                        title = "Playlists",
+                        actionLabel = "View all",
+                        onActionClick = onPlaylistsClick,
+                    )
+                }
+                if (dashboard.playlists.isEmpty()) {
+                    item { DashboardEmptyText("Create playlists to see them here.") }
+                } else {
+                    items(dashboard.playlists, key = { it.id }) { playlist ->
+                        PlaylistPreviewRow(playlist = playlist, onClick = onPlaylistsClick)
+                    }
+                }
+            }
             if (HomeSectionId.SMART_COLLECTIONS in visibleSections) {
                 item {
                     DashboardListSectionHeader(
