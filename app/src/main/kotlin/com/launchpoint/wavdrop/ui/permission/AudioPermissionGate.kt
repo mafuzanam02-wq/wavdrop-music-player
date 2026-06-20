@@ -188,7 +188,7 @@ private fun AudioPermissionBlockedContent(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Music cannot be scanned without permission. Open Android Settings and allow music access for Wavdrop.",
+            text = "Open Android Settings, then go to Permissions and allow Music & audio for Wavdrop.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,

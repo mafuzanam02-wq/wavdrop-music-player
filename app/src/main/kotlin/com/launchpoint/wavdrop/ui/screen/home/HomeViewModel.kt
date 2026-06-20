@@ -17,6 +17,9 @@ import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettings
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import com.launchpoint.wavdrop.data.settings.LibraryScanMode
+import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
+import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.SongSortMode
 import com.launchpoint.wavdrop.data.stats.MostPlayedBuilder
@@ -65,6 +68,7 @@ class HomeViewModel @Inject constructor(
     private val smartCollectionRepository: SmartCollectionRepository,
     private val homeLayoutRepository: HomeLayoutSettingsRepository,
     private val appSettingsRepository: AppSettingsRepository,
+    private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -210,6 +214,15 @@ class HomeViewModel @Inject constructor(
         initialValue = HomeLayoutSettings(),
     )
 
+    val folderModeNeedsSelection: StateFlow<Boolean> =
+        libraryScanSettingsRepository.settings
+            .map { isFolderModeNeedsSelection(it) }
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = false,
+            )
+
     val nowPlayingState: StateFlow<NowPlayingState> = playerController.nowPlayingState
 
     val sleepTimerState: StateFlow<SleepTimerState> = playerController.sleepTimerState
@@ -323,5 +336,9 @@ class HomeViewModel @Inject constructor(
 
     fun setCustomSleepTimer(durationMs: Long) = playerController.setCustomSleepTimer(durationMs)
 }
+
+internal fun isFolderModeNeedsSelection(settings: LibraryScanSettings): Boolean =
+    settings.scanMode == LibraryScanMode.SELECTED_FOLDERS &&
+        settings.selectedFolderUris.isEmpty()
 
 private const val SEARCH_TAG = "WavdropSearchPlayback"

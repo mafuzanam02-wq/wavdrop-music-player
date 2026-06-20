@@ -110,7 +110,8 @@ fun SongsScreen(
     val searchQuery      by viewModel.searchQuery.collectAsStateWithLifecycle()
     val librarySongs     by viewModel.librarySongs.collectAsStateWithLifecycle()
     val isRefreshing     by viewModel.isRefreshing.collectAsStateWithLifecycle()
-    val songSortMode     by viewModel.songSortMode.collectAsStateWithLifecycle()
+    val songSortMode              by viewModel.songSortMode.collectAsStateWithLifecycle()
+    val folderModeNeedsSelection  by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     var isSearchActive   by remember { mutableStateOf(false) }
@@ -191,7 +192,7 @@ fun SongsScreen(
             ) {
                 when (val state = uiState) {
                     HomeUiState.Loading -> LoadingSongs()
-                    HomeUiState.Empty   -> EmptySongs(onLibrarySettingsClick = onLibrarySettingsClick)
+                    HomeUiState.Empty   -> EmptySongs(onLibrarySettingsClick = onLibrarySettingsClick, folderModeNeedsSelection = folderModeNeedsSelection)
                     is HomeUiState.Songs -> {
                         val trimmedQuery = searchQuery.trim()
                         val commonSongActions = SongSearchActions(
@@ -457,14 +458,22 @@ private fun LoadingSongs(modifier: Modifier = Modifier) {
 @Composable
 private fun EmptySongs(
     onLibrarySettingsClick: () -> Unit = {},
+    folderModeNeedsSelection: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            EmptyStateText(
-                title   = "No songs found",
-                message = "Wavdrop scans your device for audio files. Make sure audio access is granted, then open Library Settings to choose your music folder.",
-            )
+            if (folderModeNeedsSelection) {
+                EmptyStateText(
+                    title   = "No folders selected",
+                    message = "Wavdrop is set to scan selected folders only, but no folders have been added yet.",
+                )
+            } else {
+                EmptyStateText(
+                    title   = "No songs found",
+                    message = "Wavdrop scans your device for audio files. Make sure audio access is granted, then open Library Settings to choose your music folder.",
+                )
+            }
             Spacer(Modifier.height(16.dp))
             TextButton(onClick = onLibrarySettingsClick) {
                 Text("Open Library Settings")

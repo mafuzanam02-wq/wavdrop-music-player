@@ -102,6 +102,7 @@ fun HomeScreen(
     onArtistClick: (String) -> Unit = {},
     onGlobalSearchClick: () -> Unit = {},
     onReportsAndInsightsClick: () -> Unit = {},
+    onLibrarySettingsClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
@@ -115,6 +116,7 @@ fun HomeScreen(
     val appIconChoice   by viewModel.appIconChoice.collectAsStateWithLifecycle()
     val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
 
+    val folderModeNeedsSelection by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -203,19 +205,20 @@ fun HomeScreen(
                 ScanningContent(Modifier.padding(innerPadding))
             } else {
                 HomeDashboardContent(
-                    dashboard           = dashboardState,
-                    visibleSections     = homeLayout.visibleSections,
-                    currentSongId       = nowPlaying.song?.id,
-                    favoriteSongIds     = favoriteSongIds,
-                    nowPlayingSong      = nowPlaying.song,
-                    onNowPlayingClick   = onNowPlayingClick,
-                    onLibraryClick      = onLibraryClick,
-                    onPlaylistsClick    = onPlaylistsClick,
-                    onSmartCollectionsClick = onSmartCollectionsClick,
-                    onWrappedClick      = onWrappedClick,
+                    dashboard                = dashboardState,
+                    visibleSections          = homeLayout.visibleSections,
+                    currentSongId            = nowPlaying.song?.id,
+                    favoriteSongIds          = favoriteSongIds,
+                    nowPlayingSong           = nowPlaying.song,
+                    folderModeNeedsSelection = folderModeNeedsSelection,
+                    onNowPlayingClick        = onNowPlayingClick,
+                    onLibraryClick           = onLibraryClick,
+                    onPlaylistsClick         = onPlaylistsClick,
+                    onSmartCollectionsClick  = onSmartCollectionsClick,
+                    onWrappedClick           = onWrappedClick,
                     onReportsAndInsightsClick = onReportsAndInsightsClick,
-                    onSongClick         = viewModel::playSong,
-                    onToggleFavorite    = { song, wasFavorite ->
+                    onSongClick              = viewModel::playSong,
+                    onToggleFavorite         = { song, wasFavorite ->
                         viewModel.toggleFavorite(song.id)
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
@@ -223,20 +226,21 @@ fun HomeScreen(
                             )
                         }
                     },
-                    onTrackDetailsClick = onTrackDetailsClick,
-                    onPlayNext          = viewModel::playNext,
-                    onAddToQueue        = viewModel::addToQueue,
-                    onAddToPlaylist     = { song -> addToPlaylistSong = song },
-                    onShare             = { song ->
+                    onTrackDetailsClick    = onTrackDetailsClick,
+                    onPlayNext             = viewModel::playNext,
+                    onAddToQueue           = viewModel::addToQueue,
+                    onAddToPlaylist        = { song -> addToPlaylistSong = song },
+                    onShare                = { song ->
                         shareSong(context, song) {
                             coroutineScope.launch {
                                 snackbarHostState.showSnackbar("Could not share this track")
                             }
                         }
                     },
-                    onRescan            = viewModel::refreshLibrary,
-                    onSettingsClick     = onSettingsClick,
-                    modifier            = Modifier.padding(innerPadding),
+                    onRescan               = viewModel::refreshLibrary,
+                    onSettingsClick        = onSettingsClick,
+                    onLibrarySettingsClick = onLibrarySettingsClick,
+                    modifier               = Modifier.padding(innerPadding),
                 )
             }
         }
@@ -495,6 +499,7 @@ private fun HomeDashboardContent(
     currentSongId: Long?,
     favoriteSongIds: Set<Long>,
     nowPlayingSong: Song?,
+    folderModeNeedsSelection: Boolean,
     onNowPlayingClick: () -> Unit,
     onLibraryClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
@@ -510,6 +515,7 @@ private fun HomeDashboardContent(
     onShare: (Song) -> Unit,
     onRescan: () -> Unit,
     onSettingsClick: () -> Unit,
+    onLibrarySettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -529,8 +535,10 @@ private fun HomeDashboardContent(
         if (dashboard.totalSongs == 0) {
             item {
                 DashboardEmptyLibraryCard(
+                    folderModeNeedsSelection = folderModeNeedsSelection,
                     onRescan = onRescan,
                     onSettingsClick = onSettingsClick,
+                    onLibrarySettingsClick = onLibrarySettingsClick,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
@@ -752,8 +760,10 @@ private fun WrappedPreviewCard(
 
 @Composable
 private fun DashboardEmptyLibraryCard(
+    folderModeNeedsSelection: Boolean,
     onRescan: () -> Unit,
     onSettingsClick: () -> Unit,
+    onLibrarySettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -773,29 +783,46 @@ private fun DashboardEmptyLibraryCard(
                     modifier = Modifier.size(28.dp),
                 )
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "No songs found yet",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Add audio files to your device, then rescan your library.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                    )
-                    Text(
-                        text = "Wavdrop only scans music stored on this device.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                    )
+                    if (folderModeNeedsSelection) {
+                        Text(
+                            text = "No folders selected",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Wavdrop is set to scan selected folders only, but no folders have been added yet. Add a folder in Library Settings to start scanning.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                        )
+                    } else {
+                        Text(
+                            text = "No songs found yet",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Add audio files to your device, then rescan your library.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                        )
+                        Text(
+                            text = "Wavdrop only scans music stored on this device.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                        )
+                    }
                 }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(onClick = onRescan) { Text("Rescan library") }
-                TextButton(onClick = onSettingsClick) { Text("Choose folder in Settings") }
+                if (folderModeNeedsSelection) {
+                    TextButton(onClick = onLibrarySettingsClick) { Text("Open Library Settings") }
+                } else {
+                    TextButton(onClick = onRescan) { Text("Rescan library") }
+                    TextButton(onClick = onLibrarySettingsClick) { Text("Choose folder in Settings") }
+                }
             }
         }
     }
