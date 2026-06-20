@@ -749,7 +749,7 @@ private fun WrappedPreviewCard(
                 }
             }
             Text(
-                text = "View your listening recap",
+                text = "Your year in music",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
                 modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp),
