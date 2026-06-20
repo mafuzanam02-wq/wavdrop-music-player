@@ -5,6 +5,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,15 +63,17 @@ fun SettingsScreen(
             item {
                 SettingsGroupCard {
                     ClickableSettingsRow(
-                        title    = "Playback",
-                        subtitle = "Startup screen, session restore, sleep timer, and display",
-                        onClick  = onPlaybackClick,
+                        title       = "Playback",
+                        subtitle    = "How music starts, resumes, and behaves during a session.",
+                        onClick     = onPlaybackClick,
+                        leadingIcon = Icons.Default.Tune,
                     )
                     CardInternalDivider()
                     ClickableSettingsRow(
-                        title    = "Bluetooth & Headphones",
-                        subtitle = "Auto-resume and audio output disconnect behavior",
-                        onClick  = onBluetoothClick,
+                        title       = "Bluetooth & Headphones",
+                        subtitle    = "Auto-resume when headphones reconnect or Bluetooth connects.",
+                        onClick     = onBluetoothClick,
+                        leadingIcon = Icons.Default.Headphones,
                     )
                 }
             }
@@ -73,9 +82,10 @@ fun SettingsScreen(
             item {
                 SettingsGroupCard {
                     ClickableSettingsRow(
-                        title    = "Library & Scanning",
-                        subtitle = "Scan mode, folders, and track filters",
-                        onClick  = onLibrarySettingsClick,
+                        title       = "Library & Scanning",
+                        subtitle    = "Scan mode, folder selection, and track filters.",
+                        onClick     = onLibrarySettingsClick,
+                        leadingIcon = Icons.Default.LibraryMusic,
                     )
                 }
             }
@@ -84,15 +94,17 @@ fun SettingsScreen(
             item {
                 SettingsGroupCard {
                     ClickableSettingsRow(
-                        title    = "Backup & Migration",
-                        subtitle = "Your data stays on your device — export, restore, or migrate at any time.",
-                        onClick  = onBackupClick,
+                        title       = "Backup & Migration",
+                        subtitle    = "Your data stays on your device — export, restore, or migrate at any time.",
+                        onClick     = onBackupClick,
+                        leadingIcon = Icons.Default.Backup,
                     )
                     CardInternalDivider()
                     ClickableSettingsRow(
-                        title    = "Reports & Insights",
-                        subtitle = "Statistics, listening reports, monthly recaps, and Wrapped",
-                        onClick  = onStatisticsClick,
+                        title       = "Reports & Insights",
+                        subtitle    = "Wrapped, listening history, top lists, and monthly recaps.",
+                        onClick     = onStatisticsClick,
+                        leadingIcon = Icons.Default.Insights,
                     )
                 }
             }
@@ -101,9 +113,10 @@ fun SettingsScreen(
             item {
                 SettingsGroupCard {
                     ClickableSettingsRow(
-                        title    = "Appearance",
-                        subtitle = "Theme, colors, display preferences, and app icon",
-                        onClick  = onAppearanceClick,
+                        title       = "Appearance",
+                        subtitle    = "Theme, accent color, artwork style, and app icon.",
+                        onClick     = onAppearanceClick,
+                        leadingIcon = Icons.Default.Palette,
                     )
                 }
             }
@@ -112,9 +125,10 @@ fun SettingsScreen(
             item {
                 SettingsGroupCard {
                     ClickableSettingsRow(
-                        title    = "About",
-                        subtitle = "Version info, supported formats, and legal",
-                        onClick  = onAboutClick,
+                        title       = "About",
+                        subtitle    = "App version, privacy, formats, and support.",
+                        onClick     = onAboutClick,
+                        leadingIcon = Icons.Default.Info,
                     )
                 }
             }
