@@ -24,7 +24,7 @@ class WrappedSlideRulesTest {
     fun `top list keeps ranking order and limits to three`() {
         assertEquals(listOf(1, 2, 3), wrappedTopThree(listOf(1, 2, 3, 4, 5)))
         assertEquals(listOf(1, 2), wrappedTopThree(listOf(1, 2)))
-        assertEquals(emptyList<Int>(), wrappedTopThree(emptyList()))
+        assertEquals(emptyList<Int>(), wrappedTopThree(emptyList<Int>()))
     }
 
     @Test
@@ -60,6 +60,26 @@ class WrappedSlideRulesTest {
         assertEquals(100, wrappedSkipRatePercent(totalPlays = 0, totalSkips = 4))
         assertEquals(25, wrappedSkipRatePercent(totalPlays = 3, totalSkips = 1))
         assertEquals(33, wrappedSkipRatePercent(totalPlays = 2, totalSkips = 1))
+    }
+
+    @Test
+    fun `period selector helper text shown for zero or one item and hidden for multiple`() {
+        assertEquals(
+            "More months will appear here as you keep listening in Wavdrop.",
+            wrappedPeriodSelectorHelperText(0, "months"),
+        )
+        assertEquals(
+            "More months will appear here as you keep listening in Wavdrop.",
+            wrappedPeriodSelectorHelperText(1, "months"),
+        )
+        assertNull(wrappedPeriodSelectorHelperText(2, "months"))
+        assertNull(wrappedPeriodSelectorHelperText(5, "months"))
+
+        assertEquals(
+            "More years will appear here as you keep listening in Wavdrop.",
+            wrappedPeriodSelectorHelperText(1, "years"),
+        )
+        assertNull(wrappedPeriodSelectorHelperText(2, "years"))
     }
 
     @Test

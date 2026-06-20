@@ -162,6 +162,9 @@ internal fun wrappedRankedListNote(
     else -> null
 }
 
+internal fun wrappedPeriodSelectorHelperText(availableCount: Int, kind: String): String? =
+    if (availableCount <= 1) "More $kind will appear here as you keep listening in Wavdrop." else null
+
 internal fun wrappedSkipRatePercent(totalPlays: Int, totalSkips: Int): Int {
     val activityCount = totalPlays.coerceAtLeast(0) + totalSkips.coerceAtLeast(0)
     if (activityCount == 0) return 0
@@ -547,9 +550,11 @@ private fun WrappedYearSelector(
     val selectedIndex = availableYears.indexOf(year)
     val hasPrevious = selectedIndex >= 0 && selectedIndex < availableYears.lastIndex
     val hasNext = selectedIndex > 0
+    val helperText = wrappedPeriodSelectorHelperText(availableYears.size, "years")
 
+    Column(modifier = modifier.fillMaxWidth()) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -613,6 +618,19 @@ private fun WrappedYearSelector(
             )
         }
     }
+    if (helperText != null) {
+        Text(
+            text = helperText,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 4.dp),
+        )
+    }
+    }
 }
 
 @Composable
@@ -628,9 +646,11 @@ private fun WrappedMonthSelector(
     val selectedIndex = availableMonths.indexOf(month)
     val hasPrevious = selectedIndex >= 0 && selectedIndex < availableMonths.lastIndex
     val hasNext = selectedIndex > 0
+    val helperText = wrappedPeriodSelectorHelperText(availableMonths.size, "months")
 
+    Column(modifier = modifier.fillMaxWidth()) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -693,6 +713,19 @@ private fun WrappedMonthSelector(
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
             )
         }
+    }
+    if (helperText != null) {
+        Text(
+            text = helperText,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 4.dp),
+        )
+    }
     }
 }
 
