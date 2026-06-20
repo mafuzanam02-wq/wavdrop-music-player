@@ -946,6 +946,13 @@ private fun ContinueListeningCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (song != null) {
+                    Text(
+                        text = "Continue where you left off",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                    )
+                }
             }
         }
     }
