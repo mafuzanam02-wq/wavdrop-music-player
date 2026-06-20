@@ -181,6 +181,13 @@ fun SettingsBackupScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
+            // ── Ownership intro ────────────────────────────────────────────────
+            item {
+                SettingsMessageRow(
+                    message = "Your listening history, favorites, and playlists are stored only on your device. Back up to keep them safe if you switch phones or reinstall.",
+                )
+            }
+
             // ── Post-restore folder warning ────────────────────────────────────
             if (folderSelectionPending) {
                 item {

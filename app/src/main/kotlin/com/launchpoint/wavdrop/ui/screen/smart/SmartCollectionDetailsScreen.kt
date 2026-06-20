@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -195,7 +196,7 @@ fun SmartCollectionDetailsScreen(
                 modifier            = Modifier.padding(innerPadding),
             )
         } else if (state.songs.isEmpty()) {
-            EmptyDetailContent(Modifier.padding(innerPadding))
+            EmptyDetailContent(type = viewModel.type, modifier = Modifier.padding(innerPadding))
         } else {
             LazyColumn(
                 modifier       = Modifier
@@ -658,18 +659,37 @@ private fun InvalidCollectionContent(
 // ── Empty detail ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun EmptyDetailContent(modifier: Modifier = Modifier) {
+private fun EmptyDetailContent(type: SmartCollectionType?, modifier: Modifier = Modifier) {
+    val title = when (type) {
+        SmartCollectionType.FORGOTTEN_GEMS -> "No forgotten gems yet"
+        else                               -> null
+    }
+    val body = when (type) {
+        SmartCollectionType.FORGOTTEN_GEMS -> "Songs you've played at least 5 times but haven't heard in 60 days will appear here."
+        else                               -> "No songs in this collection yet.\nPlay, favorite, skip, or add music that matches this collection."
+    }
     Box(
         modifier         = modifier
             .fillMaxSize()
             .padding(32.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text      = "No songs in this collection yet.\nPlay, favorite, skip, or add music that matches this collection.",
-            style     = MaterialTheme.typography.bodyLarge,
-            color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            textAlign = TextAlign.Center,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (title != null) {
+                Text(
+                    text      = title,
+                    style     = MaterialTheme.typography.titleMedium,
+                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            Text(
+                text      = body,
+                style     = MaterialTheme.typography.bodyLarge,
+                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
