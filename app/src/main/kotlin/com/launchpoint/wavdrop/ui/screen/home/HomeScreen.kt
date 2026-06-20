@@ -76,7 +76,6 @@ import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.RepeatMode
-import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
@@ -91,7 +90,6 @@ import com.launchpoint.wavdrop.ui.components.SongRow
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -136,18 +134,6 @@ fun HomeScreen(
     val context           = LocalContext.current
     var addToPlaylistSong  by remember { mutableStateOf<Song?>(null) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
-    var sleepTimerNowMs  by remember { mutableStateOf(System.currentTimeMillis()) }
-
-    LaunchedEffect(sleepTimerState.isActive, sleepTimerState.endsAtMs) {
-        if (!sleepTimerState.isActive || sleepTimerState.endsAtMs == null) return@LaunchedEffect
-        while (true) {
-            sleepTimerNowMs = System.currentTimeMillis()
-            delay(1_000L)
-        }
-    }
-
-    val sleepTimerLabel = sleepTimerState.homeHeaderLabel(sleepTimerNowMs)
-
     // ── Layout ────────────────────────────────────────────────────────────────
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -160,11 +146,14 @@ fun HomeScreen(
                     )
                 },
                 actions = {
-                    if (sleepTimerLabel != null) {
-                        SleepTimerChip(
-                            label = sleepTimerLabel,
-                            onClick = { showSleepTimerDialog = true },
-                        )
+                    if (sleepTimerState.isActive) {
+                        IconButton(onClick = { showSleepTimerDialog = true }) {
+                            Icon(
+                                imageVector        = Icons.Default.Timer,
+                                contentDescription = "Sleep timer active — tap to adjust",
+                                tint               = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                     IconButton(onClick = onHomeCustomizationClick) {
                         Icon(
@@ -345,42 +334,8 @@ private fun HomeHeaderTitle(
     }
 }
 
-@Composable
-private fun SleepTimerChip(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier
-            .padding(end = 2.dp)
-            .clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        shape = CircleShape,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Default.Timer,
-                contentDescription = "Sleep timer active — tap to adjust",
-                modifier = Modifier.size(14.dp),
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
 private fun HomeDashboardUiState.librarySummary(): String =
-    if (totalSongs > 0) "$totalSongs local songs" else "Your local music library"
+    if (totalSongs > 0) "$totalSongs songs" else "Your music library"
 
 internal enum class HomeListeningActivityPreview {
     RECENTLY_PLAYED,
@@ -400,15 +355,6 @@ internal fun selectHomeListeningActivityPreview(
         hasRecentlyPlayed -> HomeListeningActivityPreview.RECENTLY_PLAYED
         hasMostPlayed     -> HomeListeningActivityPreview.MOST_PLAYED
         else              -> null
-    }
-}
-
-private fun SleepTimerState.homeHeaderLabel(nowMs: Long): String? = when {
-    !isActive -> null
-    option == SleepTimerOption.END_OF_CURRENT_SONG -> "Timer: End of song"
-    else -> endsAtMs?.let { endsAt ->
-        val remaining = (endsAt - nowMs).coerceAtLeast(0L)
-        "Timer %d:%02d".format(remaining / 60_000L, (remaining % 60_000L) / 1_000L)
     }
 }
 
