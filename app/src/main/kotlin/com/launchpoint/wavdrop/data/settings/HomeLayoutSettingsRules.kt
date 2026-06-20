@@ -2,7 +2,7 @@ package com.launchpoint.wavdrop.data.settings
 
 object HomeLayoutSettingsRules {
 
-    val ALWAYS_VISIBLE_SECTIONS: Set<HomeSectionId> = setOf(HomeSectionId.LIBRARY_SHORTCUT)
+    val ALWAYS_VISIBLE_SECTIONS: Set<HomeSectionId> = emptySet()
 
     /**
      * Settings that truthfully map to content currently rendered by Home.
@@ -56,7 +56,7 @@ object HomeLayoutSettingsRules {
         else -> id in settings.visibleSections
     }
 
-    fun isToggleable(id: HomeSectionId): Boolean = id !in ALWAYS_VISIBLE_SECTIONS
+    fun isToggleable(id: HomeSectionId): Boolean = id in EXPOSED_SECTION_IDS
 
     fun displayNameFor(id: HomeSectionId): String = when (id) {
         HomeSectionId.CONTINUE_LISTENING  -> "Continue Listening"
@@ -78,7 +78,7 @@ object HomeLayoutSettingsRules {
         HomeSectionId.PLAYLISTS          -> "Preview your playlists."
         HomeSectionId.SMART_COLLECTIONS  -> "Auto-generated collections from your listening history."
         HomeSectionId.WRAPPED            -> "Shortcut to your latest event-backed year in music."
-        HomeSectionId.LIBRARY_SHORTCUT   -> "Quick link to your full library. Always visible."
+        HomeSectionId.LIBRARY_SHORTCUT   -> "Legacy Home library shortcut."
     }
 
 }

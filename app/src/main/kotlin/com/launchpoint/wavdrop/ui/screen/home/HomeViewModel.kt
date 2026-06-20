@@ -52,7 +52,6 @@ sealed interface HomeUiState {
 data class HomeDashboardUiState(
     val totalSongs: Int = 0,
     val recentlyPlayed: List<Song> = emptyList(),
-    val favorites: List<Song> = emptyList(),
     val mostPlayed: List<Song> = emptyList(),
     val playlists: List<PlaylistSummary> = emptyList(),
     val smartCollections: List<SmartCollection> = emptyList(),
@@ -185,10 +184,6 @@ class HomeViewModel @Inject constructor(
             recentlyPlayed = stats
                 .filter { it.lastPlayedAt > 0 }
                 .sortedByDescending { it.lastPlayedAt }
-                .mapNotNull { songsById[it.songId] }
-                .take(DASHBOARD_SONG_PREVIEW_LIMIT),
-            favorites = stats
-                .filter { it.isFavorite }
                 .mapNotNull { songsById[it.songId] }
                 .take(DASHBOARD_SONG_PREVIEW_LIMIT),
             mostPlayed = stats

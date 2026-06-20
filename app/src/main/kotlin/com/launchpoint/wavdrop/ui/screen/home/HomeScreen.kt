@@ -228,7 +228,6 @@ fun HomeScreen(
                     nowPlayingSong           = nowPlaying.song,
                     folderModeNeedsSelection = folderModeNeedsSelection,
                     onNowPlayingClick        = onNowPlayingClick,
-                    onLibraryClick           = onLibraryClick,
                     onPlaylistsClick         = onPlaylistsClick,
                     onSmartCollectionsClick  = onSmartCollectionsClick,
                     onSmartCollectionClick   = onSmartCollectionClick,
@@ -518,7 +517,6 @@ private fun HomeDashboardContent(
     nowPlayingSong: Song?,
     folderModeNeedsSelection: Boolean,
     onNowPlayingClick: () -> Unit,
-    onLibraryClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
     onSmartCollectionsClick: () -> Unit,
     onSmartCollectionClick: (SmartCollectionType) -> Unit,
@@ -646,23 +644,6 @@ private fun HomeDashboardContent(
                         SmartCollectionPreviewRow(collection = collection, onClick = { onSmartCollectionClick(collection.type) })
                     }
                 }
-            }
-            item {
-                LibraryShortcutCard(
-                    totalSongs = dashboard.totalSongs,
-                    onClick = onLibraryClick,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                )
-            }
-        }
-
-        if (dashboard.totalSongs == 0) {
-            item {
-                LibraryShortcutCard(
-                    totalSongs = dashboard.totalSongs,
-                    onClick = onLibraryClick,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
             }
         }
     }
@@ -857,55 +838,6 @@ private fun DashboardEmptyLibraryCard(
                     TextButton(onClick = onRescan) { Text("Rescan library") }
                     TextButton(onClick = onLibrarySettingsClick) { Text("Choose folder in Settings") }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryShortcutCard(
-    totalSongs: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-        shape = MaterialTheme.shapes.small,
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Default.LibraryMusic,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(26.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Library",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = if (totalSongs > 0) {
-                        "$totalSongs songs, plus albums, artists, folders and playlists"
-                    } else {
-                        "Browse songs, albums, artists, folders and playlists"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            TextButton(onClick = onClick) {
-                Text("Open")
             }
         }
     }

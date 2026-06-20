@@ -56,14 +56,14 @@ class HomeLayoutSettingsRulesTest {
     }
 
     @Test
-    fun `library shortcut cannot be hidden`() {
+    fun `library shortcut is no longer forced visible`() {
         val settings = HomeLayoutSettings()
 
         val updated = HomeLayoutSettingsRules.withSectionVisible(
             settings, HomeSectionId.LIBRARY_SHORTCUT, visible = false,
         )
 
-        assertTrue(HomeSectionId.LIBRARY_SHORTCUT in updated.visibleSections)
+        assertFalse(HomeSectionId.LIBRARY_SHORTCUT in updated.visibleSections)
     }
 
     @Test
@@ -94,6 +94,8 @@ class HomeLayoutSettingsRulesTest {
 
     @Test
     fun `always visible sections are always in the result after any toggle`() {
+        assertTrue(HomeLayoutSettingsRules.ALWAYS_VISIBLE_SECTIONS.isEmpty())
+
         val settings = HomeLayoutSettings()
 
         HomeSectionId.ALL.forEach { id ->
@@ -131,5 +133,15 @@ class HomeLayoutSettingsRulesTest {
         assertTrue(HomeSectionId.FAVORITES in normalized)
         assertTrue(HomeSectionId.PLAYLISTS in normalized)
         assertTrue(HomeSectionId.LIBRARY_SHORTCUT in normalized)
+    }
+
+    @Test
+    fun `normalization does not inject legacy library shortcut`() {
+        val normalized = HomeLayoutSettingsRules.normalizeVisibleSections(
+            setOf(HomeSectionId.PLAYLISTS),
+        )
+
+        assertFalse(HomeSectionId.LIBRARY_SHORTCUT in normalized)
+        assertTrue(HomeSectionId.PLAYLISTS in normalized)
     }
 }
