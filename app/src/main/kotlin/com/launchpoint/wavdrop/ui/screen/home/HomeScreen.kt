@@ -234,6 +234,8 @@ fun HomeScreen(
                     onSmartCollectionsClick  = onSmartCollectionsClick,
                     onSmartCollectionClick   = onSmartCollectionClick,
                     onWrappedClick           = onWrappedClick,
+                    onAlbumClick             = onAlbumClick,
+                    onArtistClick            = onArtistClick,
                     onReportsAndInsightsClick = onReportsAndInsightsClick,
                     onSongClick              = viewModel::playSong,
                     onToggleFavorite         = { song, wasFavorite ->
@@ -524,6 +526,8 @@ private fun HomeDashboardContent(
     onSmartCollectionsClick: () -> Unit,
     onSmartCollectionClick: (SmartCollectionType) -> Unit,
     onWrappedClick: () -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onReportsAndInsightsClick: () -> Unit,
     onSongClick: (Song) -> Unit,
     onToggleFavorite: (Song, Boolean) -> Unit,
@@ -583,6 +587,8 @@ private fun HomeDashboardContent(
                         onAddToQueue = onAddToQueue,
                         onAddToPlaylist = onAddToPlaylist,
                         onShare = onShare,
+                        onAlbumClick = onAlbumClick,
+                        onArtistClick = onArtistClick,
                         actionLabel = "View insights",
                         onActionClick = onReportsAndInsightsClick,
                     )
@@ -601,6 +607,8 @@ private fun HomeDashboardContent(
                         onAddToQueue = onAddToQueue,
                         onAddToPlaylist = onAddToPlaylist,
                         onShare = onShare,
+                        onAlbumClick = onAlbumClick,
+                        onArtistClick = onArtistClick,
                         actionLabel = "View insights",
                         onActionClick = onReportsAndInsightsClick,
                     )
@@ -668,6 +676,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
     onAddToQueue: (Song) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
     onShare: (Song) -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     actionLabel: String? = null,
     onActionClick: (() -> Unit)? = null,
 ) {
@@ -694,6 +704,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
                 onAddToPlaylist  = { onAddToPlaylist(song) },
                 onTrackDetails   = { onTrackDetailsClick(song.id) },
                 onShare          = { onShare(song) },
+                onAlbumClick     = onAlbumClick,
+                onArtistClick    = onArtistClick,
                 modifier         = Modifier.fillMaxWidth(),
             )
             HorizontalDivider(

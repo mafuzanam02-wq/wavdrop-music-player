@@ -34,11 +34,15 @@ fun SongRowWithOverflow(
     onRemove: (() -> Unit)? = null,
     onViewFolder: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
+    onAlbumClick: ((String) -> Unit)? = null,
+    onArtistClick: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     highlightedTitle: AnnotatedString? = null,
     highlightedArtist: AnnotatedString? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val albumKey = song.album.knownMetadataKey("Unknown Album")
+    val artistKey = song.artist.knownMetadataKey("Unknown Artist")
 
     Box(modifier = modifier) {
         SongRow(
@@ -82,6 +86,18 @@ fun SongRowWithOverflow(
                 text    = { Text("Track details") },
                 onClick = { expanded = false; onTrackDetails() },
             )
+            if (onAlbumClick != null && albumKey != null) {
+                DropdownMenuItem(
+                    text    = { Text("View album") },
+                    onClick = { expanded = false; onAlbumClick(albumKey) },
+                )
+            }
+            if (onArtistClick != null && artistKey != null) {
+                DropdownMenuItem(
+                    text    = { Text("View artist") },
+                    onClick = { expanded = false; onArtistClick(artistKey) },
+                )
+            }
             if (onShare != null) {
                 DropdownMenuItem(
                     text    = { Text("Share") },
@@ -103,3 +119,10 @@ fun SongRowWithOverflow(
         }
     }
 }
+
+private fun String.knownMetadataKey(unknownLabel: String): String? =
+    trim().takeIf { value ->
+        value.isNotBlank() &&
+            !value.equals(unknownLabel, ignoreCase = true) &&
+            !value.equals("<unknown>", ignoreCase = true)
+    }
