@@ -103,6 +103,7 @@ fun HomeScreen(
     onTrackDetailsClick: (Long) -> Unit = {},
     onFolderClick: (String) -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
+    onPlaylistClick: (Long) -> Unit = {},
     onSmartCollectionsClick: () -> Unit = {},
     onSmartCollectionClick: (SmartCollectionType) -> Unit = {},
     onWrappedClick: () -> Unit = {},
@@ -229,6 +230,7 @@ fun HomeScreen(
                     folderModeNeedsSelection = folderModeNeedsSelection,
                     onNowPlayingClick        = onNowPlayingClick,
                     onPlaylistsClick         = onPlaylistsClick,
+                    onPlaylistClick          = onPlaylistClick,
                     onSmartCollectionsClick  = onSmartCollectionsClick,
                     onSmartCollectionClick   = onSmartCollectionClick,
                     onWrappedClick           = onWrappedClick,
@@ -518,6 +520,7 @@ private fun HomeDashboardContent(
     folderModeNeedsSelection: Boolean,
     onNowPlayingClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
+    onPlaylistClick: (Long) -> Unit,
     onSmartCollectionsClick: () -> Unit,
     onSmartCollectionClick: (SmartCollectionType) -> Unit,
     onWrappedClick: () -> Unit,
@@ -625,7 +628,10 @@ private fun HomeDashboardContent(
                     item { DashboardEmptyText("Create playlists to see them here.") }
                 } else {
                     items(dashboard.playlists, key = { it.id }) { playlist ->
-                        PlaylistPreviewRow(playlist = playlist, onClick = onPlaylistsClick)
+                        PlaylistPreviewRow(
+                            playlist = playlist,
+                            onClick = { onPlaylistClick(playlist.id) },
+                        )
                     }
                 }
             }
