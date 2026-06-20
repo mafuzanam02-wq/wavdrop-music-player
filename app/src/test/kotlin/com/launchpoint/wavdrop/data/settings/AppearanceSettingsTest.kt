@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+
 class AppearanceSettingsTest {
 
     // ── ThemeMode ─────────────────────────────────────────────────────────────
@@ -178,5 +179,57 @@ class AppearanceSettingsTest {
             SearchTapBehavior.fromStoredNameOrDefault("NOT_A_BEHAVIOR"),
         )
         assertEquals(SearchTapBehavior.REPLACE_QUEUE, SearchTapBehavior.fromStoredNameOrDefault(null))
+    }
+
+    // ── WrappedBackgroundIntensity ────────────────────────────────────────────
+
+    @Test
+    fun `WrappedBackgroundIntensity has exactly three entries`() {
+        assertEquals(3, WrappedBackgroundIntensity.entries.size)
+    }
+
+    @Test
+    fun `WrappedBackgroundIntensity entries have distinct non-blank display names`() {
+        val names = WrappedBackgroundIntensity.entries.map { it.displayName }
+        assertEquals(WrappedBackgroundIntensity.entries.size, names.distinct().size)
+        names.forEach { assertNotEquals("", it.trim()) }
+    }
+
+    @Test
+    fun `WrappedBackgroundIntensity entries have non-blank descriptions`() {
+        WrappedBackgroundIntensity.entries.forEach { assertNotEquals("", it.description.trim()) }
+    }
+
+    @Test
+    fun `WrappedBackgroundIntensity valueOf roundtrip for all entries`() {
+        WrappedBackgroundIntensity.entries.forEach { intensity ->
+            assertEquals(intensity, WrappedBackgroundIntensity.valueOf(intensity.name))
+        }
+    }
+
+    // ── WrappedFallbackTheme ──────────────────────────────────────────────────
+
+    @Test
+    fun `WrappedFallbackTheme has exactly seven entries`() {
+        assertEquals(7, WrappedFallbackTheme.entries.size)
+    }
+
+    @Test
+    fun `WrappedFallbackTheme entries have distinct non-blank display names`() {
+        val names = WrappedFallbackTheme.entries.map { it.displayName }
+        assertEquals(WrappedFallbackTheme.entries.size, names.distinct().size)
+        names.forEach { assertNotEquals("", it.trim()) }
+    }
+
+    @Test
+    fun `WrappedFallbackTheme entries have non-blank descriptions`() {
+        WrappedFallbackTheme.entries.forEach { assertNotEquals("", it.description.trim()) }
+    }
+
+    @Test
+    fun `WrappedFallbackTheme valueOf roundtrip for all entries`() {
+        WrappedFallbackTheme.entries.forEach { theme ->
+            assertEquals(theme, WrappedFallbackTheme.valueOf(theme.name))
+        }
     }
 }

@@ -56,6 +56,7 @@ import com.launchpoint.wavdrop.ui.screen.settings.SettingsLibraryScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsPlaybackScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsStatisticsScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsWrappedScreen
 import com.launchpoint.wavdrop.ui.screen.smart.SmartCollectionDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.smart.SmartCollectionsScreen
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
@@ -81,6 +82,7 @@ sealed class Screen(val route: String) {
     data object SettingsBackupVerification : Screen("settings/backup/verification")
     data object SettingsAppearance  : Screen("settings/appearance")
     data object SettingsStatistics  : Screen("settings/statistics")
+    data object SettingsWrapped     : Screen("settings/wrapped")
     data object SettingsAbout       : Screen("settings/about")
     data object SettingsDiagnostics : Screen("settings/about/diagnostics")
     data object HomeCustomization   : Screen("home_customization")
@@ -457,14 +459,20 @@ fun WavdropNavGraph(
         }
         composable(Screen.Settings.route) {
             SettingsScreen(
-                onNavigateBack         = { navController.popBackStack() },
-                onPlaybackClick        = { navController.navigate(Screen.SettingsPlayback.route) },
-                onBluetoothClick       = { navController.navigate(Screen.SettingsBluetooth.route) },
-                onLibrarySettingsClick = { navController.navigate(Screen.SettingsLibrary.route) },
-                onBackupClick          = { navController.navigate(Screen.SettingsBackup.route) },
-                onAppearanceClick      = { navController.navigate(Screen.SettingsAppearance.route) },
-                onStatisticsClick      = { navController.navigate(Screen.SettingsStatistics.route) },
-                onAboutClick           = { navController.navigate(Screen.SettingsAbout.route) },
+                onNavigateBack           = { navController.popBackStack() },
+                onPlaybackClick          = { navController.navigate(Screen.SettingsPlayback.route) },
+                onBluetoothClick         = { navController.navigate(Screen.SettingsBluetooth.route) },
+                onLibrarySettingsClick   = { navController.navigate(Screen.SettingsLibrary.route) },
+                onBackupClick            = { navController.navigate(Screen.SettingsBackup.route) },
+                onAppearanceClick        = { navController.navigate(Screen.SettingsAppearance.route) },
+                onStatisticsClick        = { navController.navigate(Screen.SettingsStatistics.route) },
+                onWrappedAppearanceClick = { navController.navigate(Screen.SettingsWrapped.route) },
+                onAboutClick             = { navController.navigate(Screen.SettingsAbout.route) },
+            )
+        }
+        composable(Screen.SettingsWrapped.route) {
+            SettingsWrappedScreen(
+                onNavigateBack = { navController.popBackStack() },
             )
         }
         composable(Screen.SettingsPlayback.route) {
