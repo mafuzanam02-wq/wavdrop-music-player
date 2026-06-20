@@ -90,7 +90,10 @@ import com.launchpoint.wavdrop.ui.components.SongRow
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private const val RESUME_SESSION_GRACE_MS = 2_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -491,14 +494,26 @@ private fun HomeDashboardContent(
     onLibrarySettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val resumeSessionEligible =
+        HomeSectionId.CONTINUE_LISTENING in visibleSections &&
+            shouldShowResumeSessionCard(nowPlaying)
+    var showResumeSession by remember { mutableStateOf(false) }
+
+    LaunchedEffect(resumeSessionEligible) {
+        if (!resumeSessionEligible) {
+            showResumeSession = false
+            return@LaunchedEffect
+        }
+        showResumeSession = false
+        delay(RESUME_SESSION_GRACE_MS)
+        showResumeSession = true
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 10.dp, bottom = 18.dp),
     ) {
-        if (
-            HomeSectionId.CONTINUE_LISTENING in visibleSections &&
-            shouldShowResumeSessionCard(nowPlaying)
-        ) {
+        if (resumeSessionEligible && showResumeSession) {
             item {
                 ResumeSessionCard(
                     nowPlaying = nowPlaying,
