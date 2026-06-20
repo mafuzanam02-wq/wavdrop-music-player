@@ -75,6 +75,11 @@ internal data class GroupedSearchResults(
     val albums: List<AlbumSummary>,
     val playlists: List<PlaylistSummary>,
     val folders: List<com.launchpoint.wavdrop.data.model.FolderSummary>,
+    val songsCapped: Boolean = false,
+    val artistsCapped: Boolean = false,
+    val albumsCapped: Boolean = false,
+    val playlistsCapped: Boolean = false,
+    val foldersCapped: Boolean = false,
 ) {
     val isEmpty: Boolean
         get() = songs.isEmpty() &&
@@ -126,7 +131,7 @@ fun GroupedSearchContent(
                 if (songsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
             )
             item(key = "songs_header") {
-                SearchSectionHeader(title = "Songs", count = results.songs.size)
+                SearchSectionHeader(title = "Songs", count = results.songs.size, isCapped = results.songsCapped)
             }
             items(displayedSongs, key = { "song_${it.id}" }) { song ->
                 SearchSongResultRow(
@@ -140,10 +145,11 @@ fun GroupedSearchContent(
             if (results.songs.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
                 item(key = "songs_more") {
                     ShowMoreRow(
-                        expanded     = songsExpanded,
-                        hiddenCount  = results.songs.size - displayedSongs.size,
-                        label        = "songs",
-                        onToggle     = { songsExpanded = !songsExpanded },
+                        expanded    = songsExpanded,
+                        hiddenCount = results.songs.size - displayedSongs.size,
+                        label       = "songs",
+                        isCapped    = results.songsCapped,
+                        onToggle    = { songsExpanded = !songsExpanded },
                     )
                 }
             }
@@ -153,7 +159,7 @@ fun GroupedSearchContent(
                 if (artistsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
             )
             item(key = "artists_header") {
-                SearchSectionHeader(title = "Artists", count = results.artists.size)
+                SearchSectionHeader(title = "Artists", count = results.artists.size, isCapped = results.artistsCapped)
             }
             items(displayedArtists, key = { "artist_${it.artistKey}" }) { artist ->
                 SearchArtistRow(
@@ -169,6 +175,7 @@ fun GroupedSearchContent(
                         expanded    = artistsExpanded,
                         hiddenCount = results.artists.size - displayedArtists.size,
                         label       = "artists",
+                        isCapped    = results.artistsCapped,
                         onToggle    = { artistsExpanded = !artistsExpanded },
                     )
                 }
@@ -179,7 +186,7 @@ fun GroupedSearchContent(
                 if (albumsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
             )
             item(key = "albums_header") {
-                SearchSectionHeader(title = "Albums", count = results.albums.size)
+                SearchSectionHeader(title = "Albums", count = results.albums.size, isCapped = results.albumsCapped)
             }
             items(displayedAlbums, key = { "album_${it.albumKey}" }) { album ->
                 SearchAlbumRow(
@@ -195,6 +202,7 @@ fun GroupedSearchContent(
                         expanded    = albumsExpanded,
                         hiddenCount = results.albums.size - displayedAlbums.size,
                         label       = "albums",
+                        isCapped    = results.albumsCapped,
                         onToggle    = { albumsExpanded = !albumsExpanded },
                     )
                 }
@@ -205,7 +213,7 @@ fun GroupedSearchContent(
                 if (playlistsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
             )
             item(key = "playlists_header") {
-                SearchSectionHeader(title = "Playlists", count = results.playlists.size)
+                SearchSectionHeader(title = "Playlists", count = results.playlists.size, isCapped = results.playlistsCapped)
             }
             items(displayedPlaylists, key = { "playlist_${it.id}" }) { playlist ->
                 SearchPlaylistRow(
@@ -221,6 +229,7 @@ fun GroupedSearchContent(
                         expanded    = playlistsExpanded,
                         hiddenCount = results.playlists.size - displayedPlaylists.size,
                         label       = "playlists",
+                        isCapped    = results.playlistsCapped,
                         onToggle    = { playlistsExpanded = !playlistsExpanded },
                     )
                 }
@@ -231,7 +240,7 @@ fun GroupedSearchContent(
                 if (foldersExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
             )
             item(key = "folders_header") {
-                SearchSectionHeader(title = "Folders", count = results.folders.size)
+                SearchSectionHeader(title = "Folders", count = results.folders.size, isCapped = results.foldersCapped)
             }
             items(displayedFolders, key = { "folder_${it.folderKey}" }) { folder ->
                 SearchFolderRow(
@@ -247,6 +256,7 @@ fun GroupedSearchContent(
                         expanded    = foldersExpanded,
                         hiddenCount = results.folders.size - displayedFolders.size,
                         label       = "folders",
+                        isCapped    = results.foldersCapped,
                         onToggle    = { foldersExpanded = !foldersExpanded },
                     )
                 }
@@ -465,10 +475,12 @@ private fun SearchFolderRow(
 private fun SearchSectionHeader(
     title: String,
     count: Int,
+    isCapped: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val countLabel = if (isCapped) "$count+" else "$count"
     Text(
-        text = "$title ($count)",
+        text = "$title ($countLabel)",
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
         modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 6.dp),
@@ -480,10 +492,15 @@ private fun ShowMoreRow(
     expanded: Boolean,
     hiddenCount: Int,
     label: String,
+    isCapped: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val text = if (expanded) "Show fewer" else "Show $hiddenCount more $label"
+    val text = when {
+        !expanded         -> "Show $hiddenCount more $label"
+        isCapped          -> "Show fewer · Showing first $EXPANDED_SEARCH_RESULT_LIMIT"
+        else              -> "Show fewer"
+    }
     Text(
         text = text,
         style = MaterialTheme.typography.labelLarge,
@@ -548,21 +565,23 @@ internal fun buildGroupedSearchResults(
             folders = emptyList(),
         )
     }
-    val allFolders = FolderGrouper.groupSongsByFolder(songs)
+    val allFolders        = FolderGrouper.groupSongsByFolder(songs)
+    val allMatchedSongs   = LibrarySearch.filterSongs(songs, trimmedQuery)
+    val allMatchedArtists = LibrarySearch.filterArtists(ArtistGrouper.group(songs), songs, trimmedQuery)
+    val allMatchedAlbums  = LibrarySearch.filterAlbums(AlbumGrouper.group(songs), trimmedQuery)
+    val allMatchedPlaylists = LibrarySearch.filterPlaylists(playlists, trimmedQuery)
+    val allMatchedFolders = LibrarySearch.filterFolders(allFolders, trimmedQuery)
     return GroupedSearchResults(
-        songs = LibrarySearch.filterSongs(songs, trimmedQuery).take(EXPANDED_SEARCH_RESULT_LIMIT),
-        artists = LibrarySearch.filterArtists(
-            artists = ArtistGrouper.group(songs),
-            songs = songs,
-            query = trimmedQuery,
-        ).take(EXPANDED_SEARCH_RESULT_LIMIT),
-        albums = LibrarySearch
-            .filterAlbums(AlbumGrouper.group(songs), trimmedQuery)
-            .take(EXPANDED_SEARCH_RESULT_LIMIT),
-        playlists = LibrarySearch
-            .filterPlaylists(playlists, trimmedQuery)
-            .take(EXPANDED_SEARCH_RESULT_LIMIT),
-        folders = LibrarySearch.filterFolders(allFolders, trimmedQuery).take(EXPANDED_SEARCH_RESULT_LIMIT),
+        songs           = allMatchedSongs.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        artists         = allMatchedArtists.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        albums          = allMatchedAlbums.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        playlists       = allMatchedPlaylists.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        folders         = allMatchedFolders.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        songsCapped     = allMatchedSongs.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        artistsCapped   = allMatchedArtists.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        albumsCapped    = allMatchedAlbums.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        playlistsCapped = allMatchedPlaylists.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        foldersCapped   = allMatchedFolders.size > EXPANDED_SEARCH_RESULT_LIMIT,
     )
 }
 
