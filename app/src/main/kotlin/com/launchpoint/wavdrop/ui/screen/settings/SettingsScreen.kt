@@ -52,6 +52,7 @@ fun SettingsScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
+            item { SectionHeader("Listening") }
             item {
                 ClickableSettingsRow(
                     title    = "Playback",
@@ -66,6 +67,9 @@ fun SettingsScreen(
                     onClick  = onBluetoothClick,
                 )
             }
+            item { SectionDivider() }
+
+            item { SectionHeader("Library") }
             item {
                 ClickableSettingsRow(
                     title    = "Library & Scanning",
@@ -73,18 +77,14 @@ fun SettingsScreen(
                     onClick  = onLibrarySettingsClick,
                 )
             }
+            item { SectionDivider() }
+
+            item { SectionHeader("Data") }
             item {
                 ClickableSettingsRow(
                     title    = "Backup & Migration",
-                    subtitle = "Save, restore, and import your library data",
+                    subtitle = "Your data stays on your device — export, restore, or migrate at any time.",
                     onClick  = onBackupClick,
-                )
-            }
-            item {
-                ClickableSettingsRow(
-                    title    = "Appearance",
-                    subtitle = "Theme, colors, display preferences, and app icon",
-                    onClick  = onAppearanceClick,
                 )
             }
             item {
@@ -94,6 +94,19 @@ fun SettingsScreen(
                     onClick  = onStatisticsClick,
                 )
             }
+            item { SectionDivider() }
+
+            item { SectionHeader("Display") }
+            item {
+                ClickableSettingsRow(
+                    title    = "Appearance",
+                    subtitle = "Theme, colors, display preferences, and app icon",
+                    onClick  = onAppearanceClick,
+                )
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("More") }
             item {
                 ClickableSettingsRow(
                     title    = "About",
