@@ -200,8 +200,8 @@ class SmartCollectionDetailsViewModel @Inject constructor(
                 val candidate = if (attempt == 1) baseName else "$baseName ($attempt)"
                 when (val result = playlistRepository.createPlaylist(candidate)) {
                     is PlaylistOperationResult.Success -> {
-                        playlistRepository.addSongsToPlaylist(result.playlistId, songs.map { it.id })
-                        onResult(SaveAsPlaylistResult.Success(name = candidate, added = songs.size))
+                        val addResult = playlistRepository.addSongsToPlaylist(result.playlistId, songs.map { it.id })
+                        onResult(SaveAsPlaylistResult.Success(name = candidate, added = addResult.added))
                         return@launch
                     }
                     is PlaylistOperationResult.DuplicateName -> continue

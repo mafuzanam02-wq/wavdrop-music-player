@@ -21,6 +21,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.MusicNote
@@ -1013,11 +1018,23 @@ private fun SmartCollectionPreviewRow(
     onClick: () -> Unit,
 ) {
     DashboardPreviewRow(
-        title = collection.title,
+        title    = collection.title,
         subtitle = "${collection.songCount} songs",
-        icon = Icons.Default.AutoAwesome,
-        onClick = onClick,
+        icon     = smartCollectionIcon(collection.type),
+        onClick  = onClick,
     )
+}
+
+private fun smartCollectionIcon(type: SmartCollectionType) = when (type) {
+    SmartCollectionType.FAVORITES       -> Icons.Default.Favorite
+    SmartCollectionType.MOST_PLAYED     -> Icons.Default.Star
+    SmartCollectionType.RECENTLY_PLAYED -> Icons.Default.Schedule
+    SmartCollectionType.FORGOTTEN_GEMS  -> Icons.Default.History
+    SmartCollectionType.NEVER_PLAYED    -> Icons.Default.MusicNote
+    SmartCollectionType.RECENTLY_ADDED  -> Icons.Default.AutoAwesome
+    SmartCollectionType.MOST_SKIPPED    -> Icons.Default.SkipNext
+    SmartCollectionType.LONG_TRACKS     -> Icons.Default.Timer
+    SmartCollectionType.SHORT_TRACKS    -> Icons.Default.Timer
 }
 
 @Composable
