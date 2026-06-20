@@ -57,7 +57,9 @@ import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
+import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
+import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.launch
 
@@ -67,12 +69,15 @@ fun AlbumDetailsScreen(
     onNavigateBack: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onArtistClick: (String) -> Unit = {},
+    onNowPlayingClick: () -> Unit = {},
     viewModel: AlbumDetailsViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
+    playbackVm: PlaybackControlsViewModel = hiltViewModel(),
 ) {
     val state             by viewModel.uiState.collectAsStateWithLifecycle()
     val playlists         by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs  by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
+    val nowPlaying        by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
     var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
@@ -112,6 +117,17 @@ fun AlbumDetailsScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            MiniPlayer(
+                nowPlaying        = nowPlaying,
+                onOpenNowPlaying  = onNowPlayingClick,
+                onTogglePlayPause = playbackVm::togglePlayPause,
+                onPrevious        = playbackVm::skipToPrevious,
+                onNext            = playbackVm::skipToNext,
+                onToggleShuffle   = playbackVm::toggleShuffle,
+                onCycleRepeatMode = playbackVm::cycleRepeatMode,
+            )
+        },
     ) { innerPadding ->
         if (state.isLoading) {
             LoadingStateContent(

@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -62,6 +63,7 @@ fun LibraryScreen(
     onNowPlayingClick: () -> Unit,
     onInsightsClick: () -> Unit,
     onSearchClick: () -> Unit,
+    onLibrarySettingsClick: () -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
 ) {
@@ -120,6 +122,7 @@ fun LibraryScreen(
                 item {
                     LibrarySummaryCard(
                         summary = summary,
+                        onLibrarySettingsClick = onLibrarySettingsClick,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                     )
                 }
@@ -185,6 +188,7 @@ fun LibraryScreen(
 @OptIn(ExperimentalLayoutApi::class)
 private fun LibrarySummaryCard(
     summary: LibrarySummaryUiState,
+    onLibrarySettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -200,7 +204,7 @@ private fun LibrarySummaryCard(
                 modifier = Modifier.padding(14.dp),
             )
         } else if (summary.isEmpty) {
-            Column(modifier = Modifier.padding(14.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 Text(
                     text = "No music yet",
                     style = MaterialTheme.typography.titleMedium,
@@ -212,6 +216,12 @@ private fun LibrarySummaryCard(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
                     modifier = Modifier.padding(top = 2.dp),
                 )
+                TextButton(
+                    onClick = onLibrarySettingsClick,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Text("Set up library")
+                }
             }
         } else {
             FlowRow(

@@ -52,7 +52,9 @@ import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.EmptyStateText
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
+import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
+import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,11 +62,14 @@ import kotlinx.coroutines.launch
 fun ArtistsScreen(
     onNavigateBack: () -> Unit,
     onArtistClick: (String) -> Unit,
+    onNowPlayingClick: () -> Unit = {},
     viewModel: ArtistsViewModel = hiltViewModel(),
+    playbackVm: PlaybackControlsViewModel = hiltViewModel(),
 ) {
     val state          by viewModel.uiState.collectAsStateWithLifecycle()
     val searchQuery    by viewModel.searchQuery.collectAsStateWithLifecycle()
     val sortMode       by viewModel.sortMode.collectAsStateWithLifecycle()
+    val nowPlaying     by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
     var isSearchActive by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
@@ -141,6 +146,17 @@ fun ArtistsScreen(
                     ),
                 )
             }
+        },
+        bottomBar = {
+            MiniPlayer(
+                nowPlaying        = nowPlaying,
+                onOpenNowPlaying  = onNowPlayingClick,
+                onTogglePlayPause = playbackVm::togglePlayPause,
+                onPrevious        = playbackVm::skipToPrevious,
+                onNext            = playbackVm::skipToNext,
+                onToggleShuffle   = playbackVm::toggleShuffle,
+                onCycleRepeatMode = playbackVm::cycleRepeatMode,
+            )
         },
     ) { innerPadding ->
         when (val s = state) {
