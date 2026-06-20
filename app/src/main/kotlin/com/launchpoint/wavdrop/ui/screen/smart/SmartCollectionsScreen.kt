@@ -104,6 +104,14 @@ fun SmartCollectionsScreen(
                     .padding(innerPadding),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
+                item {
+                    Text(
+                        text     = "Automatic collections for rediscovery, cleanup, and quick listening.",
+                        style    = MaterialTheme.typography.bodyMedium,
+                        color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                }
                 items(collections, key = { it.id }) { collection ->
                     SmartCollectionRow(
                         collection = collection,
@@ -185,7 +193,7 @@ private fun EmptyCollectionsContent(modifier: Modifier = Modifier) {
                 textAlign = TextAlign.Center,
             )
             Text(
-                text      = "Play and favorite songs to build automatic collections.",
+                text      = "Favorites, Recently Played, and Most Played will appear as you listen. Never Played and Most Skipped help you rediscover and clean up your library.",
                 style     = MaterialTheme.typography.bodyMedium,
                 color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 textAlign = TextAlign.Center,

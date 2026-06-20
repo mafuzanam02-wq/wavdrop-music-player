@@ -606,7 +606,7 @@ private fun HomeDashboardContent(
                     )
                 }
                 if (dashboard.smartCollections.isEmpty()) {
-                    item { DashboardEmptyText("Smart collections appear as Wavdrop learns your library.") }
+                    item { DashboardEmptyText("Smart collections like Favorites and Recently Played will appear as you listen.") }
                 } else {
                     items(dashboard.smartCollections, key = { it.id }) { collection ->
                         SmartCollectionPreviewRow(collection = collection, onClick = onSmartCollectionsClick)
