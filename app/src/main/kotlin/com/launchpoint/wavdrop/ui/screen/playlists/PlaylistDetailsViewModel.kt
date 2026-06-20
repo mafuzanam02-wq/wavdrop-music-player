@@ -27,6 +27,7 @@ data class PlaylistSongItem(
     val songId: Long,
     val position: Int,
     val song: Song,
+    val playCount: Int = 0,
 )
 
 data class PlaylistDetailsUiState(
@@ -38,6 +39,9 @@ data class PlaylistDetailsUiState(
     val artworkUris: List<String>,
     val favoriteSongIds: Set<Long>,
     val currentSongId: Long?,
+    val totalDurationMs: Long,
+    val totalPlayCount: Int,
+    val mostPlayedSongTitle: String?,
 ) {
     val songs: List<Song> get() = entries.map { it.song }
     val isSearchActive: Boolean get() = searchQuery.isNotBlank()
@@ -64,8 +68,10 @@ class PlaylistDetailsViewModel @Inject constructor(
     private val orderedEntries = combine(
         playlistRepository.observePlaylistSongs(playlistId),
         songRepository.songs,
-    ) { playlistSongs, allSongs ->
+        statsRepository.allTrackStatsEntities(),
+    ) { playlistSongs, allSongs, allStats ->
         val songMap = allSongs.associateBy { it.id }
+        val playCountBySongId = allStats.associate { it.songId to it.playCount }
         playlistSongs.mapNotNull { ps ->
             songMap[ps.songId]?.let { song ->
                 PlaylistSongItem(
@@ -73,6 +79,7 @@ class PlaylistDetailsViewModel @Inject constructor(
                     songId     = ps.songId,
                     position   = ps.position,
                     song       = song,
+                    playCount  = playCountBySongId[ps.songId] ?: 0,
                 )
             }
         }
@@ -87,6 +94,12 @@ class PlaylistDetailsViewModel @Inject constructor(
     ) { summary, entries, query, favorites, nowPlaying ->
         val visibleSongs = LibrarySearch.filterSongs(entries.map { it.song }, query)
         val visibleSongIds = visibleSongs.mapTo(mutableSetOf()) { it.id }
+        val totalPlayCount = entries.sumOf { it.playCount }
+        val mostPlayedSongTitle = entries
+            .filter { it.playCount > 0 }
+            .maxByOrNull { it.playCount }
+            ?.song
+            ?.displayTitle
         PlaylistDetailsUiState(
             isLoading     = false,
             playlist       = summary,
@@ -100,6 +113,9 @@ class PlaylistDetailsViewModel @Inject constructor(
             artworkUris    = PlaylistArtworkBuilder.buildArtworkUris(entries.map { it.song }),
             favoriteSongIds = favorites,
             currentSongId  = nowPlaying.song?.id,
+            totalDurationMs = entries.sumOf { it.song.duration },
+            totalPlayCount = totalPlayCount,
+            mostPlayedSongTitle = mostPlayedSongTitle,
         )
     }.stateIn(
         scope        = viewModelScope,
@@ -113,6 +129,9 @@ class PlaylistDetailsViewModel @Inject constructor(
             artworkUris    = emptyList(),
             favoriteSongIds = emptySet(),
             currentSongId  = null,
+            totalDurationMs = 0L,
+            totalPlayCount = 0,
+            mostPlayedSongTitle = null,
         ),
     )
 

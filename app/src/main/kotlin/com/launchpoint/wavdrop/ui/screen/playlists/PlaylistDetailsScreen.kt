@@ -38,6 +38,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -95,6 +97,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.compose.ui.input.pointer.positionChange
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -337,6 +342,10 @@ fun PlaylistDetailsScreen(
                 onAddSongsClick = onAddSongsClick,
                 playlistName    = playlistName.ifBlank { "Playlist" },
                 artworkUris     = state.artworkUris,
+                totalDurationMs = state.totalDurationMs,
+                totalPlayCount = state.totalPlayCount,
+                mostPlayedSongTitle = state.mostPlayedSongTitle,
+                updatedAt = state.playlist?.updatedAt ?: 0L,
                 modifier        = Modifier.padding(innerPadding),
             )
         } else {
@@ -355,6 +364,15 @@ fun PlaylistDetailsScreen(
                         playlistName = playlistName.ifBlank { "Playlist" },
                         songCount    = songCount,
                         artworkUris  = state.artworkUris,
+                        totalDurationMs = state.totalDurationMs,
+                        updatedAt = state.playlist?.updatedAt ?: 0L,
+                    )
+                }
+                item {
+                    PlaylistStatsCard(
+                        totalPlayCount = state.totalPlayCount,
+                        mostPlayedSongTitle = state.mostPlayedSongTitle,
+                        modifier = Modifier.padding(horizontal = 16.dp),
                     )
                 }
                 item {
@@ -624,6 +642,8 @@ private fun PlaylistHeader(
     playlistName: String,
     songCount: Int,
     artworkUris: List<String>,
+    totalDurationMs: Long,
+    updatedAt: Long,
 ) {
     Column(
         modifier            = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
@@ -643,10 +663,52 @@ private fun PlaylistHeader(
             modifier = Modifier.padding(top = 12.dp),
         )
         Text(
-            text  = "$songCount songs",
+            text  = "${playlistSongCountLabel(songCount)} • ${formatPlaylistDuration(totalDurationMs)}",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
+        Text(
+            text = "Updated ${formatPlaylistDate(updatedAt)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun PlaylistStatsCard(
+    totalPlayCount: Int,
+    mostPlayedSongTitle: String?,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                text = "Playlist Stats",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "$totalPlayCount plays",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                text = "Most Played: ${mostPlayedSongTitle ?: "—"}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -721,41 +783,80 @@ private fun EmptyContent(
     onAddSongsClick: () -> Unit,
     playlistName: String,
     artworkUris: List<String>,
+    totalDurationMs: Long,
+    totalPlayCount: Int,
+    mostPlayedSongTitle: String?,
+    updatedAt: Long,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier         = modifier.fillMaxSize().padding(32.dp),
-        contentAlignment = Alignment.Center,
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 88.dp),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            PlaylistArtworkCollage(
-                artworkUris        = artworkUris,
-                contentDescription = "$playlistName artwork",
-                modifier           = Modifier.padding(bottom = 16.dp).size(132.dp),
+        item {
+            PlaylistHeader(
+                playlistName = playlistName,
+                songCount = 0,
+                artworkUris = artworkUris,
+                totalDurationMs = totalDurationMs,
+                updatedAt = updatedAt,
             )
-            Text(
-                text      = "No songs in this playlist yet.",
-                style     = MaterialTheme.typography.bodyLarge,
-                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center,
+        }
+        item {
+            PlaylistStatsCard(
+                totalPlayCount = totalPlayCount,
+                mostPlayedSongTitle = mostPlayedSongTitle,
+                modifier = Modifier.padding(horizontal = 16.dp),
             )
-            Text(
-                text      = "Add songs from your library to start building this playlist.",
-                style     = MaterialTheme.typography.bodyMedium,
-                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                textAlign = TextAlign.Center,
-                modifier  = Modifier.padding(top = 8.dp),
-            )
-            FilledTonalButton(
-                onClick  = onAddSongsClick,
-                modifier = Modifier.padding(top = 16.dp),
+        }
+        item {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
             ) {
-                Icon(Icons.Default.Add, null, modifier = Modifier.padding(end = 4.dp))
-                Text("Add songs")
+                Text(
+                    text      = "No songs in this playlist yet.",
+                    style     = MaterialTheme.typography.bodyLarge,
+                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text      = "Add songs from your library to start building this playlist.",
+                    style     = MaterialTheme.typography.bodyMedium,
+                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                    textAlign = TextAlign.Center,
+                    modifier  = Modifier.padding(top = 8.dp),
+                )
+                FilledTonalButton(
+                    onClick  = onAddSongsClick,
+                    modifier = Modifier.padding(top = 16.dp),
+                ) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Add songs")
+                }
             }
         }
     }
 }
+
+private fun playlistSongCountLabel(songCount: Int): String =
+    if (songCount == 1) "1 song" else "$songCount songs"
+
+private fun formatPlaylistDuration(durationMs: Long): String {
+    val totalMinutes = durationMs.coerceAtLeast(0L) / 60_000L
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return when {
+        hours > 0L && minutes > 0L -> "${hours}h ${minutes}m"
+        hours > 0L -> "${hours}h"
+        else -> "${minutes}m"
+    }
+}
+
+private fun formatPlaylistDate(epochMs: Long): String =
+    SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(epochMs))
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
