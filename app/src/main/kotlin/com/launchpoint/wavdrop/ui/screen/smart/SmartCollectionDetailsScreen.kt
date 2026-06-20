@@ -92,6 +92,21 @@ fun SmartCollectionDetailsScreen(
     val coroutineScope     = rememberCoroutineScope()
     val context            = LocalContext.current
 
+    val onSaveAsPlaylist: () -> Unit = {
+        viewModel.saveAsPlaylist { result ->
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(
+                    when (result) {
+                        is SaveAsPlaylistResult.Success      -> "Saved \"${result.name}\" · ${result.added} tracks"
+                        is SaveAsPlaylistResult.DuplicateName -> "\"${result.name}\" already exists as a playlist"
+                        SaveAsPlaylistResult.Empty           -> "No songs to save"
+                        SaveAsPlaylistResult.Error           -> "Something went wrong"
+                    },
+                )
+            }
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -156,6 +171,7 @@ fun SmartCollectionDetailsScreen(
                 onLimitSelected     = viewModel::setMostPlayedDisplayLimit,
                 onPlayAll           = viewModel::playAll,
                 onShufflePlay       = viewModel::shufflePlay,
+                onSaveAsPlaylist    = onSaveAsPlaylist,
                 onSongClick         = viewModel::playSong,
                 onPlayNext          = { song -> viewModel.playNext(song) },
                 onAddToQueue        = { song -> viewModel.addToQueue(song) },
@@ -189,9 +205,10 @@ fun SmartCollectionDetailsScreen(
             ) {
                 item {
                     PlaybackActions(
-                        onPlayAll     = viewModel::playAll,
-                        onShufflePlay = viewModel::shufflePlay,
-                        modifier      = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        onPlayAll        = viewModel::playAll,
+                        onShufflePlay    = viewModel::shufflePlay,
+                        onSaveAsPlaylist = onSaveAsPlaylist,
+                        modifier         = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                     HorizontalDivider(
                         color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
@@ -268,6 +285,7 @@ private fun MostPlayedContent(
     onLimitSelected: (MostPlayedDisplayLimit) -> Unit,
     onPlayAll: () -> Unit,
     onShufflePlay: () -> Unit,
+    onSaveAsPlaylist: () -> Unit,
     onSongClick: (Song) -> Unit,
     onPlayNext: (Song) -> Unit,
     onAddToQueue: (Song) -> Unit,
@@ -302,9 +320,10 @@ private fun MostPlayedContent(
         } else {
             item {
                 PlaybackActions(
-                    onPlayAll = onPlayAll,
-                    onShufflePlay = onShufflePlay,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    onPlayAll        = onPlayAll,
+                    onShufflePlay    = onShufflePlay,
+                    onSaveAsPlaylist = onSaveAsPlaylist,
+                    modifier         = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
@@ -573,24 +592,35 @@ private fun PlaybackActions(
     onPlayAll: () -> Unit,
     onShufflePlay: () -> Unit,
     modifier: Modifier = Modifier,
+    onSaveAsPlaylist: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier              = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        FilledTonalButton(
-            onClick  = onPlayAll,
-            modifier = Modifier.weight(1f),
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.padding(end = 4.dp))
-            Text("Play all")
+            FilledTonalButton(
+                onClick  = onPlayAll,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Default.PlayArrow, null, modifier = Modifier.padding(end = 4.dp))
+                Text("Play all")
+            }
+            FilledTonalButton(
+                onClick  = onShufflePlay,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Default.Shuffle, null, modifier = Modifier.padding(end = 4.dp))
+                Text("Shuffle")
+            }
         }
-        FilledTonalButton(
-            onClick  = onShufflePlay,
-            modifier = Modifier.weight(1f),
-        ) {
-            Icon(Icons.Default.Shuffle, null, modifier = Modifier.padding(end = 4.dp))
-            Text("Shuffle")
+        if (onSaveAsPlaylist != null) {
+            OutlinedButton(
+                onClick  = onSaveAsPlaylist,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Save as Playlist")
+            }
         }
     }
 }

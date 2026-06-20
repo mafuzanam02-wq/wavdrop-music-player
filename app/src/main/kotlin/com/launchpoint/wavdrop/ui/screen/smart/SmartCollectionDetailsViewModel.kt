@@ -8,6 +8,8 @@ import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
+import com.launchpoint.wavdrop.data.repository.PlaylistRepository
+import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
@@ -24,6 +26,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+sealed interface SaveAsPlaylistResult {
+    data class Success(val name: String, val added: Int) : SaveAsPlaylistResult
+    data class DuplicateName(val name: String) : SaveAsPlaylistResult
+    data object Empty : SaveAsPlaylistResult
+    data object Error : SaveAsPlaylistResult
+}
 
 data class SmartCollectionDetailsUiState(
     val isLoading: Boolean = false,
@@ -43,6 +52,7 @@ class SmartCollectionDetailsViewModel @Inject constructor(
     private val statsRepository: StatsRepository,
     private val playerController: PlayerController,
     private val appSettingsRepository: AppSettingsRepository,
+    private val playlistRepository: PlaylistRepository,
 ) : ViewModel() {
 
     val type: SmartCollectionType? = SmartCollectionType.fromRouteValue(savedStateHandle["type"])
@@ -171,5 +181,21 @@ class SmartCollectionDetailsViewModel @Inject constructor(
     fun toggleFavorite(songId: Long) {
         val song = uiState.value.songs.firstOrNull { it.id == songId } ?: return
         viewModelScope.launch { statsRepository.toggleFavorite(songId, song.uri) }
+    }
+
+    fun saveAsPlaylist(onResult: (SaveAsPlaylistResult) -> Unit) {
+        val songs = uiState.value.songs
+        if (songs.isEmpty()) { onResult(SaveAsPlaylistResult.Empty); return }
+        val playlistName = "$title — Smart Collection"
+        viewModelScope.launch {
+            when (val result = playlistRepository.createPlaylist(playlistName)) {
+                is PlaylistOperationResult.Success -> {
+                    playlistRepository.addSongsToPlaylist(result.playlistId, songs.map { it.id })
+                    onResult(SaveAsPlaylistResult.Success(name = playlistName, added = songs.size))
+                }
+                is PlaylistOperationResult.DuplicateName -> onResult(SaveAsPlaylistResult.DuplicateName(playlistName))
+                is PlaylistOperationResult.BlankName     -> onResult(SaveAsPlaylistResult.Error)
+            }
+        }
     }
 }
