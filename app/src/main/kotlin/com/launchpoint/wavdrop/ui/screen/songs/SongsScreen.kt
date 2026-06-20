@@ -131,7 +131,7 @@ fun SongsScreen(
                     query         = searchQuery,
                     onQueryChange = viewModel::setSearchQuery,
                     onClose       = { isSearchActive = false; viewModel.setSearchQuery("") },
-                    placeholder   = "Search songs...",
+                    placeholder   = "Search songs, artists, albums, folders…",
                 )
             } else {
                 TopAppBar(

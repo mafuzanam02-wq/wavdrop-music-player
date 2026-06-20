@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.ui.screen.playlists
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -123,6 +124,11 @@ fun PlaylistDetailsScreen(
     val autoScrollScope    = rememberCoroutineScope()
     val context            = LocalContext.current
 
+    BackHandler(enabled = searchMode) {
+        searchMode = false
+        viewModel.clearSearch()
+    }
+
     LaunchedEffect(pendingMessage) {
         if (pendingMessage != null) {
             snackbarHostState.showSnackbar(pendingMessage)
@@ -238,7 +244,7 @@ fun PlaylistDetailsScreen(
                         searchMode = false
                         viewModel.clearSearch()
                     },
-                    placeholder   = "Search playlist",
+                    placeholder   = "Search songs in this playlist…",
                 )
             } else {
                 TopAppBar(

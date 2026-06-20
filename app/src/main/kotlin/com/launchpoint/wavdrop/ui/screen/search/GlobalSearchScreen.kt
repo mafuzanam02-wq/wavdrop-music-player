@@ -57,7 +57,7 @@ fun GlobalSearchRoute(
                 query         = searchQuery,
                 onQueryChange = viewModel::setSearchQuery,
                 onClose       = onNavigateBack,
-                placeholder   = "Search songs, artists, albums, playlists…",
+                placeholder   = "Search songs, artists, albums, playlists, folders…",
             )
         },
     ) { innerPadding ->

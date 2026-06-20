@@ -83,7 +83,7 @@ fun FoldersScreen(
                         isSearchActive = false
                         viewModel.setSearchQuery("")
                     },
-                    placeholder = "Search folders...",
+                    placeholder = "Search folders…",
                 )
             } else {
                 TopAppBar(

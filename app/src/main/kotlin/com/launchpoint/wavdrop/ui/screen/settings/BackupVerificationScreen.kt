@@ -250,7 +250,7 @@ private fun VerificationStatusCard(result: BackupVerificationResult) {
             if (healthy) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text  = "If you lose this device, your stats, playlists, and settings can be restored from this file.",
+                    text  = "If this backup file is saved somewhere safe, your stats, playlists, and settings can be restored on another install or device.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                 )
