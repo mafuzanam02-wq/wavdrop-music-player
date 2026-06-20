@@ -44,15 +44,16 @@ class GroupedLibrarySearchTest {
     }
 
     @Test
-    fun `playlist results are capped at twenty four`() {
+    fun `playlist results are capped at twenty`() {
         val results = buildGroupedSearchResults(
             songs = emptyList(),
             playlists = (1L..30L).map { id -> playlist(id, "Mix $id") },
             query = "mix",
         )
 
-        assertEquals(24, results.playlists.size)
-        assertEquals((1L..24L).toList(), results.playlists.map { it.id })
+        assertEquals(20, results.playlists.size)
+        assertEquals((1L..20L).toList(), results.playlists.map { it.id })
+        assertTrue(results.playlistsCapped)
     }
 
     @Test

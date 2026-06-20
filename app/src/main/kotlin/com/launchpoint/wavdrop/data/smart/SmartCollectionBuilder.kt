@@ -10,6 +10,10 @@ object SmartCollectionBuilder {
     private const val LONG_TRACK_THRESHOLD_MS  = 7 * 60 * 1_000L   // 7 minutes
     private const val SHORT_TRACK_THRESHOLD_MS = 90 * 1_000L        // 90 seconds
 
+    private const val FORGOTTEN_GEMS_PLAY_COUNT_MIN = 5
+    private const val FORGOTTEN_GEMS_QUIET_DAYS     = 60
+    private const val FORGOTTEN_GEMS_CAP            = 50
+
     fun build(songs: List<Song>, stats: List<TrackStatsEntity>): List<SmartCollection> {
         val songIds   = songs.mapTo(HashSet()) { it.id }
         val statsById = stats.filter { it.songId in songIds }.associateBy { it.songId }
@@ -62,6 +66,24 @@ object SmartCollectionBuilder {
                         .thenBy { it.id },
                 )
 
+        SmartCollectionType.FORGOTTEN_GEMS -> {
+            val quietThresholdMs = System.currentTimeMillis() - FORGOTTEN_GEMS_QUIET_DAYS * 24 * 60 * 60 * 1_000L
+            songs
+                .filter { song ->
+                    val stat = statsById[song.id]
+                    stat != null &&
+                        stat.playCount >= FORGOTTEN_GEMS_PLAY_COUNT_MIN &&
+                        stat.lastPlayedAt > 0L &&
+                        stat.lastPlayedAt < quietThresholdMs
+                }
+                .sortedWith(
+                    compareByDescending<Song> { statsById[it.id]?.playCount ?: 0 }
+                        .thenBy { statsById[it.id]?.lastPlayedAt ?: 0L }
+                        .thenBy { it.id },
+                )
+                .take(FORGOTTEN_GEMS_CAP)
+        }
+
         SmartCollectionType.NEVER_PLAYED ->
             songs
                 .filter { (statsById[it.id]?.playCount ?: 0) == 0 }
@@ -104,6 +126,7 @@ object SmartCollectionBuilder {
         SmartCollectionType.FAVORITES       -> "Favorites"
         SmartCollectionType.MOST_PLAYED     -> "Most Played"
         SmartCollectionType.RECENTLY_PLAYED -> "Recently Played"
+        SmartCollectionType.FORGOTTEN_GEMS  -> "Forgotten Gems"
         SmartCollectionType.NEVER_PLAYED    -> "Never Played"
         SmartCollectionType.RECENTLY_ADDED  -> "Recently Added"
         SmartCollectionType.MOST_SKIPPED    -> "Most Skipped"
@@ -115,6 +138,7 @@ object SmartCollectionBuilder {
         SmartCollectionType.FAVORITES       -> "Songs you've marked as favorites"
         SmartCollectionType.MOST_PLAYED     -> "Your most frequently played tracks"
         SmartCollectionType.RECENTLY_PLAYED -> "Tracks you've played recently"
+        SmartCollectionType.FORGOTTEN_GEMS  -> "Songs you used to play often, but haven't heard in a while"
         SmartCollectionType.NEVER_PLAYED    -> "Tracks you haven't played yet"
         SmartCollectionType.RECENTLY_ADDED  -> "Tracks recently added to your library"
         SmartCollectionType.MOST_SKIPPED    -> "Tracks you frequently skip"

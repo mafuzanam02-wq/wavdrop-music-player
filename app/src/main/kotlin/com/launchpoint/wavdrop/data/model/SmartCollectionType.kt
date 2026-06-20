@@ -4,6 +4,7 @@ enum class SmartCollectionType {
     FAVORITES,
     MOST_PLAYED,
     RECENTLY_PLAYED,
+    FORGOTTEN_GEMS,
     NEVER_PLAYED,
     RECENTLY_ADDED,
     MOST_SKIPPED,

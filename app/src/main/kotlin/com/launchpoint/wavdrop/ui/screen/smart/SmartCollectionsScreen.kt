@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SkipNext
@@ -207,6 +208,7 @@ private fun iconFor(type: SmartCollectionType): ImageVector = when (type) {
     SmartCollectionType.FAVORITES       -> Icons.Default.Favorite
     SmartCollectionType.MOST_PLAYED     -> Icons.Default.Star
     SmartCollectionType.RECENTLY_PLAYED -> Icons.Default.Schedule
+    SmartCollectionType.FORGOTTEN_GEMS  -> Icons.Default.History
     SmartCollectionType.NEVER_PLAYED    -> Icons.Default.MusicNote
     SmartCollectionType.RECENTLY_ADDED  -> Icons.Default.AutoAwesome
     SmartCollectionType.MOST_SKIPPED    -> Icons.Default.SkipNext

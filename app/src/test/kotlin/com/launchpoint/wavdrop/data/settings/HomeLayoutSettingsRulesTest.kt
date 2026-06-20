@@ -110,13 +110,13 @@ class HomeLayoutSettingsRulesTest {
             listOf(
                 HomeSectionId.CONTINUE_LISTENING,
                 HomeSectionId.RECENTLY_PLAYED,
+                HomeSectionId.PLAYLISTS,
                 HomeSectionId.SMART_COLLECTIONS,
                 HomeSectionId.WRAPPED,
             ),
             HomeLayoutSettingsRules.EXPOSED_SECTION_IDS,
         )
         assertFalse(HomeSectionId.FAVORITES in HomeLayoutSettingsRules.EXPOSED_SECTION_IDS)
-        assertFalse(HomeSectionId.PLAYLISTS in HomeLayoutSettingsRules.EXPOSED_SECTION_IDS)
         assertFalse(HomeSectionId.LIBRARY_SHORTCUT in HomeLayoutSettingsRules.EXPOSED_SECTION_IDS)
     }
 

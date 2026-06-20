@@ -267,4 +267,73 @@ class SmartCollectionBuilderTest {
             .first { it.type == SmartCollectionType.FAVORITES }
         assertEquals(2, favCollection.songCount)
     }
+
+    // ── Forgotten Gems ────────────────────────────────────────────────────────
+
+    // Helper: epoch ms clearly older than 60 days
+    private val OLD_TS   = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1_000L  // 90 days ago
+    private val OLD_TS2  = System.currentTimeMillis() - 75L * 24 * 60 * 60 * 1_000L  // 75 days ago
+    // Recent: within 60-day quiet window
+    private val RECENT   = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1_000L  // 30 days ago
+
+    @Test fun `forgotten gems excludes songs with playCount below 5`() {
+        val songs = listOf(song(1), song(2))
+        val s     = listOf(
+            stats(1, playCount = 4, lastPlayedAt = OLD_TS),
+            stats(2, playCount = 5, lastPlayedAt = OLD_TS),
+        )
+        val result = SmartCollectionBuilder.songsFor(SmartCollectionType.FORGOTTEN_GEMS, songs, s)
+        assertEquals(listOf(2L), result.map { it.id })
+    }
+
+    @Test fun `forgotten gems excludes songs played within 60 days`() {
+        val songs = listOf(song(1), song(2))
+        val s     = listOf(
+            stats(1, playCount = 10, lastPlayedAt = RECENT),
+            stats(2, playCount = 10, lastPlayedAt = OLD_TS),
+        )
+        val result = SmartCollectionBuilder.songsFor(SmartCollectionType.FORGOTTEN_GEMS, songs, s)
+        assertEquals(listOf(2L), result.map { it.id })
+    }
+
+    @Test fun `forgotten gems excludes songs with lastPlayedAt zero`() {
+        val songs = listOf(song(1))
+        val s     = listOf(stats(1, playCount = 10, lastPlayedAt = 0L))
+        val result = SmartCollectionBuilder.songsFor(SmartCollectionType.FORGOTTEN_GEMS, songs, s)
+        assertTrue(result.isEmpty())
+    }
+
+    @Test fun `forgotten gems includes songs meeting all criteria`() {
+        val songs = listOf(song(1))
+        val s     = listOf(stats(1, playCount = 5, lastPlayedAt = OLD_TS))
+        val result = SmartCollectionBuilder.songsFor(SmartCollectionType.FORGOTTEN_GEMS, songs, s)
+        assertEquals(listOf(1L), result.map { it.id })
+    }
+
+    @Test fun `forgotten gems sorted by playCount descending then lastPlayedAt ascending`() {
+        val songs = listOf(song(1), song(2), song(3), song(4))
+        val s     = listOf(
+            stats(1, playCount = 10, lastPlayedAt = OLD_TS2),  // high plays, less old
+            stats(2, playCount = 10, lastPlayedAt = OLD_TS),   // high plays, more old → comes first at same count
+            stats(3, playCount = 20, lastPlayedAt = OLD_TS),   // highest plays → first overall
+            stats(4, playCount = 5,  lastPlayedAt = OLD_TS),   // lowest plays → last
+        )
+        val ids = SmartCollectionBuilder.songsFor(SmartCollectionType.FORGOTTEN_GEMS, songs, s)
+            .map { it.id }
+        assertEquals(listOf(3L, 2L, 1L, 4L), ids)
+    }
+
+    @Test fun `forgotten gems caps at 50`() {
+        val songs = (1L..60L).map { song(it) }
+        val s     = songs.map { stats(it.id, playCount = 10, lastPlayedAt = OLD_TS) }
+        val result = SmartCollectionBuilder.songsFor(SmartCollectionType.FORGOTTEN_GEMS, songs, s)
+        assertEquals(50, result.size)
+    }
+
+    @Test fun `build omits forgotten gems when no songs qualify`() {
+        val songs = listOf(song(1))
+        val s     = listOf(stats(1, playCount = 3, lastPlayedAt = OLD_TS))  // below min play count
+        val collections = SmartCollectionBuilder.build(songs, s)
+        assertTrue(collections.none { it.type == SmartCollectionType.FORGOTTEN_GEMS })
+    }
 }
