@@ -10,6 +10,9 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
@@ -43,6 +46,10 @@ data class SmartCollectionDetailsUiState(
     val favoriteSongIds: Set<Long>,
     val currentSongId: Long?,
 )
+
+private val DATE_FORMATTER: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)
+private const val MAX_SAVE_ATTEMPTS = 99
 
 @HiltViewModel
 class SmartCollectionDetailsViewModel @Inject constructor(
@@ -186,16 +193,22 @@ class SmartCollectionDetailsViewModel @Inject constructor(
     fun saveAsPlaylist(onResult: (SaveAsPlaylistResult) -> Unit) {
         val songs = uiState.value.songs
         if (songs.isEmpty()) { onResult(SaveAsPlaylistResult.Empty); return }
-        val playlistName = "$title — Smart Collection"
+        val dateLabel = LocalDate.now().format(DATE_FORMATTER)
+        val baseName  = "$title — $dateLabel"
         viewModelScope.launch {
-            when (val result = playlistRepository.createPlaylist(playlistName)) {
-                is PlaylistOperationResult.Success -> {
-                    playlistRepository.addSongsToPlaylist(result.playlistId, songs.map { it.id })
-                    onResult(SaveAsPlaylistResult.Success(name = playlistName, added = songs.size))
+            for (attempt in 1..MAX_SAVE_ATTEMPTS) {
+                val candidate = if (attempt == 1) baseName else "$baseName ($attempt)"
+                when (val result = playlistRepository.createPlaylist(candidate)) {
+                    is PlaylistOperationResult.Success -> {
+                        playlistRepository.addSongsToPlaylist(result.playlistId, songs.map { it.id })
+                        onResult(SaveAsPlaylistResult.Success(name = candidate, added = songs.size))
+                        return@launch
+                    }
+                    is PlaylistOperationResult.DuplicateName -> continue
+                    is PlaylistOperationResult.BlankName     -> { onResult(SaveAsPlaylistResult.Error); return@launch }
                 }
-                is PlaylistOperationResult.DuplicateName -> onResult(SaveAsPlaylistResult.DuplicateName(playlistName))
-                is PlaylistOperationResult.BlankName     -> onResult(SaveAsPlaylistResult.Error)
             }
+            onResult(SaveAsPlaylistResult.DuplicateName(baseName))
         }
     }
 }

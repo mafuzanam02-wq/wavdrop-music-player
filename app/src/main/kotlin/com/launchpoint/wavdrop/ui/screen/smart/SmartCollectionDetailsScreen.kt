@@ -97,10 +97,10 @@ fun SmartCollectionDetailsScreen(
             coroutineScope.launch {
                 snackbarHostState.showSnackbar(
                     when (result) {
-                        is SaveAsPlaylistResult.Success      -> "Saved \"${result.name}\" · ${result.added} tracks"
-                        is SaveAsPlaylistResult.DuplicateName -> "\"${result.name}\" already exists as a playlist"
-                        SaveAsPlaylistResult.Empty           -> "No songs to save"
-                        SaveAsPlaylistResult.Error           -> "Something went wrong"
+                        is SaveAsPlaylistResult.Success       -> "Saved '${result.name}' with ${result.added} songs."
+                        is SaveAsPlaylistResult.DuplicateName -> "Could not create a unique playlist name."
+                        SaveAsPlaylistResult.Empty            -> "No songs to save."
+                        SaveAsPlaylistResult.Error            -> "Something went wrong."
                     },
                 )
             }
