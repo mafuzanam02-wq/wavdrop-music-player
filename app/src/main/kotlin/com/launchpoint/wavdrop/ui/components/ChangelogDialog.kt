@@ -19,6 +19,20 @@ private sealed interface ChangelogEntry {
     data class Item(val text: String) : ChangelogEntry
 }
 
+private val BETA_5_ENTRIES: List<ChangelogEntry> = listOf(
+    ChangelogEntry.Section("Navigation & Insights"),
+    ChangelogEntry.Item("Insights is now a main tab with quick listening stats."),
+    ChangelogEntry.Item("Wrapped now supports Monthly and Yearly recaps."),
+    ChangelogEntry.Item("Wrapped slides now show richer Top 3 rankings and Skip Habits."),
+
+    ChangelogEntry.Section("Search & Discovery"),
+    ChangelogEntry.Item("Global Search now finds playlists too."),
+    ChangelogEntry.Item("Albums, Artists, and Playlists now have better sorting and discovery tools."),
+
+    ChangelogEntry.Section("Settings"),
+    ChangelogEntry.Item("Settings moved to the Home gear, with Wrapped Appearance controls in Settings."),
+)
+
 private val BETA_4_ENTRIES: List<ChangelogEntry> = listOf(
     ChangelogEntry.Section("Discover & Browse"),
     ChangelogEntry.Item("Global Search now finds songs, albums, artists, and folders across your library."),
@@ -78,11 +92,28 @@ private val BETA_3_1_ENTRIES: List<ChangelogEntry> = listOf(
     ChangelogEntry.Item("General stability and error-handling improvements."),
 )
 
+private fun fullBeta5Entries(): List<ChangelogEntry> = listOf(
+    ChangelogEntry.Item("Moved Insights into the bottom navigation."),
+    ChangelogEntry.Item("Moved Settings to the Home gear."),
+    ChangelogEntry.Item("Added Insights summary cards for plays, listening time, and streaks."),
+    ChangelogEntry.Item("Refreshed the Insights hub with destination cards."),
+    ChangelogEntry.Item("Added Monthly and Yearly Wrapped scopes."),
+    ChangelogEntry.Item("Updated Wrapped with Top 3 Tracks, Top 3 Artists, Top 3 Albums, and Skip Habits."),
+    ChangelogEntry.Item("Moved Wrapped Appearance controls into Settings."),
+    ChangelogEntry.Item("Added playlist-name results to Global Search."),
+    ChangelogEntry.Item("Improved Global Search normalization for artists and albums."),
+    ChangelogEntry.Item("Added search and sorting to Playlists."),
+    ChangelogEntry.Item("Added sorting to Albums and Artists."),
+    ChangelogEntry.Item("Added Album → Artist navigation from Album Details."),
+    ChangelogEntry.Item("Improved search placeholders and Playlist Details search Back behavior."),
+    ChangelogEntry.Item("Updated backup verification wording."),
+)
+
 @Composable
 fun ChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
-        title = "What's new in Beta 4",
-        entries = BETA_4_ENTRIES,
+        title = "What's new in Beta 5",
+        entries = BETA_5_ENTRIES,
         onDismiss = onDismiss,
     )
 }
@@ -92,6 +123,8 @@ fun FullChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
         title = "Wavdrop Changelog",
         entries = buildList {
+            add(ChangelogEntry.Section("Beta 5 — Discovery, Insights, and Wrapped"))
+            addAll(fullBeta5Entries())
             add(ChangelogEntry.Section("Beta 4"))
             addAll(BETA_4_ENTRIES)
             add(ChangelogEntry.Section("Beta 3.1"))
