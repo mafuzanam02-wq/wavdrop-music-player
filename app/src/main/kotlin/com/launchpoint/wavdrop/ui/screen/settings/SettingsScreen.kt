@@ -54,65 +54,69 @@ fun SettingsScreen(
         ) {
             item { SectionHeader("Listening") }
             item {
-                ClickableSettingsRow(
-                    title    = "Playback",
-                    subtitle = "Startup screen, session restore, sleep timer, and display",
-                    onClick  = onPlaybackClick,
-                )
+                SettingsGroupCard {
+                    ClickableSettingsRow(
+                        title    = "Playback",
+                        subtitle = "Startup screen, session restore, sleep timer, and display",
+                        onClick  = onPlaybackClick,
+                    )
+                    CardInternalDivider()
+                    ClickableSettingsRow(
+                        title    = "Bluetooth & Headphones",
+                        subtitle = "Auto-resume and audio output disconnect behavior",
+                        onClick  = onBluetoothClick,
+                    )
+                }
             }
-            item {
-                ClickableSettingsRow(
-                    title    = "Bluetooth & Headphones",
-                    subtitle = "Auto-resume and audio output disconnect behavior",
-                    onClick  = onBluetoothClick,
-                )
-            }
-            item { SectionDivider() }
 
             item { SectionHeader("Library") }
             item {
-                ClickableSettingsRow(
-                    title    = "Library & Scanning",
-                    subtitle = "Scan mode, folders, and track filters",
-                    onClick  = onLibrarySettingsClick,
-                )
+                SettingsGroupCard {
+                    ClickableSettingsRow(
+                        title    = "Library & Scanning",
+                        subtitle = "Scan mode, folders, and track filters",
+                        onClick  = onLibrarySettingsClick,
+                    )
+                }
             }
-            item { SectionDivider() }
 
             item { SectionHeader("Data") }
             item {
-                ClickableSettingsRow(
-                    title    = "Backup & Migration",
-                    subtitle = "Your data stays on your device — export, restore, or migrate at any time.",
-                    onClick  = onBackupClick,
-                )
+                SettingsGroupCard {
+                    ClickableSettingsRow(
+                        title    = "Backup & Migration",
+                        subtitle = "Your data stays on your device — export, restore, or migrate at any time.",
+                        onClick  = onBackupClick,
+                    )
+                    CardInternalDivider()
+                    ClickableSettingsRow(
+                        title    = "Reports & Insights",
+                        subtitle = "Statistics, listening reports, monthly recaps, and Wrapped",
+                        onClick  = onStatisticsClick,
+                    )
+                }
             }
-            item {
-                ClickableSettingsRow(
-                    title    = "Reports & Insights",
-                    subtitle = "Statistics, listening reports, monthly recaps, and Wrapped",
-                    onClick  = onStatisticsClick,
-                )
-            }
-            item { SectionDivider() }
 
             item { SectionHeader("Display") }
             item {
-                ClickableSettingsRow(
-                    title    = "Appearance",
-                    subtitle = "Theme, colors, display preferences, and app icon",
-                    onClick  = onAppearanceClick,
-                )
+                SettingsGroupCard {
+                    ClickableSettingsRow(
+                        title    = "Appearance",
+                        subtitle = "Theme, colors, display preferences, and app icon",
+                        onClick  = onAppearanceClick,
+                    )
+                }
             }
-            item { SectionDivider() }
 
             item { SectionHeader("More") }
             item {
-                ClickableSettingsRow(
-                    title    = "About",
-                    subtitle = "Version info, supported formats, and legal",
-                    onClick  = onAboutClick,
-                )
+                SettingsGroupCard {
+                    ClickableSettingsRow(
+                        title    = "About",
+                        subtitle = "Version info, supported formats, and legal",
+                        onClick  = onAboutClick,
+                    )
+                }
             }
         }
     }

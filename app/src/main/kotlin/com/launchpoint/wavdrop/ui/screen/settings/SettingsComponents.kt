@@ -42,6 +42,30 @@ private const val SUBTITLE_ALPHA   = 0.65f
 // ── Section structure ──────────────────────────────────────────────────────
 
 @Composable
+internal fun SettingsGroupCard(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    androidx.compose.material3.Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column { content() }
+    }
+}
+
+@Composable
+internal fun CardInternalDivider() {
+    HorizontalDivider(
+        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+        thickness = 0.5.dp,
+    )
+}
+
+@Composable
 internal fun SectionHeader(title: String) {
     Text(
         text     = title,
