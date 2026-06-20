@@ -52,7 +52,7 @@ internal fun SettingsGroupCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.60f),
         shape = MaterialTheme.shapes.medium,
     ) {
         Column { content() }
@@ -72,7 +72,7 @@ internal fun SectionHeader(title: String) {
     Text(
         text     = title,
         style    = MaterialTheme.typography.labelLarge,
-        color    = MaterialTheme.colorScheme.primary,
+        color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = ROW_HORIZONTAL_PADDING, end = ROW_HORIZONTAL_PADDING, top = 24.dp, bottom = 6.dp),
