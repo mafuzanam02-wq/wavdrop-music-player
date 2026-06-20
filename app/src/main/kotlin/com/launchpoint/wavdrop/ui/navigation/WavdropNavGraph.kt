@@ -515,17 +515,18 @@ fun WavdropNavGraph(
             val previousRoute = navController.previousBackStackEntry?.destination?.route
             val fromSettings = previousRoute == Screen.Settings.route
             SettingsStatisticsScreen(
-                onNavigateBack        = { navController.popBackStack() },
-                onStatisticsClick     = { navController.navigate(Screen.Statistics.route) },
-                onReportsClick        = { navController.navigate(Screen.Reports.route) },
-                onMonthlyReportsClick = { navController.navigate(Screen.MonthlyReports.route) },
-                onWrappedClick        = { navController.navigate(Screen.Wrapped.route) },
-                showBackArrow         = fromSettings,
-                onHomeClick           = { navController.navigatePrimary(Screen.Home.route) },
-                onSongsClick          = { navController.navigatePrimary(Screen.Songs.route) },
-                onLibraryClick        = { navController.navigatePrimary(Screen.Library.route) },
-                onInsightsClick       = {},
-                onNowPlayingClick     = { navController.navigateNowPlaying() },
+                onNavigateBack         = { navController.popBackStack() },
+                onStatisticsClick      = { navController.navigate(Screen.Statistics.route) },
+                onReportsClick         = { navController.navigate(Screen.Reports.route) },
+                onMonthlyReportsClick  = { navController.navigate(Screen.MonthlyReports.route) },
+                onWrappedClick         = { navController.navigate(Screen.Wrapped.route) },
+                showBackArrow          = fromSettings,
+                onSmartCollectionClick = { type -> navController.navigate(Screen.SmartCollectionDetails.createRoute(type)) },
+                onHomeClick            = { navController.navigatePrimary(Screen.Home.route) },
+                onSongsClick           = { navController.navigatePrimary(Screen.Songs.route) },
+                onLibraryClick         = { navController.navigatePrimary(Screen.Library.route) },
+                onInsightsClick        = {},
+                onNowPlayingClick      = { navController.navigateNowPlaying() },
             )
         }
         composable(Screen.SettingsAbout.route) {
