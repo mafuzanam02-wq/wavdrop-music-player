@@ -74,6 +74,8 @@ import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
+import com.launchpoint.wavdrop.playback.NowPlayingState
+import com.launchpoint.wavdrop.playback.RepeatMode
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.data.library.FolderGrouper
@@ -226,9 +228,10 @@ fun HomeScreen(
                     visibleSections          = homeLayout.visibleSections,
                     currentSongId            = nowPlaying.song?.id,
                     favoriteSongIds          = favoriteSongIds,
-                    nowPlayingSong           = nowPlaying.song,
+                    nowPlaying               = nowPlaying,
                     folderModeNeedsSelection = folderModeNeedsSelection,
                     onNowPlayingClick        = onNowPlayingClick,
+                    onResumeSession          = viewModel::togglePlayPause,
                     onPlaylistsClick         = onPlaylistsClick,
                     onPlaylistClick          = onPlaylistClick,
                     onSmartCollectionsClick  = onSmartCollectionsClick,
@@ -518,9 +521,10 @@ private fun HomeDashboardContent(
     visibleSections: Set<HomeSectionId>,
     currentSongId: Long?,
     favoriteSongIds: Set<Long>,
-    nowPlayingSong: Song?,
+    nowPlaying: NowPlayingState,
     folderModeNeedsSelection: Boolean,
     onNowPlayingClick: () -> Unit,
+    onResumeSession: () -> Unit,
     onPlaylistsClick: () -> Unit,
     onPlaylistClick: (Long) -> Unit,
     onSmartCollectionsClick: () -> Unit,
@@ -545,11 +549,15 @@ private fun HomeDashboardContent(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 10.dp, bottom = 18.dp),
     ) {
-        if (HomeSectionId.CONTINUE_LISTENING in visibleSections) {
+        if (
+            HomeSectionId.CONTINUE_LISTENING in visibleSections &&
+            shouldShowResumeSessionCard(nowPlaying)
+        ) {
             item {
-                ContinueListeningCard(
-                    song = nowPlayingSong,
-                    onClick = onNowPlayingClick,
+                ResumeSessionCard(
+                    nowPlaying = nowPlaying,
+                    onResume = onResumeSession,
+                    onOpen = onNowPlayingClick,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                 )
             }
@@ -861,16 +869,51 @@ private fun DashboardEmptyLibraryCard(
     }
 }
 
+internal fun shouldShowResumeSessionCard(nowPlaying: NowPlayingState): Boolean =
+    nowPlaying.song != null &&
+        !nowPlaying.isPlaying &&
+        (nowPlaying.positionMs > 10_000L || nowPlaying.queue.size > 1)
+
+internal fun formatResumeSessionTime(durationMs: Long): String {
+    val totalSeconds = durationMs.coerceAtLeast(0L) / 1_000L
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
+private fun resumeSessionPositionLabel(nowPlaying: NowPlayingState): String {
+    val elapsed = formatResumeSessionTime(nowPlaying.positionMs)
+    return if (nowPlaying.durationMs > 0L) {
+        "$elapsed of ${formatResumeSessionTime(nowPlaying.durationMs)}"
+    } else {
+        elapsed
+    }
+}
+
+private fun resumeSessionQueueLabel(nowPlaying: NowPlayingState): String? =
+    nowPlaying.currentIndex
+        .takeIf { it in nowPlaying.queue.indices }
+        ?.let { "Track ${it + 1} of ${nowPlaying.queue.size}" }
+
 @Composable
-private fun ContinueListeningCard(
-    song: Song?,
-    onClick: () -> Unit,
+private fun ResumeSessionCard(
+    nowPlaying: NowPlayingState,
+    onResume: () -> Unit,
+    onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val song = nowPlaying.song ?: return
+    val queueLabel = resumeSessionQueueLabel(nowPlaying)
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(enabled = song != null, onClick = onClick),
+            .clickable(onClick = onOpen),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         shape = MaterialTheme.shapes.small,
     ) {
@@ -880,37 +923,64 @@ private fun ContinueListeningCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ArtworkImage(
-                artworkUri = song?.let { ArtworkResolver.albumArtworkUri(it.albumId) },
-                contentDescription = song?.let { "Album artwork for ${it.album}" },
+                artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
+                contentDescription = "Album artwork for ${song.album}",
                 placeholderIcon = Icons.Default.MusicNote,
                 modifier = Modifier.size(44.dp),
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Continue Listening",
+                    text = "Resume Session",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    text = song?.title ?: "Nothing playing yet",
+                    text = song.displayTitle,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = song?.artist ?: "Pick something from your library when you are ready.",
+                    text = song.displayArtist,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (song != null) {
+                queueLabel?.let {
                     Text(
-                        text = "Continue where you left off",
+                        text = it,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                     )
+                }
+                Text(
+                    text = resumeSessionPositionLabel(nowPlaying),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                )
+                val indicators = buildList {
+                    if (nowPlaying.shuffleEnabled) add("Shuffle on")
+                    when (nowPlaying.repeatMode) {
+                        RepeatMode.ALL -> add("Repeat all")
+                        RepeatMode.ONE -> add("Repeat one")
+                        RepeatMode.OFF -> Unit
+                    }
+                }
+                if (indicators.isNotEmpty()) {
+                    Text(
+                        text = indicators.joinToString(" • "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onOpen) { Text("Open") }
+                    TextButton(onClick = onResume) { Text("Resume") }
                 }
             }
         }

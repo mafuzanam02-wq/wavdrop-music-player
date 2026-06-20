@@ -59,7 +59,7 @@ object HomeLayoutSettingsRules {
     fun isToggleable(id: HomeSectionId): Boolean = id in EXPOSED_SECTION_IDS
 
     fun displayNameFor(id: HomeSectionId): String = when (id) {
-        HomeSectionId.CONTINUE_LISTENING  -> "Continue Listening"
+        HomeSectionId.CONTINUE_LISTENING  -> "Resume Session"
         HomeSectionId.RECENTLY_PLAYED    -> "Listening Activity"
         HomeSectionId.FAVORITES          -> "Favorites"
         HomeSectionId.MOST_PLAYED        -> "Most Played"
@@ -70,7 +70,7 @@ object HomeLayoutSettingsRules {
     }
 
     fun descriptionFor(id: HomeSectionId): String = when (id) {
-        HomeSectionId.CONTINUE_LISTENING -> "Quick access to the current or last played track."
+        HomeSectionId.CONTINUE_LISTENING -> "Show a paused queue when there is something useful to resume."
         HomeSectionId.RECENTLY_PLAYED    ->
             "Recently played tracks, with most played as a fallback."
         HomeSectionId.FAVORITES          -> "Songs you have marked as favorites."
