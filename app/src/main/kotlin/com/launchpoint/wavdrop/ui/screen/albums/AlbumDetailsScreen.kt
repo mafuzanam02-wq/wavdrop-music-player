@@ -31,6 +31,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -42,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +66,7 @@ import kotlinx.coroutines.launch
 fun AlbumDetailsScreen(
     onNavigateBack: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onArtistClick: (String) -> Unit = {},
     viewModel: AlbumDetailsViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
@@ -120,7 +124,10 @@ fun AlbumDetailsScreen(
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
                 item {
-                    AlbumHeader(state = state)
+                    AlbumHeader(
+                        state = state,
+                        onArtistClick = onArtistClick,
+                    )
                     HorizontalDivider(
                         color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                         thickness = 0.5.dp,
@@ -236,6 +243,7 @@ private fun EmptyAlbumSongs(modifier: Modifier = Modifier) {
 @Composable
 private fun AlbumHeader(
     state: AlbumDetailsUiState,
+    onArtistClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -267,6 +275,16 @@ private fun AlbumHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+            if (state.songs.isNotEmpty() && state.artist.isNotBlank()) {
+                TextButton(
+                    onClick = { onArtistClick(state.artist) },
+                    modifier = Modifier.semantics {
+                        contentDescription = "View artist ${state.artist}"
+                    },
+                ) {
+                    Text("View artist")
+                }
             }
             Text(
                 text     = "${state.songs.size} songs - ${formatTotalDuration(state.totalDurationMs)}",

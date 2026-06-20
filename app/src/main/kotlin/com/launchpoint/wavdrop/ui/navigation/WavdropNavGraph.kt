@@ -312,6 +312,7 @@ fun WavdropNavGraph(
             AlbumDetailsScreen(
                 onNavigateBack      = { navController.popBackStack() },
                 onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
             )
         }
         composable(Screen.Artists.route) {
