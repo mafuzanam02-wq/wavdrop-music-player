@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -101,6 +102,7 @@ fun HomeScreen(
     onAlbumClick: (String) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
     onGlobalSearchClick: () -> Unit = {},
+    onHomeCustomizationClick: () -> Unit = {},
     onReportsAndInsightsClick: () -> Unit = {},
     onLibrarySettingsClick: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
@@ -152,6 +154,13 @@ fun HomeScreen(
                         SleepTimerChip(
                             label = sleepTimerLabel,
                             onClick = { showSleepTimerDialog = true },
+                        )
+                    }
+                    IconButton(onClick = onHomeCustomizationClick) {
+                        Icon(
+                            imageVector        = Icons.Default.Tune,
+                            contentDescription = "Customize Home",
+                            tint               = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     IconButton(onClick = onGlobalSearchClick) {
