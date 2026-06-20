@@ -24,7 +24,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.AnnotatedString
@@ -44,6 +47,9 @@ import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.LibrarySearch
+
+private const val COLLAPSED_SEARCH_RESULT_LIMIT = 5
+private const val EXPANDED_SEARCH_RESULT_LIMIT  = 20
 
 /**
  * Shared grouped library search UI: Songs / Artists / Albums sections with
@@ -91,12 +97,16 @@ fun GroupedSearchContent(
     modifier: Modifier = Modifier,
 ) {
     val results = remember(songs, playlists, query) {
-        buildGroupedSearchResults(
-            songs = songs,
-            playlists = playlists,
-            query = query,
-        )
+        buildGroupedSearchResults(songs = songs, playlists = playlists, query = query)
     }
+
+    // Expansion state resets when the query changes.
+    var songsExpanded     by remember(query) { mutableStateOf(false) }
+    var artistsExpanded   by remember(query) { mutableStateOf(false) }
+    var albumsExpanded    by remember(query) { mutableStateOf(false) }
+    var playlistsExpanded by remember(query) { mutableStateOf(false) }
+    var foldersExpanded   by remember(query) { mutableStateOf(false) }
+
     if (results.isEmpty) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             SearchEmptyState(
@@ -112,10 +122,13 @@ fun GroupedSearchContent(
         contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
     ) {
         if (results.songs.isNotEmpty()) {
+            val displayedSongs = results.songs.take(
+                if (songsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
+            )
             item(key = "songs_header") {
                 SearchSectionHeader(title = "Songs", count = results.songs.size)
             }
-            items(results.songs, key = { "song_${it.id}" }) { song ->
+            items(displayedSongs, key = { "song_${it.id}" }) { song ->
                 SearchSongResultRow(
                     song = song,
                     query = query,
@@ -124,12 +137,25 @@ fun GroupedSearchContent(
                 )
                 SearchDivider()
             }
+            if (results.songs.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
+                item(key = "songs_more") {
+                    ShowMoreRow(
+                        expanded     = songsExpanded,
+                        hiddenCount  = results.songs.size - displayedSongs.size,
+                        label        = "songs",
+                        onToggle     = { songsExpanded = !songsExpanded },
+                    )
+                }
+            }
         }
         if (results.artists.isNotEmpty()) {
+            val displayedArtists = results.artists.take(
+                if (artistsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
+            )
             item(key = "artists_header") {
                 SearchSectionHeader(title = "Artists", count = results.artists.size)
             }
-            items(results.artists, key = { "artist_${it.artistKey}" }) { artist ->
+            items(displayedArtists, key = { "artist_${it.artistKey}" }) { artist ->
                 SearchArtistRow(
                     artist = artist,
                     query = query,
@@ -137,12 +163,25 @@ fun GroupedSearchContent(
                 )
                 SearchDivider()
             }
+            if (results.artists.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
+                item(key = "artists_more") {
+                    ShowMoreRow(
+                        expanded    = artistsExpanded,
+                        hiddenCount = results.artists.size - displayedArtists.size,
+                        label       = "artists",
+                        onToggle    = { artistsExpanded = !artistsExpanded },
+                    )
+                }
+            }
         }
         if (results.albums.isNotEmpty()) {
+            val displayedAlbums = results.albums.take(
+                if (albumsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
+            )
             item(key = "albums_header") {
                 SearchSectionHeader(title = "Albums", count = results.albums.size)
             }
-            items(results.albums, key = { "album_${it.albumKey}" }) { album ->
+            items(displayedAlbums, key = { "album_${it.albumKey}" }) { album ->
                 SearchAlbumRow(
                     album = album,
                     query = query,
@@ -150,12 +189,25 @@ fun GroupedSearchContent(
                 )
                 SearchDivider()
             }
+            if (results.albums.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
+                item(key = "albums_more") {
+                    ShowMoreRow(
+                        expanded    = albumsExpanded,
+                        hiddenCount = results.albums.size - displayedAlbums.size,
+                        label       = "albums",
+                        onToggle    = { albumsExpanded = !albumsExpanded },
+                    )
+                }
+            }
         }
         if (results.playlists.isNotEmpty()) {
+            val displayedPlaylists = results.playlists.take(
+                if (playlistsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
+            )
             item(key = "playlists_header") {
                 SearchSectionHeader(title = "Playlists", count = results.playlists.size)
             }
-            items(results.playlists, key = { "playlist_${it.id}" }) { playlist ->
+            items(displayedPlaylists, key = { "playlist_${it.id}" }) { playlist ->
                 SearchPlaylistRow(
                     playlist = playlist,
                     query = query,
@@ -163,18 +215,41 @@ fun GroupedSearchContent(
                 )
                 SearchDivider()
             }
+            if (results.playlists.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
+                item(key = "playlists_more") {
+                    ShowMoreRow(
+                        expanded    = playlistsExpanded,
+                        hiddenCount = results.playlists.size - displayedPlaylists.size,
+                        label       = "playlists",
+                        onToggle    = { playlistsExpanded = !playlistsExpanded },
+                    )
+                }
+            }
         }
         if (results.folders.isNotEmpty()) {
+            val displayedFolders = results.folders.take(
+                if (foldersExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
+            )
             item(key = "folders_header") {
                 SearchSectionHeader(title = "Folders", count = results.folders.size)
             }
-            items(results.folders, key = { "folder_${it.folderKey}" }) { folder ->
+            items(displayedFolders, key = { "folder_${it.folderKey}" }) { folder ->
                 SearchFolderRow(
                     folder = folder,
                     query = query,
                     onClick = { onFolderClick(folder.folderKey) },
                 )
                 SearchDivider()
+            }
+            if (results.folders.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
+                item(key = "folders_more") {
+                    ShowMoreRow(
+                        expanded    = foldersExpanded,
+                        hiddenCount = results.folders.size - displayedFolders.size,
+                        label       = "folders",
+                        onToggle    = { foldersExpanded = !foldersExpanded },
+                    )
+                }
             }
         }
     }
@@ -401,6 +476,26 @@ private fun SearchSectionHeader(
 }
 
 @Composable
+private fun ShowMoreRow(
+    expanded: Boolean,
+    hiddenCount: Int,
+    label: String,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val text = if (expanded) "Show fewer" else "Show $hiddenCount more $label"
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    )
+}
+
+@Composable
 private fun SearchDivider() {
     HorizontalDivider(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
@@ -455,19 +550,19 @@ internal fun buildGroupedSearchResults(
     }
     val allFolders = FolderGrouper.groupSongsByFolder(songs)
     return GroupedSearchResults(
-        songs = LibrarySearch.filterSongs(songs, trimmedQuery),
+        songs = LibrarySearch.filterSongs(songs, trimmedQuery).take(EXPANDED_SEARCH_RESULT_LIMIT),
         artists = LibrarySearch.filterArtists(
             artists = ArtistGrouper.group(songs),
             songs = songs,
             query = trimmedQuery,
-        ).take(24),
+        ).take(EXPANDED_SEARCH_RESULT_LIMIT),
         albums = LibrarySearch
             .filterAlbums(AlbumGrouper.group(songs), trimmedQuery)
-            .take(24),
+            .take(EXPANDED_SEARCH_RESULT_LIMIT),
         playlists = LibrarySearch
             .filterPlaylists(playlists, trimmedQuery)
-            .take(24),
-        folders = LibrarySearch.filterFolders(allFolders, trimmedQuery).take(24),
+            .take(EXPANDED_SEARCH_RESULT_LIMIT),
+        folders = LibrarySearch.filterFolders(allFolders, trimmedQuery).take(EXPANDED_SEARCH_RESULT_LIMIT),
     )
 }
 
