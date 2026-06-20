@@ -43,6 +43,7 @@ import com.launchpoint.wavdrop.ui.theme.SlateGrayPrimary
 fun SettingsAppearanceScreen(
     onNavigateBack: () -> Unit,
     onHomeCustomizationClick: () -> Unit,
+    onWrappedAppearanceClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val appIconChoice        by viewModel.appIconChoice.collectAsStateWithLifecycle()
@@ -189,6 +190,17 @@ fun SettingsAppearanceScreen(
                     title    = "Home Sections",
                     subtitle = "Choose which sections appear on your Home screen.",
                     onClick  = onHomeCustomizationClick,
+                )
+            }
+            item { SectionDivider() }
+
+            // ── Wrapped ────────────────────────────────────────────────────────
+            item { SectionHeader("Wrapped") }
+            item {
+                ClickableSettingsRow(
+                    title    = "Wrapped Appearance",
+                    subtitle = "Customize Wrapped backgrounds, milestones, and themes.",
+                    onClick  = onWrappedAppearanceClick,
                 )
             }
             item { SectionDivider() }

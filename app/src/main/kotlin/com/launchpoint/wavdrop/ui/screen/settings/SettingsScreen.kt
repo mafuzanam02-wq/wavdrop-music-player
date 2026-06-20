@@ -26,7 +26,6 @@ fun SettingsScreen(
     onBackupClick: () -> Unit,
     onAppearanceClick: () -> Unit,
     onStatisticsClick: () -> Unit,
-    onWrappedAppearanceClick: () -> Unit,
     onAboutClick: () -> Unit,
 ) {
     Scaffold(
@@ -93,13 +92,6 @@ fun SettingsScreen(
                     title    = "Reports & Insights",
                     subtitle = "Statistics, listening reports, monthly recaps, and Wrapped",
                     onClick  = onStatisticsClick,
-                )
-            }
-            item {
-                ClickableSettingsRow(
-                    title    = "Wrapped Appearance",
-                    subtitle = "Customize Wrapped backgrounds, milestones, and themes.",
-                    onClick  = onWrappedAppearanceClick,
                 )
             }
             item {

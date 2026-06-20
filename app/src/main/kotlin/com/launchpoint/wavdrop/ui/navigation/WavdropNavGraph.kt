@@ -468,7 +468,6 @@ fun WavdropNavGraph(
                 onBackupClick            = { navController.navigate(Screen.SettingsBackup.route) },
                 onAppearanceClick        = { navController.navigate(Screen.SettingsAppearance.route) },
                 onStatisticsClick        = { navController.navigate(Screen.SettingsStatistics.route) },
-                onWrappedAppearanceClick = { navController.navigate(Screen.SettingsWrapped.route) },
                 onAboutClick             = { navController.navigate(Screen.SettingsAbout.route) },
             )
         }
@@ -507,6 +506,7 @@ fun WavdropNavGraph(
             SettingsAppearanceScreen(
                 onNavigateBack           = { navController.popBackStack() },
                 onHomeCustomizationClick = { navController.navigate(Screen.HomeCustomization.route) },
+                onWrappedAppearanceClick = { navController.navigate(Screen.SettingsWrapped.route) },
             )
         }
         composable(Screen.SettingsStatistics.route) {
