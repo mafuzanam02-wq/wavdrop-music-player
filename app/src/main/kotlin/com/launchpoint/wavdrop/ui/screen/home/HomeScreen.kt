@@ -63,6 +63,7 @@ import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.R
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
+import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
@@ -98,6 +99,7 @@ fun HomeScreen(
     onFolderClick: (String) -> Unit = {},
     onPlaylistsClick: () -> Unit = {},
     onSmartCollectionsClick: () -> Unit = {},
+    onSmartCollectionClick: (SmartCollectionType) -> Unit = {},
     onWrappedClick: () -> Unit = {},
     onAlbumClick: (String) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
@@ -224,6 +226,7 @@ fun HomeScreen(
                     onLibraryClick           = onLibraryClick,
                     onPlaylistsClick         = onPlaylistsClick,
                     onSmartCollectionsClick  = onSmartCollectionsClick,
+                    onSmartCollectionClick   = onSmartCollectionClick,
                     onWrappedClick           = onWrappedClick,
                     onReportsAndInsightsClick = onReportsAndInsightsClick,
                     onSongClick              = viewModel::playSong,
@@ -513,6 +516,7 @@ private fun HomeDashboardContent(
     onLibraryClick: () -> Unit,
     onPlaylistsClick: () -> Unit,
     onSmartCollectionsClick: () -> Unit,
+    onSmartCollectionClick: (SmartCollectionType) -> Unit,
     onWrappedClick: () -> Unit,
     onReportsAndInsightsClick: () -> Unit,
     onSongClick: (Song) -> Unit,
@@ -634,7 +638,7 @@ private fun HomeDashboardContent(
                     item { DashboardEmptyText("Smart collections like Favorites and Recently Played will appear as you listen.") }
                 } else {
                     items(dashboard.smartCollections, key = { it.id }) { collection ->
-                        SmartCollectionPreviewRow(collection = collection, onClick = onSmartCollectionsClick)
+                        SmartCollectionPreviewRow(collection = collection, onClick = { onSmartCollectionClick(collection.type) })
                     }
                 }
             }
