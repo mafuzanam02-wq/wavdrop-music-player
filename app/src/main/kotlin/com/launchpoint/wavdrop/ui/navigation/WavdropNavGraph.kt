@@ -208,7 +208,8 @@ fun WavdropNavGraph(
         }
         composable(Screen.Home.route) {
             HomeScreen(
-                onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
+                onSettingsClick     = { navController.navigate(Screen.Settings.route) },
+                onInsightsClick     = { navController.navigatePrimary(Screen.SettingsStatistics.route) },
                 onSongsClick        = { navController.navigatePrimary(Screen.Songs.route) },
                 onLibraryClick      = { navController.navigatePrimary(Screen.Library.route) },
                 onNowPlayingClick   = { navController.navigateNowPlaying() },
@@ -233,7 +234,7 @@ fun WavdropNavGraph(
                 onSmartCollectionsClick = { navController.navigate(Screen.SmartCollections.route) },
                 onHomeClick             = { navController.navigatePrimary(Screen.Home.route) },
                 onNowPlayingClick       = { navController.navigateNowPlaying() },
-                onSettingsClick         = { navController.navigatePrimary(Screen.Settings.route) },
+                onInsightsClick         = { navController.navigatePrimary(Screen.SettingsStatistics.route) },
             )
         }
         composable(Screen.Songs.route) {
@@ -242,7 +243,7 @@ fun WavdropNavGraph(
                 onHomeClick            = { navController.navigatePrimary(Screen.Home.route) },
                 onLibraryClick         = { navController.navigatePrimary(Screen.Library.route) },
                 onNowPlayingClick      = { navController.navigateNowPlaying() },
-                onSettingsClick        = { navController.navigatePrimary(Screen.Settings.route) },
+                onInsightsClick        = { navController.navigatePrimary(Screen.SettingsStatistics.route) },
                 onLibrarySettingsClick = { navController.navigate(Screen.SettingsLibrary.route) },
                 onTrackDetailsClick    = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onFolderClick       = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
@@ -279,7 +280,7 @@ fun WavdropNavGraph(
                 onHomeClick         = { navController.navigatePrimary(Screen.Home.route) },
                 onSongsClick        = { navController.navigatePrimary(Screen.Songs.route) },
                 onLibraryClick      = { navController.navigatePrimary(Screen.Library.route) },
-                onSettingsClick     = { navController.navigatePrimary(Screen.Settings.route) },
+                onInsightsClick     = { navController.navigatePrimary(Screen.SettingsStatistics.route) },
                 onOpenTrackDetails  = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
                 onOpenAlbum         = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
                 onOpenArtist        = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
@@ -457,10 +458,6 @@ fun WavdropNavGraph(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 onNavigateBack         = { navController.popBackStack() },
-                onHomeClick            = { navController.navigatePrimary(Screen.Home.route) },
-                onSongsClick           = { navController.navigatePrimary(Screen.Songs.route) },
-                onLibraryClick         = { navController.navigatePrimary(Screen.Library.route) },
-                onNowPlayingClick      = { navController.navigateNowPlaying() },
                 onPlaybackClick        = { navController.navigate(Screen.SettingsPlayback.route) },
                 onBluetoothClick       = { navController.navigate(Screen.SettingsBluetooth.route) },
                 onLibrarySettingsClick = { navController.navigate(Screen.SettingsLibrary.route) },
@@ -503,12 +500,20 @@ fun WavdropNavGraph(
             )
         }
         composable(Screen.SettingsStatistics.route) {
+            val previousRoute = navController.previousBackStackEntry?.destination?.route
+            val fromSettings = previousRoute == Screen.Settings.route
             SettingsStatisticsScreen(
                 onNavigateBack        = { navController.popBackStack() },
                 onStatisticsClick     = { navController.navigate(Screen.Statistics.route) },
                 onReportsClick        = { navController.navigate(Screen.Reports.route) },
                 onMonthlyReportsClick = { navController.navigate(Screen.MonthlyReports.route) },
                 onWrappedClick        = { navController.navigate(Screen.Wrapped.route) },
+                showBackArrow         = fromSettings,
+                onHomeClick           = { navController.navigatePrimary(Screen.Home.route) },
+                onSongsClick          = { navController.navigatePrimary(Screen.Songs.route) },
+                onLibraryClick        = { navController.navigatePrimary(Screen.Library.route) },
+                onInsightsClick       = {},
+                onNowPlayingClick     = { navController.navigateNowPlaying() },
             )
         }
         composable(Screen.SettingsAbout.route) {

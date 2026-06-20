@@ -15,17 +15,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import com.launchpoint.wavdrop.ui.components.PrimaryDestination
-import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
-    onHomeClick: () -> Unit = {},
-    onSongsClick: () -> Unit = {},
-    onLibraryClick: () -> Unit = {},
-    onNowPlayingClick: () -> Unit = {},
     onPlaybackClick: () -> Unit,
     onBluetoothClick: () -> Unit,
     onLibrarySettingsClick: () -> Unit,
@@ -50,15 +44,6 @@ fun SettingsScreen(
                     containerColor    = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
-            )
-        },
-        bottomBar = {
-            PrimaryNavigationBar(
-                selected        = PrimaryDestination.SETTINGS,
-                onHomeClick     = onHomeClick,
-                onSongsClick    = onSongsClick,
-                onLibraryClick  = onLibraryClick,
-                onSettingsClick = {},
             )
         },
     ) { innerPadding ->

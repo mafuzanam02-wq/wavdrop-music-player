@@ -59,7 +59,7 @@ fun LibraryScreen(
     onSmartCollectionsClick: () -> Unit,
     onHomeClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
-    onSettingsClick: () -> Unit,
+    onInsightsClick: () -> Unit,
     viewModel: LibraryViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
 ) {
@@ -93,7 +93,7 @@ fun LibraryScreen(
                     onHomeClick = onHomeClick,
                     onSongsClick = onSongsClick,
                     onLibraryClick = {},
-                    onSettingsClick = onSettingsClick,
+                    onInsightsClick = onInsightsClick,
                 )
             }
         },

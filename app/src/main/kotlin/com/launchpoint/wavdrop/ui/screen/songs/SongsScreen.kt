@@ -95,7 +95,7 @@ fun SongsScreen(
     onHomeClick: () -> Unit,
     onLibraryClick: () -> Unit,
     onNowPlayingClick: () -> Unit,
-    onSettingsClick: () -> Unit,
+    onInsightsClick: () -> Unit,
     onLibrarySettingsClick: () -> Unit = {},
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
@@ -175,7 +175,7 @@ fun SongsScreen(
                     onHomeClick     = onHomeClick,
                     onSongsClick    = {},
                     onLibraryClick  = onLibraryClick,
-                    onSettingsClick = onSettingsClick,
+                    onInsightsClick = onInsightsClick,
                 )
             }
         },

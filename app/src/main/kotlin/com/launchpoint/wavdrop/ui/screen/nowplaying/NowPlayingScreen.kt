@@ -123,7 +123,7 @@ fun NowPlayingScreen(
     onHomeClick: () -> Unit = {},
     onSongsClick: () -> Unit = {},
     onLibraryClick: () -> Unit = {},
-    onSettingsClick: () -> Unit = {},
+    onInsightsClick: () -> Unit = {},
     onOpenTrackDetails: (Long) -> Unit = {},
     onOpenAlbum: (String) -> Unit = {},
     onOpenArtist: (String) -> Unit = {},
@@ -305,7 +305,7 @@ fun NowPlayingScreen(
                 onHomeClick = onHomeClick,
                 onSongsClick = onSongsClick,
                 onLibraryClick = onLibraryClick,
-                onSettingsClick = onSettingsClick,
+                onInsightsClick = onInsightsClick,
             )
         },
     ) { innerPadding ->

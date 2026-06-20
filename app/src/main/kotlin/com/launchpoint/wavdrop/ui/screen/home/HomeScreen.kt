@@ -89,6 +89,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     onSettingsClick: () -> Unit = {},
+    onInsightsClick: () -> Unit = {},
     onSongsClick: () -> Unit = {},
     onLibraryClick: () -> Unit = {},
     onNowPlayingClick: () -> Unit = {},
@@ -189,7 +190,7 @@ fun HomeScreen(
                     onHomeClick = {},
                     onSongsClick = onSongsClick,
                     onLibraryClick = onLibraryClick,
-                    onSettingsClick = onSettingsClick,
+                    onInsightsClick = onInsightsClick,
                 )
             }
         },

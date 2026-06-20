@@ -2,9 +2,9 @@ package com.launchpoint.wavdrop.ui.components
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -15,7 +15,7 @@ enum class PrimaryDestination {
     HOME,
     SONGS,
     LIBRARY,
-    SETTINGS,
+    INSIGHTS,
 }
 
 @Composable
@@ -24,7 +24,7 @@ fun PrimaryNavigationBar(
     onHomeClick: () -> Unit,
     onSongsClick: () -> Unit,
     onLibraryClick: () -> Unit,
-    onSettingsClick: () -> Unit,
+    onInsightsClick: () -> Unit,
 ) {
     NavigationBar {
         NavigationBarItem(
@@ -46,10 +46,10 @@ fun PrimaryNavigationBar(
             label = { Text("Library") },
         )
         NavigationBarItem(
-            selected = selected == PrimaryDestination.SETTINGS,
-            onClick = onSettingsClick,
-            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-            label = { Text("Settings") },
+            selected = selected == PrimaryDestination.INSIGHTS,
+            onClick = onInsightsClick,
+            icon = { Icon(Icons.Default.Insights, contentDescription = null) },
+            label = { Text("Insights") },
         )
     }
 }

@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.ui.screen.settings
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -23,6 +24,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
+import com.launchpoint.wavdrop.ui.components.MiniPlayer
+import com.launchpoint.wavdrop.ui.components.PrimaryDestination
+import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
+import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,23 +37,33 @@ fun SettingsStatisticsScreen(
     onReportsClick: () -> Unit,
     onMonthlyReportsClick: () -> Unit,
     onWrappedClick: () -> Unit,
+    showBackArrow: Boolean = true,
+    onHomeClick: () -> Unit = {},
+    onSongsClick: () -> Unit = {},
+    onLibraryClick: () -> Unit = {},
+    onInsightsClick: () -> Unit = {},
+    onNowPlayingClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
+    playbackVm: PlaybackControlsViewModel = hiltViewModel(),
 ) {
     val showMilestoneCelebrations by viewModel.showMilestoneCelebrations.collectAsStateWithLifecycle()
     val wrappedUseArtworkBackgrounds by viewModel.wrappedUseArtworkBackgrounds.collectAsStateWithLifecycle()
     val wrappedBackgroundIntensity by viewModel.wrappedBackgroundIntensity.collectAsStateWithLifecycle()
     val wrappedFallbackTheme by viewModel.wrappedFallbackTheme.collectAsStateWithLifecycle()
+    val nowPlaying by playbackVm.nowPlayingState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Reports & Insights") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                        )
+                    if (showBackArrow) {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(
+                                imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -56,6 +71,27 @@ fun SettingsStatisticsScreen(
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
             )
+        },
+        bottomBar = {
+            Column {
+                MiniPlayer(
+                    nowPlaying                 = nowPlaying,
+                    onOpenNowPlaying           = onNowPlayingClick,
+                    onTogglePlayPause          = playbackVm::togglePlayPause,
+                    onPrevious                 = playbackVm::skipToPrevious,
+                    onNext                     = playbackVm::skipToNext,
+                    onToggleShuffle            = playbackVm::toggleShuffle,
+                    onCycleRepeatMode          = playbackVm::cycleRepeatMode,
+                    applyNavigationBarsPadding = false,
+                )
+                PrimaryNavigationBar(
+                    selected        = PrimaryDestination.INSIGHTS,
+                    onHomeClick     = onHomeClick,
+                    onSongsClick    = onSongsClick,
+                    onLibraryClick  = onLibraryClick,
+                    onInsightsClick = onInsightsClick,
+                )
+            }
         },
     ) { innerPadding ->
         LazyColumn(
