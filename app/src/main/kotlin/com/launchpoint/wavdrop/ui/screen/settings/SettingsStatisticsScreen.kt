@@ -131,15 +131,15 @@ fun SettingsStatisticsScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     InsightsDestinationCard(
-                        title    = "Statistics",
-                        subtitle = "Plays, listening time, streaks",
+                        title    = "Overview",
+                        subtitle = "Totals, streaks, and listening history",
                         icon     = Icons.Default.Insights,
                         onClick  = onStatisticsClick,
                         modifier = Modifier.weight(1f),
                     )
                     InsightsDestinationCard(
-                        title    = "Reports",
-                        subtitle = "Top songs, artists, albums",
+                        title    = "Top Lists",
+                        subtitle = "Ranked songs, artists, and albums",
                         icon     = Icons.Default.History,
                         onClick  = onReportsClick,
                         modifier = Modifier.weight(1f),
