@@ -24,6 +24,16 @@ object WrappedBuilder {
             .distinct()
             .sortedDescending()
 
+    fun availableMonths(
+        events: List<TrackListenEventEntity>,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): List<MonthYear> =
+        events
+            .filter { it.eventType == TrackListenEventEntity.TYPE_PLAY || it.eventType == TrackListenEventEntity.TYPE_SKIP }
+            .map { MonthYear.fromEpochMs(it.occurredAt, zone) }
+            .distinct()
+            .sortedDescending()
+
     fun buildYear(
         year: Int,
         songs: List<Song>,

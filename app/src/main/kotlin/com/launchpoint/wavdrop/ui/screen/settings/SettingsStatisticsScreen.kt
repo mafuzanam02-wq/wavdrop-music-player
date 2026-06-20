@@ -87,7 +87,7 @@ fun SettingsStatisticsScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Wrapped",
-                    subtitle = "Review your year in music.",
+                    subtitle = "Review monthly and yearly listening recaps.",
                     onClick  = onWrappedClick,
                 )
             }
@@ -96,7 +96,7 @@ fun SettingsStatisticsScreen(
             item {
                 ToggleSettingsRow(
                     title           = "Show milestone celebrations",
-                    subtitle        = "Display a milestone summary inside your yearly Wrapped recap.",
+                    subtitle        = "Display milestone summaries inside yearly Wrapped recaps.",
                     checked         = showMilestoneCelebrations,
                     onCheckedChange = viewModel::setShowMilestoneCelebrations,
                 )

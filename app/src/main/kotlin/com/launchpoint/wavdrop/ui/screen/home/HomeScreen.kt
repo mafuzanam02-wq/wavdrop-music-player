@@ -722,7 +722,7 @@ private fun WrappedPreviewCard(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = wrapped.year.toString(),
+                        text = wrapped.period.displayLabel,
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -740,7 +740,7 @@ private fun WrappedPreviewCard(
                 }
             }
             Text(
-                text = "View your year in music",
+                text = "View your listening recap",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
                 modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp),

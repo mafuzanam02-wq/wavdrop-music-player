@@ -44,6 +44,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -73,8 +76,11 @@ import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +88,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
+import com.launchpoint.wavdrop.data.model.AlbumReportSummary
+import com.launchpoint.wavdrop.data.model.ArtistReportSummary
+import com.launchpoint.wavdrop.data.model.MonthYear
+import com.launchpoint.wavdrop.data.model.WrappedPeriod
+import com.launchpoint.wavdrop.data.model.WrappedScope
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
@@ -96,6 +107,84 @@ import java.util.Locale
 // Base page count: Intro + 8 existing pages (Overview, Streaks, Patterns, Top Track/Artist/Album,
 // Most Skipped, Recent Plays). Milestone page appended conditionally.
 private const val WRAPPED_BASE_COUNT = 9
+
+internal data class WrappedPeriodCopy(
+    val shortLabel: String,
+    val displayLabel: String,
+    val thisPeriod: String,
+    val duringThisPeriod: String,
+) {
+    val inReviewTitle: String get() = "$displayLabel in Review"
+}
+
+internal fun WrappedPeriod.toWrappedPeriodCopy(): WrappedPeriodCopy = when (this) {
+    is WrappedPeriod.Monthly -> WrappedPeriodCopy(
+        shortLabel = shortLabel,
+        displayLabel = displayLabel,
+        thisPeriod = "this month",
+        duringThisPeriod = "during this month",
+    )
+    is WrappedPeriod.Yearly -> WrappedPeriodCopy(
+        shortLabel = shortLabel,
+        displayLabel = displayLabel,
+        thisPeriod = "this year",
+        duringThisPeriod = "during this year",
+    )
+}
+
+internal fun shouldShowWrappedMilestonePage(
+    scope: WrappedScope,
+    preferenceEnabled: Boolean,
+    hasMilestones: Boolean,
+): Boolean =
+    scope == WrappedScope.YEARLY && preferenceEnabled && hasMilestones
+
+internal fun <T> wrappedTopThree(items: List<T>): List<T> = items.take(3)
+
+internal enum class WrappedRankedKind(
+    val singular: String,
+    val plural: String,
+    val emptySubject: String,
+) {
+    TRACK("track", "tracks", "played tracks"),
+    ARTIST("artist", "artists", "artists"),
+    ALBUM("album", "albums", "albums"),
+}
+
+internal fun wrappedRankedListNote(
+    kind: WrappedRankedKind,
+    itemCount: Int,
+    periodCopy: WrappedPeriodCopy,
+): String? = when (itemCount) {
+    0 -> "No ${kind.emptySubject} ranked ${periodCopy.thisPeriod} yet."
+    1 -> "Only one ${kind.singular} ranked ${periodCopy.thisPeriod}."
+    2 -> "Only two ${kind.plural} ranked ${periodCopy.thisPeriod}."
+    else -> null
+}
+
+internal fun wrappedSkipRatePercent(totalPlays: Int, totalSkips: Int): Int {
+    val activityCount = totalPlays.coerceAtLeast(0) + totalSkips.coerceAtLeast(0)
+    if (activityCount == 0) return 0
+    return ((totalSkips.coerceAtLeast(0).toDouble() / activityCount) * 100.0)
+        .roundToInt()
+}
+
+internal fun wrappedPageCount(
+    scope: WrappedScope,
+    milestonePreferenceEnabled: Boolean,
+    hasMilestones: Boolean,
+): Int =
+    WRAPPED_BASE_COUNT + if (
+        shouldShowWrappedMilestonePage(
+            scope = scope,
+            preferenceEnabled = milestonePreferenceEnabled,
+            hasMilestones = hasMilestones,
+        )
+    ) {
+        1
+    } else {
+        0
+    }
 
 private data class WrappedVisualSettings(
     val useArtworkBackgrounds: Boolean,
@@ -209,7 +298,9 @@ fun WrappedScreen(
             )
             is WrappedUiState.Content -> WrappedContent(
                 state = state,
+                onSelectScope = viewModel::selectScope,
                 onSelectYear = viewModel::selectYear,
+                onSelectMonth = viewModel::selectMonth,
                 onTrackDetailsClick = onTrackDetailsClick,
                 onArtistClick = onArtistClick,
                 onAlbumClick = onAlbumClick,
@@ -235,14 +326,14 @@ private fun EmptyContent(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "Your year in music starts here.",
+                text = "Your Wrapped starts here.",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = "Play music in Wavdrop and your private yearly recap will appear here.",
+                text = "Play music in Wavdrop to build private monthly and yearly recaps.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -258,7 +349,9 @@ private fun EmptyContent(
 @Composable
 private fun WrappedContent(
     state: WrappedUiState.Content,
+    onSelectScope: (WrappedScope) -> Unit,
     onSelectYear: (Int) -> Unit,
+    onSelectMonth: (MonthYear) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onArtistClick: (String) -> Unit,
     onAlbumClick: (String) -> Unit,
@@ -274,47 +367,72 @@ private fun WrappedContent(
         ) < 0.1f
     }
 
-    val years = state.availableYears
-    val selectedIndex = years.indexOf(state.selectedYear)
-    val wrapped = state.wrapped
+    val wrapped = state.summary
+    val periodCopy = state.currentPeriod.toWrappedPeriodCopy()
     val visualSettings = WrappedVisualSettings(
         useArtworkBackgrounds = state.useArtworkBackgrounds,
         backgroundIntensity = state.backgroundIntensity,
         fallbackTheme = state.fallbackTheme,
     )
 
-    val milestones = remember(wrapped) { computeMilestones(wrapped) }
-    val showMilestonePage = state.showMilestoneCelebrations && milestones.isNotEmpty()
-    val pageCount = if (showMilestonePage) WRAPPED_BASE_COUNT + 1 else WRAPPED_BASE_COUNT
+    val isYearly = state.selectedScope == WrappedScope.YEARLY
+    val milestones = remember(wrapped, isYearly) {
+        if (isYearly) computeMilestones(wrapped) else emptyList()
+    }
+    val showMilestonePage = shouldShowWrappedMilestonePage(
+        scope = state.selectedScope,
+        preferenceEnabled = state.showMilestoneCelebrations,
+        hasMilestones = milestones.isNotEmpty(),
+    )
+    val pageCount = wrappedPageCount(
+        scope = state.selectedScope,
+        milestonePreferenceEnabled = state.showMilestoneCelebrations,
+        hasMilestones = milestones.isNotEmpty(),
+    )
 
     val pagerState = rememberPagerState(pageCount = { pageCount })
     var pagerBoundsInWindow by remember { mutableStateOf<AndroidRect?>(null) }
 
-    LaunchedEffect(pageCount) {
-    if (pageCount > 0 && pagerState.currentPage >= pageCount) {
-        pagerState.scrollToPage(pageCount - 1)
+    LaunchedEffect(state.currentPeriod) {
+        pagerState.scrollToPage(0)
     }
-}
+
+    LaunchedEffect(pageCount) {
+        if (pageCount > 0 && pagerState.currentPage >= pageCount) {
+            pagerState.scrollToPage(pageCount - 1)
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
-        YearSelector(
-            year = state.selectedYear,
-            availableYears = years,
-            hasPrevious = selectedIndex >= 0 && selectedIndex < years.lastIndex,
-            hasNext = selectedIndex > 0,
-            onSelectYear = onSelectYear,
-            onPrevious = {
-                if (selectedIndex >= 0 && selectedIndex < years.lastIndex)
-                    onSelectYear(years[selectedIndex + 1])
-            },
-            onNext = {
-                if (selectedIndex > 0) onSelectYear(years[selectedIndex - 1])
-            },
+        WrappedScopeSelector(
+            selectedScope = state.selectedScope,
+            onSelectScope = onSelectScope,
+        )
+        when (state.selectedScope) {
+            WrappedScope.MONTHLY -> WrappedMonthSelector(
+                month = state.selectedMonth,
+                availableMonths = state.availableMonths,
+                accessibilityLabel = state.currentPeriod.accessibilityLabel,
+                onSelectMonth = onSelectMonth,
+            )
+            WrappedScope.YEARLY -> WrappedYearSelector(
+                year = state.selectedYear,
+                availableYears = state.availableYears,
+                accessibilityLabel = state.currentPeriod.accessibilityLabel,
+                onSelectYear = onSelectYear,
+            )
+        }
+
+        Text(
+            text = "Wrapped is based on listening activity recorded by Wavdrop on this device. Imported totals may appear in Statistics, but they are not included here.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
 
         if (wrapped.emptyState.isEmpty) {
             Text(
-                text = "No listening summary found for ${wrapped.year}. Play current library songs to build a fresh yearly summary.",
+                text = "No listening summary found for ${state.currentPeriod.displayLabel}. Play current library songs to build this recap.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
                 modifier = Modifier
@@ -340,16 +458,24 @@ private fun WrappedContent(
         ) { page ->
             when (page) {
                 0    -> IntroPage(wrapped, visualSettings)
-                1    -> OverviewPage(wrapped)
-                2    -> StreaksPage(wrapped)
-                3    -> PatternsPage(wrapped, visualSettings)
-                4    -> TopTrackPage(wrapped, visualSettings, onTrackDetailsClick)
-                5    -> TopArtistPage(wrapped, visualSettings, onArtistClick)
-                6    -> TopAlbumPage(wrapped, visualSettings, onAlbumClick)
-                7    -> MostSkippedPage(wrapped, visualSettings, onTrackDetailsClick)
-                8    -> RecentPlaysPage(wrapped, onTrackDetailsClick)
-                else -> if (showMilestonePage) MilestonePage(milestones, wrapped.year, visualSettings, reduceMotion)
-                        else RecentPlaysPage(wrapped, onTrackDetailsClick)
+                1    -> OverviewPage(wrapped, periodCopy)
+                2    -> StreaksPage(wrapped, periodCopy)
+                3    -> PatternsPage(wrapped, periodCopy, visualSettings)
+                4    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
+                6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
+                7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                8    -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                else -> if (showMilestonePage) {
+                    MilestonePage(
+                        milestones = milestones,
+                        periodLabel = state.currentPeriod.displayLabel,
+                        visualSettings = visualSettings,
+                        reduceMotion = reduceMotion,
+                    )
+                } else {
+                    RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                }
             }
         }
 
@@ -384,18 +510,43 @@ private fun WrappedContent(
 // ── Year selector ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun YearSelector(
+private fun WrappedScopeSelector(
+    selectedScope: WrappedScope,
+    onSelectScope: (WrappedScope) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SingleChoiceSegmentedButtonRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        WrappedScope.entries.forEachIndexed { index, scope ->
+            SegmentedButton(
+                selected = selectedScope == scope,
+                onClick = { onSelectScope(scope) },
+                shape = SegmentedButtonDefaults.itemShape(
+                    index = index,
+                    count = WrappedScope.entries.size,
+                ),
+                label = { Text(scope.displayName) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun WrappedYearSelector(
     year: Int,
     availableYears: List<Int>,
-    hasPrevious: Boolean,
-    hasNext: Boolean,
+    accessibilityLabel: String,
     onSelectYear: (Int) -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val canSelectYear = availableYears.size > 1
+    val selectedIndex = availableYears.indexOf(year)
+    val hasPrevious = selectedIndex >= 0 && selectedIndex < availableYears.lastIndex
+    val hasNext = selectedIndex > 0
 
     Row(
         modifier = modifier
@@ -404,7 +555,10 @@ private fun YearSelector(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        IconButton(onClick = onPrevious, enabled = hasPrevious) {
+        IconButton(
+            onClick = { onSelectYear(availableYears[selectedIndex + 1]) },
+            enabled = hasPrevious,
+        ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                 contentDescription = "Previous year",
@@ -416,6 +570,9 @@ private fun YearSelector(
             TextButton(
                 onClick = { expanded = true },
                 enabled = canSelectYear,
+                modifier = Modifier.semantics {
+                    contentDescription = accessibilityLabel
+                },
             ) {
                 Text(
                     text = year.toString(),
@@ -444,10 +601,94 @@ private fun YearSelector(
                 }
             }
         }
-        IconButton(onClick = onNext, enabled = hasNext) {
+        IconButton(
+            onClick = { onSelectYear(availableYears[selectedIndex - 1]) },
+            enabled = hasNext,
+        ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Next year",
+                tint = if (hasNext) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun WrappedMonthSelector(
+    month: MonthYear,
+    availableMonths: List<MonthYear>,
+    accessibilityLabel: String,
+    onSelectMonth: (MonthYear) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val canSelectMonth = availableMonths.size > 1
+    val selectedIndex = availableMonths.indexOf(month)
+    val hasPrevious = selectedIndex >= 0 && selectedIndex < availableMonths.lastIndex
+    val hasNext = selectedIndex > 0
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        IconButton(
+            onClick = { onSelectMonth(availableMonths[selectedIndex + 1]) },
+            enabled = hasPrevious,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = "Previous month",
+                tint = if (hasPrevious) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+            )
+        }
+        Box {
+            TextButton(
+                onClick = { expanded = true },
+                enabled = canSelectMonth,
+                modifier = Modifier.semantics {
+                    contentDescription = accessibilityLabel
+                },
+            ) {
+                Text(
+                    text = month.toDisplayLabel(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (canSelectMonth) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                    },
+                )
+            }
+            DropdownMenu(
+                expanded = expanded && canSelectMonth,
+                onDismissRequest = { expanded = false },
+            ) {
+                availableMonths.forEach { availableMonth ->
+                    DropdownMenuItem(
+                        text = { Text(availableMonth.toDisplayLabel()) },
+                        onClick = {
+                            expanded = false
+                            onSelectMonth(availableMonth)
+                        },
+                        enabled = availableMonth != month,
+                    )
+                }
+            }
+        }
+        IconButton(
+            onClick = { onSelectMonth(availableMonths[selectedIndex - 1]) },
+            enabled = hasNext,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Next month",
                 tint = if (hasNext) MaterialTheme.colorScheme.onSurface
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
             )
@@ -933,7 +1174,7 @@ private fun IntroPage(
             ) {
                 Column {
                     Text(
-                        text = wrapped.year.toString(),
+                        text = wrapped.period.shortLabel,
                         style = MaterialTheme.typography.displayMedium,
                         fontWeight = FontWeight.Bold,
                         color = onColor,
@@ -965,8 +1206,12 @@ private fun IntroPage(
 }
 
 @Composable
-private fun OverviewPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
-    InsightCard(label = "${wrapped.year} in Review", modifier = modifier) {
+private fun OverviewPage(
+    wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
+    modifier: Modifier = Modifier,
+) {
+    InsightCard(label = periodCopy.inReviewTitle, modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -992,10 +1237,17 @@ private fun OverviewPage(wrapped: WrappedSummary, modifier: Modifier = Modifier)
 }
 
 @Composable
-private fun StreaksPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) {
-    InsightCard(label = "Listening Streaks", modifier = modifier) {
+private fun StreaksPage(
+    wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
+    modifier: Modifier = Modifier,
+) {
+    InsightCard(
+        label = "Listening Streaks · ${periodCopy.displayLabel}",
+        modifier = modifier,
+    ) {
         if (wrapped.longestStreak == 0) {
-            NoDataText("No consecutive listening days recorded for this year. Play on multiple days to build a streak.")
+            NoDataText("No consecutive listening days recorded ${periodCopy.thisPeriod}. Play on multiple days to build a streak.")
         } else {
             BigStat(
                 value = formatStreak(wrapped.longestStreak),
@@ -1010,18 +1262,19 @@ private fun StreaksPage(wrapped: WrappedSummary, modifier: Modifier = Modifier) 
 @Composable
 private fun PatternsPage(
     wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     modifier: Modifier = Modifier,
 ) {
     WrappedDecorativeCard(
-        label = "Listening Patterns",
+        label = "Listening Patterns · ${periodCopy.displayLabel}",
         motif = WrappedDecorativeMotif.Patterns,
         visualSettings = visualSettings,
         modifier = modifier,
     ) {
         val hasData = wrapped.mostActiveDayOfWeek != null || wrapped.mostActiveHour != null
         if (!hasData) {
-            NoDataText("No listening patterns for this year. Play music across days or hours to reveal patterns.")
+            NoDataText("No listening patterns for ${periodCopy.thisPeriod}. Play music across days or hours to reveal patterns.")
         } else {
             wrapped.mostActiveDayOfWeek?.let { dow ->
                 BigStat(value = formatDayOfWeek(dow), label = "Most active day")
@@ -1043,235 +1296,316 @@ private fun PatternsPage(
 }
 
 @Composable
-private fun TopTrackPage(
+private fun TopTracksPage(
     wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val song = wrapped.mostPlayedSong
-    WrappedArtworkCard(
-        label = "Top Track",
-        artworkUri = ArtworkResolver.albumArtworkUri(song?.song?.albumId),
+    val tracks = wrappedTopThree(wrapped.topSongs)
+    RankedWrappedCard(
+        label = "Top Tracks · ${periodCopy.shortLabel}",
+        supportingCopy = "The tracks you returned to most ${periodCopy.thisPeriod}.",
         visualSettings = visualSettings,
         modifier = modifier,
-    ) { artworkLoaded ->
-        if (song == null) {
-            NoDataText("No tracks played this year yet. Play music in Wavdrop to choose a top track.")
-        } else {
-            ArtworkImage(
-                artworkUri = ArtworkResolver.albumArtworkUri(song.song.albumId),
-                contentDescription = null,
-                modifier = Modifier.size(88.dp),
-                placeholderIcon = Icons.Default.MusicNote,
-            )
-            Spacer(Modifier.height(16.dp))
-            FeaturedTrack(
-                song = song,
-                subline = "${song.playCount} plays",
-                caption = "Your most-played track of ${wrapped.year}",
-                onDetailsClick = { onTrackDetailsClick(song.song.id) },
-                onArtwork = artworkLoaded,
+        lowDataNote = wrappedRankedListNote(
+            kind = WrappedRankedKind.TRACK,
+            itemCount = tracks.size,
+            periodCopy = periodCopy,
+        ),
+    ) {
+        tracks.forEachIndexed { index, track ->
+            RankedTrackRow(
+                rank = index + 1,
+                track = track,
+                onClick = { onTrackDetailsClick(track.song.id) },
             )
         }
     }
 }
 
 @Composable
-private fun TopArtistPage(
+private fun TopArtistsPage(
     wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     onArtistClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val artist = wrapped.mostPlayedArtist
-    // Resolve representative artwork: first recently-played song by this artist
-    val artworkUri = remember(wrapped) {
-        if (artist == null) return@remember null
-        wrapped.recentlyPlayed
-            .firstOrNull { it.song.artist.trim() == artist.artistKey }
-            ?.let { ArtworkResolver.albumArtworkUri(it.song.albumId) }
-            ?: if (wrapped.mostPlayedSong?.song?.artist?.trim() == artist.artistKey)
-                ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId) else null
-    }
-    WrappedArtworkCard(
-        label = "Top Artist",
-        artworkUri = artworkUri,
+    val artists = wrappedTopThree(wrapped.topArtists)
+    RankedWrappedCard(
+        label = "Top Artists · ${periodCopy.shortLabel}",
+        supportingCopy = "The artists that shaped your listening ${periodCopy.thisPeriod}.",
         visualSettings = visualSettings,
         modifier = modifier,
-    ) { artworkLoaded ->
-        if (artist == null) {
-            NoDataText("No artists played this year yet. Play music in Wavdrop to choose a top artist.")
-        } else {
-            val titleColor   = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.onSurface
-            val accentColor  = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary
-            val captionColor = if (artworkLoaded) Color.White.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-            Text(
-                text = artist.artistKey,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = titleColor,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "${artist.playCount} plays",
-                style = MaterialTheme.typography.titleMedium,
-                color = accentColor,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "You couldn't stop listening to ${artist.artistKey} this year",
-                style = MaterialTheme.typography.bodySmall,
-                color = captionColor,
-            )
-            Spacer(Modifier.height(16.dp))
-            TextButton(
+        lowDataNote = wrappedRankedListNote(
+            kind = WrappedRankedKind.ARTIST,
+            itemCount = artists.size,
+            periodCopy = periodCopy,
+        ),
+    ) {
+        artists.forEachIndexed { index, artist ->
+            RankedArtistRow(
+                rank = index + 1,
+                artist = artist,
                 onClick = { onArtistClick(artist.artistKey) },
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                Text("View artist")
-            }
+            )
         }
     }
 }
 
 @Composable
-private fun TopAlbumPage(
+private fun TopAlbumsPage(
     wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     onAlbumClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val album = wrapped.mostPlayedAlbum
-    // albumKey == song.album.trim() — match via recentlyPlayed, fall back to mostPlayedSong
-    val artworkUri = remember(wrapped) {
-        if (album == null) return@remember null
-        wrapped.recentlyPlayed
-            .firstOrNull { it.song.album.trim() == album.albumKey }
-            ?.let { ArtworkResolver.albumArtworkUri(it.song.albumId) }
-            ?: ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId)
-    }
-    WrappedArtworkCard(
-        label = "Top Album",
-        artworkUri = artworkUri,
+    val albums = wrappedTopThree(wrapped.topAlbums)
+    RankedWrappedCard(
+        label = "Top Albums · ${periodCopy.shortLabel}",
+        supportingCopy = "The albums in your heaviest rotation ${periodCopy.thisPeriod}.",
         visualSettings = visualSettings,
         modifier = modifier,
-    ) { artworkLoaded ->
-        if (album == null) {
-            NoDataText("No albums played this year yet. Play music in Wavdrop to choose a top album.")
-        } else {
-            val titleColor   = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.onSurface
-            val subColor     = if (artworkLoaded) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            val accentColor  = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary
-            ArtworkImage(
-                artworkUri = artworkUri,
-                contentDescription = null,
-                modifier = Modifier.size(80.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = album.albumKey,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = titleColor,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = album.artist,
-                style = MaterialTheme.typography.bodyLarge,
-                color = subColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "${album.playCount} plays",
-                style = MaterialTheme.typography.titleMedium,
-                color = accentColor,
-            )
-            Spacer(Modifier.height(16.dp))
-            TextButton(
+        lowDataNote = wrappedRankedListNote(
+            kind = WrappedRankedKind.ALBUM,
+            itemCount = albums.size,
+            periodCopy = periodCopy,
+        ),
+    ) {
+        albums.forEachIndexed { index, album ->
+            RankedAlbumRow(
+                rank = index + 1,
+                album = album,
                 onClick = { onAlbumClick(album.albumKey) },
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                Text("View album")
-            }
+            )
         }
     }
 }
 
 @Composable
-private fun MostSkippedPage(
+private fun SkipHabitsPage(
     wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val track = wrapped.mostSkippedTrack
-    WrappedArtworkCard(
-        label = "Most Skipped",
-        artworkUri = ArtworkResolver.albumArtworkUri(track?.song?.albumId),
+    WrappedDecorativeCard(
+        label = "Skip Habits · ${periodCopy.shortLabel}",
+        motif = WrappedDecorativeMotif.Patterns,
         visualSettings = visualSettings,
         modifier = modifier,
-    ) { artworkLoaded ->
+    ) {
+        Text(
+            text = "How often you moved on ${periodCopy.thisPeriod}.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.height(20.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            BigStat(
+                value = wrapped.totalSkipCount.toString(),
+                label = "Total skips",
+                modifier = Modifier.weight(1f),
+            )
+            BigStat(
+                value = "${wrappedSkipRatePercent(wrapped.totalPlayCount, wrapped.totalSkipCount)}%",
+                label = "Skip rate",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(20.dp))
         if (track == null) {
-            NoDataText("No skips recorded for this year. Skips during this year will appear here.")
+            NoDataText("No skips recorded ${periodCopy.thisPeriod}.")
         } else {
-            val titleColor   = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.onSurface
-            val subColor     = if (artworkLoaded) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            val accentColor  = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary
             Text(
-                text = track.song.displayTitle,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = titleColor,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
+                text = "Most skipped track",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = track.song.displayArtist.ifBlank { "Unknown Artist" },
-                style = MaterialTheme.typography.bodyLarge,
-                color = subColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "${track.skipCount} skips",
-                style = MaterialTheme.typography.titleMedium,
-                color = accentColor,
-            )
-            Spacer(Modifier.height(16.dp))
-            TextButton(
+            RankedTrackRow(
+                rank = null,
+                track = track,
+                metric = "${track.skipCount} skips",
                 onClick = { onTrackDetailsClick(track.song.id) },
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = if (artworkLoaded) Color.White else MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                Text("View track details")
-            }
+            )
         }
     }
 }
 
 @Composable
+private fun RankedWrappedCard(
+    label: String,
+    supportingCopy: String,
+    visualSettings: WrappedVisualSettings,
+    lowDataNote: String?,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    WrappedDecorativeCard(
+        label = label,
+        motif = WrappedDecorativeMotif.Patterns,
+        visualSettings = visualSettings,
+        modifier = modifier,
+    ) {
+        Text(
+            text = supportingCopy,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.height(14.dp))
+        content()
+        lowDataNote?.let { note ->
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RankedTrackRow(
+    rank: Int?,
+    track: SongStatsSummary,
+    metric: String = "${track.playCount} plays",
+    onClick: () -> Unit,
+) {
+    RankedResultRow(
+        rank = rank,
+        title = track.song.displayTitle,
+        subtitle = track.song.displayArtist.ifBlank { "Unknown Artist" },
+        metric = metric,
+        onClick = onClick,
+        artwork = {
+            ArtworkImage(
+                artworkUri = ArtworkResolver.albumArtworkUri(track.song.albumId),
+                contentDescription = null,
+                modifier = Modifier.size(42.dp),
+                placeholderIcon = Icons.Default.MusicNote,
+            )
+        },
+    )
+}
+
+@Composable
+private fun RankedArtistRow(
+    rank: Int,
+    artist: ArtistReportSummary,
+    onClick: () -> Unit,
+) {
+    RankedResultRow(
+        rank = rank,
+        title = artist.artistKey,
+        subtitle = "${artist.songCount} songs · ${artist.albumCount} albums",
+        metric = "${artist.playCount} plays",
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun RankedAlbumRow(
+    rank: Int,
+    album: AlbumReportSummary,
+    onClick: () -> Unit,
+) {
+    RankedResultRow(
+        rank = rank,
+        title = album.albumKey,
+        subtitle = album.artist.ifBlank { "Unknown Artist" },
+        metric = "${album.playCount} plays",
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun RankedResultRow(
+    rank: Int?,
+    title: String,
+    subtitle: String,
+    metric: String,
+    onClick: () -> Unit,
+    artwork: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        rank?.let {
+            Text(
+                text = it.toString(),
+                style = if (it == 1) {
+                    MaterialTheme.typography.titleLarge
+                } else {
+                    MaterialTheme.typography.titleMedium
+                },
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.width(22.dp),
+                textAlign = TextAlign.Center,
+            )
+        }
+        artwork?.invoke()
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = if (rank == 1) {
+                    MaterialTheme.typography.titleMedium
+                } else {
+                    MaterialTheme.typography.bodyLarge
+                },
+                fontWeight = if (rank == 1) FontWeight.SemiBold else FontWeight.Normal,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = metric,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+        )
+    }
+    HorizontalDivider(
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+        thickness = 0.5.dp,
+    )
+}
+
+@Composable
 private fun RecentPlaysPage(
     wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
     onTrackDetailsClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    InsightCard(label = "Recent Plays", modifier = modifier) {
+    InsightCard(
+        label = "Recent Plays · ${periodCopy.displayLabel}",
+        modifier = modifier,
+    ) {
         if (wrapped.recentlyPlayed.isEmpty()) {
-            NoDataText("No recent plays for this year. Play music during this year to fill this list.")
+            NoDataText("No recent plays for ${periodCopy.thisPeriod}. Play music ${periodCopy.duringThisPeriod} to fill this list.")
         } else {
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(
@@ -1327,19 +1661,19 @@ private fun RecentPlaysPage(
 @Composable
 private fun MilestonePage(
     milestones: List<WrappedMilestone>,
-    year: Int,
+    periodLabel: String,
     visualSettings: WrappedVisualSettings,
     @Suppress("UNUSED_PARAMETER") reduceMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
     WrappedDecorativeCard(
-        label = "Milestones",
+        label = "Milestones · $periodLabel",
         motif = WrappedDecorativeMotif.Milestones,
         visualSettings = visualSettings,
         modifier = modifier,
     ) {
         Text(
-            text = "Moments from your $year.",
+            text = "Moments from your $periodLabel.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )

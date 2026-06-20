@@ -2,6 +2,9 @@ package com.launchpoint.wavdrop.ui.screen.wrapped
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.model.MonthYear
+import com.launchpoint.wavdrop.data.model.WrappedPeriod
+import com.launchpoint.wavdrop.data.model.WrappedScope
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
@@ -11,6 +14,7 @@ import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,9 +25,13 @@ sealed interface WrappedUiState {
     data object Loading : WrappedUiState
     data object Empty : WrappedUiState
     data class Content(
+        val selectedScope: WrappedScope,
         val availableYears: List<Int>,
         val selectedYear: Int,
-        val wrapped: WrappedSummary,
+        val availableMonths: List<MonthYear>,
+        val selectedMonth: MonthYear,
+        val currentPeriod: WrappedPeriod,
+        val summary: WrappedSummary,
         val showMilestoneCelebrations: Boolean,
         val useArtworkBackgrounds: Boolean,
         val backgroundIntensity: WrappedBackgroundIntensity,
@@ -38,7 +46,21 @@ class WrappedViewModel @Inject constructor(
     appSettingsRepository: AppSettingsRepository,
 ) : ViewModel() {
 
+    private val zone = ZoneId.systemDefault()
+    private val selectedScope = MutableStateFlow(WrappedScope.YEARLY)
     private val selectedYear = MutableStateFlow<Int?>(null)
+    private val selectedMonth = MutableStateFlow<MonthYear?>(null)
+    private val selection = combine(
+        selectedScope,
+        selectedYear,
+        selectedMonth,
+    ) { scope, year, month ->
+        WrappedSelectionRequest(
+            scope = scope,
+            year = year,
+            month = month,
+        )
+    }
     private val visualPreferences = combine(
         appSettingsRepository.wrappedUseArtworkBackgrounds,
         appSettingsRepository.wrappedBackgroundIntensity,
@@ -54,19 +76,28 @@ class WrappedViewModel @Inject constructor(
     val uiState: StateFlow<WrappedUiState> = combine(
         songRepository.songs,
         statsRepository.allListenEvents(),
-        selectedYear,
+        selection,
         appSettingsRepository.showMilestoneCelebrations,
         visualPreferences,
-    ) { songs, events, requestedYear, showMilestones, visualPreferences ->
-        val years = WrappedBuilder.availableYears(events)
-        if (years.isEmpty()) return@combine WrappedUiState.Empty
-
-        val year = requestedYear?.takeIf { it in years } ?: years.first()
-        WrappedUiState.Content(
+    ) { songs, events, request, showMilestones, visualPreferences ->
+        val years = WrappedBuilder.availableYears(events, zone)
+        val months = WrappedBuilder.availableMonths(events, zone)
+        val resolved = resolveWrappedSelection(
+            request = request,
             availableYears = years,
-            selectedYear = year,
-            wrapped = WrappedBuilder.buildYear(
-                year = year,
+            availableMonths = months,
+            zone = zone,
+        ) ?: return@combine WrappedUiState.Empty
+
+        WrappedUiState.Content(
+            selectedScope = resolved.scope,
+            availableYears = years,
+            selectedYear = resolved.year,
+            availableMonths = months,
+            selectedMonth = resolved.month,
+            currentPeriod = resolved.period,
+            summary = WrappedBuilder.buildPeriod(
+                period = resolved.period,
                 songs = songs,
                 events = events,
             ),
@@ -81,9 +112,54 @@ class WrappedViewModel @Inject constructor(
         initialValue = WrappedUiState.Loading,
     )
 
+    fun selectScope(scope: WrappedScope) {
+        selectedScope.value = scope
+    }
+
     fun selectYear(year: Int) {
         selectedYear.value = year
     }
+
+    fun selectMonth(month: MonthYear) {
+        selectedMonth.value = month
+    }
+}
+
+internal data class WrappedSelectionRequest(
+    val scope: WrappedScope,
+    val year: Int?,
+    val month: MonthYear?,
+)
+
+internal data class ResolvedWrappedSelection(
+    val scope: WrappedScope,
+    val year: Int,
+    val month: MonthYear,
+    val period: WrappedPeriod,
+)
+
+internal fun resolveWrappedSelection(
+    request: WrappedSelectionRequest,
+    availableYears: List<Int>,
+    availableMonths: List<MonthYear>,
+    zone: ZoneId,
+): ResolvedWrappedSelection? {
+    val year = request.year?.takeIf { it in availableYears }
+        ?: availableYears.firstOrNull()
+        ?: return null
+    val month = request.month?.takeIf { it in availableMonths }
+        ?: availableMonths.firstOrNull()
+        ?: return null
+    val period = when (request.scope) {
+        WrappedScope.MONTHLY -> WrappedPeriod.month(month, zone)
+        WrappedScope.YEARLY -> WrappedPeriod.year(year, zone)
+    }
+    return ResolvedWrappedSelection(
+        scope = request.scope,
+        year = year,
+        month = month,
+        period = period,
+    )
 }
 
 private data class WrappedVisualPreferences(

@@ -2,7 +2,9 @@ package com.launchpoint.wavdrop.data.stats
 
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.model.ListeningAnalyticsEmptyReason
+import com.launchpoint.wavdrop.data.model.MonthYear
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.model.WrappedPeriod
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
@@ -49,7 +51,7 @@ class WrappedBuilderTest {
             zone = utc,
         )
 
-        assertEquals(2026, wrapped.year)
+        assertEquals(2026, (wrapped.period as WrappedPeriod.Yearly).year)
         assertEquals(2, wrapped.totalPlayCount)
         assertEquals(0, wrapped.totalSkipCount)
         assertEquals(30_000L, wrapped.totalListeningTimeMs)
@@ -182,6 +184,133 @@ class WrappedBuilderTest {
     }
 
     // ── V2 insight tests ──────────────────────────────────────────────────────
+
+    @Test
+    fun `availableMonths returns event-backed months newest first and ignores unsupported events`() {
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 1, 1)),
+            skipEvent(songId = 1, occurredAt = epochMs(2026, 3, 1)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 2, 1)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 4, 1))
+                .copy(eventType = "PAUSE"),
+        )
+
+        assertEquals(
+            listOf(MonthYear(2026, 3), MonthYear(2026, 2), MonthYear(2026, 1)),
+            WrappedBuilder.availableMonths(events, utc),
+        )
+    }
+
+    @Test
+    fun `availableMonths respects timezone at month boundary`() {
+        val event = playEvent(
+            songId = 1,
+            occurredAt = epochMs(2026, 1, 1) + 30 * 60_000L,
+        )
+
+        assertEquals(
+            listOf(MonthYear(2025, 12)),
+            WrappedBuilder.availableMonths(
+                events = listOf(event),
+                zone = ZoneId.of("America/Los_Angeles"),
+            ),
+        )
+    }
+
+    @Test
+    fun `monthly period includes selected month and excludes adjacent months`() {
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 5, 31)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 1)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 30)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 7, 1)),
+        )
+
+        val wrapped = WrappedBuilder.buildPeriod(
+            period = WrappedPeriod.month(MonthYear(2026, 6), utc),
+            songs = listOf(song(1)),
+            events = events,
+        )
+
+        assertEquals(2, wrapped.totalPlayCount)
+        assertEquals(MonthYear(2026, 6), (wrapped.period as WrappedPeriod.Monthly).month)
+    }
+
+    @Test
+    fun `monthly top songs artists and albums use selected month activity`() {
+        val songs = listOf(
+            song(id = 1, title = "Low", artist = "Artist C", album = "Album C"),
+            song(id = 2, title = "Mid", artist = "Artist B", album = "Album B"),
+            song(id = 3, title = "High", artist = "Artist A", album = "Album A"),
+        )
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 6, 1)),
+            playEvent(songId = 2, occurredAt = epochMs(2026, 6, 2)),
+            playEvent(songId = 2, occurredAt = epochMs(2026, 6, 3)),
+            playEvent(songId = 3, occurredAt = epochMs(2026, 6, 4)),
+            playEvent(songId = 3, occurredAt = epochMs(2026, 6, 5)),
+            playEvent(songId = 3, occurredAt = epochMs(2026, 6, 6)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 7, 1)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 7, 2)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 7, 3)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 7, 4)),
+        )
+
+        val wrapped = WrappedBuilder.buildPeriod(
+            period = WrappedPeriod.month(MonthYear(2026, 6), utc),
+            songs = songs,
+            events = events,
+        )
+
+        assertEquals(listOf("High", "Mid", "Low"), wrapped.topSongs.map { it.song.title })
+        assertEquals(listOf("Artist A", "Artist B", "Artist C"), wrapped.topArtists.map { it.artistKey })
+        assertEquals(listOf("Album A", "Album B", "Album C"), wrapped.topAlbums.map { it.albumKey })
+    }
+
+    @Test
+    fun `monthly skip-only activity surfaces most skipped without plays`() {
+        val wrapped = WrappedBuilder.buildPeriod(
+            period = WrappedPeriod.month(MonthYear(2026, 6), utc),
+            songs = listOf(song(1)),
+            events = listOf(
+                skipEvent(songId = 1, occurredAt = epochMs(2026, 6, 10)),
+                skipEvent(songId = 1, occurredAt = epochMs(2026, 6, 11)),
+            ),
+        )
+
+        assertEquals(0, wrapped.totalPlayCount)
+        assertEquals(2, wrapped.totalSkipCount)
+        assertEquals(2, wrapped.mostSkippedTrack?.skipCount)
+        assertTrue(wrapped.topSongs.isEmpty())
+    }
+
+    @Test
+    fun `monthly orphan-only activity preserves totals and empty reason`() {
+        val wrapped = WrappedBuilder.buildPeriod(
+            period = WrappedPeriod.month(MonthYear(2026, 6), utc),
+            songs = emptyList(),
+            events = listOf(playEvent(songId = 99, occurredAt = epochMs(2026, 6, 1))),
+        )
+
+        assertEquals(1, wrapped.totalPlayCount)
+        assertEquals(ListeningAnalyticsEmptyReason.ONLY_ORPHAN_EVENTS, wrapped.emptyState.reason)
+    }
+
+    @Test
+    fun `monthly streak does not cross month boundary`() {
+        val wrapped = WrappedBuilder.buildPeriod(
+            period = WrappedPeriod.month(MonthYear(2026, 6), utc),
+            songs = listOf(song(1)),
+            events = listOf(
+                playEvent(songId = 1, occurredAt = epochMs(2026, 5, 31)),
+                playEvent(songId = 1, occurredAt = epochMs(2026, 6, 1)),
+                playEvent(songId = 1, occurredAt = epochMs(2026, 6, 2)),
+            ),
+        )
+
+        assertEquals(2, wrapped.longestStreak)
+        assertEquals(2, wrapped.currentStreak)
+    }
 
     @Test
     fun `longestStreak spans the longest consecutive listening run`() {

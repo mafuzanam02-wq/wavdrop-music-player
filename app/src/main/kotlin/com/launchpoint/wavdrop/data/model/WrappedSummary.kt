@@ -32,6 +32,5 @@ data class WrappedSummary(
     val averageListeningTimePerActiveDayMs: Long,
     val mostReplayedTrack: SongStatsSummary?,
 ) {
-    val year: Int get() = period.year
     val hasActivity: Boolean get() = totalPlayCount > 0 || totalSkipCount > 0
 }
