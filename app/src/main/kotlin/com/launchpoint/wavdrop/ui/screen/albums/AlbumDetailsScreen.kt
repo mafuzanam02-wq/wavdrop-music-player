@@ -303,7 +303,7 @@ private fun AlbumHeader(
                 }
             }
             Text(
-                text     = "${state.songs.size} songs - ${formatTotalDuration(state.totalDurationMs)}",
+                text     = "${state.songs.size} songs · ${formatTotalDuration(state.totalDurationMs)}",
                 style    = MaterialTheme.typography.labelMedium,
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f),
                 modifier = Modifier.padding(top = 8.dp),
@@ -336,7 +336,7 @@ private fun GroupPlaybackActions(
         }
         Box {
             IconButton(onClick = { moreExpanded = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More queue actions")
+                Icon(Icons.Default.MoreVert, contentDescription = "More options")
             }
             DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
                 DropdownMenuItem(

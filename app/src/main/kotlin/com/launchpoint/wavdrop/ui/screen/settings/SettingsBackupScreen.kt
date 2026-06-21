@@ -274,7 +274,7 @@ fun SettingsBackupScreen(
             item { SectionDivider() }
 
             // ── Automatic Backup ───────────────────────────────────────────────
-            item { SectionHeader("Automatic backup check") }
+            item { SectionHeader("Automatic Backup Check") }
             item {
                 SettingsMessageRow(
                     message = when {

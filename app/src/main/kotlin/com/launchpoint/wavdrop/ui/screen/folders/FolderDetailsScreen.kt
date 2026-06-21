@@ -259,7 +259,7 @@ private fun GroupPlaybackActions(
         }
         Box {
             IconButton(onClick = { moreExpanded = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More queue actions")
+                Icon(Icons.Default.MoreVert, contentDescription = "More options")
             }
             DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
                 DropdownMenuItem(

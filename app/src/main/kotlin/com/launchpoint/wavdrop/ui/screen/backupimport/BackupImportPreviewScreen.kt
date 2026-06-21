@@ -166,7 +166,7 @@ private fun IdleContent(
             Text("No backup selected", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
-                text  = "Choose Import Wavdrop Data from Settings.",
+                text  = "Go to Settings to choose a Wavdrop backup file.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
             )

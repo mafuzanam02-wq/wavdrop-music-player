@@ -120,14 +120,14 @@ private fun NoDataContent(modifier: Modifier = Modifier) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "No event-backed monthly history yet.",
+                text = "No monthly history yet.",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Play music in Wavdrop to create monthly event history. Imported aggregate counts are kept out of monthly reports.",
+                text = "Play music in Wavdrop to build monthly history. Only plays recorded by Wavdrop appear here.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -170,7 +170,7 @@ private fun MonthlyContent(
 
         monthSongSection(
             title = "Top Songs",
-            subtitle = "Ranked by event-backed plays this month",
+            subtitle = "Ranked by plays recorded this month",
             sectionKey = "top_songs",
             songs = report.topSongs,
             emptyMessage = "No plays recorded for this month. Play music during this month to rank songs.",
@@ -180,7 +180,7 @@ private fun MonthlyContent(
 
         monthArtistSection(
             title = "Top Artists",
-            subtitle = "Ranked by event-backed plays this month",
+            subtitle = "Ranked by plays recorded this month",
             artists = report.topArtists,
             emptyMessage = "No artist data for this month. Play songs during this month to fill it.",
             metric = { "${it.playCount} plays this month" },
@@ -189,7 +189,7 @@ private fun MonthlyContent(
 
         monthAlbumSection(
             title = "Top Albums",
-            subtitle = "Ranked by event-backed plays this month",
+            subtitle = "Ranked by plays recorded this month",
             albums = report.topAlbums,
             emptyMessage = "No album data for this month. Play songs during this month to fill it.",
             metric = { "${it.playCount} plays this month" },
@@ -270,22 +270,22 @@ private fun AccuracyBanner(report: MonthlyReportSummary, modifier: Modifier = Mo
         ListeningAnalyticsEmptyReason.HAS_ACTIVITY -> Triple(
             Icons.Filled.CheckCircle,
             MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-            "Accurate event history. Counts reflect Wavdrop plays and skips recorded this month.",
+            "Counts reflect plays and skips recorded by Wavdrop this month.",
         )
         ListeningAnalyticsEmptyReason.ONLY_ORPHAN_EVENTS -> Triple(
             Icons.Filled.Info,
             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-            "Event history exists for this month, but the tracks are no longer in the current library.",
+            "Plays were recorded this month, but the tracks are no longer in your library.",
         )
         ListeningAnalyticsEmptyReason.NO_EVENTS_IN_RANGE -> Triple(
             Icons.Filled.Info,
             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-            "No event-backed listening was recorded for this month. Imported aggregate counts are excluded.",
+            "No listening was recorded by Wavdrop for this month. Imported counts are not included.",
         )
         ListeningAnalyticsEmptyReason.NO_AGGREGATE_ACTIVITY -> Triple(
             Icons.Filled.Info,
             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-            "No monthly event history is available.",
+            "No monthly history is available.",
         )
     }
 
@@ -423,7 +423,7 @@ private fun HabitsSection(
                 metric = "${track.skipCount} skips this month",
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
-        } ?: EmptySectionRow("No skips recorded for this month. Skips during this month will appear here.")
+        } ?: EmptySectionRow("No skips recorded yet. Skips from this month will appear here.")
     }
 }
 

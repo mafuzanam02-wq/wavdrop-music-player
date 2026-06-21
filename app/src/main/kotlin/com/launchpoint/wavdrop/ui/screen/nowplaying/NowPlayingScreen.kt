@@ -229,7 +229,7 @@ fun NowPlayingScreen(
                             IconButton(onClick = { showMoreActions = true }) {
                                 Icon(
                                     imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "More actions",
+                                    contentDescription = "More options",
                                     tint = MaterialTheme.colorScheme.onSurface,
                                 )
                             }

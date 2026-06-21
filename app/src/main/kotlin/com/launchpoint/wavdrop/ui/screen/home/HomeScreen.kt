@@ -460,7 +460,7 @@ private fun EmptyLibraryContent(
         )
         Spacer(Modifier.height(16.dp))
         TextButton(onClick = onRescan) { Text("Rescan library") }
-        TextButton(onClick = onSettingsClick) { Text("Choose folder in Settings") }
+        TextButton(onClick = onSettingsClick) { Text("Settings") }
     }
 }
 
@@ -823,7 +823,7 @@ private fun DashboardEmptyLibraryCard(
                     TextButton(onClick = onLibrarySettingsClick) { Text("Open Library Settings") }
                 } else {
                     TextButton(onClick = onRescan) { Text("Rescan library") }
-                    TextButton(onClick = onLibrarySettingsClick) { Text("Choose folder in Settings") }
+                    TextButton(onClick = onLibrarySettingsClick) { Text("Library Settings") }
                 }
             }
         }

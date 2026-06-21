@@ -258,7 +258,7 @@ private fun FolderRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${folder.songCount} songs - ${formatTotalDuration(folder.totalDurationMs)}",
+                text = "${folder.songCount} songs · ${formatTotalDuration(folder.totalDurationMs)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )
