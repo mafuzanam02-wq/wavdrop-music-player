@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -39,6 +40,10 @@ fun GlobalSearchRoute(
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
     val searchQuery      by viewModel.searchQuery.collectAsStateWithLifecycle()
+    // Local snapshot state backs the TextField for immediate display. The ViewModel's
+    // searchQuery drives GroupedSearchContent one frame later, decoupling list filtering
+    // from the keystroke frame so typed characters appear without perceptible latency.
+    var localQuery by rememberSaveable { mutableStateOf("") }
     val allSongs         by viewModel.allSongs.collectAsStateWithLifecycle()
     val smartCollections by viewModel.smartCollections.collectAsStateWithLifecycle()
     val nowPlaying       by viewModel.nowPlayingState.collectAsStateWithLifecycle()
@@ -57,8 +62,8 @@ fun GlobalSearchRoute(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             SearchTopAppBar(
-                query         = searchQuery,
-                onQueryChange = viewModel::setSearchQuery,
+                query         = localQuery,
+                onQueryChange = { localQuery = it; viewModel.setSearchQuery(it) },
                 onClose       = onNavigateBack,
                 placeholder   = "Search songs, artists, albums, playlists, collections, folders…",
             )
