@@ -1,10 +1,12 @@
 package com.launchpoint.wavdrop.data.stats
 
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.ListeningAnalyticsEmptyReason
 import com.launchpoint.wavdrop.data.model.MonthYear
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedPeriod
+import com.launchpoint.wavdrop.data.model.WrappedScope
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
@@ -483,6 +485,167 @@ class WrappedBuilderTest {
         assertNull(wrapped.mostReplayedTrack)
     }
 
+    // ── All-Time Wrapped tests ────────────────────────────────────────────────
+
+    @Test
+    fun `buildAllTime produces AllTime period and ALL_TIME scope`() {
+        val summary = WrappedBuilder.buildAllTime(
+            songs = listOf(song(1)),
+            stats = listOf(stat(songId = 1, playCount = 5)),
+        )
+
+        assertEquals(WrappedPeriod.AllTime, summary.period)
+        assertEquals(WrappedScope.ALL_TIME, summary.period.scope)
+    }
+
+    @Test
+    fun `buildAllTime empty state when no play counts in stats`() {
+        val summary = WrappedBuilder.buildAllTime(
+            songs = listOf(song(1)),
+            stats = listOf(stat(songId = 1, playCount = 0, skipCount = 0, listeningTimeMs = 0L)),
+        )
+
+        assertEquals(ListeningAnalyticsEmptyReason.NO_AGGREGATE_ACTIVITY, summary.emptyState.reason)
+        assertTrue(summary.emptyState.isEmpty)
+        assertFalse(summary.hasActivity)
+    }
+
+    @Test
+    fun `buildAllTime empty state when stats list is empty`() {
+        val summary = WrappedBuilder.buildAllTime(
+            songs = listOf(song(1)),
+            stats = emptyList(),
+        )
+
+        assertTrue(summary.emptyState.isEmpty)
+        assertEquals(0, summary.totalPlayCount)
+        assertTrue(summary.topSongs.isEmpty())
+    }
+
+    @Test
+    fun `buildAllTime totals play count and listening time from stats`() {
+        val songs = listOf(song(1), song(2), song(3))
+        val stats = listOf(
+            stat(songId = 1, playCount = 10, listeningTimeMs = 100_000L),
+            stat(songId = 2, playCount = 5, listeningTimeMs = 50_000L),
+            stat(songId = 3, playCount = 2, listeningTimeMs = 20_000L),
+        )
+
+        val summary = WrappedBuilder.buildAllTime(songs, stats)
+
+        assertEquals(17, summary.totalPlayCount)
+        assertFalse(summary.emptyState.isEmpty)
+    }
+
+    @Test
+    fun `buildAllTime top songs are ranked by play count from stats`() {
+        val songs = listOf(
+            song(id = 1, title = "Low"),
+            song(id = 2, title = "Mid"),
+            song(id = 3, title = "High"),
+        )
+        val stats = listOf(
+            stat(songId = 1, playCount = 1),
+            stat(songId = 2, playCount = 5),
+            stat(songId = 3, playCount = 10),
+        )
+
+        val summary = WrappedBuilder.buildAllTime(songs, stats)
+
+        assertEquals(listOf("High", "Mid", "Low"), summary.topSongs.map { it.song.title })
+        assertEquals("High", summary.mostPlayedSong?.song?.title)
+    }
+
+    @Test
+    fun `buildAllTime top artists are ranked by total play count from stats`() {
+        val songs = listOf(
+            song(id = 1, artist = "Artist A"),
+            song(id = 2, artist = "Artist B"),
+            song(id = 3, artist = "Artist B"),
+        )
+        val stats = listOf(
+            stat(songId = 1, playCount = 10),
+            stat(songId = 2, playCount = 3),
+            stat(songId = 3, playCount = 4),
+        )
+
+        val summary = WrappedBuilder.buildAllTime(songs, stats)
+
+        // Artist B has 3+4=7 plays, Artist A has 10
+        assertEquals("Artist A", summary.topArtists.first().artistKey)
+        assertEquals("Artist B", summary.topArtists[1].artistKey)
+    }
+
+    @Test
+    fun `buildAllTime top albums are ranked by play count from stats`() {
+        val songs = listOf(
+            song(id = 1, album = "Album A"),
+            song(id = 2, album = "Album B"),
+        )
+        val stats = listOf(
+            stat(songId = 1, playCount = 2),
+            stat(songId = 2, playCount = 8),
+        )
+
+        val summary = WrappedBuilder.buildAllTime(songs, stats)
+
+        assertEquals(listOf("Album B", "Album A"), summary.topAlbums.map { it.albumKey })
+    }
+
+    @Test
+    fun `buildAllTime does not use events — streaks and patterns are zeroed`() {
+        val summary = WrappedBuilder.buildAllTime(
+            songs = listOf(song(1)),
+            stats = listOf(stat(songId = 1, playCount = 100)),
+        )
+
+        assertEquals(0, summary.longestStreak)
+        assertEquals(0, summary.currentStreak)
+        assertNull(summary.mostActiveDayOfWeek)
+        assertNull(summary.mostActiveHour)
+        assertEquals(0, summary.listeningDaysCount)
+    }
+
+    @Test
+    fun `buildAllTime skip stats come from TrackStatsEntity`() {
+        val songs = listOf(song(id = 1, title = "SkipMe"), song(id = 2, title = "NoSkip"))
+        val stats = listOf(
+            stat(songId = 1, playCount = 1, skipCount = 5),
+            stat(songId = 2, playCount = 3, skipCount = 0),
+        )
+
+        val summary = WrappedBuilder.buildAllTime(songs, stats)
+
+        assertEquals(5, summary.totalSkipCount)
+        assertEquals("SkipMe", summary.mostSkippedTrack?.song?.title)
+    }
+
+    @Test
+    fun `buildAllTime songs not in library are excluded from ranked lists`() {
+        val songs = listOf(song(id = 1, title = "InLibrary"))
+        val stats = listOf(
+            stat(songId = 1, playCount = 3),
+            stat(songId = 999, playCount = 100),
+        )
+
+        val summary = WrappedBuilder.buildAllTime(songs, stats)
+
+        assertEquals(1, summary.topSongs.size)
+        assertEquals("InLibrary", summary.topSongs.first().song.title)
+    }
+
+    @Test
+    fun `buildAllTime monthly and yearly behavior is unchanged after adding ALL_TIME scope`() {
+        val events = listOf(
+            playEvent(songId = 1, occurredAt = epochMs(2026, 3, 15)),
+            playEvent(songId = 1, occurredAt = epochMs(2026, 3, 16)),
+        )
+        val yearlyWrapped = WrappedBuilder.buildYear(2026, listOf(song(1)), events, utc)
+
+        assertEquals(WrappedScope.YEARLY, yearlyWrapped.period.scope)
+        assertEquals(2, yearlyWrapped.totalPlayCount)
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private fun epochMs(year: Int, month: Int, day: Int): Long =
@@ -520,6 +683,21 @@ class WrappedBuilderTest {
         listenedMs = listenedMs,
         durationMs = 200_000L,
         source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+    )
+
+    private fun stat(
+        songId: Long,
+        playCount: Int = 0,
+        skipCount: Int = 0,
+        listeningTimeMs: Long = 0L,
+        lastPlayedAt: Long = 0L,
+    ) = TrackStatsEntity(
+        songId = songId,
+        contentUri = "content://media/$songId",
+        playCount = playCount,
+        skipCount = skipCount,
+        totalListeningTimeMs = listeningTimeMs,
+        lastPlayedAt = lastPlayedAt,
     )
 
     private fun skipEvent(

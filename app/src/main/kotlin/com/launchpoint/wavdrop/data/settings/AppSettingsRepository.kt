@@ -273,6 +273,25 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    /**
+     * True when a restore included SELECTED_FOLDERS scan mode but folder URIs were not
+     * restored (SAF permissions are device-specific). The app surfaces a targeted prompt
+     * instead of the generic "no folders selected" message. Never cleared automatically —
+     * it becomes irrelevant once the user picks at least one folder (folderModeNeedsSelection
+     * becomes false, hiding the empty-library state entirely).
+     */
+    val needsFolderReselectionAfterRestore: Flow<Boolean> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences -> preferences[NEEDS_FOLDER_RESELECTION_AFTER_RESTORE_KEY] ?: false }
+
+    suspend fun setNeedsFolderReselectionAfterRestore(needed: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[NEEDS_FOLDER_RESELECTION_AFTER_RESTORE_KEY] = needed
+        }
+    }
+
     val backupFileMode: Flow<BackupFileMode> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -496,8 +515,9 @@ class AppSettingsRepository @Inject constructor(
         val NOW_PLAYING_BACKGROUND_KEY              = stringPreferencesKey("now_playing_background")
         val SHOW_QUEUE_COUNT_KEY                    = booleanPreferencesKey("show_queue_count")
         val NOW_PLAYING_TIME_DISPLAY_MODE_KEY       = stringPreferencesKey("now_playing_time_display_mode")
-        val NEEDS_BACKUP_FOLDER_AFTER_RESTORE_KEY   = booleanPreferencesKey("needs_auto_backup_folder_selection_after_restore")
-        val SHOW_MILESTONE_CELEBRATIONS_KEY         = booleanPreferencesKey("show_milestone_celebrations")
+        val NEEDS_BACKUP_FOLDER_AFTER_RESTORE_KEY       = booleanPreferencesKey("needs_auto_backup_folder_selection_after_restore")
+        val NEEDS_FOLDER_RESELECTION_AFTER_RESTORE_KEY  = booleanPreferencesKey("needs_folder_reselection_after_restore")
+        val SHOW_MILESTONE_CELEBRATIONS_KEY             = booleanPreferencesKey("show_milestone_celebrations")
         val WRAPPED_USE_ARTWORK_BACKGROUNDS_KEY     = booleanPreferencesKey("wrapped_use_artwork_backgrounds")
         val WRAPPED_BACKGROUND_INTENSITY_KEY         = stringPreferencesKey("wrapped_background_intensity")
         val WRAPPED_FALLBACK_THEME_KEY               = stringPreferencesKey("wrapped_fallback_theme")

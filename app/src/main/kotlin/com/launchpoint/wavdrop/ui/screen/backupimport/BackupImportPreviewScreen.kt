@@ -385,6 +385,13 @@ private fun AppliedContent(
                         StatRow("Playlists created", result.playlistsRestored.toString())
                         StatRow("Playlist songs added", result.playlistSongsRestored.toString())
                     }
+                    val unmatchedPlaylists = result.playlistRestoreSummaries.filter { it.skippedUnmatched > 0 }
+                    if (unmatchedPlaylists.isNotEmpty()) {
+                        unmatchedPlaylists.forEach { summary ->
+                            val count = summary.skippedUnmatched
+                            StatRow(summary.playlistName, "$count song${if (count == 1) "" else "s"} not found")
+                        }
+                    }
                     if (result.eventsRestored > 0 || result.eventsSkipped > 0) {
                         StatRow("Listening history restored", result.eventsRestored.toString())
                         if (result.currentMonthEventsRestored > 0) {

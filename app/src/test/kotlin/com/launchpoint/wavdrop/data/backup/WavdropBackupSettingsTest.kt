@@ -353,6 +353,50 @@ class WavdropBackupSettingsTest {
         )
     }
 
+    // ── Wrapped / milestone settings round-trip ───────────────────────────────
+
+    @Test
+    fun `wrapped and milestone settings survive export and parse`() {
+        val prefs = allNullPrefs().copy(
+            showMilestoneCelebrations    = false,
+            wrappedUseArtworkBackgrounds = false,
+            wrappedBackgroundIntensity   = "BOLD",
+            wrappedFallbackTheme         = "OCEAN",
+        )
+        val parsed = WavdropBackupParser
+            .parse(WavdropBackupExporter.toJson(minimalBackup(prefs)))
+            .backup
+        assertNotNull(parsed)
+        val p = parsed!!.preferences!!
+        assertEquals(false, p.showMilestoneCelebrations)
+        assertEquals(false, p.wrappedUseArtworkBackgrounds)
+        assertEquals("BOLD", p.wrappedBackgroundIntensity)
+        assertEquals("OCEAN", p.wrappedFallbackTheme)
+    }
+
+    @Test
+    fun `old backups without wrapped and milestone settings parse with nulls`() {
+        val prefs = allNullPrefs().copy(themeMode = "DARK")
+        val parsed = WavdropBackupParser
+            .parse(WavdropBackupExporter.toJson(minimalBackup(prefs)))
+            .backup!!
+        val p = parsed.preferences!!
+        assertNull(p.showMilestoneCelebrations)
+        assertNull(p.wrappedUseArtworkBackgrounds)
+        assertNull(p.wrappedBackgroundIntensity)
+        assertNull(p.wrappedFallbackTheme)
+    }
+
+    @Test
+    fun `wrapped and milestone settings change the fingerprint when present`() {
+        val base    = minimalBackup(allNullPrefs())
+        val changed = minimalBackup(allNullPrefs().copy(wrappedFallbackTheme = "OBSIDIAN"))
+        assertFalse(
+            WavdropBackupIntegrity.payloadFingerprint(base) ==
+                WavdropBackupIntegrity.payloadFingerprint(changed),
+        )
+    }
+
     @Test
     fun `tampering a phase 4 setting in the file fails integrity`() {
         val json = WavdropBackupExporter.toJson(

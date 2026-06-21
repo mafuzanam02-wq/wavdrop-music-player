@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.data.stats
 
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.MonthYear
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedPeriod
@@ -47,6 +48,46 @@ object WrappedBuilder {
             events = events,
             topListLimit = topListLimit,
         )
+
+    fun buildAllTime(
+        songs: List<Song>,
+        stats: List<TrackStatsEntity>,
+        topListLimit: Int = DEFAULT_TOP_LIST_LIMIT,
+    ): WrappedSummary {
+        val analytics = ListeningAnalyticsBuilder.buildAllTimeAggregateFallback(
+            songs = songs,
+            stats = stats,
+            topListLimit = topListLimit,
+        )
+        return WrappedSummary(
+            period = WrappedPeriod.AllTime,
+            totalPlayCount = analytics.totalPlayCount,
+            totalSkipCount = analytics.totalSkipCount,
+            totalListeningTimeMs = analytics.totalListeningTimeMs,
+            uniqueSongsPlayedCount = analytics.tracksPlayedCount,
+            uniqueArtistsPlayedCount = analytics.artistsPlayedCount,
+            uniqueAlbumsPlayedCount = analytics.albumsPlayedCount,
+            listeningDaysCount = 0,
+            busiestDay = null,
+            busiestDayPlayCount = 0,
+            averagePlaysPerActiveDay = 0.0,
+            topSongs = analytics.topSongs,
+            topArtists = analytics.topArtists,
+            topAlbums = analytics.topAlbums,
+            mostPlayedSong = analytics.topSongs.firstOrNull(),
+            mostPlayedArtist = analytics.topArtists.firstOrNull(),
+            mostPlayedAlbum = analytics.topAlbums.firstOrNull(),
+            mostSkippedTrack = analytics.mostSkippedTrack,
+            recentlyPlayed = analytics.recentlyPlayed,
+            emptyState = analytics.emptyState,
+            longestStreak = 0,
+            currentStreak = 0,
+            mostActiveDayOfWeek = null,
+            mostActiveHour = null,
+            averageListeningTimePerActiveDayMs = 0L,
+            mostReplayedTrack = analytics.topSongs.firstOrNull(),
+        )
+    }
 
     fun buildPeriod(
         period: WrappedPeriod,

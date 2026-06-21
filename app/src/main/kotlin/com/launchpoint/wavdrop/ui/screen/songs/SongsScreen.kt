@@ -106,7 +106,8 @@ fun SongsScreen(
     val isRefreshing      by viewModel.isRefreshing.collectAsStateWithLifecycle()
     var localQuery        by remember { mutableStateOf("") }
     val songSortMode              by viewModel.songSortMode.collectAsStateWithLifecycle()
-    val folderModeNeedsSelection  by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
+    val folderModeNeedsSelection           by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
+    val needsFolderReselectionAfterRestore by viewModel.needsFolderReselectionAfterRestore.collectAsStateWithLifecycle()
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     var isSearchActive   by remember { mutableStateOf(false) }
@@ -188,7 +189,11 @@ fun SongsScreen(
             ) {
                 when (val state = uiState) {
                     HomeUiState.Loading -> LoadingSongs()
-                    HomeUiState.Empty   -> EmptySongs(onLibrarySettingsClick = onLibrarySettingsClick, folderModeNeedsSelection = folderModeNeedsSelection)
+                    HomeUiState.Empty   -> EmptySongs(
+                        onLibrarySettingsClick             = onLibrarySettingsClick,
+                        folderModeNeedsSelection           = folderModeNeedsSelection,
+                        needsFolderReselectionAfterRestore = needsFolderReselectionAfterRestore,
+                    )
                     is HomeUiState.Songs -> {
                         val commonSongActions = SongSearchActions(
                             currentSongId = nowPlaying.song?.id,
@@ -454,14 +459,18 @@ private fun LoadingSongs(modifier: Modifier = Modifier) {
 private fun EmptySongs(
     onLibrarySettingsClick: () -> Unit = {},
     folderModeNeedsSelection: Boolean = false,
+    needsFolderReselectionAfterRestore: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             if (folderModeNeedsSelection) {
                 EmptyStateText(
-                    title   = "No folders selected",
-                    message = "Wavdrop is set to scan selected folders only, but no folders have been added yet.",
+                    title   = if (needsFolderReselectionAfterRestore) "Folder access needs to be reselected" else "No folders selected",
+                    message = if (needsFolderReselectionAfterRestore)
+                        "Folder permissions couldn't be transferred to this device. Open Library Settings to reselect your music folders."
+                    else
+                        "Wavdrop is set to scan selected folders only, but no folders have been added yet.",
                 )
             } else {
                 EmptyStateText(

@@ -172,7 +172,11 @@ object WavdropBackupExporter {
         prefs.rememberLastTrack?.let         { put("rememberLastTrack",         it) }
         prefs.rememberPosition?.let          { put("rememberPosition",          it) }
         prefs.restoreQueue?.let              { put("restoreQueue",              it) }
-        prefs.bluetoothResumeMode?.let       { put("bluetoothResumeMode",       it) }
-        prefs.wiredResumeMode?.let           { put("wiredResumeMode",           it) }
+        prefs.bluetoothResumeMode?.let           { put("bluetoothResumeMode",           it) }
+        prefs.wiredResumeMode?.let               { put("wiredResumeMode",               it) }
+        prefs.showMilestoneCelebrations?.let     { put("showMilestoneCelebrations",     it) }
+        prefs.wrappedUseArtworkBackgrounds?.let  { put("wrappedUseArtworkBackgrounds",  it) }
+        prefs.wrappedBackgroundIntensity?.let    { put("wrappedBackgroundIntensity",    it) }
+        prefs.wrappedFallbackTheme?.let          { put("wrappedFallbackTheme",          it) }
     }
 }

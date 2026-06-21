@@ -28,6 +28,8 @@ import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
+import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
+import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
@@ -170,6 +172,7 @@ class WavdropBackupImportRepository @Inject constructor(
             var playlistsRestored        = 0
             var playlistSongsRestored    = 0
             var playlistEntriesUnmatched = 0
+            val playlistSummaries        = mutableListOf<PlaylistRestoreSummary>()
 
             for (backupPlaylist in backup.playlists) {
                 val name = backupPlaylist.name.trim()
@@ -213,6 +216,13 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
                 playlistSongsRestored    += entryPlan.restored
                 playlistEntriesUnmatched += entryPlan.skippedUnmatched
+                playlistSummaries += PlaylistRestoreSummary(
+                    playlistName     = name,
+                    entriesInBackup  = entryPlan.entriesInBackup,
+                    restored         = entryPlan.restored,
+                    skippedUnmatched = entryPlan.skippedUnmatched,
+                    skippedDuplicate = entryPlan.skippedExisting,
+                )
 
                 if (entryPlan.restored > 0) {
                     playlistDao.touchPlaylist(playlistId, importedAt)
@@ -295,6 +305,7 @@ class WavdropBackupImportRepository @Inject constructor(
                 playlistSongsRestored = playlistSongsRestored,
                 playlistEntriesInBackup  = backup.playlists.sumOf { it.songs.size },
                 playlistEntriesUnmatched = playlistEntriesUnmatched,
+                playlistRestoreSummaries = playlistSummaries,
                 eventsRestored        = eventsRestored,
                 baselinesRestored     = baselinePlan.restored,
                 eventsSkipped         = eventsSkipped,
@@ -337,6 +348,9 @@ class WavdropBackupImportRepository @Inject constructor(
         // Restore preferences outside the Room transaction — DataStore is not Room-transactional.
         val warnings = mutableListOf<String>()
         BackupRestoreWarnings.selectedFolderPermissionWarning(backup.preferences)?.let { warnings += it }
+        if (dbResult.playlistEntriesUnmatched > 0) {
+            warnings += "Some playlist songs could not be matched to your current library."
+        }
 
         var preferencesRestored = false
         backup.preferences?.let { prefs ->
@@ -366,17 +380,29 @@ class WavdropBackupImportRepository @Inject constructor(
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { homeLayoutSettingsRepository.setVisibleSections(it.toSet()); preferencesRestored = true }
 
-            prefs.scanMode
+            val restoredScanMode = prefs.scanMode
                 ?.let { runCatching { LibraryScanMode.valueOf(it) }.getOrNull() }
-                ?.let { libraryScanSettingsRepository.setScanMode(it); preferencesRestored = true }
+            restoredScanMode?.let { libraryScanSettingsRepository.setScanMode(it); preferencesRestored = true }
 
             prefs.minimumTrackDurationSeconds
                 ?.let { libraryScanSettingsRepository.setMinimumTrackDurationSeconds(it); preferencesRestored = true }
 
-            val folderUris = prefs.selectedFolderUris?.filter { it.isNotBlank() }
-            if (!folderUris.isNullOrEmpty()) {
-                libraryScanSettingsRepository.setSelectedFolderUris(folderUris)
-                preferencesRestored = true
+            // SAF folder URIs are device- and permission-specific. Restoring them on a new
+            // device creates SELECTED_FOLDERS mode with URIs that appear non-empty but cannot
+            // be opened, silently leaving the library empty. When SELECTED_FOLDERS was backed
+            // up, skip the URI restore and instead set a flag that shows a targeted
+            // "Re-select folders after restore" prompt through the existing empty-library UI.
+            if (restoredScanMode == LibraryScanMode.SELECTED_FOLDERS) {
+                runCatching { appSettingsRepository.setNeedsFolderReselectionAfterRestore(true) }
+                    .onFailure { error ->
+                        Log.e(TAG, "Restore: could not set folder reselection flag", error)
+                    }
+            } else {
+                val folderUris = prefs.selectedFolderUris?.filter { it.isNotBlank() }
+                if (!folderUris.isNullOrEmpty()) {
+                    libraryScanSettingsRepository.setSelectedFolderUris(folderUris)
+                    preferencesRestored = true
+                }
             }
 
             prefs.themeMode
@@ -437,6 +463,20 @@ class WavdropBackupImportRepository @Inject constructor(
             prefs.wiredResumeMode
                 ?.let { runCatching { HeadphoneResumeMode.valueOf(it) }.getOrNull() }
                 ?.let { resumeBehaviorSettingsRepository.setWiredResumeMode(it); preferencesRestored = true }
+
+            prefs.showMilestoneCelebrations
+                ?.let { appSettingsRepository.setShowMilestoneCelebrations(it); preferencesRestored = true }
+
+            prefs.wrappedUseArtworkBackgrounds
+                ?.let { appSettingsRepository.setWrappedUseArtworkBackgrounds(it); preferencesRestored = true }
+
+            prefs.wrappedBackgroundIntensity
+                ?.let { runCatching { WrappedBackgroundIntensity.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setWrappedBackgroundIntensity(it); preferencesRestored = true }
+
+            prefs.wrappedFallbackTheme
+                ?.let { runCatching { WrappedFallbackTheme.valueOf(it) }.getOrNull() }
+                ?.let { appSettingsRepository.setWrappedFallbackTheme(it); preferencesRestored = true }
 
             prefs.backupFileMode
                 ?.let { runCatching { BackupFileMode.valueOf(it) }.getOrNull() }
@@ -517,6 +557,49 @@ class WavdropBackupImportRepository @Inject constructor(
             launcherIconRestored           = launcherIconRestored,
             warnings                       = warnings.distinct(),
         )
+    }
+
+    /**
+     * Reads current DB state, runs the stats matcher against [backup], and returns true
+     * if any matched song has local stats strictly higher than the backup values.
+     * No data is written. Called during the preview phase to decide whether to show a
+     * "newer local activity" warning before the user confirms the restore.
+     */
+    suspend fun detectStatsRegression(backup: WavdropBackup): StatsRegressionDetector.StatsRegressionSummary {
+        if (backup.trackStats.isEmpty()) return StatsRegressionDetector.StatsRegressionSummary(0)
+        val currentSongs = songDao.getAllSongsSnapshot().map { e ->
+            Song(
+                id          = e.id,
+                title       = e.title,
+                artist      = e.artist,
+                album       = e.album,
+                albumId     = e.albumId,
+                duration    = e.duration,
+                uri         = e.uri,
+                dateAdded   = e.dateAdded,
+                trackNumber = e.trackNumber,
+                year        = e.year,
+                folderPath  = e.folderPath,
+                folderName  = e.folderName,
+            )
+        }
+        val match = WavdropBackupStatsMatcher.match(backup, currentSongs)
+        if (match.matchedRows.isEmpty()) return StatsRegressionDetector.StatsRegressionSummary(0)
+        val currentStatsById = trackStatsDao.getAllStatsSnapshot().associateBy { it.songId }
+        val pairs = match.matchedRows.mapNotNull { (song, backupStats) ->
+            val local = currentStatsById[song.id] ?: return@mapNotNull null
+            StatsRegressionDetector.MatchedStatsPair(
+                backupPlayCount        = backupStats.playCount,
+                backupSkipCount        = backupStats.skipCount,
+                backupListeningTimeMs  = backupStats.totalListeningTimeMs,
+                backupLastPlayedAt     = backupStats.lastPlayedAt,
+                localPlayCount         = local.playCount,
+                localSkipCount         = local.skipCount,
+                localListeningTimeMs   = local.totalListeningTimeMs,
+                localLastPlayedAt      = local.lastPlayedAt,
+            )
+        }
+        return StatsRegressionDetector.detect(pairs)
     }
 }
 

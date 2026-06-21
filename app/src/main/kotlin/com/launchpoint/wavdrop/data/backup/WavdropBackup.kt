@@ -75,6 +75,10 @@ data class BackupPreferences(
     val restoreQueue: Boolean? = null,
     val bluetoothResumeMode: String? = null,
     val wiredResumeMode: String? = null,
+    val showMilestoneCelebrations: Boolean? = null,
+    val wrappedUseArtworkBackgrounds: Boolean? = null,
+    val wrappedBackgroundIntensity: String? = null,
+    val wrappedFallbackTheme: String? = null,
 )
 
 data class BackupPlaylistSong(
@@ -173,6 +177,10 @@ data class BackupManifest(
             prefs.restoreQueue,
             prefs.bluetoothResumeMode,
             prefs.wiredResumeMode,
+            prefs.showMilestoneCelebrations,
+            prefs.wrappedUseArtworkBackgrounds,
+            prefs.wrappedBackgroundIntensity,
+            prefs.wrappedFallbackTheme,
         ).size
     }
 }

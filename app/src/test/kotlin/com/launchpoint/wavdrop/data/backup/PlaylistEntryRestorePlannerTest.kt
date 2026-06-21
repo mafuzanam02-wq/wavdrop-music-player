@@ -80,6 +80,33 @@ class PlaylistEntryRestorePlannerTest {
     // ── F: uncertain songs are skipped, not wrongly attached ──────────────────
 
     @Test
+    fun `restore does not fail when all entries are unmatched`() {
+        val plan = PlaylistEntryRestorePlanner.plan(
+            entries         = listOf(entry(1L, 0), entry(2L, 1), entry(3L, 2)),
+            resolve         = { null },
+            existingSongIds = emptySet(),
+            nextPosition    = 0,
+        )
+        assertEquals(0, plan.restored)
+        assertEquals(3, plan.skippedUnmatched)
+        assertEquals(0, plan.toAdd.size)
+    }
+
+    @Test
+    fun `partial match reports both restored and unmatched entry counts`() {
+        val plan = PlaylistEntryRestorePlanner.plan(
+            entries         = listOf(entry(1L, 0), entry(2L, 1), entry(3L, 2)),
+            resolve         = { if (it.songId == 2L) song(22L) else null },
+            existingSongIds = emptySet(),
+            nextPosition    = 0,
+        )
+        assertEquals(1, plan.restored)
+        assertEquals(2, plan.skippedUnmatched)
+        assertEquals(3, plan.entriesInBackup)
+        assertEquals(22L, plan.toAdd.single().songId)
+    }
+
+    @Test
     fun `unresolved entry is skipped and counted`() {
         val plan = PlaylistEntryRestorePlanner.plan(
             entries         = listOf(entry(1L, 0), entry(2L, 1)),

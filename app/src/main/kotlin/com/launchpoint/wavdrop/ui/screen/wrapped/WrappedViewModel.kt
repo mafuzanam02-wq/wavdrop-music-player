@@ -2,7 +2,9 @@ package com.launchpoint.wavdrop.ui.screen.wrapped
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.MonthYear
+import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedPeriod
 import com.launchpoint.wavdrop.data.model.WrappedScope
 import com.launchpoint.wavdrop.data.model.WrappedSummary
@@ -15,10 +17,12 @@ import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 sealed interface WrappedUiState {
@@ -72,16 +76,39 @@ class WrappedViewModel @Inject constructor(
             fallbackTheme = fallbackTheme,
         )
     }
+    private val songData = combine(
+        songRepository.songs,
+        statsRepository.allTrackStatsEntities(),
+    ) { songs, stats -> songs to stats }
 
     val uiState: StateFlow<WrappedUiState> = combine(
-        songRepository.songs,
+        songData,
         statsRepository.allListenEvents(),
         selection,
         appSettingsRepository.showMilestoneCelebrations,
         visualPreferences,
-    ) { songs, events, request, showMilestones, visualPreferences ->
+    ) { songAndStats, events, request, showMilestones, visualPrefs ->
+        val songs: List<Song> = songAndStats.first
+        val stats: List<TrackStatsEntity> = songAndStats.second
         val years = WrappedBuilder.availableYears(events, zone)
         val months = WrappedBuilder.availableMonths(events, zone)
+
+        if (request.scope == WrappedScope.ALL_TIME) {
+            return@combine WrappedUiState.Content(
+                selectedScope = WrappedScope.ALL_TIME,
+                availableYears = years,
+                selectedYear = years.firstOrNull() ?: 0,
+                availableMonths = months,
+                selectedMonth = months.firstOrNull() ?: MonthYear(2020, 1),
+                currentPeriod = WrappedPeriod.AllTime,
+                summary = WrappedBuilder.buildAllTime(songs, stats),
+                showMilestoneCelebrations = showMilestones,
+                useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
+                backgroundIntensity = visualPrefs.backgroundIntensity,
+                fallbackTheme = visualPrefs.fallbackTheme,
+            )
+        }
+
         val resolved = resolveWrappedSelection(
             request = request,
             availableYears = years,
@@ -102,15 +129,17 @@ class WrappedViewModel @Inject constructor(
                 events = events,
             ),
             showMilestoneCelebrations = showMilestones,
-            useArtworkBackgrounds = visualPreferences.useArtworkBackgrounds,
-            backgroundIntensity = visualPreferences.backgroundIntensity,
-            fallbackTheme = visualPreferences.fallbackTheme,
+            useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
+            backgroundIntensity = visualPrefs.backgroundIntensity,
+            fallbackTheme = visualPrefs.fallbackTheme,
         )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = WrappedUiState.Loading,
-    )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = WrappedUiState.Loading,
+        )
 
     fun selectScope(scope: WrappedScope) {
         selectedScope.value = scope
@@ -153,6 +182,7 @@ internal fun resolveWrappedSelection(
     val period = when (request.scope) {
         WrappedScope.MONTHLY -> WrappedPeriod.month(month, zone)
         WrappedScope.YEARLY -> WrappedPeriod.year(year, zone)
+        WrappedScope.ALL_TIME -> return null
     }
     return ResolvedWrappedSelection(
         scope = request.scope,

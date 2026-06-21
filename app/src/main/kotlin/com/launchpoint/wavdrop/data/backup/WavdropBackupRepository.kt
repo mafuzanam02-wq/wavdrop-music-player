@@ -22,6 +22,8 @@ import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
 import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
+import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
+import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettings
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
@@ -184,7 +186,7 @@ class WavdropBackupRepository @Inject constructor(
             nowPlayingTimeDisplayMode = appSettingsRepository.nowPlayingTimeDisplayMode.first()
                 .takeIf { it != NowPlayingTimeDisplayMode.DURATION }?.name,
             notificationControls = appSettingsRepository.notificationControlsSetting.first()
-                .takeIf { it != NotificationControlsSetting.STANDARD }?.name,
+                .takeIf { it != NotificationControlsSetting.STANDARD_SHUFFLE_REPEAT }?.name,
             includeWhatsAppVoiceNotes = scanSettings.includeWhatsAppVoiceNotes
                 .takeIf { it },  // default false
             pauseOnAudioDisconnect = resumeSettings.pauseOnAudioDisconnect
@@ -196,6 +198,14 @@ class WavdropBackupRepository @Inject constructor(
                 .takeIf { it != HeadphoneResumeMode.RESUME_IF_INTERRUPTED }?.name,
             wiredResumeMode = resumeSettings.wiredResumeMode
                 .takeIf { it != HeadphoneResumeMode.RESUME_IF_INTERRUPTED }?.name,
+            showMilestoneCelebrations = appSettingsRepository.showMilestoneCelebrations.first()
+                .takeIf { !it }, // default true — export only when turned off
+            wrappedUseArtworkBackgrounds = appSettingsRepository.wrappedUseArtworkBackgrounds.first()
+                .takeIf { !it }, // default true
+            wrappedBackgroundIntensity = appSettingsRepository.wrappedBackgroundIntensity.first()
+                .takeIf { it != WrappedBackgroundIntensity.MEDIUM }?.name,
+            wrappedFallbackTheme = appSettingsRepository.wrappedFallbackTheme.first()
+                .takeIf { it != WrappedFallbackTheme.AUTO }?.name,
         )
 
         val backup = WavdropBackup(

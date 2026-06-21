@@ -8,10 +8,12 @@ import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.stats.MonthlyReportBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
@@ -53,11 +55,13 @@ class MonthlyReportsViewModel @Inject constructor(
             selectedMonth = selected,
             report = report,
         )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = MonthlyReportsUiState.Loading,
-    )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = MonthlyReportsUiState.Loading,
+        )
 
     fun selectMonth(month: MonthYear) {
         _selectedMonth.value = month

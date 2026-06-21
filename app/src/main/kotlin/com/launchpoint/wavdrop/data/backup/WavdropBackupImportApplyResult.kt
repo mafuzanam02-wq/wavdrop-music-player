@@ -21,6 +21,8 @@ data class WavdropBackupImportApplyResult(
     val playlistEntriesInBackup: Int = 0,
     /** Playlist entries whose song could not be confidently resolved (skipped, never guessed). */
     val playlistEntriesUnmatched: Int = 0,
+    /** Per-playlist breakdown for summaries with unmatched entries. Empty when all entries matched. */
+    val playlistRestoreSummaries: List<PlaylistRestoreSummary> = emptyList(),
     val eventsRestored: Int = 0,
     /** Import baselines re-keyed to current song ids and upserted (BlackPlayer history tracking). */
     val baselinesRestored: Int = 0,

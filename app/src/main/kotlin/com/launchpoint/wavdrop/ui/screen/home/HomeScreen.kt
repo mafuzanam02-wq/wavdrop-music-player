@@ -129,7 +129,8 @@ fun HomeScreen(
     val appIconChoice   by viewModel.appIconChoice.collectAsStateWithLifecycle()
     val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
 
-    val folderModeNeedsSelection by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
+    val folderModeNeedsSelection          by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
+    val needsFolderReselectionAfterRestore by viewModel.needsFolderReselectionAfterRestore.collectAsStateWithLifecycle()
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -221,7 +222,8 @@ fun HomeScreen(
                     currentSongId            = nowPlaying.song?.id,
                     favoriteSongIds          = favoriteSongIds,
                     nowPlaying               = nowPlaying,
-                    folderModeNeedsSelection = folderModeNeedsSelection,
+                    folderModeNeedsSelection          = folderModeNeedsSelection,
+                    needsFolderReselectionAfterRestore = needsFolderReselectionAfterRestore,
                     onNowPlayingClick        = onNowPlayingClick,
                     onResumeSession          = viewModel::togglePlayPause,
                     onPlaylistsClick         = onPlaylistsClick,
@@ -472,6 +474,7 @@ private fun HomeDashboardContent(
     favoriteSongIds: Set<Long>,
     nowPlaying: NowPlayingState,
     folderModeNeedsSelection: Boolean,
+    needsFolderReselectionAfterRestore: Boolean,
     onNowPlayingClick: () -> Unit,
     onResumeSession: () -> Unit,
     onPlaylistsClick: () -> Unit,
@@ -527,7 +530,8 @@ private fun HomeDashboardContent(
         if (dashboard.totalSongs == 0) {
             item {
                 DashboardEmptyLibraryCard(
-                    folderModeNeedsSelection = folderModeNeedsSelection,
+                    folderModeNeedsSelection          = folderModeNeedsSelection,
+                    needsFolderReselectionAfterRestore = needsFolderReselectionAfterRestore,
                     onRescan = onRescan,
                     onSettingsClick = onSettingsClick,
                     onLibrarySettingsClick = onLibrarySettingsClick,
@@ -844,6 +848,7 @@ private fun WrappedSeedCard(
 @Composable
 private fun DashboardEmptyLibraryCard(
     folderModeNeedsSelection: Boolean,
+    needsFolderReselectionAfterRestore: Boolean = false,
     onRescan: () -> Unit,
     onSettingsClick: () -> Unit,
     onLibrarySettingsClick: () -> Unit,
@@ -868,12 +873,15 @@ private fun DashboardEmptyLibraryCard(
                 Column(modifier = Modifier.weight(1f)) {
                     if (folderModeNeedsSelection) {
                         Text(
-                            text = "No folders selected",
+                            text = if (needsFolderReselectionAfterRestore) "Folder access needs to be reselected" else "No folders selected",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            text = "Wavdrop is set to scan selected folders only, but no folders have been added yet. Add a folder in Library Settings to start scanning.",
+                            text = if (needsFolderReselectionAfterRestore)
+                                "Folder permissions couldn't be transferred to this device. Open Library Settings to reselect your music folders."
+                            else
+                                "Wavdrop is set to scan selected folders only, but no folders have been added yet. Add a folder in Library Settings to start scanning.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                         )
@@ -901,7 +909,9 @@ private fun DashboardEmptyLibraryCard(
                 horizontalArrangement = Arrangement.End,
             ) {
                 if (folderModeNeedsSelection) {
-                    TextButton(onClick = onLibrarySettingsClick) { Text("Open Library Settings") }
+                    TextButton(onClick = onLibrarySettingsClick) {
+                        Text(if (needsFolderReselectionAfterRestore) "Select Music Folders" else "Open Library Settings")
+                    }
                 } else {
                     TextButton(onClick = onRescan) { Text("Rescan library") }
                     TextButton(onClick = onLibrarySettingsClick) { Text("Library Settings") }

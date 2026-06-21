@@ -18,9 +18,11 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 
 sealed interface InsightsHubUiState {
@@ -99,9 +101,11 @@ class InsightsViewModel @Inject constructor(
                 mostActiveHour           = mostActiveHour,
             )
         }
-    }.stateIn(
-        scope        = viewModelScope,
-        started      = SharingStarted.WhileSubscribed(5_000),
-        initialValue = InsightsHubUiState.Loading,
-    )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = InsightsHubUiState.Loading,
+        )
 }

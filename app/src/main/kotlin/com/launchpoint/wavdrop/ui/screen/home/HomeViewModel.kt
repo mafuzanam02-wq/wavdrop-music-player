@@ -185,11 +185,13 @@ class HomeViewModel @Inject constructor(
             .firstOrNull()
             ?.let { year -> WrappedBuilder.buildYear(year = year, songs = loadedSongs, events = events) }
             ?.takeIf { it.hasActivity && !it.emptyState.isEmpty }
-    }.stateIn(
-        scope        = viewModelScope,
-        started      = SharingStarted.WhileSubscribed(5_000),
-        initialValue = null,
-    )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
 
     val dashboardState: StateFlow<HomeDashboardUiState> = combine(
         allSongs,
@@ -233,6 +235,14 @@ class HomeViewModel @Inject constructor(
     val folderModeNeedsSelection: StateFlow<Boolean> =
         libraryScanSettingsRepository.settings
             .map { isFolderModeNeedsSelection(it) }
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = false,
+            )
+
+    val needsFolderReselectionAfterRestore: StateFlow<Boolean> =
+        appSettingsRepository.needsFolderReselectionAfterRestore
             .stateIn(
                 scope        = viewModelScope,
                 started      = SharingStarted.WhileSubscribed(5_000),

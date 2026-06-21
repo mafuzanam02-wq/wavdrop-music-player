@@ -4,6 +4,32 @@ Historical record of completed and shipped work. Newest changes first.
 
 ---
 
+## 0.1.0-beta7.5
+
+### Added
+- Added All-Time Wrapped with aggregate-backed lifetime listening stats.
+- Added All-Time Wrapped cards for lifetime totals, top songs, top artists, top albums, skips, recent plays, and listening summary.
+- Added backup restore visibility for playlists with unmatched songs.
+- Added precise warning when restoring older backups may overwrite newer local listening activity.
+
+### Improved
+- Hardened backup and migration resilience.
+- Preserved additional Wrapped and milestone settings during backup/restore.
+- Improved selected-folder restore behavior by prompting users to reselect folders after migration.
+- Moved Wrapped, Monthly Reports, Home Wrapped Preview, and Insights analytics computation off the main thread.
+
+### Fixed
+- Fixed selected-folder backup restore silently producing empty libraries on new devices.
+- Fixed missing backup coverage for Wrapped appearance and milestone settings.
+- Fixed backup notification-controls default comparison.
+- Fixed legacy backup compatibility for newly added preference fields.
+
+### Notes
+- All-Time Wrapped uses aggregate stats and intentionally avoids event-heavy cards for this MVP.
+- Event-derived lifetime insights such as streaks, heatmaps, rediscovery, and comeback moments are deferred.
+
+---
+
 ## Beta 7 — Navigation, Discoverability & Polish
 
 ### Navigation & Discoverability

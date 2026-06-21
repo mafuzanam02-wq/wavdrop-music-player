@@ -131,12 +131,16 @@ class BackupImportPreviewViewModel @Inject constructor(
             )
         }
 
-        val result = WavdropBackupParser.parse(content)
+        val result = withContext(Dispatchers.Default) { WavdropBackupParser.parse(content) }
         val backup = result.backup
             ?: return BackupImportUiState.Error(userFacingParseError(result.error))
 
         parsedBackup = backup
         parsedDesktopBackup = null
+
+        val regression = withContext(Dispatchers.IO) {
+            importRepository.detectStatsRegression(backup)
+        }
 
         return BackupImportUiState.Preview(
             format               = WavdropBackupParser.SUPPORTED_FORMAT,
@@ -149,6 +153,7 @@ class BackupImportPreviewViewModel @Inject constructor(
             hasPreferences       = backup.preferences != null,
             playlistCount        = backup.playlists.size,
             listenEventsCount    = backup.listenEvents.size,
+            warning = regression.regressionWarning(),
         )
     }
 

@@ -114,6 +114,7 @@ internal data class WrappedPeriodCopy(
     val displayLabel: String,
     val thisPeriod: String,
     val duringThisPeriod: String,
+    val introSubtitle: String = "in Review",
 ) {
     val inReviewTitle: String get() = "$displayLabel in Review"
 }
@@ -131,6 +132,13 @@ internal fun WrappedPeriod.toWrappedPeriodCopy(): WrappedPeriodCopy = when (this
         thisPeriod = "this year",
         duringThisPeriod = "during this year",
     )
+    is WrappedPeriod.AllTime -> WrappedPeriodCopy(
+        shortLabel = "All Time",
+        displayLabel = "All Time",
+        thisPeriod = "in your history",
+        duringThisPeriod = "in your history",
+        introSubtitle = "Your Story",
+    )
 }
 
 internal fun shouldShowWrappedMilestonePage(
@@ -139,6 +147,8 @@ internal fun shouldShowWrappedMilestonePage(
     hasMilestones: Boolean,
 ): Boolean =
     scope == WrappedScope.YEARLY && preferenceEnabled && hasMilestones
+
+private const val WRAPPED_ALL_TIME_PAGE_COUNT = 7
 
 internal fun <T> wrappedTopThree(items: List<T>): List<T> = items.take(3)
 
@@ -177,18 +187,24 @@ internal fun wrappedPageCount(
     scope: WrappedScope,
     milestonePreferenceEnabled: Boolean,
     hasMilestones: Boolean,
-): Int =
-    WRAPPED_BASE_COUNT + if (
+): Int = when (scope) {
+    WrappedScope.ALL_TIME -> WRAPPED_ALL_TIME_PAGE_COUNT
+    else -> WRAPPED_BASE_COUNT + if (
         shouldShowWrappedMilestonePage(
             scope = scope,
             preferenceEnabled = milestonePreferenceEnabled,
             hasMilestones = hasMilestones,
         )
-    ) {
-        1
-    } else {
-        0
-    }
+    ) 1 else 0
+}
+
+internal fun wrappedDataSourceDisclosure(scope: WrappedScope): String = when (scope) {
+    WrappedScope.ALL_TIME ->
+        "All Time is based on your aggregate listening totals on this device, including restored or imported stats."
+    WrappedScope.MONTHLY,
+    WrappedScope.YEARLY ->
+        "Wrapped is based on listening activity recorded by Wavdrop on this device. Imported totals may appear in Statistics, but they are not included here."
+}
 
 private data class WrappedVisualSettings(
     val useArtworkBackgrounds: Boolean,
@@ -391,7 +407,7 @@ private fun WrappedContent(
 
     val isYearly = state.selectedScope == WrappedScope.YEARLY
     val milestones = remember(wrapped, isYearly) {
-        if (isYearly) computeMilestones(wrapped) else emptyList()
+        if (isYearly) computeMilestones(wrapped) else emptyList<WrappedMilestone>()
     }
     val showMilestonePage = shouldShowWrappedMilestonePage(
         scope = state.selectedScope,
@@ -435,10 +451,11 @@ private fun WrappedContent(
                 accessibilityLabel = state.currentPeriod.accessibilityLabel,
                 onSelectYear = onSelectYear,
             )
+            WrappedScope.ALL_TIME -> Unit
         }
 
         Text(
-            text = "Wrapped is based on listening activity recorded by Wavdrop on this device. Imported totals may appear in Statistics, but they are not included here.",
+            text = wrappedDataSourceDisclosure(state.selectedScope),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -453,15 +470,25 @@ private fun WrappedContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val emptyTitle = if (state.selectedScope == WrappedScope.ALL_TIME) {
+                        "Your listening story starts here."
+                    } else {
+                        "No listening summary for this period"
+                    }
+                    val emptyBody = if (state.selectedScope == WrappedScope.ALL_TIME) {
+                        "Play some music to see your listening story here."
+                    } else {
+                        "Try another month or year with listening activity."
+                    }
                     Text(
-                        text = "No listening summary for this period",
+                        text = emptyTitle,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Try another month or year with listening activity.",
+                        text = emptyBody,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         textAlign = TextAlign.Center,
@@ -484,25 +511,36 @@ private fun WrappedContent(
                         )
                     },
             ) { page ->
-                when (page) {
-                    0    -> IntroPage(wrapped, visualSettings)
-                    1    -> OverviewPage(wrapped, periodCopy)
-                    2    -> StreaksPage(wrapped, periodCopy)
-                    3    -> PatternsPage(wrapped, periodCopy, visualSettings)
-                    4    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
-                    5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
-                    6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
-                    7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
-                    8    -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
-                    else -> if (showMilestonePage) {
-                        MilestonePage(
-                            milestones = milestones,
-                            periodLabel = state.currentPeriod.displayLabel,
-                            visualSettings = visualSettings,
-                            reduceMotion = reduceMotion,
-                        )
-                    } else {
-                        RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                when (state.selectedScope) {
+                    WrappedScope.ALL_TIME -> when (page) {
+                        0    -> IntroPage(wrapped, periodCopy, visualSettings)
+                        1    -> OverviewPage(wrapped, periodCopy)
+                        2    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                        3    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
+                        4    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
+                        5    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                        else -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                    }
+                    else -> when (page) {
+                        0    -> IntroPage(wrapped, periodCopy, visualSettings)
+                        1    -> OverviewPage(wrapped, periodCopy)
+                        2    -> StreaksPage(wrapped, periodCopy)
+                        3    -> PatternsPage(wrapped, periodCopy, visualSettings)
+                        4    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                        5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
+                        6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
+                        7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                        8    -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                        else -> if (showMilestonePage) {
+                            MilestonePage(
+                                milestones = milestones,
+                                periodLabel = state.currentPeriod.displayLabel,
+                                visualSettings = visualSettings,
+                                reduceMotion = reduceMotion,
+                            )
+                        } else {
+                            RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                        }
                     }
                 }
             }
@@ -1171,6 +1209,7 @@ private fun FeaturedTrack(
 @Composable
 private fun IntroPage(
     wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     modifier: Modifier = Modifier,
 ) {
@@ -1233,13 +1272,13 @@ private fun IntroPage(
             ) {
                 Column {
                     Text(
-                        text = wrapped.period.shortLabel,
+                        text = periodCopy.shortLabel,
                         style = MaterialTheme.typography.displayMedium,
                         fontWeight = FontWeight.Bold,
                         color = onColor,
                     )
                     Text(
-                        text = "in Review",
+                        text = periodCopy.introSubtitle,
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Normal,
                         color = onColor.copy(alpha = 0.75f),

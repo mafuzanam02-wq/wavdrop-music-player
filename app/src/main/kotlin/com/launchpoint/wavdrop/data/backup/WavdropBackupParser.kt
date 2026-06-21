@@ -269,6 +269,10 @@ private fun Map<*, *>.toBackupPreferences(): BackupPreferences = BackupPreferenc
     restoreQueue                = this["restoreQueue"] as? Boolean,
     bluetoothResumeMode         = this["bluetoothResumeMode"] as? String,
     wiredResumeMode             = this["wiredResumeMode"] as? String,
+    showMilestoneCelebrations   = this["showMilestoneCelebrations"] as? Boolean,
+    wrappedUseArtworkBackgrounds = this["wrappedUseArtworkBackgrounds"] as? Boolean,
+    wrappedBackgroundIntensity  = this["wrappedBackgroundIntensity"] as? String,
+    wrappedFallbackTheme        = this["wrappedFallbackTheme"] as? String,
 )
 
 private fun Map<*, *>.requiredArray(name: String): List<*> {

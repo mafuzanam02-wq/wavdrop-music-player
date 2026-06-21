@@ -117,4 +117,33 @@ class WrappedSlideRulesTest {
             ),
         )
     }
+
+    @Test
+    fun `all time uses seven aggregate-safe pages regardless of milestone settings`() {
+        assertEquals(
+            7,
+            wrappedPageCount(
+                scope = WrappedScope.ALL_TIME,
+                milestonePreferenceEnabled = true,
+                hasMilestones = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `all time copy and disclosure describe aggregate history`() {
+        val copy = WrappedPeriod.AllTime.toWrappedPeriodCopy()
+
+        assertEquals("All Time", copy.displayLabel)
+        assertEquals("in your history", copy.thisPeriod)
+        assertEquals("Your Story", copy.introSubtitle)
+        assertEquals(
+            "All Time is based on your aggregate listening totals on this device, including restored or imported stats.",
+            wrappedDataSourceDisclosure(WrappedScope.ALL_TIME),
+        )
+        assertEquals(
+            "Wrapped is based on listening activity recorded by Wavdrop on this device. Imported totals may appear in Statistics, but they are not included here.",
+            wrappedDataSourceDisclosure(WrappedScope.MONTHLY),
+        )
+    }
 }

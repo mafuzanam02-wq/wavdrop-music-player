@@ -100,6 +100,10 @@ object WavdropBackupIntegrity {
                 optionalRecord("prefRestoreQueue", prefs.restoreQueue)
                 optionalRecord("prefBluetoothResumeMode", prefs.bluetoothResumeMode)
                 optionalRecord("prefWiredResumeMode", prefs.wiredResumeMode)
+                optionalRecord("prefShowMilestoneCelebrations", prefs.showMilestoneCelebrations)
+                optionalRecord("prefWrappedUseArtworkBackgrounds", prefs.wrappedUseArtworkBackgrounds)
+                optionalRecord("prefWrappedBackgroundIntensity", prefs.wrappedBackgroundIntensity)
+                optionalRecord("prefWrappedFallbackTheme", prefs.wrappedFallbackTheme)
             } ?: record("prefs-none")
         }
         return sha256Hex(canonical)

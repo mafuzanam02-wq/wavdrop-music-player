@@ -39,6 +39,15 @@ sealed interface WrappedPeriod {
         override val accessibilityLabel: String get() = "Yearly Wrapped for $year"
     }
 
+    data object AllTime : WrappedPeriod {
+        override val scope: WrappedScope = WrappedScope.ALL_TIME
+        override val range: ListeningPeriodRange get() = ListeningPeriodRange.allTime()
+        override val shortLabel: String = "All Time"
+        override val displayLabel: String = "All Time"
+        override val shareFilenameLabel: String = "all-time"
+        override val accessibilityLabel: String = "All Time Wrapped"
+    }
+
     companion object {
         private val SHORT_MONTH_FORMATTER =
             DateTimeFormatter.ofPattern("MMM yyyy", Locale.US)
