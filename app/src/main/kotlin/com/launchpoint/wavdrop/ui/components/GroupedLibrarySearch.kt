@@ -72,7 +72,7 @@ data class SongSearchActions(
     val onShare: (Song) -> Unit,
 )
 
-internal data class GroupedSearchResults(
+data class GroupedSearchResults(
     val songs: List<Song>,
     val artists: List<ArtistSummary>,
     val albums: List<AlbumSummary>,
@@ -97,6 +97,23 @@ internal data class GroupedSearchResults(
 
 @Composable
 fun GroupedSearchContent(
+    results: GroupedSearchResults,
+    query: String,
+    songActions: SongSearchActions,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
+    onFolderClick: (String) -> Unit = {},
+    onPlaylistClick: (Long) -> Unit = {},
+    onSmartCollectionClick: (SmartCollectionType) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    GroupedSearchContentImpl(results = results, query = query, songActions = songActions,
+        onAlbumClick = onAlbumClick, onArtistClick = onArtistClick, onFolderClick = onFolderClick,
+        onPlaylistClick = onPlaylistClick, onSmartCollectionClick = onSmartCollectionClick, modifier = modifier)
+}
+
+@Composable
+fun GroupedSearchContent(
     songs: List<Song>,
     query: String,
     songActions: SongSearchActions,
@@ -112,6 +129,23 @@ fun GroupedSearchContent(
     val results = remember(songs, playlists, smartCollections, query) {
         buildGroupedSearchResults(songs = songs, playlists = playlists, smartCollections = smartCollections, query = query)
     }
+    GroupedSearchContentImpl(results = results, query = query, songActions = songActions,
+        onAlbumClick = onAlbumClick, onArtistClick = onArtistClick, onFolderClick = onFolderClick,
+        onPlaylistClick = onPlaylistClick, onSmartCollectionClick = onSmartCollectionClick, modifier = modifier)
+}
+
+@Composable
+private fun GroupedSearchContentImpl(
+    results: GroupedSearchResults,
+    query: String,
+    songActions: SongSearchActions,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
+    onFolderClick: (String) -> Unit = {},
+    onPlaylistClick: (Long) -> Unit = {},
+    onSmartCollectionClick: (SmartCollectionType) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
 
     // Expansion state resets when the query changes.
     var songsExpanded           by remember(query) { mutableStateOf(false) }

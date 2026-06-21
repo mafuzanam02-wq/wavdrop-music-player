@@ -60,14 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
-import com.launchpoint.wavdrop.data.grouping.AlbumGrouper
-import com.launchpoint.wavdrop.data.grouping.ArtistGrouper
 import com.launchpoint.wavdrop.data.library.FolderGrouper
-import com.launchpoint.wavdrop.data.model.AlbumSummary
-import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
-import com.launchpoint.wavdrop.data.search.LibrarySearch
 import com.launchpoint.wavdrop.data.settings.SongSortMode
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.GroupedSearchContent
@@ -104,12 +99,12 @@ fun SongsScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
-    val uiState          by viewModel.songsUiState.collectAsStateWithLifecycle()
-    val nowPlaying       by viewModel.nowPlayingState.collectAsStateWithLifecycle()
-    val favoriteSongIds  by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
-    val searchQuery      by viewModel.searchQuery.collectAsStateWithLifecycle()
-    val librarySongs     by viewModel.librarySongs.collectAsStateWithLifecycle()
-    val isRefreshing     by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val uiState           by viewModel.songsUiState.collectAsStateWithLifecycle()
+    val nowPlaying        by viewModel.nowPlayingState.collectAsStateWithLifecycle()
+    val favoriteSongIds   by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
+    val songSearchResults by viewModel.songSearchResults.collectAsStateWithLifecycle()
+    val isRefreshing      by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    var localQuery        by remember { mutableStateOf("") }
     val songSortMode              by viewModel.songSortMode.collectAsStateWithLifecycle()
     val folderModeNeedsSelection  by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
@@ -122,6 +117,7 @@ fun SongsScreen(
 
     BackHandler(enabled = isSearchActive) {
         isSearchActive = false
+        localQuery = ""
         viewModel.setSearchQuery("")
     }
 
@@ -129,9 +125,9 @@ fun SongsScreen(
         topBar = {
             if (isSearchActive) {
                 SearchTopAppBar(
-                    query         = searchQuery,
-                    onQueryChange = viewModel::setSearchQuery,
-                    onClose       = { isSearchActive = false; viewModel.setSearchQuery("") },
+                    query         = localQuery,
+                    onQueryChange = { localQuery = it; viewModel.setSearchQuery(it) },
+                    onClose       = { isSearchActive = false; localQuery = ""; viewModel.setSearchQuery("") },
                     placeholder   = "Search songs, artists, albums, folders…",
                 )
             } else {
@@ -194,7 +190,6 @@ fun SongsScreen(
                     HomeUiState.Loading -> LoadingSongs()
                     HomeUiState.Empty   -> EmptySongs(onLibrarySettingsClick = onLibrarySettingsClick, folderModeNeedsSelection = folderModeNeedsSelection)
                     is HomeUiState.Songs -> {
-                        val trimmedQuery = searchQuery.trim()
                         val commonSongActions = SongSearchActions(
                             currentSongId = nowPlaying.song?.id,
                             favoriteSongIds = favoriteSongIds,
@@ -220,10 +215,10 @@ fun SongsScreen(
                                 }
                             },
                         )
-                        if (isSearchActive && trimmedQuery.isNotEmpty()) {
+                        if (isSearchActive && localQuery.isNotEmpty()) {
                             GroupedSearchContent(
-                                songs = librarySongs,
-                                query = trimmedQuery,
+                                results = songSearchResults,
+                                query = localQuery,
                                 songActions = commonSongActions,
                                 onAlbumClick = onAlbumClick,
                                 onArtistClick = onArtistClick,

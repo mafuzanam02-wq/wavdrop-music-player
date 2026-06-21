@@ -2,8 +2,10 @@ package com.launchpoint.wavdrop.ui.screen.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
@@ -11,12 +13,19 @@ import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
+import com.launchpoint.wavdrop.ui.components.GroupedSearchResults
+import com.launchpoint.wavdrop.ui.components.buildGroupedSearchResults
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -28,6 +37,7 @@ class GlobalSearchViewModel @Inject constructor(
     private val statsRepository: StatsRepository,
     private val appSettingsRepository: AppSettingsRepository,
     private val smartCollectionRepository: SmartCollectionRepository,
+    private val playlistRepository: PlaylistRepository,
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -48,6 +58,32 @@ class GlobalSearchViewModel @Inject constructor(
                 scope        = viewModelScope,
                 started      = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
+            )
+
+    val playlists: StateFlow<List<PlaylistSummary>> = playlistRepository.observePlaylists()
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+    val filteredResults: StateFlow<GroupedSearchResults> =
+        combine(
+            _searchQuery.debounce(200),
+            songRepository.songs,
+            smartCollectionRepository.observeSmartCollections(),
+            playlistRepository.observePlaylists(),
+        ) { query, songs, collections, lists ->
+            buildGroupedSearchResults(songs = songs, query = query, playlists = lists, smartCollections = collections)
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = GroupedSearchResults(
+                    songs  = emptyList(), artists = emptyList(), albums  = emptyList(),
+                    playlists = emptyList(), smartCollections = emptyList(), folders = emptyList(),
+                ),
             )
 
     val nowPlayingState: StateFlow<NowPlayingState> = playerController.nowPlayingState

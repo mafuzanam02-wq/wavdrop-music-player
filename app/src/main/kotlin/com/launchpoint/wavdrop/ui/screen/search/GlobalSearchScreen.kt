@@ -39,16 +39,11 @@ fun GlobalSearchRoute(
     viewModel: GlobalSearchViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
-    val searchQuery      by viewModel.searchQuery.collectAsStateWithLifecycle()
-    // Local snapshot state backs the TextField for immediate display. The ViewModel's
-    // searchQuery drives GroupedSearchContent one frame later, decoupling list filtering
-    // from the keystroke frame so typed characters appear without perceptible latency.
-    var localQuery by rememberSaveable { mutableStateOf("") }
-    val allSongs         by viewModel.allSongs.collectAsStateWithLifecycle()
-    val smartCollections by viewModel.smartCollections.collectAsStateWithLifecycle()
+    var localQuery       by rememberSaveable { mutableStateOf("") }
+    val filteredResults  by viewModel.filteredResults.collectAsStateWithLifecycle()
     val nowPlaying       by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val favoriteSongIds  by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
-    val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
+    val playlists        by viewModel.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
 
     val context        = LocalContext.current
@@ -70,8 +65,8 @@ fun GlobalSearchRoute(
         },
     ) { innerPadding ->
         GroupedSearchContent(
-            songs  = allSongs,
-            query  = searchQuery.trim(),
+            results = filteredResults,
+            query   = localQuery,
             songActions = SongSearchActions(
                 currentSongId    = nowPlaying.song?.id,
                 favoriteSongIds  = favoriteSongIds,
@@ -97,14 +92,12 @@ fun GlobalSearchRoute(
                     }
                 },
             ),
-            onAlbumClick              = onAlbumClick,
-            onArtistClick             = onArtistClick,
-            onFolderClick             = onFolderClick,
-            playlists                 = playlists,
-            onPlaylistClick           = onPlaylistClick,
-            smartCollections          = smartCollections,
-            onSmartCollectionClick    = onSmartCollectionClick,
-            modifier                  = Modifier
+            onAlbumClick           = onAlbumClick,
+            onArtistClick          = onArtistClick,
+            onFolderClick          = onFolderClick,
+            onPlaylistClick        = onPlaylistClick,
+            onSmartCollectionClick = onSmartCollectionClick,
+            modifier               = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
         )

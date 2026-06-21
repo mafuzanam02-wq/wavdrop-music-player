@@ -29,13 +29,19 @@ import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.launchpoint.wavdrop.ui.components.GroupedSearchResults
+import com.launchpoint.wavdrop.ui.components.buildGroupedSearchResults
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -119,18 +125,19 @@ class HomeViewModel @Inject constructor(
         initialValue = SearchTapBehavior.DEFAULT,
     )
 
+    // songsUiState intentionally does NOT combine with _searchQuery so that typing
+    // in the Songs search bar does not trigger a full re-sort of the library on every
+    // keystroke. When search is active, SongsScreen shows songSearchResults instead.
     val songsUiState: StateFlow<HomeUiState> = combine(
         allSongs,
-        _searchQuery,
         songSortMode,
         statsRepository.allPlayCounts(),
         statsRepository.allListenEvents(),
-    ) { songs, query, sortMode, allTimePlayCounts, events ->
+    ) { songs, sortMode, allTimePlayCounts, events ->
         when {
             songs == null -> HomeUiState.Loading
             songs.isEmpty() -> HomeUiState.Empty
             else -> {
-                val filtered = LibrarySearch.filterSongs(songs, query)
                 val thisMonthPlayCounts =
                     if (sortMode == SongSortMode.MOST_PLAYED_THIS_MONTH) {
                         MostPlayedBuilder.thisMonthPlayCounts(songs = songs, events = events)
@@ -139,7 +146,7 @@ class HomeViewModel @Inject constructor(
                     }
                 HomeUiState.Songs(
                     SongSort.sortSongs(
-                        songs = filtered,
+                        songs = songs,
                         mode = sortMode,
                         allTimePlayCounts = allTimePlayCounts,
                         thisMonthPlayCounts = thisMonthPlayCounts,
@@ -152,6 +159,20 @@ class HomeViewModel @Inject constructor(
         started      = SharingStarted.WhileSubscribed(5_000),
         initialValue = HomeUiState.Loading,
     )
+
+    val songSearchResults: StateFlow<GroupedSearchResults> =
+        combine(_searchQuery.debounce(200), librarySongs) { query, songs ->
+            buildGroupedSearchResults(songs = songs, query = query)
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = GroupedSearchResults(
+                    songs  = emptyList(), artists = emptyList(), albums  = emptyList(),
+                    playlists = emptyList(), smartCollections = emptyList(), folders = emptyList(),
+                ),
+            )
 
     // Wrapped preview only depends on songs + events; isolated so that playlist/stats
     // changes don't trigger a full WrappedBuilder run on every play or skip.
