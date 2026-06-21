@@ -51,17 +51,30 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.Canvas
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -71,14 +84,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.material3.ButtonDefaults
-import coil.compose.AsyncImage
-import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
-import com.launchpoint.wavdrop.ui.components.ArtworkImage
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.roundToInt
-import kotlin.math.sin
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -88,15 +93,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.launchpoint.wavdrop.data.model.SongStatsSummary
+import coil.compose.AsyncImage
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
+import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.AlbumReportSummary
 import com.launchpoint.wavdrop.data.model.ArtistReportSummary
 import com.launchpoint.wavdrop.data.model.MonthYear
+import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.model.WrappedPeriod
 import com.launchpoint.wavdrop.data.model.WrappedScope
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
+import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
 import java.time.DayOfWeek
@@ -196,6 +208,25 @@ internal fun wrappedPageCount(
             hasMilestones = hasMilestones,
         )
     ) 1 else 0
+}
+
+// Intro gets 4 s; ranked list slides (Top Tracks/Artists/Albums) get 6 s to allow reading;
+// all other slides get the default 5 s.
+internal fun wrappedSlideDurationMs(
+    page: Int,
+    scope: WrappedScope,
+    showMilestonePage: Boolean,
+): Int = when (scope) {
+    WrappedScope.ALL_TIME -> when (page) {
+        0       -> 4_000  // Intro
+        2, 3, 4 -> 7_000  // Top Tracks, Top Artists, Top Albums
+        else    -> 5_000  // Overview, Skip Habits, Recent Plays
+    }
+    else -> when (page) {
+        0       -> 4_000  // Intro
+        4, 5, 6 -> 7_000  // Top Tracks, Top Artists, Top Albums
+        else    -> 5_000  // Overview, Streaks, Patterns, Skip Habits, Recent Plays, Milestones
+    }
 }
 
 internal fun wrappedDataSourceDisclosure(scope: WrappedScope): String = when (scope) {
@@ -423,8 +454,15 @@ private fun WrappedContent(
     val pagerState = rememberPagerState(pageCount = { pageCount })
     var pagerBoundsInWindow by remember { mutableStateOf<AndroidRect?>(null) }
 
+    // ── Story mode ────────────────────────────────────────────────────────────
+    // Story starts playing automatically unless the OS reduce-motion flag is set.
+    var storyPlaying by remember { mutableStateOf(!reduceMotion) }
+    val slideProgress = remember { Animatable(0f) }
+
     LaunchedEffect(state.currentPeriod) {
         pagerState.scrollToPage(0)
+        slideProgress.snapTo(0f)
+        storyPlaying = !reduceMotion
     }
 
     LaunchedEffect(pageCount) {
@@ -432,6 +470,28 @@ private fun WrappedContent(
             pagerState.scrollToPage(pageCount - 1)
         }
     }
+
+    // Single effect drives both the progress animation and the auto-advance.
+    // Keyed on settledPage (not currentPage) so the timer only starts once the page has fully
+    // landed — prevents the effect from firing on transitional/partially-visible pages during
+    // manual swipes or animated scrolls.
+    val currentStoryPage = pagerState.settledPage
+    LaunchedEffect(currentStoryPage, storyPlaying) {
+        slideProgress.snapTo(0f)
+        if (!storyPlaying || reduceMotion) return@LaunchedEffect
+        val isLastPage = currentStoryPage >= pageCount - 1
+        val durationMs = wrappedSlideDurationMs(currentStoryPage, state.selectedScope, showMilestonePage)
+        slideProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = durationMs, easing = LinearEasing),
+        )
+        if (isLastPage) {
+            storyPlaying = false
+        } else {
+            pagerState.animateScrollToPage(currentStoryPage + 1)
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     Column(modifier = modifier.fillMaxSize()) {
         WrappedScopeSelector(
@@ -511,25 +571,26 @@ private fun WrappedContent(
                         )
                     },
             ) { page ->
+                val isCurrentPage = pagerState.settledPage == page
                 when (state.selectedScope) {
                     WrappedScope.ALL_TIME -> when (page) {
                         0    -> IntroPage(wrapped, periodCopy, visualSettings)
-                        1    -> OverviewPage(wrapped, periodCopy)
+                        1    -> OverviewPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
                         2    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
                         3    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
                         4    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
-                        5    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                        5    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick, isCurrentPage, reduceMotion)
                         else -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
                     }
                     else -> when (page) {
                         0    -> IntroPage(wrapped, periodCopy, visualSettings)
-                        1    -> OverviewPage(wrapped, periodCopy)
-                        2    -> StreaksPage(wrapped, periodCopy)
+                        1    -> OverviewPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
+                        2    -> StreaksPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
                         3    -> PatternsPage(wrapped, periodCopy, visualSettings)
                         4    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
                         5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
                         6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
-                        7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                        7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick, isCurrentPage, reduceMotion)
                         8    -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
                         else -> if (showMilestonePage) {
                             MilestonePage(
@@ -545,29 +606,54 @@ private fun WrappedContent(
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-            ) {
-                PageIndicator(
-                    pageCount = pageCount,
-                    currentPage = pagerState.currentPage,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                IconButton(
-                    onClick = {
-                        val rect = pagerBoundsInWindow ?: return@IconButton
-                        val act = activity ?: return@IconButton
-                        shareWrappedSlide(act, rect)
-                    },
-                    enabled = !pagerState.isScrollInProgress && pagerBoundsInWindow != null && activity != null,
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = "Share this slide",
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (!reduceMotion) {
+                    LinearProgressIndicator(
+                        progress = { slideProgress.value },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
                     )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                ) {
+                    if (!reduceMotion) {
+                        IconButton(
+                            onClick = { storyPlaying = !storyPlaying },
+                            modifier = Modifier.align(Alignment.CenterStart),
+                        ) {
+                            Icon(
+                                imageVector = if (storyPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (storyPlaying) "Pause story" else "Play story",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                    PageIndicator(
+                        pageCount = pageCount,
+                        currentPage = pagerState.settledPage,
+                        reduceMotion = reduceMotion,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    IconButton(
+                        onClick = {
+                            val rect = pagerBoundsInWindow ?: return@IconButton
+                            val act = activity ?: return@IconButton
+                            shareWrappedSlide(act, rect)
+                        },
+                        enabled = !pagerState.isScrollInProgress && pagerBoundsInWindow != null && activity != null,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share this slide",
+                        )
+                    }
                 }
             }
         }
@@ -799,6 +885,7 @@ private fun WrappedMonthSelector(
 private fun PageIndicator(
     pageCount: Int,
     currentPage: Int,
+    reduceMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -807,12 +894,18 @@ private fun PageIndicator(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         repeat(pageCount) { index ->
+            val isActive = index == currentPage
+            val dotSize by animateDpAsState(
+                targetValue = if (isActive) 10.dp else 7.dp,
+                animationSpec = if (reduceMotion) tween(durationMillis = 0) else tween(durationMillis = 200),
+                label = "dot_size_$index",
+            )
             Box(
                 modifier = Modifier
-                    .size(if (index == currentPage) 10.dp else 7.dp)
+                    .size(dotSize)
                     .clip(CircleShape)
                     .background(
-                        if (index == currentPage) MaterialTheme.colorScheme.primary
+                        if (isActive) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                     ),
             )
@@ -903,21 +996,27 @@ private fun WrappedArtworkCard(
                     onError = { artworkLoaded = false },
                 )
             }
-            if (artworkLoaded && effectiveArtworkUri != null) {
-                Box(
-                    Modifier.fillMaxSize().background(
-                        Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = intensityStyle.artworkTopScrimAlpha),
-                            1f to Color.Black.copy(alpha = intensityStyle.artworkBottomScrimAlpha),
+            Crossfade(
+                targetState = artworkLoaded && effectiveArtworkUri != null,
+                animationSpec = tween(durationMillis = 400),
+                label = "artwork_crossfade",
+            ) { showingArtwork ->
+                if (showingArtwork) {
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                0f to Color.Black.copy(alpha = intensityStyle.artworkTopScrimAlpha),
+                                1f to Color.Black.copy(alpha = intensityStyle.artworkBottomScrimAlpha),
+                            )
                         )
                     )
-                )
-            } else {
-                WrappedDecorativeBackground(
-                    motif = fallbackMotif,
-                    visualSettings = visualSettings,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                } else {
+                    WrappedDecorativeBackground(
+                        motif = fallbackMotif,
+                        visualSettings = visualSettings,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             Column(
                 modifier = Modifier
@@ -949,93 +1048,117 @@ private fun WrappedDecorativeBackground(
 ) {
     val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
     val palette = visualSettings.fallbackTheme.toPalette(motif, intensityStyle)
-    val primary = palette.primary
-    val secondary = palette.secondary
-    val motifMultiplier = intensityStyle.decorativeMotifMultiplier
-    Canvas(modifier = modifier) {
-        when (motif) {
-            WrappedDecorativeMotif.Milestones -> {
-                // Concentric badge rings anchored top-right
-                val cx = size.width * 0.87f
-                val cy = size.height * 0.19f
-                for (i in 1..5) {
-                    drawCircle(
-                        color = primary.copy(
-                            alpha = ((0.065f - i * 0.01f).coerceAtLeast(0.01f) * motifMultiplier)
-                                .coerceAtMost(0.16f),
-                        ),
-                        radius = i * 50.dp.toPx(),
-                        center = Offset(cx, cy),
-                        style = Stroke(width = 1.dp.toPx()),
-                    )
-                }
-                // Scattered accent dots
-                val dots = listOf(
-                    0.10f to 0.72f, 0.06f to 0.47f, 0.93f to 0.64f,
-                    0.77f to 0.90f, 0.52f to 0.94f, 0.30f to 0.84f,
-                )
-                dots.forEachIndexed { idx, (rx, ry) ->
-                    val r = if (idx % 2 == 0) 3f else 2f
-                    drawCircle(
-                        color = primary.copy(alpha = (0.09f * motifMultiplier).coerceAtMost(0.18f)),
-                        radius = r.dp.toPx(),
-                        center = Offset(rx * size.width, ry * size.height),
-                    )
-                }
-            }
-            WrappedDecorativeMotif.Patterns -> {
-                // Layered sine waves (listening rhythm motif)
+
+    // Wrap in rememberUpdatedState so drawWithCache re-runs its cache when colors/multiplier change.
+    val primaryState = rememberUpdatedState(palette.primary)
+    val secondaryState = rememberUpdatedState(palette.secondary)
+    val motifMultiplierState = rememberUpdatedState(intensityStyle.decorativeMotifMultiplier)
+
+    Spacer(
+        modifier = modifier.drawWithCache {
+            val primary = primaryState.value
+            val secondary = secondaryState.value
+            val mult = motifMultiplierState.value
+
+            // Build Path objects once per size change (the expensive part for Patterns).
+            val wavePaths: List<Path>
+            val waveAlphas: List<Float>
+            val waveStrokeWidth: Float
+            if (motif == WrappedDecorativeMotif.Patterns) {
                 val amplitude = size.height * 0.065f
                 val waveLen = size.width * 0.55f
-                for (w in 0..2) {
+                wavePaths = List(3) { w ->
                     val yBase = size.height * (0.30f + w * 0.22f)
                     val phase = w * (PI / 3.0)
-                    val path = Path()
-                    path.moveTo(0f, yBase.toFloat())
-                    var x = 0f
-                    while (x <= size.width + 3f) {
-                        val y = (yBase + amplitude * sin(x / waveLen * 2.0 * PI + phase)).toFloat()
-                        path.lineTo(x, y)
-                        x += 3f
+                    Path().apply {
+                        moveTo(0f, yBase.toFloat())
+                        var x = 0f
+                        while (x <= size.width + 3f) {
+                            lineTo(x, (yBase + amplitude * sin(x / waveLen * 2.0 * PI + phase)).toFloat())
+                            x += 3f
+                        }
                     }
-                    drawPath(
-                        path = path,
-                        color = primary.copy(
-                            alpha = ((0.062f - w * 0.014f).coerceAtLeast(0.02f) * motifMultiplier)
-                                .coerceAtMost(0.15f),
-                        ),
-                        style = Stroke(width = 1.2.dp.toPx()),
-                    )
                 }
-                // Mini clock-face motif bottom-right
-                val ccx = size.width * 0.90f
-                val ccy = size.height * 0.83f
-                val cr = 27.dp.toPx()
-                drawCircle(
-                    color = secondary.copy(alpha = (0.05f * motifMultiplier).coerceAtMost(0.13f)),
-                    radius = cr,
-                    center = Offset(ccx, ccy),
-                    style = Stroke(width = 0.8.dp.toPx()),
-                )
-                for (tick in 0..11) {
-                    val angle = tick * (PI / 6.0) - PI / 2.0
-                    val inner = if (tick % 3 == 0) 0.68f else 0.84f
-                    drawLine(
-                        color = secondary.copy(alpha = (0.055f * motifMultiplier).coerceAtMost(0.14f)),
-                        start = Offset(
-                            (ccx + cr * inner * cos(angle)).toFloat(),
-                            (ccy + cr * inner * sin(angle)).toFloat(),
-                        ),
-                        end = Offset(
-                            (ccx + cr * cos(angle)).toFloat(),
-                            (ccy + cr * sin(angle)).toFloat(),
-                        ),
-                        strokeWidth = (if (tick % 3 == 0) 1.1 else 0.7).dp.toPx(),
-                    )
+                waveAlphas = List(3) { w ->
+                    ((0.062f - w * 0.014f).coerceAtLeast(0.02f) * mult).coerceAtMost(0.15f)
+                }
+                waveStrokeWidth = 1.2.dp.toPx()
+            } else {
+                wavePaths = emptyList()
+                waveAlphas = emptyList()
+                waveStrokeWidth = 0f
+            }
+
+            // Milestones geometry (no Path needed — pure circles/lines)
+            val ringCx = size.width * 0.87f
+            val ringCy = size.height * 0.19f
+            val ringStroke = 1.dp.toPx()
+            val dotPositions = listOf(
+                0.10f to 0.72f, 0.06f to 0.47f, 0.93f to 0.64f,
+                0.77f to 0.90f, 0.52f to 0.94f, 0.30f to 0.84f,
+            )
+
+            // Patterns clock geometry
+            val ccx = size.width * 0.90f
+            val ccy = size.height * 0.83f
+            val cr = 27.dp.toPx()
+            val clockOutlineStroke = 0.8.dp.toPx()
+
+            onDrawBehind {
+                when (motif) {
+                    WrappedDecorativeMotif.Milestones -> {
+                        for (i in 1..5) {
+                            drawCircle(
+                                color = primary.copy(
+                                    alpha = ((0.065f - i * 0.01f).coerceAtLeast(0.01f) * mult)
+                                        .coerceAtMost(0.16f),
+                                ),
+                                radius = i * 50.dp.toPx(),
+                                center = Offset(ringCx, ringCy),
+                                style = Stroke(width = ringStroke),
+                            )
+                        }
+                        val dotAlpha = (0.09f * mult).coerceAtMost(0.18f)
+                        dotPositions.forEachIndexed { idx, (rx, ry) ->
+                            drawCircle(
+                                color = primary.copy(alpha = dotAlpha),
+                                radius = (if (idx % 2 == 0) 3f else 2f).dp.toPx(),
+                                center = Offset(rx * size.width, ry * size.height),
+                            )
+                        }
+                    }
+                    WrappedDecorativeMotif.Patterns -> {
+                        wavePaths.forEachIndexed { w, path ->
+                            drawPath(
+                                path = path,
+                                color = primary.copy(alpha = waveAlphas[w]),
+                                style = Stroke(width = waveStrokeWidth),
+                            )
+                        }
+                        drawCircle(
+                            color = secondary.copy(alpha = (0.05f * mult).coerceAtMost(0.13f)),
+                            radius = cr,
+                            center = Offset(ccx, ccy),
+                            style = Stroke(width = clockOutlineStroke),
+                        )
+                        val tickAlpha = (0.055f * mult).coerceAtMost(0.14f)
+                        for (tick in 0..11) {
+                            val angle = tick * (PI / 6.0) - PI / 2.0
+                            val inner = if (tick % 3 == 0) 0.68f else 0.84f
+                            val cosA = cos(angle).toFloat()
+                            val sinA = sin(angle).toFloat()
+                            drawLine(
+                                color = secondary.copy(alpha = tickAlpha),
+                                start = Offset(ccx + cr * inner * cosA, ccy + cr * inner * sinA),
+                                end = Offset(ccx + cr * cosA, ccy + cr * sinA),
+                                strokeWidth = (if (tick % 3 == 0) 1.1f else 0.7f).dp.toPx(),
+                            )
+                        }
+                    }
                 }
             }
         }
-    }
+    )
 }
 
 @Composable
@@ -1091,6 +1214,30 @@ private fun WrappedDecorativeCard(
 }
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
+
+/**
+ * Returns an animated Int that counts up from 0 to [target] once [isVisible] becomes true.
+ * Skips animation when [reduceMotion] is set. Safe across recompositions — will not re-animate
+ * once triggered unless the composable leaves and re-enters the composition.
+ */
+@Composable
+private fun animatedWrappedCounter(
+    target: Int,
+    isVisible: Boolean,
+    reduceMotion: Boolean,
+): Int {
+    if (reduceMotion) return target
+    var triggered by remember { mutableStateOf(false) }
+    LaunchedEffect(isVisible) {
+        if (isVisible) triggered = true
+    }
+    val animated by animateIntAsState(
+        targetValue = if (triggered) target else 0,
+        animationSpec = tween(durationMillis = 700),
+        label = "wrapped_counter",
+    )
+    return animated
+}
 
 @Composable
 private fun BigStat(value: String, label: String, modifier: Modifier = Modifier) {
@@ -1247,20 +1394,26 @@ private fun IntroPage(
                     onError = { artworkLoaded = false },
                 )
             }
-            if (artworkLoaded && artworkUri != null) {
-                Box(
-                    modifier = Modifier.fillMaxSize().background(
-                        Color.Black.copy(
-                            alpha = (intensityStyle.artworkTopScrimAlpha + intensityStyle.artworkBottomScrimAlpha) / 2f,
+            Crossfade(
+                targetState = artworkLoaded && artworkUri != null,
+                animationSpec = tween(durationMillis = 400),
+                label = "intro_artwork_crossfade",
+            ) { showingArtwork ->
+                if (showingArtwork) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(
+                            Color.Black.copy(
+                                alpha = (intensityStyle.artworkTopScrimAlpha + intensityStyle.artworkBottomScrimAlpha) / 2f,
+                            ),
                         ),
-                    ),
-                )
-            } else {
-                WrappedDecorativeBackground(
-                    motif = WrappedDecorativeMotif.Patterns,
-                    visualSettings = visualSettings,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    )
+                } else {
+                    WrappedDecorativeBackground(
+                        motif = WrappedDecorativeMotif.Patterns,
+                        visualSettings = visualSettings,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             val onColor = if (artworkLoaded) Color.White
                           else MaterialTheme.colorScheme.onSurface
@@ -1307,15 +1460,21 @@ private fun IntroPage(
 private fun OverviewPage(
     wrapped: WrappedSummary,
     periodCopy: WrappedPeriodCopy,
+    isVisible: Boolean = false,
+    reduceMotion: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val animPlays         = animatedWrappedCounter(wrapped.totalPlayCount, isVisible, reduceMotion)
+    val animDays          = animatedWrappedCounter(wrapped.listeningDaysCount, isVisible, reduceMotion)
+    val animUniqueTracks  = animatedWrappedCounter(wrapped.uniqueSongsPlayedCount, isVisible, reduceMotion)
+    val animUniqueArtists = animatedWrappedCounter(wrapped.uniqueArtistsPlayedCount, isVisible, reduceMotion)
     InsightCard(label = periodCopy.inReviewTitle, modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             BigStat(
-                value = wrapped.totalPlayCount.toString(),
+                value = animPlays.toString(),
                 label = "Plays",
                 modifier = Modifier.weight(1f),
             )
@@ -1326,9 +1485,9 @@ private fun OverviewPage(
             )
         }
         Spacer(Modifier.height(20.dp))
-        StatRow("Listening Days", wrapped.listeningDaysCount.toString())
-        StatRow("Unique Tracks", wrapped.uniqueSongsPlayedCount.toString())
-        StatRow("Unique Artists", wrapped.uniqueArtistsPlayedCount.toString())
+        StatRow("Listening Days", animDays.toString())
+        StatRow("Unique Tracks", animUniqueTracks.toString())
+        StatRow("Unique Artists", animUniqueArtists.toString())
         StatRow("Busiest Day", formatBusiestDay(wrapped.busiestDay, wrapped.busiestDayPlayCount))
         StatRow("Avg Plays / Day", formatDecimal(wrapped.averagePlaysPerActiveDay))
     }
@@ -1338,8 +1497,12 @@ private fun OverviewPage(
 private fun StreaksPage(
     wrapped: WrappedSummary,
     periodCopy: WrappedPeriodCopy,
+    isVisible: Boolean = false,
+    reduceMotion: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val animLongest = animatedWrappedCounter(wrapped.longestStreak, isVisible, reduceMotion)
+    val animCurrent = animatedWrappedCounter(wrapped.currentStreak, isVisible, reduceMotion)
     InsightCard(
         label = "Listening Streaks · ${periodCopy.displayLabel}",
         modifier = modifier,
@@ -1348,11 +1511,11 @@ private fun StreaksPage(
             NoDataText("No consecutive listening days recorded ${periodCopy.thisPeriod}. Play on multiple days to build a streak.")
         } else {
             BigStat(
-                value = formatStreak(wrapped.longestStreak),
+                value = formatStreak(animLongest),
                 label = "Longest streak",
             )
             Spacer(Modifier.height(24.dp))
-            StatRow("Current streak", formatStreak(wrapped.currentStreak))
+            StatRow("Current streak", formatStreak(animCurrent))
         }
     }
 }
@@ -1489,8 +1652,16 @@ private fun SkipHabitsPage(
     periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     onTrackDetailsClick: (Long) -> Unit,
+    isVisible: Boolean = false,
+    reduceMotion: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val animSkips    = animatedWrappedCounter(wrapped.totalSkipCount, isVisible, reduceMotion)
+    val animSkipRate = animatedWrappedCounter(
+        wrappedSkipRatePercent(wrapped.totalPlayCount, wrapped.totalSkipCount),
+        isVisible,
+        reduceMotion,
+    )
     val track = wrapped.mostSkippedTrack
     WrappedDecorativeCard(
         label = "Skip Habits · ${periodCopy.shortLabel}",
@@ -1509,12 +1680,12 @@ private fun SkipHabitsPage(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             BigStat(
-                value = wrapped.totalSkipCount.toString(),
+                value = animSkips.toString(),
                 label = "Total skips",
                 modifier = Modifier.weight(1f),
             )
             BigStat(
-                value = "${wrappedSkipRatePercent(wrapped.totalPlayCount, wrapped.totalSkipCount)}%",
+                value = "$animSkipRate%",
                 label = "Skip rate",
                 modifier = Modifier.weight(1f),
             )

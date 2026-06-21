@@ -146,4 +146,61 @@ class WrappedSlideRulesTest {
             wrappedDataSourceDisclosure(WrappedScope.MONTHLY),
         )
     }
+
+    // ── Story mode slide durations ─────────────────────────────────────────────
+
+    @Test
+    fun `intro page always returns 4000ms across all scopes`() {
+        assertEquals(4_000, wrappedSlideDurationMs(0, WrappedScope.ALL_TIME, false))
+        assertEquals(4_000, wrappedSlideDurationMs(0, WrappedScope.YEARLY, false))
+        assertEquals(4_000, wrappedSlideDurationMs(0, WrappedScope.MONTHLY, false))
+    }
+
+    @Test
+    fun `ranked list pages return 7000ms for all time scope`() {
+        // All Time: page 2 = Top Tracks, 3 = Top Artists, 4 = Top Albums
+        assertEquals(7_000, wrappedSlideDurationMs(2, WrappedScope.ALL_TIME, false))
+        assertEquals(7_000, wrappedSlideDurationMs(3, WrappedScope.ALL_TIME, false))
+        assertEquals(7_000, wrappedSlideDurationMs(4, WrappedScope.ALL_TIME, false))
+    }
+
+    @Test
+    fun `ranked list pages return 7000ms for yearly and monthly scopes`() {
+        // Yearly / Monthly: page 4 = Top Tracks, 5 = Top Artists, 6 = Top Albums
+        assertEquals(7_000, wrappedSlideDurationMs(4, WrappedScope.YEARLY, false))
+        assertEquals(7_000, wrappedSlideDurationMs(5, WrappedScope.YEARLY, false))
+        assertEquals(7_000, wrappedSlideDurationMs(6, WrappedScope.YEARLY, false))
+        assertEquals(7_000, wrappedSlideDurationMs(4, WrappedScope.MONTHLY, false))
+        assertEquals(7_000, wrappedSlideDurationMs(5, WrappedScope.MONTHLY, false))
+        assertEquals(7_000, wrappedSlideDurationMs(6, WrappedScope.MONTHLY, false))
+    }
+
+    @Test
+    fun `standard pages return 5000ms for all time scope`() {
+        // All Time: Overview (1), Skip Habits (5), Recent Plays (6)
+        assertEquals(5_000, wrappedSlideDurationMs(1, WrappedScope.ALL_TIME, false))
+        assertEquals(5_000, wrappedSlideDurationMs(5, WrappedScope.ALL_TIME, false))
+        assertEquals(5_000, wrappedSlideDurationMs(6, WrappedScope.ALL_TIME, false))
+    }
+
+    @Test
+    fun `standard pages return 5000ms for yearly and monthly scopes`() {
+        // Yearly / Monthly: Overview (1), Streaks (2), Patterns (3), Skip Habits (7), Recent Plays (8)
+        assertEquals(5_000, wrappedSlideDurationMs(1, WrappedScope.YEARLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(2, WrappedScope.YEARLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(3, WrappedScope.YEARLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(7, WrappedScope.YEARLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(8, WrappedScope.YEARLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(1, WrappedScope.MONTHLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(7, WrappedScope.MONTHLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(8, WrappedScope.MONTHLY, false))
+    }
+
+    @Test
+    fun `milestone and out-of-range pages fall back to 5000ms`() {
+        // Page 9 = Milestone page (yearly with milestones) or Recent Plays fallback
+        assertEquals(5_000, wrappedSlideDurationMs(9, WrappedScope.YEARLY, true))
+        assertEquals(5_000, wrappedSlideDurationMs(9, WrappedScope.YEARLY, false))
+        assertEquals(5_000, wrappedSlideDurationMs(9, WrappedScope.MONTHLY, false))
+    }
 }
