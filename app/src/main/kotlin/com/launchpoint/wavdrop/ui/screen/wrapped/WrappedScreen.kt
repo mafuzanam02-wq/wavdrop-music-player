@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
@@ -270,6 +271,7 @@ fun WrappedScreen(
     onArtistClick: (String) -> Unit,
     onAlbumClick: (String) -> Unit,
     onNavigateToSongs: () -> Unit = {},
+    onWrappedAppearanceClick: () -> Unit = {},
     viewModel: WrappedViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -283,6 +285,15 @@ fun WrappedScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onWrappedAppearanceClick) {
+                        Icon(
+                            imageVector        = Icons.Default.Settings,
+                            contentDescription = "Wrapped appearance settings",
+                            tint               = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 },
@@ -434,77 +445,92 @@ private fun WrappedContent(
         )
 
         if (wrapped.emptyState.isEmpty) {
-            Text(
-                text = "No listening summary found for ${state.currentPeriod.displayLabel}. Play current library songs to build this recap.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+            Box(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-            )
-        }
-
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .onGloballyPositioned { coordinates ->
-                    val b = coordinates.boundsInWindow()
-                    pagerBoundsInWindow = AndroidRect(
-                        b.left.toInt(),
-                        b.top.toInt(),
-                        b.right.toInt(),
-                        b.bottom.toInt(),
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "No listening summary for this period",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
                     )
-                },
-        ) { page ->
-            when (page) {
-                0    -> IntroPage(wrapped, visualSettings)
-                1    -> OverviewPage(wrapped, periodCopy)
-                2    -> StreaksPage(wrapped, periodCopy)
-                3    -> PatternsPage(wrapped, periodCopy, visualSettings)
-                4    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
-                5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
-                6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
-                7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
-                8    -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
-                else -> if (showMilestonePage) {
-                    MilestonePage(
-                        milestones = milestones,
-                        periodLabel = state.currentPeriod.displayLabel,
-                        visualSettings = visualSettings,
-                        reduceMotion = reduceMotion,
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Try another month or year with listening activity.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Center,
                     )
-                } else {
-                    RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
                 }
             }
-        }
+        } else {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .onGloballyPositioned { coordinates ->
+                        val b = coordinates.boundsInWindow()
+                        pagerBoundsInWindow = AndroidRect(
+                            b.left.toInt(),
+                            b.top.toInt(),
+                            b.right.toInt(),
+                            b.bottom.toInt(),
+                        )
+                    },
+            ) { page ->
+                when (page) {
+                    0    -> IntroPage(wrapped, visualSettings)
+                    1    -> OverviewPage(wrapped, periodCopy)
+                    2    -> StreaksPage(wrapped, periodCopy)
+                    3    -> PatternsPage(wrapped, periodCopy, visualSettings)
+                    4    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                    5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
+                    6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
+                    7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
+                    8    -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                    else -> if (showMilestonePage) {
+                        MilestonePage(
+                            milestones = milestones,
+                            periodLabel = state.currentPeriod.displayLabel,
+                            visualSettings = visualSettings,
+                            reduceMotion = reduceMotion,
+                        )
+                    } else {
+                        RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                    }
+                }
+            }
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-        ) {
-            PageIndicator(
-                pageCount = pageCount,
-                currentPage = pagerState.currentPage,
-                modifier = Modifier.align(Alignment.Center),
-            )
-            IconButton(
-                onClick = {
-                    val rect = pagerBoundsInWindow ?: return@IconButton
-                    val act = activity ?: return@IconButton
-                    shareWrappedSlide(act, rect)
-                },
-                enabled = !pagerState.isScrollInProgress && pagerBoundsInWindow != null && activity != null,
-                modifier = Modifier.align(Alignment.CenterEnd),
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = "Share this slide",
+                PageIndicator(
+                    pageCount = pageCount,
+                    currentPage = pagerState.currentPage,
+                    modifier = Modifier.align(Alignment.Center),
                 )
+                IconButton(
+                    onClick = {
+                        val rect = pagerBoundsInWindow ?: return@IconButton
+                        val act = activity ?: return@IconButton
+                        shareWrappedSlide(act, rect)
+                    },
+                    enabled = !pagerState.isScrollInProgress && pagerBoundsInWindow != null && activity != null,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share this slide",
+                    )
+                }
             }
         }
     }

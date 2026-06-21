@@ -379,11 +379,12 @@ fun WavdropNavGraph(
         }
         composable(Screen.Wrapped.route) {
             WrappedScreen(
-                onNavigateBack      = { navController.popBackStack() },
-                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
-                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
-                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
-                onNavigateToSongs   = { navController.navigatePrimary(Screen.Songs.route) },
+                onNavigateBack            = { navController.popBackStack() },
+                onTrackDetailsClick       = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onArtistClick             = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onAlbumClick              = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+                onNavigateToSongs         = { navController.navigatePrimary(Screen.Songs.route) },
+                onWrappedAppearanceClick  = { navController.navigate(Screen.SettingsWrapped.route) },
             )
         }
         composable(Screen.Playlists.route) {
