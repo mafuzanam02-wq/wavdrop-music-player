@@ -101,7 +101,7 @@ fun SettingsScreen(
                     )
                     CardInternalDivider()
                     ClickableSettingsRow(
-                        title       = "Reports & Insights",
+                        title       = "Insights",
                         subtitle    = "Wrapped, listening history, top lists, and monthly recaps.",
                         onClick     = onStatisticsClick,
                         leadingIcon = Icons.Default.Insights,
