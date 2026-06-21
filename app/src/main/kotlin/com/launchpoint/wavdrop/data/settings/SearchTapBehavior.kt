@@ -5,7 +5,7 @@ enum class SearchTapBehavior(val displayName: String) {
     PRESERVE_QUEUE("Preserve queue");
 
     companion object {
-        val DEFAULT: SearchTapBehavior = REPLACE_QUEUE
+        val DEFAULT: SearchTapBehavior = PRESERVE_QUEUE
 
         fun fromStoredName(value: String?): SearchTapBehavior? =
             value?.let { stored -> entries.firstOrNull { it.name == stored } }

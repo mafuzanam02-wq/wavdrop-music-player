@@ -172,13 +172,13 @@ class AppearanceSettingsTest {
     }
 
     @Test
-    fun `SearchTapBehavior invalid stored value falls back to replace queue`() {
-        assertEquals(SearchTapBehavior.REPLACE_QUEUE, SearchTapBehavior.DEFAULT)
+    fun `SearchTapBehavior invalid stored value falls back to preserve queue`() {
+        assertEquals(SearchTapBehavior.PRESERVE_QUEUE, SearchTapBehavior.DEFAULT)
         assertEquals(
-            SearchTapBehavior.REPLACE_QUEUE,
+            SearchTapBehavior.PRESERVE_QUEUE,
             SearchTapBehavior.fromStoredNameOrDefault("NOT_A_BEHAVIOR"),
         )
-        assertEquals(SearchTapBehavior.REPLACE_QUEUE, SearchTapBehavior.fromStoredNameOrDefault(null))
+        assertEquals(SearchTapBehavior.PRESERVE_QUEUE, SearchTapBehavior.fromStoredNameOrDefault(null))
     }
 
     // ── WrappedBackgroundIntensity ────────────────────────────────────────────

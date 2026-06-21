@@ -27,7 +27,7 @@ class AppSettingsRepository @Inject constructor(
         }
         .map { preferences ->
             preferences[STARTUP_DESTINATION_KEY]?.toStartupDestination()
-                ?: StartupDestination.SONGS
+                ?: StartupDestination.HOME
         }
 
     suspend fun setStartupDestination(destination: StartupDestination) {
@@ -434,7 +434,7 @@ class AppSettingsRepository @Inject constructor(
         .map { preferences ->
             preferences[NOTIFICATION_CONTROLS_KEY]
                 ?.let { runCatching { NotificationControlsSetting.valueOf(it) }.getOrNull() }
-                ?: NotificationControlsSetting.STANDARD
+                ?: NotificationControlsSetting.STANDARD_SHUFFLE_REPEAT
         }
 
     suspend fun setNotificationControlsSetting(setting: NotificationControlsSetting) {

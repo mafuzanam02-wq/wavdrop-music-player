@@ -8,7 +8,7 @@ import java.util.Locale
 object LibraryScanSettingsRules {
     const val MINIMUM_TRACK_DURATION_SECONDS_MIN = 1
     const val MINIMUM_TRACK_DURATION_SECONDS_MAX = 60
-    const val DEFAULT_MINIMUM_TRACK_DURATION_SECONDS = 30
+    const val DEFAULT_MINIMUM_TRACK_DURATION_SECONDS = 50
 
     fun normalize(settings: LibraryScanSettings): LibraryScanSettings =
         settings.copy(
