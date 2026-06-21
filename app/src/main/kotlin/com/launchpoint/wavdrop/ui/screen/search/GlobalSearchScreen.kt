@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.GroupedSearchContent
@@ -33,13 +34,15 @@ fun GlobalSearchRoute(
     onArtistClick: (String) -> Unit,
     onFolderClick: (String) -> Unit,
     onPlaylistClick: (Long) -> Unit,
+    onSmartCollectionClick: (SmartCollectionType) -> Unit = {},
     viewModel: GlobalSearchViewModel = hiltViewModel(),
     playlistVm: PlaylistActionsViewModel = hiltViewModel(),
 ) {
-    val searchQuery     by viewModel.searchQuery.collectAsStateWithLifecycle()
-    val allSongs        by viewModel.allSongs.collectAsStateWithLifecycle()
-    val nowPlaying      by viewModel.nowPlayingState.collectAsStateWithLifecycle()
-    val favoriteSongIds by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
+    val searchQuery      by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val allSongs         by viewModel.allSongs.collectAsStateWithLifecycle()
+    val smartCollections by viewModel.smartCollections.collectAsStateWithLifecycle()
+    val nowPlaying       by viewModel.nowPlayingState.collectAsStateWithLifecycle()
+    val favoriteSongIds  by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val playlists        by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
 
@@ -57,7 +60,7 @@ fun GlobalSearchRoute(
                 query         = searchQuery,
                 onQueryChange = viewModel::setSearchQuery,
                 onClose       = onNavigateBack,
-                placeholder   = "Search songs, artists, albums, playlists, folders…",
+                placeholder   = "Search songs, artists, albums, playlists, collections, folders…",
             )
         },
     ) { innerPadding ->
@@ -89,12 +92,14 @@ fun GlobalSearchRoute(
                     }
                 },
             ),
-            onAlbumClick  = onAlbumClick,
-            onArtistClick = onArtistClick,
-            onFolderClick = onFolderClick,
-            playlists = playlists,
-            onPlaylistClick = onPlaylistClick,
-            modifier      = Modifier
+            onAlbumClick              = onAlbumClick,
+            onArtistClick             = onArtistClick,
+            onFolderClick             = onFolderClick,
+            playlists                 = playlists,
+            onPlaylistClick           = onPlaylistClick,
+            smartCollections          = smartCollections,
+            onSmartCollectionClick    = onSmartCollectionClick,
+            modifier                  = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
         )

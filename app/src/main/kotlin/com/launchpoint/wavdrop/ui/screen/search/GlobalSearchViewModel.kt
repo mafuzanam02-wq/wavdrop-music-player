@@ -2,7 +2,9 @@ package com.launchpoint.wavdrop.ui.screen.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
@@ -26,6 +28,7 @@ class GlobalSearchViewModel @Inject constructor(
     private val playerController: PlayerController,
     private val statsRepository: StatsRepository,
     private val appSettingsRepository: AppSettingsRepository,
+    private val smartCollectionRepository: SmartCollectionRepository,
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -40,6 +43,14 @@ class GlobalSearchViewModel @Inject constructor(
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList(),
         )
+
+    val smartCollections: StateFlow<List<SmartCollection>> =
+        smartCollectionRepository.observeSmartCollections()
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
 
     val nowPlayingState: StateFlow<NowPlayingState> = playerController.nowPlayingState
 

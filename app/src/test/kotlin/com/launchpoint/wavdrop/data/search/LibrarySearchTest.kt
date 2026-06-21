@@ -4,6 +4,8 @@ import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.FolderSummary
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
+import com.launchpoint.wavdrop.data.model.SmartCollection
+import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -27,6 +29,19 @@ class LibrarySearchTest {
 
     private fun folder(key: String, displayName: String = key) = FolderSummary(
         folderKey = key, displayName = displayName, songCount = 1, totalDurationMs = 200_000L,
+    )
+
+    private fun smartCollection(
+        type: SmartCollectionType,
+        title: String = SmartCollectionType.FAVORITES.name,
+        description: String = "",
+        songCount: Int = 1,
+    ) = SmartCollection(
+        id          = type.name,
+        title       = title,
+        description = description,
+        type        = type,
+        songCount   = songCount,
     )
 
     private fun playlist(id: Long, name: String, songCount: Int = 1) = PlaylistSummary(
@@ -302,6 +317,81 @@ class LibrarySearchTest {
 
         assertEquals(1, result.size)
         assertEquals("Queen", result.first().artistKey)
+    }
+
+    // ── Smart Collection filter ───────────────────────────────────────────────
+
+    @Test
+    fun `blank query returns all smart collections`() {
+        val collections = listOf(
+            smartCollection(SmartCollectionType.FAVORITES, title = "Favorites", description = "Songs you've marked as favorites"),
+            smartCollection(SmartCollectionType.MOST_PLAYED, title = "Most Played", description = "Your most frequently played tracks"),
+        )
+        assertEquals(2, LibrarySearch.filterSmartCollections(collections, "").size)
+        assertEquals(2, LibrarySearch.filterSmartCollections(collections, "   ").size)
+    }
+
+    @Test
+    fun `smart collection filter matches title case-insensitively`() {
+        val collections = listOf(
+            smartCollection(SmartCollectionType.FAVORITES, title = "Favorites", description = "Songs you've marked as favorites"),
+            smartCollection(SmartCollectionType.MOST_PLAYED, title = "Most Played", description = "Your most frequently played tracks"),
+        )
+        val result = LibrarySearch.filterSmartCollections(collections, "FAVORITES")
+        assertEquals(1, result.size)
+        assertEquals("Favorites", result.first().title)
+    }
+
+    @Test
+    fun `smart collection filter matches partial title`() {
+        val collections = listOf(
+            smartCollection(SmartCollectionType.FORGOTTEN_GEMS, title = "Forgotten Gems", description = "Songs you used to play often, but haven't heard in a while"),
+            smartCollection(SmartCollectionType.NEVER_PLAYED, title = "Never Played", description = "Tracks you haven't played yet"),
+        )
+        val result = LibrarySearch.filterSmartCollections(collections, "forgotten")
+        assertEquals(1, result.size)
+        assertEquals("Forgotten Gems", result.first().title)
+    }
+
+    @Test
+    fun `smart collection filter matches by description`() {
+        val collections = listOf(
+            smartCollection(SmartCollectionType.MOST_SKIPPED, title = "Most Skipped", description = "Tracks you frequently skip"),
+            smartCollection(SmartCollectionType.LONG_TRACKS, title = "Long Tracks", description = "Tracks longer than 7 minutes"),
+        )
+        val result = LibrarySearch.filterSmartCollections(collections, "skipped")
+        assertEquals(1, result.size)
+        assertEquals("Most Skipped", result.first().title)
+    }
+
+    @Test
+    fun `smart collection filter returns empty when nothing matches`() {
+        val collections = listOf(
+            smartCollection(SmartCollectionType.FAVORITES, title = "Favorites", description = "Songs you've marked as favorites"),
+        )
+        assertTrue(LibrarySearch.filterSmartCollections(collections, "zzz").isEmpty())
+    }
+
+    @Test
+    fun `smart collection filter preserves input order`() {
+        val collections = listOf(
+            smartCollection(SmartCollectionType.MOST_SKIPPED,    title = "Most Skipped",    description = "Tracks you frequently skip"),
+            smartCollection(SmartCollectionType.FAVORITES,       title = "Favorites",       description = "Songs you've marked as favorites"),
+            smartCollection(SmartCollectionType.RECENTLY_PLAYED, title = "Recently Played", description = "Tracks you've played recently"),
+        )
+        val result = LibrarySearch.filterSmartCollections(collections, "tra")
+        assertEquals(listOf("Most Skipped", "Recently Played"), result.map { it.title })
+    }
+
+    @Test
+    fun `smart collection filter matches description partial — long tracks`() {
+        val collections = listOf(
+            smartCollection(SmartCollectionType.LONG_TRACKS,  title = "Long Tracks",  description = "Tracks longer than 7 minutes"),
+            smartCollection(SmartCollectionType.SHORT_TRACKS, title = "Short Tracks", description = "Tracks shorter than 90 seconds"),
+        )
+        val result = LibrarySearch.filterSmartCollections(collections, "longer")
+        assertEquals(1, result.size)
+        assertEquals("Long Tracks", result.first().title)
     }
 
     @Test

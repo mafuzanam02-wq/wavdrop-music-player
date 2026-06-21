@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.HorizontalDivider
@@ -45,6 +46,8 @@ import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
+import com.launchpoint.wavdrop.data.model.SmartCollection
+import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.LibrarySearch
 
@@ -74,11 +77,13 @@ internal data class GroupedSearchResults(
     val artists: List<ArtistSummary>,
     val albums: List<AlbumSummary>,
     val playlists: List<PlaylistSummary>,
+    val smartCollections: List<SmartCollection> = emptyList(),
     val folders: List<com.launchpoint.wavdrop.data.model.FolderSummary>,
     val songsCapped: Boolean = false,
     val artistsCapped: Boolean = false,
     val albumsCapped: Boolean = false,
     val playlistsCapped: Boolean = false,
+    val smartCollectionsCapped: Boolean = false,
     val foldersCapped: Boolean = false,
 ) {
     val isEmpty: Boolean
@@ -86,6 +91,7 @@ internal data class GroupedSearchResults(
             artists.isEmpty() &&
             albums.isEmpty() &&
             playlists.isEmpty() &&
+            smartCollections.isEmpty() &&
             folders.isEmpty()
 }
 
@@ -99,24 +105,27 @@ fun GroupedSearchContent(
     onFolderClick: (String) -> Unit = {},
     playlists: List<PlaylistSummary> = emptyList(),
     onPlaylistClick: (Long) -> Unit = {},
+    smartCollections: List<SmartCollection> = emptyList(),
+    onSmartCollectionClick: (SmartCollectionType) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val results = remember(songs, playlists, query) {
-        buildGroupedSearchResults(songs = songs, playlists = playlists, query = query)
+    val results = remember(songs, playlists, smartCollections, query) {
+        buildGroupedSearchResults(songs = songs, playlists = playlists, smartCollections = smartCollections, query = query)
     }
 
     // Expansion state resets when the query changes.
-    var songsExpanded     by remember(query) { mutableStateOf(false) }
-    var artistsExpanded   by remember(query) { mutableStateOf(false) }
-    var albumsExpanded    by remember(query) { mutableStateOf(false) }
-    var playlistsExpanded by remember(query) { mutableStateOf(false) }
-    var foldersExpanded   by remember(query) { mutableStateOf(false) }
+    var songsExpanded           by remember(query) { mutableStateOf(false) }
+    var artistsExpanded         by remember(query) { mutableStateOf(false) }
+    var albumsExpanded          by remember(query) { mutableStateOf(false) }
+    var playlistsExpanded       by remember(query) { mutableStateOf(false) }
+    var smartCollectionsExpanded by remember(query) { mutableStateOf(false) }
+    var foldersExpanded         by remember(query) { mutableStateOf(false) }
 
     if (results.isEmpty) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             SearchEmptyState(
                 title = "No results",
-                message = "Try a song, artist, album, playlist, or folder name.",
+                message = "Try a song, artist, album, playlist, collection, or folder name.",
             )
         }
         return
@@ -231,6 +240,33 @@ fun GroupedSearchContent(
                         label       = "playlists",
                         isCapped    = results.playlistsCapped,
                         onToggle    = { playlistsExpanded = !playlistsExpanded },
+                    )
+                }
+            }
+        }
+        if (results.smartCollections.isNotEmpty()) {
+            val displayedSmartCollections = results.smartCollections.take(
+                if (smartCollectionsExpanded) EXPANDED_SEARCH_RESULT_LIMIT else COLLAPSED_SEARCH_RESULT_LIMIT,
+            )
+            item(key = "smart_collections_header") {
+                SearchSectionHeader(title = "Smart Collections", count = results.smartCollections.size, isCapped = results.smartCollectionsCapped)
+            }
+            items(displayedSmartCollections, key = { "smart_${it.type.name}" }) { collection ->
+                SearchSmartCollectionRow(
+                    collection = collection,
+                    query      = query,
+                    onClick    = { onSmartCollectionClick(collection.type) },
+                )
+                SearchDivider()
+            }
+            if (results.smartCollections.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
+                item(key = "smart_collections_more") {
+                    ShowMoreRow(
+                        expanded    = smartCollectionsExpanded,
+                        hiddenCount = results.smartCollections.size - displayedSmartCollections.size,
+                        label       = "smart collections",
+                        isCapped    = results.smartCollectionsCapped,
+                        onToggle    = { smartCollectionsExpanded = !smartCollectionsExpanded },
                     )
                 }
             }
@@ -430,6 +466,55 @@ private fun SearchPlaylistRow(
 }
 
 @Composable
+private fun SearchSmartCollectionRow(
+    collection: SmartCollection,
+    query: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val compact = LocalCompactMode.current
+    val verticalPadding = if (compact) 10.dp else 14.dp
+    val iconSize = if (compact) 36.dp else 40.dp
+    val highlightStyle = searchHighlightStyle()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.AutoAwesome,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+            modifier = Modifier.size(iconSize),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = highlightQuery(collection.title, query, highlightStyle),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = highlightQuery(collection.description, query, highlightStyle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "${collection.songCount} songs",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
+        }
+    }
+}
+
+@Composable
 private fun SearchFolderRow(
     folder: com.launchpoint.wavdrop.data.model.FolderSummary,
     query: String,
@@ -554,6 +639,7 @@ internal fun buildGroupedSearchResults(
     songs: List<Song>,
     query: String,
     playlists: List<PlaylistSummary> = emptyList(),
+    smartCollections: List<SmartCollection> = emptyList(),
 ): GroupedSearchResults {
     val trimmedQuery = query.trim()
     if (trimmedQuery.isEmpty()) {
@@ -562,26 +648,30 @@ internal fun buildGroupedSearchResults(
             artists = emptyList(),
             albums = emptyList(),
             playlists = emptyList(),
+            smartCollections = emptyList(),
             folders = emptyList(),
         )
     }
-    val allFolders        = FolderGrouper.groupSongsByFolder(songs)
-    val allMatchedSongs   = LibrarySearch.filterSongs(songs, trimmedQuery)
-    val allMatchedArtists = LibrarySearch.filterArtists(ArtistGrouper.group(songs), songs, trimmedQuery)
-    val allMatchedAlbums  = LibrarySearch.filterAlbums(AlbumGrouper.group(songs), trimmedQuery)
-    val allMatchedPlaylists = LibrarySearch.filterPlaylists(playlists, trimmedQuery)
-    val allMatchedFolders = LibrarySearch.filterFolders(allFolders, trimmedQuery)
+    val allFolders               = FolderGrouper.groupSongsByFolder(songs)
+    val allMatchedSongs          = LibrarySearch.filterSongs(songs, trimmedQuery)
+    val allMatchedArtists        = LibrarySearch.filterArtists(ArtistGrouper.group(songs), songs, trimmedQuery)
+    val allMatchedAlbums         = LibrarySearch.filterAlbums(AlbumGrouper.group(songs), trimmedQuery)
+    val allMatchedPlaylists      = LibrarySearch.filterPlaylists(playlists, trimmedQuery)
+    val allMatchedSmartCollections = LibrarySearch.filterSmartCollections(smartCollections, trimmedQuery)
+    val allMatchedFolders        = LibrarySearch.filterFolders(allFolders, trimmedQuery)
     return GroupedSearchResults(
-        songs           = allMatchedSongs.take(EXPANDED_SEARCH_RESULT_LIMIT),
-        artists         = allMatchedArtists.take(EXPANDED_SEARCH_RESULT_LIMIT),
-        albums          = allMatchedAlbums.take(EXPANDED_SEARCH_RESULT_LIMIT),
-        playlists       = allMatchedPlaylists.take(EXPANDED_SEARCH_RESULT_LIMIT),
-        folders         = allMatchedFolders.take(EXPANDED_SEARCH_RESULT_LIMIT),
-        songsCapped     = allMatchedSongs.size > EXPANDED_SEARCH_RESULT_LIMIT,
-        artistsCapped   = allMatchedArtists.size > EXPANDED_SEARCH_RESULT_LIMIT,
-        albumsCapped    = allMatchedAlbums.size > EXPANDED_SEARCH_RESULT_LIMIT,
-        playlistsCapped = allMatchedPlaylists.size > EXPANDED_SEARCH_RESULT_LIMIT,
-        foldersCapped   = allMatchedFolders.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        songs                  = allMatchedSongs.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        artists                = allMatchedArtists.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        albums                 = allMatchedAlbums.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        playlists              = allMatchedPlaylists.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        smartCollections       = allMatchedSmartCollections.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        folders                = allMatchedFolders.take(EXPANDED_SEARCH_RESULT_LIMIT),
+        songsCapped            = allMatchedSongs.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        artistsCapped          = allMatchedArtists.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        albumsCapped           = allMatchedAlbums.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        playlistsCapped        = allMatchedPlaylists.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        smartCollectionsCapped = allMatchedSmartCollections.size > EXPANDED_SEARCH_RESULT_LIMIT,
+        foldersCapped          = allMatchedFolders.size > EXPANDED_SEARCH_RESULT_LIMIT,
     )
 }
 

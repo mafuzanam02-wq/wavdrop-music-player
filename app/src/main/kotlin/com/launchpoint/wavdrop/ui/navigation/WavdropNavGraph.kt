@@ -462,12 +462,13 @@ fun WavdropNavGraph(
         }
         composable(Screen.GlobalSearch.route) {
             GlobalSearchRoute(
-                onNavigateBack      = { navController.popBackStack() },
-                onTrackDetailsClick = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
-                onAlbumClick        = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
-                onArtistClick       = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
-                onFolderClick       = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
-                onPlaylistClick     = { playlistId -> navController.navigate(Screen.PlaylistDetails.createRoute(playlistId)) },
+                onNavigateBack             = { navController.popBackStack() },
+                onTrackDetailsClick        = { songId -> navController.navigate(Screen.TrackDetails.createRoute(songId)) },
+                onAlbumClick               = { albumKey -> navController.navigate(Screen.AlbumDetails.createRoute(albumKey)) },
+                onArtistClick              = { artistKey -> navController.navigate(Screen.ArtistDetails.createRoute(artistKey)) },
+                onFolderClick              = { folderKey -> navController.navigate(Screen.FolderDetails.createRoute(folderKey)) },
+                onPlaylistClick            = { playlistId -> navController.navigate(Screen.PlaylistDetails.createRoute(playlistId)) },
+                onSmartCollectionClick     = { type -> navController.navigate(Screen.SmartCollectionDetails.createRoute(type)) },
             )
         }
         composable(Screen.Settings.route) {

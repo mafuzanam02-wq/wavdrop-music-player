@@ -5,6 +5,7 @@ import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.model.FolderSummary
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
+import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.text.MusicTextNormalizer
 
@@ -46,6 +47,18 @@ object LibrarySearch {
         if (q.isEmpty()) return playlists
         return playlists.filter { playlist ->
             MusicTextNormalizer.normalizeSearch(playlist.name).contains(q)
+        }
+    }
+
+    fun filterSmartCollections(
+        collections: List<SmartCollection>,
+        query: String,
+    ): List<SmartCollection> {
+        val q = MusicTextNormalizer.normalizeSearch(query)
+        if (q.isEmpty()) return collections
+        return collections.filter { collection ->
+            MusicTextNormalizer.normalizeSearch(collection.title).contains(q) ||
+            MusicTextNormalizer.normalizeSearch(collection.description).contains(q)
         }
     }
 
