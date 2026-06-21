@@ -582,15 +582,41 @@ private fun HomeDashboardContent(
                         onActionClick = onReportsAndInsightsClick,
                     )
                 }
-                null -> Unit
+                null -> {
+                    val listeningActivityEnabled =
+                        HomeSectionId.RECENTLY_PLAYED in visibleSections ||
+                            HomeSectionId.MOST_PLAYED in visibleSections
+                    if (listeningActivityEnabled) {
+                        item {
+                            DashboardListSectionHeader(
+                                title = "Recently Played",
+                                actionLabel = "View insights",
+                                onActionClick = onReportsAndInsightsClick,
+                            )
+                        }
+                        item {
+                            DashboardEmptyText("Your listening history starts here.")
+                        }
+                        item {
+                            DashboardEmptyText("Play anything to begin.")
+                        }
+                    }
+                }
             }
-            if (HomeSectionId.WRAPPED in visibleSections && dashboard.wrapped != null) {
+            if (HomeSectionId.WRAPPED in visibleSections) {
                 item {
-                    WrappedPreviewCard(
-                        wrapped = dashboard.wrapped,
-                        onClick = onWrappedClick,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
+                    if (dashboard.wrapped != null) {
+                        WrappedPreviewCard(
+                            wrapped = dashboard.wrapped,
+                            onClick = onWrappedClick,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
+                    } else {
+                        WrappedSeedCard(
+                            onClick = onWrappedClick,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
+                    }
                 }
             }
             if (HomeSectionId.PLAYLISTS in visibleSections) {
@@ -602,7 +628,7 @@ private fun HomeDashboardContent(
                     )
                 }
                 if (dashboard.playlists.isEmpty()) {
-                    item { DashboardEmptyText("Create playlists to see them here.") }
+                    item { DashboardEmptyText("Your playlists will appear here. Create one from any song, album, or collection.") }
                 } else {
                     items(dashboard.playlists, key = { it.id }) { playlist ->
                         PlaylistPreviewRow(
@@ -756,6 +782,61 @@ private fun WrappedPreviewCard(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
                 modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 16.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun WrappedSeedCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.07f),
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                        shape = CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Wrapped",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Your year in music starts here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                )
+                Text(
+                    text = "Play songs to begin building your story.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.40f),
+                )
+            }
         }
     }
 }
@@ -1000,7 +1081,7 @@ private fun SmartCollectionPreviewRow(
 ) {
     DashboardPreviewRow(
         title    = collection.title,
-        subtitle = "${collection.songCount} songs",
+        subtitle = collection.description,
         icon     = smartCollectionIcon(collection.type),
         onClick  = onClick,
     )
