@@ -69,9 +69,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.first
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
@@ -471,21 +471,31 @@ private fun WrappedContent(
         }
     }
 
-    // Single effect drives both the progress animation and the auto-advance.
-    // Keyed on settledPage (not currentPage) so the timer only starts once the page has fully
-    // landed — prevents the effect from firing on transitional/partially-visible pages during
-    // manual swipes or animated scrolls.
     val currentStoryPage = pagerState.settledPage
-    LaunchedEffect(currentStoryPage, storyPlaying) {
+
+    // Resets progress when the page changes (manual swipe, auto-advance, scope/period change).
+    // Pause/resume does not change settledPage, so this effect does not run on toggle — progress
+    // is preserved across pause/resume cycles by the Animatable cancellation mechanism.
+    LaunchedEffect(currentStoryPage) {
         slideProgress.snapTo(0f)
+    }
+
+    // Drives the progress bar and auto-advance. Restarts on page change (progress already
+    // reset above) or on play/pause toggle (progress preserved from cancellation point).
+    // On resume, remaining duration is proportional to the remaining progress fraction so the
+    // bar always reaches 1f at the same per-slide rate regardless of where it was paused.
+    LaunchedEffect(currentStoryPage, storyPlaying) {
         if (!storyPlaying || reduceMotion) return@LaunchedEffect
         val isLastPage = currentStoryPage >= pageCount - 1
         val durationMs = wrappedSlideDurationMs(currentStoryPage, state.selectedScope, showMilestonePage)
+        val remainingFraction = (1f - slideProgress.value).coerceIn(0f, 1f)
+        val remainingMs = (durationMs * remainingFraction).roundToInt().coerceAtLeast(1)
         slideProgress.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = durationMs, easing = LinearEasing),
+            animationSpec = tween(durationMillis = remainingMs, easing = LinearEasing),
         )
         if (isLastPage) {
+            slideProgress.snapTo(0f)
             storyPlaying = false
         } else {
             pagerState.animateScrollToPage(currentStoryPage + 1)
@@ -572,6 +582,12 @@ private fun WrappedContent(
                     },
             ) { page ->
                 val isCurrentPage = pagerState.settledPage == page
+                val tapToggleModifier = if (!reduceMotion) {
+                    Modifier.pointerInput(Unit) {
+                        detectTapGestures { storyPlaying = !storyPlaying }
+                    }
+                } else Modifier
+                Box(modifier = Modifier.fillMaxSize().then(tapToggleModifier)) {
                 when (state.selectedScope) {
                     WrappedScope.ALL_TIME -> when (page) {
                         0    -> IntroPage(wrapped, periodCopy, visualSettings)
@@ -604,6 +620,7 @@ private fun WrappedContent(
                         }
                     }
                 }
+                } // Box(tapToggleModifier)
             }
 
             Column(modifier = Modifier.fillMaxWidth()) {
