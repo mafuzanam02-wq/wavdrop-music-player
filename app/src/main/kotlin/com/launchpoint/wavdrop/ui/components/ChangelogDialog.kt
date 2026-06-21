@@ -19,6 +19,32 @@ private sealed interface ChangelogEntry {
     data class Item(val text: String) : ChangelogEntry
 }
 
+private val BETA_7_9_ENTRIES: List<ChangelogEntry> = listOf(
+    ChangelogEntry.Section("Your Music Story"),
+    ChangelogEntry.Item("Wrapped now plays automatically — tap to pause, swipe to navigate, and resume right where you left off."),
+    ChangelogEntry.Item("Monthly, Yearly, and All-Time Wrapped give you a recap for every period."),
+    ChangelogEntry.Item("Top 3 Tracks, Top 3 Artists, and Top 3 Albums show ranked cards with play counts."),
+    ChangelogEntry.Item("Skip Habits slides and artwork-backed backgrounds make each recap feel personal."),
+    ChangelogEntry.Item("Reduce Motion disables story auto-play while keeping manual navigation available."),
+
+    ChangelogEntry.Section("Smarter Library"),
+    ChangelogEntry.Item("Always Finish: songs you almost always listen through, based on your native completion rate."),
+    ChangelogEntry.Item("Usually Abandon: songs you rarely finish, based on skip rate or low completion."),
+    ChangelogEntry.Item("Smart Collections now appear in Global Search results."),
+
+    ChangelogEntry.Section("Safer Backups"),
+    ChangelogEntry.Item("Backup and restore is more resilient across reinstalls, migrations, and device switches."),
+    ChangelogEntry.Item("Listening history, Wrapped stats, and playlists survive restore more reliably."),
+    ChangelogEntry.Item("Precise warning when restoring an older backup might overwrite newer local listening activity."),
+
+    ChangelogEntry.Section("Navigation & Polish"),
+    ChangelogEntry.Item("Insights is now a main tab with quick listening stats, streaks, and monthly recaps."),
+    ChangelogEntry.Item("Settings moved to the Home gear icon for cleaner navigation."),
+    ChangelogEntry.Item("Albums, Artists, and Playlists now have sorting options."),
+    ChangelogEntry.Item("Global Search now finds playlists and Smart Collections."),
+    ChangelogEntry.Item("Analytics runs off the main thread for a smoother experience."),
+)
+
 private val BETA_7_ENTRIES: List<ChangelogEntry> = listOf(
     ChangelogEntry.Section("Navigation & Discoverability"),
     ChangelogEntry.Item("Smart Collections now appear in Global Search results."),
@@ -125,8 +151,8 @@ private fun fullBeta5Entries(): List<ChangelogEntry> = listOf(
 @Composable
 fun ChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
-        title = "What's new in Beta 7",
-        entries = BETA_7_ENTRIES,
+        title = "What's new in Beta 7.9",
+        entries = BETA_7_9_ENTRIES,
         onDismiss = onDismiss,
     )
 }
@@ -136,6 +162,8 @@ fun FullChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
         title = "Wavdrop Changelog",
         entries = buildList {
+            add(ChangelogEntry.Section("Beta 7.9 — Story Mode, Smart Collections & More"))
+            addAll(BETA_7_9_ENTRIES)
             add(ChangelogEntry.Section("Beta 7 — Navigation, Discoverability & Polish"))
             addAll(BETA_7_ENTRIES)
             add(ChangelogEntry.Section("Beta 5 — Discovery, Insights, and Wrapped"))

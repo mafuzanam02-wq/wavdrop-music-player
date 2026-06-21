@@ -6,26 +6,47 @@ Historical record of completed and shipped work. Newest changes first.
 
 ## 0.1.0-beta7.9
 
-### Added
-- Added Wrapped Story Mode with auto-advance, play/pause, per-slide progress, and card-tap pause/resume.
-- Added smoother Wrapped presentation with artwork crossfades, animated counters, animated page indicators, and optimized decorative backgrounds.
-- Added Always Finish and Usually Abandon Smart Collections powered by native playback behavior.
+Beta 7.9 is the major public-facing upgrade from Beta 4. Betas 5, 6, 7, and 7.5 were internal builds.
 
-### Improved
-- Wrapped slides now respect Reduce Motion by disabling story playback controls and progress animation.
-- Wrapped story progress now pauses and resumes from the same position.
-- Manual Wrapped swipes now reset story progress cleanly.
-- Wrapped page indicators and counter animations now wait for pages to fully settle before updating.
-- Ranked Wrapped slides now stay visible longer for readability.
+### Insights & Wrapped
+
+- **New Insights tab.** A dedicated Insights tab in the bottom navigation with summary cards for plays, listening time, and streaks. Monthly Reports and Wrapped are accessible directly from Insights.
+- **Wrapped Story Mode.** Wrapped now plays through your slides automatically with a progress bar. Tap a card to pause or resume. Swipe to navigate manually. Progress freezes exactly where you paused and resumes from there.
+- **Monthly, Yearly, and All-Time Wrapped.** Review your top tracks, top artists, top albums, skip habits, and listening milestones for any period.
+- **Richer Wrapped slides.** Top 3 Tracks, Top 3 Artists, and Top 3 Albums show ranked cards with play counts. Skip Habits slides visualise your skip patterns. Artwork-backed backgrounds and animated counters make each recap feel personal.
+- **Reduce Motion support.** When system Reduce Motion is on, Wrapped skips story auto-play and disables the progress bar while keeping manual navigation available.
+- **All-Time Wrapped.** Lifetime totals across your entire listening history.
+
+### Smart Collections
+
+- **Always Finish.** Surfaces songs you almost always listen through completely — based on native playback completion rate.
+- **Usually Abandon.** Surfaces songs you rarely finish — identified by high skip rates or consistently low completion.
+- **Smart Collections in Global Search.** Searching from any screen now surfaces Smart Collections alongside songs, albums, artists, folders, and playlists.
+
+### Navigation & Settings
+
+- **Settings moved to the Home gear icon.** Cleaner navigation — Settings lives on the Home screen.
+- **Insights search and settings access.** Search and Settings icons appear directly in the Insights top bar.
+- **Sorting for Albums, Artists, and Playlists.**
+- **Album → Artist navigation.** Tap the artist name in Album Details to jump to that artist's page.
+- **Global Search finds playlists.** Search now returns playlists alongside all other content types.
+- **Safer startup.** If the app is set to open to Now Playing but no session exists, it falls back to Home.
+
+### Backup & Restore
+
+- **Hardened backup and restore resilience.** More reliable across reinstalls, migrations, and version upgrades.
+- **Listening history and Wrapped survive restore.** Events and aggregate stats are re-keyed correctly after restore.
+- **Precise older-backup warning.** You're warned if restoring an older backup might overwrite newer local listening activity.
+- **Selected-folder restore improved.** Prompts you to reselect your music folder when restoring to a new device.
+- **Analytics off the main thread.** Wrapped, Monthly Reports, Home Wrapped Preview, and Insights compute off the main thread.
 
 ### Fixed
 - Fixed Wrapped story pages not landing cleanly during auto-slide and manual swipes.
-- Fixed Usually Abandon not appearing by accounting for early SKIP events as abandonment attempts.
+- Fixed Usually Abandon not appearing by accounting for early SKIP events as abandonment signals.
 - Fixed deprecated Material icon usage for the new Smart Collection icons.
 
 ### Notes
-- Batch sharing remains deferred due to memory and export complexity.
-- Deeper completion analytics, listening-depth dashboards, and Wrapped engagement slides remain deferred for a later milestone.
+- Batch sharing, completion analytics, and listening-depth dashboards remain deferred.
 
 ---
 
