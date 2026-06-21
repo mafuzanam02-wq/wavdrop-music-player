@@ -543,6 +543,7 @@ fun WavdropNavGraph(
                 onLibraryClick         = { navController.navigatePrimary(Screen.Library.route) },
                 onInsightsClick        = {},
                 onNowPlayingClick      = { navController.navigateNowPlaying() },
+                onSearchClick          = { navController.navigate(Screen.GlobalSearch.route) },
             )
         }
         composable(Screen.SettingsAbout.route) {
