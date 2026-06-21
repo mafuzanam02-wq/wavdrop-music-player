@@ -1,3 +1,3 @@
-# What's New — Wavdrop Beta 3.1
+# What's New — Wavdrop Beta 7.9
 
-New home screen widget — see your current track, album artwork, and playback controls without opening the app. Wrapped gets a visual refresh with artwork-backed slides and new personalization options. Improved widget reliability, better resize behaviour, and general stability improvements.
+Wrapped now plays through your slides automatically — tap to pause, swipe to navigate, and resume right where you left off. Two new Smart Collections, Always Finish and Usually Abandon, surface how you really engage with your music based on your actual listening behaviour.

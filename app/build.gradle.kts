@@ -14,8 +14,8 @@ android {
         applicationId = "com.launchpoint.wavdrop"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.1.0-beta7"
+        versionCode = 8
+        versionName = "0.1.0-beta7.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
