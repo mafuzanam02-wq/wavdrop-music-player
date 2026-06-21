@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
+import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
@@ -14,6 +15,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -22,6 +24,7 @@ import kotlinx.coroutines.launch
 class WavdropNavViewModel @Inject constructor(
     private val appSettingsRepository: AppSettingsRepository,
     private val autoBackupRepository: AutoBackupRepository,
+    private val playbackSessionRepository: PlaybackSessionRepository,
 ) : ViewModel() {
 
     // Guard: run at most once per process lifetime, regardless of recompositions.
@@ -42,6 +45,15 @@ class WavdropNavViewModel @Inject constructor(
     val startupDestination: StateFlow<StartupDestination?> =
         appSettingsRepository.startupDestination
             .map<StartupDestination, StartupDestination?> { it }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null,
+            )
+
+    // Null until the check completes; false means no persisted session (queue was empty).
+    val hasPlaybackSession: StateFlow<Boolean?> =
+        flow { emit(playbackSessionRepository.load() != null) }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),

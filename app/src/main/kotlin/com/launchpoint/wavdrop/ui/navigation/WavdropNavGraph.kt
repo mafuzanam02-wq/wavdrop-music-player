@@ -151,6 +151,7 @@ fun WavdropNavGraph(
 ) {
     val startupDestination by viewModel.startupDestination.collectAsStateWithLifecycle()
     val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
+    val hasPlaybackSession by viewModel.hasPlaybackSession.collectAsStateWithLifecycle()
     val compactMode          by viewModel.compactMode.collectAsStateWithLifecycle()
     val showSongThumbnails   by viewModel.showSongThumbnails.collectAsStateWithLifecycle()
     val showAlbumInSongRows  by viewModel.showAlbumInSongRows.collectAsStateWithLifecycle()
@@ -161,13 +162,18 @@ fun WavdropNavGraph(
     val showChangelog        by viewModel.showChangelog.collectAsStateWithLifecycle()
     var startRoute by rememberSaveable { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(startupDestination, hasCompletedOnboarding) {
-        if (startRoute == null && startupDestination != null && hasCompletedOnboarding != null) {
-            startRoute = if (hasCompletedOnboarding == true) {
-                startupDestination!!.toRoute()
-            } else {
-                Screen.Onboarding.route
-            }
+    LaunchedEffect(startupDestination, hasCompletedOnboarding, hasPlaybackSession) {
+        if (startRoute != null) return@LaunchedEffect
+        val destination = startupDestination ?: return@LaunchedEffect
+        val onboarded = hasCompletedOnboarding ?: return@LaunchedEffect
+        // For NOW_PLAYING, wait until the persisted session check resolves.
+        if (destination == StartupDestination.NOW_PLAYING && hasPlaybackSession == null) return@LaunchedEffect
+
+        startRoute = when {
+            !onboarded -> Screen.Onboarding.route
+            destination == StartupDestination.NOW_PLAYING && hasPlaybackSession == false ->
+                Screen.Home.route
+            else -> destination.toRoute()
         }
     }
 
