@@ -9,7 +9,9 @@ enum class SmartCollectionType {
     RECENTLY_ADDED,
     MOST_SKIPPED,
     LONG_TRACKS,
-    SHORT_TRACKS;
+    SHORT_TRACKS,
+    ALWAYS_FINISH,
+    USUALLY_ABANDON;
 
     companion object {
         /** Returns null for a null, blank, or unrecognised route value instead of throwing. */

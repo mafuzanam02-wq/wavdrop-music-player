@@ -4,6 +4,7 @@ import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 
 object SmartCollectionBuilder {
 
@@ -14,11 +15,24 @@ object SmartCollectionBuilder {
     private const val FORGOTTEN_GEMS_QUIET_DAYS     = 60
     private const val FORGOTTEN_GEMS_CAP            = 50
 
-    fun build(songs: List<Song>, stats: List<TrackStatsEntity>): List<SmartCollection> {
-        val songIds   = songs.mapTo(HashSet()) { it.id }
-        val statsById = stats.filter { it.songId in songIds }.associateBy { it.songId }
+    private const val ALWAYS_FINISH_MIN_PLAYS         = 3
+    private const val ALWAYS_FINISH_THRESHOLD         = 0.85f
+
+    private const val USUALLY_ABANDON_MIN_ATTEMPTS    = 3
+    private const val USUALLY_ABANDON_SKIP_RATE       = 0.60f
+    private const val USUALLY_ABANDON_COMPLETION      = 0.40f
+    private const val USUALLY_ABANDON_MIN_VALID_PLAYS = 3
+
+    fun build(
+        songs: List<Song>,
+        stats: List<TrackStatsEntity>,
+        completionSummaries: List<SongCompletionSummary> = emptyList(),
+    ): List<SmartCollection> {
+        val songIds      = songs.mapTo(HashSet()) { it.id }
+        val statsById    = stats.filter { it.songId in songIds }.associateBy { it.songId }
+        val completionById = completionSummaries.filter { it.songId in songIds }.associateBy { it.songId }
         return SmartCollectionType.values().mapNotNull { type ->
-            val filtered = songsForInternal(type, songs, statsById)
+            val filtered = songsForInternal(type, songs, statsById, completionById)
             if (filtered.isEmpty()) null
             else SmartCollection(
                 id          = type.name,
@@ -34,16 +48,19 @@ object SmartCollectionBuilder {
         type: SmartCollectionType,
         songs: List<Song>,
         stats: List<TrackStatsEntity>,
+        completionSummaries: List<SongCompletionSummary> = emptyList(),
     ): List<Song> {
-        val songIds   = songs.mapTo(HashSet()) { it.id }
-        val statsById = stats.filter { it.songId in songIds }.associateBy { it.songId }
-        return songsForInternal(type, songs, statsById)
+        val songIds      = songs.mapTo(HashSet()) { it.id }
+        val statsById    = stats.filter { it.songId in songIds }.associateBy { it.songId }
+        val completionById = completionSummaries.filter { it.songId in songIds }.associateBy { it.songId }
+        return songsForInternal(type, songs, statsById, completionById)
     }
 
     private fun songsForInternal(
         type: SmartCollectionType,
         songs: List<Song>,
         statsById: Map<Long, TrackStatsEntity>,
+        completionById: Map<Long, SongCompletionSummary>,
     ): List<Song> = when (type) {
         SmartCollectionType.FAVORITES ->
             songs
@@ -120,6 +137,44 @@ object SmartCollectionBuilder {
                     compareBy<Song> { it.duration }
                         .thenBy { it.id },
                 )
+
+        SmartCollectionType.ALWAYS_FINISH ->
+            songs
+                .filter { song ->
+                    val c = completionById[song.id]
+                    c != null &&
+                        c.nativePlays >= ALWAYS_FINISH_MIN_PLAYS &&
+                        c.avgCompletion >= ALWAYS_FINISH_THRESHOLD
+                }
+                .sortedWith(
+                    compareByDescending<Song> { completionById[it.id]?.avgCompletion ?: 0f }
+                        .thenByDescending { completionById[it.id]?.nativePlays ?: 0 }
+                        .thenBy { it.id },
+                )
+
+        SmartCollectionType.USUALLY_ABANDON ->
+            songs
+                .filter { song ->
+                    val c = completionById[song.id]
+                    if (c == null) return@filter false
+                    val attempts = c.nativePlays + c.nativeSkips
+                    if (attempts < USUALLY_ABANDON_MIN_ATTEMPTS) return@filter false
+                    val highSkipRate = c.nativeSkips.toFloat() / attempts >= USUALLY_ABANDON_SKIP_RATE
+                    val lowCompletion = c.validCompletionPlays >= USUALLY_ABANDON_MIN_VALID_PLAYS &&
+                        c.avgCompletion < USUALLY_ABANDON_COMPLETION
+                    highSkipRate || lowCompletion
+                }
+                .sortedWith(
+                    compareByDescending<Song> {
+                        val c = completionById[it.id]
+                        if (c == null) 0f
+                        else (c.nativePlays + c.nativeSkips).let { att ->
+                            if (att == 0) 0f else c.nativeSkips.toFloat() / att
+                        }
+                    }
+                        .thenBy { completionById[it.id]?.avgCompletion ?: 1f }
+                        .thenBy { it.id },
+                )
     }
 
     fun titleFor(type: SmartCollectionType): String = when (type) {
@@ -132,6 +187,8 @@ object SmartCollectionBuilder {
         SmartCollectionType.MOST_SKIPPED    -> "Most Skipped"
         SmartCollectionType.LONG_TRACKS     -> "Long Tracks"
         SmartCollectionType.SHORT_TRACKS    -> "Short Tracks"
+        SmartCollectionType.ALWAYS_FINISH   -> "Always Finish"
+        SmartCollectionType.USUALLY_ABANDON -> "Usually Abandon"
     }
 
     fun descriptionFor(type: SmartCollectionType): String = when (type) {
@@ -144,5 +201,7 @@ object SmartCollectionBuilder {
         SmartCollectionType.MOST_SKIPPED    -> "Tracks you frequently skip"
         SmartCollectionType.LONG_TRACKS     -> "Tracks longer than 7 minutes"
         SmartCollectionType.SHORT_TRACKS    -> "Tracks shorter than 90 seconds"
+        SmartCollectionType.ALWAYS_FINISH   -> "Songs you almost always listen through."
+        SmartCollectionType.USUALLY_ABANDON -> "Songs you rarely finish."
     }
 }

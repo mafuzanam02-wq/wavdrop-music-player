@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -214,4 +216,6 @@ private fun iconFor(type: SmartCollectionType): ImageVector = when (type) {
     SmartCollectionType.MOST_SKIPPED    -> Icons.Default.SkipNext
     SmartCollectionType.LONG_TRACKS     -> Icons.Default.Timer
     SmartCollectionType.SHORT_TRACKS    -> Icons.Default.Timer
+    SmartCollectionType.ALWAYS_FINISH   -> Icons.Default.CheckCircle
+    SmartCollectionType.USUALLY_ABANDON -> Icons.AutoMirrored.Filled.TrendingDown
 }

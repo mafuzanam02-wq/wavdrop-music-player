@@ -13,6 +13,7 @@ import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 import com.launchpoint.wavdrop.data.model.TrackStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -89,6 +90,10 @@ class StatsRepository @Inject constructor(
 
     /** All listen events (PLAY + SKIP), most recent first. Used by Monthly Reports / analytics. */
     fun allListenEvents(): Flow<List<TrackListenEventEntity>> = listenEventDao.observeAll()
+
+    /** Per-song completion summaries from native Wavdrop playback. Used by Smart Collections. */
+    fun observeCompletionSummaries(): Flow<List<SongCompletionSummary>> =
+        listenEventDao.observeCompletionSummaries()
 
     fun favoriteSongIds(): Flow<Set<Long>> =
         dao.favoriteSongIds().map { it.toSet() }

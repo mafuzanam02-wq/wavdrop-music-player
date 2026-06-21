@@ -15,12 +15,20 @@ class SmartCollectionRepository @Inject constructor(
     private val statsRepository: StatsRepository,
 ) {
     fun observeSmartCollections(): Flow<List<SmartCollection>> =
-        combine(songRepository.songs, statsRepository.allTrackStatsEntities()) { songs, stats ->
-            SmartCollectionBuilder.build(songs, stats)
+        combine(
+            songRepository.songs,
+            statsRepository.allTrackStatsEntities(),
+            statsRepository.observeCompletionSummaries(),
+        ) { songs, stats, completions ->
+            SmartCollectionBuilder.build(songs, stats, completions)
         }
 
     fun observeSongsForCollection(type: SmartCollectionType): Flow<List<Song>> =
-        combine(songRepository.songs, statsRepository.allTrackStatsEntities()) { songs, stats ->
-            SmartCollectionBuilder.songsFor(type, songs, stats)
+        combine(
+            songRepository.songs,
+            statsRepository.allTrackStatsEntities(),
+            statsRepository.observeCompletionSummaries(),
+        ) { songs, stats, completions ->
+            SmartCollectionBuilder.songsFor(type, songs, stats, completions)
         }
 }
