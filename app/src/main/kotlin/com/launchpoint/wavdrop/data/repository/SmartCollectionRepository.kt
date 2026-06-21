@@ -4,8 +4,10 @@ import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.smart.SmartCollectionBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,6 +24,7 @@ class SmartCollectionRepository @Inject constructor(
         ) { songs, stats, completions ->
             SmartCollectionBuilder.build(songs, stats, completions)
         }
+            .flowOn(Dispatchers.Default)
 
     fun observeSongsForCollection(type: SmartCollectionType): Flow<List<Song>> =
         combine(
@@ -31,4 +34,5 @@ class SmartCollectionRepository @Inject constructor(
         ) { songs, stats, completions ->
             SmartCollectionBuilder.songsFor(type, songs, stats, completions)
         }
+            .flowOn(Dispatchers.Default)
 }

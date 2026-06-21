@@ -12,7 +12,7 @@ Beta 7.9 is the major public-facing upgrade from Beta 4. Betas 5, 6, 7, and 7.5 
 
 - **New Insights tab.** A dedicated Insights tab in the bottom navigation with summary cards for plays, listening time, and streaks. Monthly Reports and Wrapped are accessible directly from Insights.
 - **Wrapped Story Mode.** Wrapped now plays through your slides automatically with a progress bar. Tap a card to pause or resume. Swipe to navigate manually. Progress freezes exactly where you paused and resumes from there.
-- **Monthly, Yearly, and All-Time Wrapped.** Review your top tracks, top artists, top albums, skip habits, and listening milestones for any period.
+- **Monthly, Yearly, and All-Time Wrapped.** Review your top tracks, top artists, top albums, and skip habits for any period. Yearly recaps can also highlight listening milestones.
 - **Richer Wrapped slides.** Top 3 Tracks, Top 3 Artists, and Top 3 Albums show ranked cards with play counts. Skip Habits slides visualise your skip patterns. Artwork-backed backgrounds and animated counters make each recap feel personal.
 - **Reduce Motion support.** When system Reduce Motion is on, Wrapped skips story auto-play and disables the progress bar while keeping manual navigation available.
 - **All-Time Wrapped.** Lifetime totals across your entire listening history.

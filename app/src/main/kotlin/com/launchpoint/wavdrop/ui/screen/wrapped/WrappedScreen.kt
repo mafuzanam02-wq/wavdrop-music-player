@@ -495,7 +495,6 @@ private fun WrappedContent(
             animationSpec = tween(durationMillis = remainingMs, easing = LinearEasing),
         )
         if (isLastPage) {
-            slideProgress.snapTo(0f)
             storyPlaying = false
         } else {
             pagerState.animateScrollToPage(currentStoryPage + 1)
@@ -661,6 +660,7 @@ private fun WrappedContent(
                         onClick = {
                             val rect = pagerBoundsInWindow ?: return@IconButton
                             val act = activity ?: return@IconButton
+                            storyPlaying = false
                             shareWrappedSlide(act, rect)
                         },
                         enabled = !pagerState.isScrollInProgress && pagerBoundsInWindow != null && activity != null,
