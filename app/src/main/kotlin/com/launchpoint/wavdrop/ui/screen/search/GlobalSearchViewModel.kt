@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -37,7 +36,6 @@ class GlobalSearchViewModel @Inject constructor(
     fun setSearchQuery(query: String) { _searchQuery.value = query }
 
     val allSongs: StateFlow<List<Song>> = songRepository.songs
-        .map { it }
         .stateIn(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
