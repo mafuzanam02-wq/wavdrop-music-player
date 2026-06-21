@@ -19,6 +19,19 @@ private sealed interface ChangelogEntry {
     data class Item(val text: String) : ChangelogEntry
 }
 
+private val BETA_7_ENTRIES: List<ChangelogEntry> = listOf(
+    ChangelogEntry.Section("Navigation & Discoverability"),
+    ChangelogEntry.Item("Smart Collections now appear in Global Search results."),
+    ChangelogEntry.Item("Insights now has a Search icon for quick access to Global Search."),
+    ChangelogEntry.Item("Settings is now accessible directly from the Insights screen."),
+    ChangelogEntry.Item("Opening the app to Now Playing with an empty queue now falls back to Home safely."),
+
+    ChangelogEntry.Section("Polish"),
+    ChangelogEntry.Item("Monthly Reports no longer uses technical language in empty states."),
+    ChangelogEntry.Item("Metadata separators and overflow menu descriptions are now consistent across all screens."),
+    ChangelogEntry.Item("Empty-state button labels and backup screen wording clarified throughout."),
+)
+
 private val BETA_5_ENTRIES: List<ChangelogEntry> = listOf(
     ChangelogEntry.Section("Navigation & Insights"),
     ChangelogEntry.Item("Insights is now a main tab with quick listening stats."),
@@ -112,8 +125,8 @@ private fun fullBeta5Entries(): List<ChangelogEntry> = listOf(
 @Composable
 fun ChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
-        title = "What's new in Beta 5",
-        entries = BETA_5_ENTRIES,
+        title = "What's new in Beta 7",
+        entries = BETA_7_ENTRIES,
         onDismiss = onDismiss,
     )
 }
@@ -123,6 +136,8 @@ fun FullChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
         title = "Wavdrop Changelog",
         entries = buildList {
+            add(ChangelogEntry.Section("Beta 7 — Navigation, Discoverability & Polish"))
+            addAll(BETA_7_ENTRIES)
             add(ChangelogEntry.Section("Beta 5 — Discovery, Insights, and Wrapped"))
             addAll(fullBeta5Entries())
             add(ChangelogEntry.Section("Beta 4"))

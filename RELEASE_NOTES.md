@@ -4,6 +4,34 @@ Historical record of completed and shipped work. Newest changes first.
 
 ---
 
+## Beta 7 — Navigation, Discoverability & Polish
+
+### Navigation & Discoverability
+
+- **Smart Collections now appear in Global Search.** Searching from any screen now surfaces Smart Collections (Forgotten Gems, Recently Played, Never Played) alongside songs, albums, artists, folders, and playlists.
+- **Insights now has a Search entry point.** A search icon in the Insights top app bar opens Global Search directly, matching the behaviour on Home, Songs, and Library.
+- **Settings now accessible from Insights.** A Settings icon in the Insights top app bar provides access to Settings without returning to Home first.
+- **Empty Now Playing startup guard.** If the startup destination is set to Now Playing but no session has been saved, the app now falls back to Home instead of opening an empty, dead-end Now Playing screen.
+
+### Audits & Consistency
+
+- **Home screen audited.** Dashboard layout, MiniPlayer placement, empty states, and section wording reviewed and polished.
+- **Library screen audited.** Hub card subtitles reviewed; Songs card intentionally retained as part of the complete content directory.
+- **Wrapped screen audited.** Appearance and navigation polish reviewed.
+- **"Insights" label normalised.** The Settings entry for the Insights hub was previously labelled "Reports & Insights"; it now consistently reads "Insights" across all surfaces.
+
+### Polish & Wording
+
+- **Monthly Reports empty state wording.** Internal "event-backed" and "aggregate" terminology removed from all user-facing Monthly Reports messages, replaced with plain language.
+- **Metadata separator standardised.** Album Details and Folders list views now use the interpunct (`·`) separator between song count and duration, matching the Albums list.
+- **Overflow menu contentDescriptions standardised.** All overflow/more-options icons across Album Details, Folder Details, and Now Playing now use the consistent label "More options".
+- **Home empty-state button wording clarified.** The "Choose folder in Settings" button is now labelled "Library Settings" where it navigates directly to Library & Scanning, and "Settings" where it navigates to the main Settings hub.
+- **Backup import empty state clarified.** "Choose Import Wavdrop Data from Settings" replaced with plain-language "Go to Settings to choose a Wavdrop backup file."
+- **Backup section header capitalisation fixed.** "Automatic backup check" corrected to "Automatic Backup Check" for consistency with other section headers on the same screen.
+- **Monthly Reports skip section.** "No skips recorded for this month. Skips during this month will appear here." tightened to remove repetition.
+
+---
+
 ## Beta 3 — Backup Reliability & Queue Control
 
 ### Backup & Restore
