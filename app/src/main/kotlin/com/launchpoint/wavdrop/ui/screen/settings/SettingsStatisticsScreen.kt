@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Card
@@ -72,6 +73,7 @@ fun SettingsStatisticsScreen(
     onInsightsClick: () -> Unit = {},
     onNowPlayingClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
     insightsVm: InsightsViewModel = hiltViewModel(),
 ) {
@@ -97,6 +99,12 @@ fun SettingsStatisticsScreen(
                         Icon(
                             imageVector        = Icons.Default.Search,
                             contentDescription = "Search",
+                        )
+                    }
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(
+                            imageVector        = Icons.Default.Settings,
+                            contentDescription = "Settings",
                         )
                     }
                 },
