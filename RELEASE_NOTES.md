@@ -4,6 +4,31 @@ Historical record of completed and shipped work. Newest changes first.
 
 ---
 
+## 0.1.0-beta7.9
+
+### Added
+- Added Wrapped Story Mode with auto-advance, play/pause, per-slide progress, and card-tap pause/resume.
+- Added smoother Wrapped presentation with artwork crossfades, animated counters, animated page indicators, and optimized decorative backgrounds.
+- Added Always Finish and Usually Abandon Smart Collections powered by native playback behavior.
+
+### Improved
+- Wrapped slides now respect Reduce Motion by disabling story playback controls and progress animation.
+- Wrapped story progress now pauses and resumes from the same position.
+- Manual Wrapped swipes now reset story progress cleanly.
+- Wrapped page indicators and counter animations now wait for pages to fully settle before updating.
+- Ranked Wrapped slides now stay visible longer for readability.
+
+### Fixed
+- Fixed Wrapped story pages not landing cleanly during auto-slide and manual swipes.
+- Fixed Usually Abandon not appearing by accounting for early SKIP events as abandonment attempts.
+- Fixed deprecated Material icon usage for the new Smart Collection icons.
+
+### Notes
+- Batch sharing remains deferred due to memory and export complexity.
+- Deeper completion analytics, listening-depth dashboards, and Wrapped engagement slides remain deferred for a later milestone.
+
+---
+
 ## 0.1.0-beta7.5
 
 ### Added
