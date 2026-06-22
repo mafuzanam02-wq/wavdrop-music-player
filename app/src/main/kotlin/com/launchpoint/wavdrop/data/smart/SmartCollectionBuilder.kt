@@ -13,33 +13,39 @@ object SmartCollectionBuilder {
 
     private const val FORGOTTEN_GEMS_PLAY_COUNT_MIN = 5
     private const val FORGOTTEN_GEMS_QUIET_DAYS     = 60
-    private const val FORGOTTEN_GEMS_CAP            = 50
+    internal const val FORGOTTEN_GEMS_LIMIT         = 50
+    internal const val NEVER_PLAYED_LIMIT           = 100
 
     private const val ALWAYS_FINISH_MIN_PLAYS         = 3
     private const val ALWAYS_FINISH_THRESHOLD         = 0.85f
+    internal const val ALWAYS_FINISH_LIMIT            = 50
 
     private const val USUALLY_ABANDON_MIN_ATTEMPTS    = 3
     private const val USUALLY_ABANDON_SKIP_RATE       = 0.60f
     private const val USUALLY_ABANDON_COMPLETION      = 0.40f
     private const val USUALLY_ABANDON_MIN_VALID_PLAYS = 3
+    internal const val USUALLY_ABANDON_LIMIT          = 30
 
     fun build(
         songs: List<Song>,
         stats: List<TrackStatsEntity>,
         completionSummaries: List<SongCompletionSummary> = emptyList(),
+        nowMs: Long = System.currentTimeMillis(),
     ): List<SmartCollection> {
         val songIds      = songs.mapTo(HashSet()) { it.id }
         val statsById    = stats.filter { it.songId in songIds }.associateBy { it.songId }
         val completionById = completionSummaries.filter { it.songId in songIds }.associateBy { it.songId }
         return SmartCollectionType.values().mapNotNull { type ->
-            val filtered = songsForInternal(type, songs, statsById, completionById)
-            if (filtered.isEmpty()) null
+            val result = songsResultForInternal(type, songs, statsById, completionById, nowMs)
+            if (result.songs.isEmpty()) null
             else SmartCollection(
-                id          = type.name,
-                title       = titleFor(type),
-                description = descriptionFor(type),
-                type        = type,
-                songCount   = filtered.size,
+                id                 = type.name,
+                title              = titleFor(type),
+                description        = descriptionFor(type),
+                type               = type,
+                songCount          = result.songs.size,
+                totalEligibleCount = result.totalEligibleCount,
+                visibleLimit       = result.visibleLimit,
             )
         }
     }
@@ -49,18 +55,51 @@ object SmartCollectionBuilder {
         songs: List<Song>,
         stats: List<TrackStatsEntity>,
         completionSummaries: List<SongCompletionSummary> = emptyList(),
+        nowMs: Long = System.currentTimeMillis(),
     ): List<Song> {
         val songIds      = songs.mapTo(HashSet()) { it.id }
         val statsById    = stats.filter { it.songId in songIds }.associateBy { it.songId }
         val completionById = completionSummaries.filter { it.songId in songIds }.associateBy { it.songId }
-        return songsForInternal(type, songs, statsById, completionById)
+        return songsResultForInternal(type, songs, statsById, completionById, nowMs).songs
     }
 
-    private fun songsForInternal(
+    fun songsResultFor(
+        type: SmartCollectionType,
+        songs: List<Song>,
+        stats: List<TrackStatsEntity>,
+        completionSummaries: List<SongCompletionSummary> = emptyList(),
+        nowMs: Long = System.currentTimeMillis(),
+    ): SmartCollectionSongResult {
+        val songIds = songs.mapTo(HashSet()) { it.id }
+        val statsById = stats.filter { it.songId in songIds }.associateBy { it.songId }
+        val completionById = completionSummaries
+            .filter { it.songId in songIds }
+            .associateBy { it.songId }
+        return songsResultForInternal(type, songs, statsById, completionById, nowMs)
+    }
+
+    private fun songsResultForInternal(
         type: SmartCollectionType,
         songs: List<Song>,
         statsById: Map<Long, TrackStatsEntity>,
         completionById: Map<Long, SongCompletionSummary>,
+        nowMs: Long,
+    ): SmartCollectionSongResult {
+        val rankedEligibleSongs = rankedEligibleSongs(type, songs, statsById, completionById, nowMs)
+        val visibleLimit = visibleLimitFor(type)
+        return SmartCollectionSongResult(
+            songs = visibleLimit?.let(rankedEligibleSongs::take) ?: rankedEligibleSongs,
+            totalEligibleCount = rankedEligibleSongs.size,
+            visibleLimit = visibleLimit,
+        )
+    }
+
+    private fun rankedEligibleSongs(
+        type: SmartCollectionType,
+        songs: List<Song>,
+        statsById: Map<Long, TrackStatsEntity>,
+        completionById: Map<Long, SongCompletionSummary>,
+        nowMs: Long,
     ): List<Song> = when (type) {
         SmartCollectionType.FAVORITES ->
             songs
@@ -84,7 +123,7 @@ object SmartCollectionBuilder {
                 )
 
         SmartCollectionType.FORGOTTEN_GEMS -> {
-            val quietThresholdMs = System.currentTimeMillis() - FORGOTTEN_GEMS_QUIET_DAYS * 24 * 60 * 60 * 1_000L
+            val quietThresholdMs = nowMs - FORGOTTEN_GEMS_QUIET_DAYS * 24 * 60 * 60 * 1_000L
             songs
                 .filter { song ->
                     val stat = statsById[song.id]
@@ -98,7 +137,6 @@ object SmartCollectionBuilder {
                         .thenBy { statsById[it.id]?.lastPlayedAt ?: 0L }
                         .thenBy { it.id },
                 )
-                .take(FORGOTTEN_GEMS_CAP)
         }
 
         SmartCollectionType.NEVER_PLAYED ->
@@ -177,6 +215,14 @@ object SmartCollectionBuilder {
                 )
     }
 
+    private fun visibleLimitFor(type: SmartCollectionType): Int? = when (type) {
+        SmartCollectionType.ALWAYS_FINISH -> ALWAYS_FINISH_LIMIT
+        SmartCollectionType.USUALLY_ABANDON -> USUALLY_ABANDON_LIMIT
+        SmartCollectionType.FORGOTTEN_GEMS -> FORGOTTEN_GEMS_LIMIT
+        SmartCollectionType.NEVER_PLAYED -> NEVER_PLAYED_LIMIT
+        else -> null
+    }
+
     fun titleFor(type: SmartCollectionType): String = when (type) {
         SmartCollectionType.FAVORITES       -> "Favorites"
         SmartCollectionType.MOST_PLAYED     -> "Most Played"
@@ -204,4 +250,13 @@ object SmartCollectionBuilder {
         SmartCollectionType.ALWAYS_FINISH   -> "Songs you almost always listen through."
         SmartCollectionType.USUALLY_ABANDON -> "Songs you rarely finish."
     }
+}
+
+data class SmartCollectionSongResult(
+    val songs: List<Song>,
+    val totalEligibleCount: Int,
+    val visibleLimit: Int?,
+) {
+    val isCapped: Boolean
+        get() = totalEligibleCount > songs.size
 }

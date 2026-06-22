@@ -40,12 +40,21 @@ sealed interface SaveAsPlaylistResult {
 data class SmartCollectionDetailsUiState(
     val isLoading: Boolean = false,
     val songs: List<Song>,
+    val totalEligibleCount: Int = songs.size,
+    val visibleLimit: Int? = null,
     val mostPlayedSummaries: List<SongStatsSummary> = emptyList(),
     val mostPlayedPeriod: MostPlayedPeriod = MostPlayedPeriod.ALL_TIME,
     val mostPlayedDisplayLimit: MostPlayedDisplayLimit = MostPlayedDisplayLimit.TOP_25,
     val favoriteSongIds: Set<Long>,
     val currentSongId: Long?,
-)
+) {
+    val capFooterText: String?
+        get() = smartCollectionCapFooterText(
+            visibleCount = songs.size,
+            totalEligibleCount = totalEligibleCount,
+            visibleLimit = visibleLimit,
+        )
+}
 
 private val DATE_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)
@@ -132,13 +141,15 @@ class SmartCollectionDetailsViewModel @Inject constructor(
             ),
         )
         else -> combine(
-            smartCollectionRepository.observeSongsForCollection(type),
+            smartCollectionRepository.observeSongResultForCollection(type),
             statsRepository.favoriteSongIds(),
             playerController.nowPlayingState,
-        ) { songs, favorites, nowPlaying ->
+        ) { result, favorites, nowPlaying ->
             SmartCollectionDetailsUiState(
                 isLoading = false,
-                songs = songs,
+                songs = result.songs,
+                totalEligibleCount = result.totalEligibleCount,
+                visibleLimit = result.visibleLimit,
                 favoriteSongIds = favorites,
                 currentSongId = nowPlaying.song?.id,
             )
@@ -200,7 +211,10 @@ class SmartCollectionDetailsViewModel @Inject constructor(
                 val candidate = if (attempt == 1) baseName else "$baseName ($attempt)"
                 when (val result = playlistRepository.createPlaylist(candidate)) {
                     is PlaylistOperationResult.Success -> {
-                        val addResult = playlistRepository.addSongsToPlaylist(result.playlistId, songs.map { it.id })
+                        val addResult = playlistRepository.addSongsToPlaylist(
+                            result.playlistId,
+                            smartCollectionPlaylistSongIds(songs),
+                        )
                         onResult(SaveAsPlaylistResult.Success(name = candidate, added = addResult.added))
                         return@launch
                     }
@@ -212,3 +226,17 @@ class SmartCollectionDetailsViewModel @Inject constructor(
         }
     }
 }
+
+internal fun smartCollectionCapFooterText(
+    visibleCount: Int,
+    totalEligibleCount: Int,
+    visibleLimit: Int?,
+): String? =
+    if (visibleLimit != null && totalEligibleCount > visibleCount) {
+        "Showing top $visibleCount of $totalEligibleCount qualifying songs"
+    } else {
+        null
+    }
+
+internal fun smartCollectionPlaylistSongIds(songs: List<Song>): List<Long> =
+    songs.map { it.id }

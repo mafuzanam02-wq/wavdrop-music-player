@@ -27,6 +27,7 @@ import com.launchpoint.wavdrop.MainActivity
 import com.launchpoint.wavdrop.R
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
+import com.launchpoint.wavdrop.data.settings.AudioEnhancementsRepository
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.ui.widget.WidgetPlaybackSnapshot
@@ -54,12 +55,14 @@ class PlaybackService : MediaSessionService() {
 
     @Inject lateinit var resumeBehaviorRepository: ResumeBehaviorSettingsRepository
     @Inject lateinit var appSettingsRepository: AppSettingsRepository
+    @Inject lateinit var audioEnhancementsRepository: AudioEnhancementsRepository
     @Inject lateinit var playerController: PlayerController
     @Inject lateinit var songRepository: SongRepository
     @Inject lateinit var widgetStateStore: WidgetStateStore
 
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var enhancementController: AudioEnhancementController? = null
 
     // Fires when audio devices are added or removed. Runs on the main thread (null handler).
     private val audioDeviceCallback = object : AudioDeviceCallback() {
@@ -109,6 +112,10 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
+        if (BuildConfig.DEBUG) {
+            Log.d(AUDIO_SESSION_TAG, "[init] player created audioSessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
+        }
+
         // Authoritative widget state source: direct ExoPlayer listener fires on the
         // player thread without the MediaController → MediaSession IPC round-trip.
         // This covers notification controls, lock-screen controls, Bluetooth buttons,
@@ -128,6 +135,7 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged=$isPlaying")
                 serviceScope.launch {
                     try {
@@ -144,6 +152,7 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged=$playbackState")
                 if (playbackState == Player.STATE_IDLE) {
                     serviceScope.launch {
@@ -162,6 +171,7 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onMediaItemTransition reason=$reason sessionId=${player.audioSessionId} title=${mediaItem?.mediaMetadata?.title} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition reason=$reason title=${mediaItem?.mediaMetadata?.title}")
                 serviceScope.launch {
                     try {
@@ -183,7 +193,39 @@ class PlaybackService : MediaSessionService() {
                 }
             }
 
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                if (BuildConfig.DEBUG) {
+                    val item = player.currentMediaItem
+                    Log.d(
+                        AUDIO_SESSION_TAG,
+                        "[changed] audioSessionId=$audioSessionId" +
+                            " playbackState=${player.playbackState}" +
+                            " songId=${item?.mediaId}" +
+                            " title=${item?.mediaMetadata?.title}" +
+                            " ts=${System.currentTimeMillis()}",
+                    )
+                }
+                enhancementController?.onAudioSessionIdChanged(audioSessionId)
+            }
+
         })
+
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                AUDIO_SESSION_TAG,
+                "[post-listener] audioSessionId=${player.audioSessionId} playbackState=${player.playbackState} ts=${System.currentTimeMillis()}"
+            )
+        }
+
+        // One-time cleanup of stale EQ keys from earlier builds (fire-and-forget).
+        // Runs concurrently with attach(); DataStore serializes the edit so controller
+        // always applies a clean state after the first emission following normalization.
+        serviceScope.launch { audioEnhancementsRepository.normalizeEqPresetStateOnce() }
+
+        enhancementController = AudioEnhancementController(
+            repository = audioEnhancementsRepository,
+            scope = serviceScope,
+        ).also { it.attach(player) }
 
         // Keep ExoPlayer's noisy-audio handling in sync with the user's preference.
         // Default is true (matches the builder value above), so there is no gap on
@@ -261,6 +303,23 @@ class PlaybackService : MediaSessionService() {
                 mediaSession?.player?.seekToPrevious()
             }
         }
+        if (BuildConfig.DEBUG) {
+            when (intent?.action) {
+                ACTION_DEBUG_EQ_ENABLE -> {
+                    Log.d(AUDIO_EFFECTS_TAG, "[debug-cmd] EQ enable requested")
+                    serviceScope.launch {
+                        audioEnhancementsRepository.setEqFlatPreset()
+                        audioEnhancementsRepository.setEqEnabled(true)
+                    }
+                }
+                ACTION_DEBUG_EQ_DISABLE -> {
+                    Log.d(AUDIO_EFFECTS_TAG, "[debug-cmd] EQ disable requested")
+                    serviceScope.launch {
+                        audioEnhancementsRepository.setEqEnabled(false)
+                    }
+                }
+            }
+        }
         return super.onStartCommand(intent, flags, startId)
     }
 
@@ -273,6 +332,9 @@ class PlaybackService : MediaSessionService() {
         // Cancel the settings observer before releasing the player to avoid
         // calling setHandleAudioBecomingNoisy on a released ExoPlayer instance.
         serviceScope.cancel()
+        // Release audio effects before the player so the session is still valid during cleanup.
+        enhancementController?.release()
+        enhancementController = null
         mediaSession?.run {
             player.release()
             release()
@@ -380,5 +442,10 @@ class PlaybackService : MediaSessionService() {
         private const val CMD_CYCLE_REPEAT = "com.launchpoint.wavdrop.CYCLE_REPEAT"
         private const val RESUME_TAG = "WavdropResume"
         private const val WIDGET_TAG = "WavdropWidget"
+        private const val AUDIO_SESSION_TAG = "WavdropAudioSession"
+        private const val AUDIO_EFFECTS_TAG = "WavdropAudioEffects"
+        // Debug-only ADB triggers for EQ round-trip validation — never exposed in release builds.
+        private const val ACTION_DEBUG_EQ_ENABLE  = "com.launchpoint.wavdrop.DEBUG_EQ_ENABLE"
+        private const val ACTION_DEBUG_EQ_DISABLE = "com.launchpoint.wavdrop.DEBUG_EQ_DISABLE"
     }
 }

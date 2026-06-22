@@ -249,6 +249,19 @@ fun SmartCollectionDetailsScreen(
                         thickness = 0.5.dp,
                     )
                 }
+                state.capFooterText?.let { footerText ->
+                    item {
+                        Text(
+                            text = footerText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                        )
+                    }
+                }
             }
         }
     }

@@ -43,6 +43,44 @@ sealed interface WrappedUiState {
     ) : WrappedUiState
 }
 
+data class WrappedStorySnapshot(
+    val reportKey: String,
+    val page: Int,
+    val isPlaying: Boolean,
+    val progress: Float,
+)
+
+internal class WrappedStorySnapshotStore {
+    private var snapshot: WrappedStorySnapshot? = null
+
+    fun save(reportKey: String, page: Int, isPlaying: Boolean, progress: Float) {
+        snapshot = WrappedStorySnapshot(
+            reportKey = reportKey,
+            page = page.coerceAtLeast(0),
+            isPlaying = isPlaying,
+            progress = progress.coerceIn(0f, 1f),
+        )
+    }
+
+    fun get(reportKey: String, pageCount: Int): WrappedStorySnapshot? {
+        if (pageCount <= 0) return null
+        return snapshot
+            ?.takeIf { it.reportKey == reportKey }
+            ?.let {
+                it.copy(
+                    page = it.page.coerceIn(0, pageCount - 1),
+                    progress = it.progress.coerceIn(0f, 1f),
+                )
+            }
+    }
+
+    fun clearIfReportChanged(reportKey: String) {
+        if (snapshot?.reportKey != reportKey) {
+            snapshot = null
+        }
+    }
+}
+
 @HiltViewModel
 class WrappedViewModel @Inject constructor(
     songRepository: SongRepository,
@@ -51,6 +89,7 @@ class WrappedViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val zone = ZoneId.systemDefault()
+    private val storySnapshotStore = WrappedStorySnapshotStore()
     private val selectedScope = MutableStateFlow(WrappedScope.YEARLY)
     private val selectedYear = MutableStateFlow<Int?>(null)
     private val selectedMonth = MutableStateFlow<MonthYear?>(null)
@@ -152,6 +191,22 @@ class WrappedViewModel @Inject constructor(
     fun selectMonth(month: MonthYear) {
         selectedMonth.value = month
     }
+
+    fun saveStorySnapshot(
+        reportKey: String,
+        page: Int,
+        isPlaying: Boolean,
+        progress: Float,
+    ) {
+        storySnapshotStore.save(reportKey, page, isPlaying, progress)
+    }
+
+    fun getStorySnapshot(reportKey: String, pageCount: Int): WrappedStorySnapshot? =
+        storySnapshotStore.get(reportKey, pageCount)
+
+    fun clearStorySnapshotIfReportChanged(reportKey: String) {
+        storySnapshotStore.clearIfReportChanged(reportKey)
+    }
 }
 
 internal data class WrappedSelectionRequest(
@@ -197,3 +252,10 @@ private data class WrappedVisualPreferences(
     val backgroundIntensity: WrappedBackgroundIntensity,
     val fallbackTheme: WrappedFallbackTheme,
 )
+
+internal fun WrappedPeriod.toWrappedReportKey(): String = when (this) {
+    WrappedPeriod.AllTime -> "ALL_TIME"
+    is WrappedPeriod.Yearly -> "YEARLY:$year"
+    is WrappedPeriod.Monthly ->
+        "MONTHLY:${month.year}-${month.month.toString().padStart(2, '0')}"
+}

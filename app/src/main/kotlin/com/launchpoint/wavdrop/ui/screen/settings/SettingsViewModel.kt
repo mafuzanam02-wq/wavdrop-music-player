@@ -9,6 +9,9 @@ import com.launchpoint.wavdrop.data.repository.LibrarySyncResult
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.settings.AccentColor
+import com.launchpoint.wavdrop.data.settings.AudioEnhancementsRepository
+import com.launchpoint.wavdrop.data.settings.EqualizerCapabilities
+import com.launchpoint.wavdrop.data.settings.EqPresetType
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
 import com.launchpoint.wavdrop.data.settings.AutoBackupCheckResult
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
@@ -42,6 +45,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -68,6 +72,7 @@ class SettingsViewModel @Inject constructor(
     private val appIconAliasManager: AppIconAliasManager,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
     private val resumeBehaviorRepository: ResumeBehaviorSettingsRepository,
+    private val audioEnhancementsRepository: AudioEnhancementsRepository,
     private val songRepository: SongRepository,
     private val playerController: PlayerController,
 ) : ViewModel() {
@@ -162,6 +167,59 @@ class SettingsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ResumeBehaviorSettings(),
         )
+
+    val eqEnabled: StateFlow<Boolean> =
+        audioEnhancementsRepository.settings
+            .map { it.eqEnabled }
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = false,
+            )
+
+    val eqPresetType: StateFlow<EqPresetType> =
+        audioEnhancementsRepository.settings
+            .map { it.eqPresetType }
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = EqPresetType.FLAT,
+            )
+
+    val eqPlatformPresetIndex: StateFlow<Int?> =
+        audioEnhancementsRepository.settings
+            .map { it.eqPlatformPresetIndex }
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null,
+            )
+
+    val eqCustomBandLevels: StateFlow<List<Int>> =
+        audioEnhancementsRepository.settings
+            .map { it.eqCustomBandLevels }
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
+
+    val eqWavdropPresetId: StateFlow<String?> =
+        audioEnhancementsRepository.settings
+            .map { it.eqWavdropPresetId }
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null,
+            )
+
+    val eqCapabilities: StateFlow<EqualizerCapabilities?> =
+        audioEnhancementsRepository.capabilities
+            .stateIn(
+                scope        = viewModelScope,
+                started      = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null,
+            )
 
     val sleepTimerState: StateFlow<SleepTimerState> = playerController.sleepTimerState
 
@@ -375,6 +433,30 @@ class SettingsViewModel @Inject constructor(
 
     fun setRestoreQueue(enabled: Boolean) {
         viewModelScope.launch { resumeBehaviorRepository.setRestoreQueue(enabled) }
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean) {
+        viewModelScope.launch { audioEnhancementsRepository.setEqEnabled(enabled) }
+    }
+
+    fun setEqFlat() {
+        viewModelScope.launch { audioEnhancementsRepository.setEqFlatPreset() }
+    }
+
+    fun setEqCustomPreset(bandCount: Int) {
+        viewModelScope.launch { audioEnhancementsRepository.setEqCustomPreset(bandCount) }
+    }
+
+    fun setEqPlatformPreset(index: Int) {
+        viewModelScope.launch { audioEnhancementsRepository.setEqPlatformPreset(index) }
+    }
+
+    fun setEqCustomBandLevels(levels: List<Int>) {
+        viewModelScope.launch { audioEnhancementsRepository.setEqCustomBandLevels(levels) }
+    }
+
+    fun setEqWavdropPreset(id: String) {
+        viewModelScope.launch { audioEnhancementsRepository.setEqWavdropPreset(id) }
     }
 
     fun setSleepTimer(option: SleepTimerOption) {

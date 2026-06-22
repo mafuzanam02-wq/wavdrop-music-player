@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.data.smart
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
+import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -102,6 +103,22 @@ class SmartCollectionBuilderTest {
         assertEquals(listOf(1L, 2L, 3L), ids)
     }
 
+    @Test fun `most played remains uncapped`() {
+        val songs = (1L..120L).map { song(it) }
+        val stats = songs.map { stats(it.id, playCount = it.id.toInt()) }
+
+        val result = SmartCollectionBuilder.songsResultFor(
+            SmartCollectionType.MOST_PLAYED,
+            songs,
+            stats,
+        )
+
+        assertEquals(120, result.songs.size)
+        assertEquals(120, result.totalEligibleCount)
+        assertEquals(null, result.visibleLimit)
+        assertEquals(120L, result.songs.first().id)
+    }
+
     // ── Recently Played ───────────────────────────────────────────────────────
 
     @Test fun `recently played excludes songs with lastPlayedAt zero`() {
@@ -138,6 +155,23 @@ class SmartCollectionBuilderTest {
         val stats  = listOf(stats(1, playCount = 0), stats(2, playCount = 1))
         val result = SmartCollectionBuilder.songsFor(SmartCollectionType.NEVER_PLAYED, songs, stats)
         assertEquals(listOf(1L), result.map { it.id })
+    }
+
+    @Test fun `never played ranks full eligible set before applying 100 cap`() {
+        val songs = (105L downTo 1L).map { id ->
+            song(id = id, title = id.toString().padStart(3, '0'))
+        }
+
+        val result = SmartCollectionBuilder.songsResultFor(
+            SmartCollectionType.NEVER_PLAYED,
+            songs,
+            emptyList(),
+        )
+
+        assertEquals(SmartCollectionBuilder.NEVER_PLAYED_LIMIT, result.songs.size)
+        assertEquals(105, result.totalEligibleCount)
+        assertEquals(SmartCollectionBuilder.NEVER_PLAYED_LIMIT, result.visibleLimit)
+        assertEquals((1L..100L).toList(), result.songs.map { it.id })
     }
 
     // ── Most Skipped ──────────────────────────────────────────────────────────
@@ -310,6 +344,30 @@ class SmartCollectionBuilderTest {
         assertEquals(listOf(1L), result.map { it.id })
     }
 
+    @Test fun `forgotten gems recomputes deterministically when day changes`() {
+        val beforeMidnight = Instant.parse("2026-06-22T23:59:00Z").toEpochMilli()
+        val afterMidnight = Instant.parse("2026-06-23T00:01:00Z").toEpochMilli()
+        val lastPlayedAt = afterMidnight - 60L * 24 * 60 * 60 * 1_000L - 1L
+        val songs = listOf(song(1))
+        val s = listOf(stats(1, playCount = 5, lastPlayedAt = lastPlayedAt))
+
+        val before = SmartCollectionBuilder.songsFor(
+            type = SmartCollectionType.FORGOTTEN_GEMS,
+            songs = songs,
+            stats = s,
+            nowMs = beforeMidnight,
+        )
+        val after = SmartCollectionBuilder.songsFor(
+            type = SmartCollectionType.FORGOTTEN_GEMS,
+            songs = songs,
+            stats = s,
+            nowMs = afterMidnight,
+        )
+
+        assertTrue(before.isEmpty())
+        assertEquals(listOf(1L), after.map { it.id })
+    }
+
     @Test fun `forgotten gems sorted by playCount descending then lastPlayedAt ascending`() {
         val songs = listOf(song(1), song(2), song(3), song(4))
         val s     = listOf(
@@ -328,6 +386,28 @@ class SmartCollectionBuilderTest {
         val s     = songs.map { stats(it.id, playCount = 10, lastPlayedAt = OLD_TS) }
         val result = SmartCollectionBuilder.songsFor(SmartCollectionType.FORGOTTEN_GEMS, songs, s)
         assertEquals(50, result.size)
+    }
+
+    @Test fun `forgotten gems exposes total eligible count after ranking before cap`() {
+        val songs = (60L downTo 1L).map { song(it) }
+        val s = songs.map { stats(it.id, playCount = it.id.toInt(), lastPlayedAt = OLD_TS) }
+
+        val result = SmartCollectionBuilder.songsResultFor(
+            SmartCollectionType.FORGOTTEN_GEMS,
+            songs,
+            s,
+        )
+
+        assertEquals(SmartCollectionBuilder.FORGOTTEN_GEMS_LIMIT, result.songs.size)
+        assertEquals(56, result.totalEligibleCount)
+        assertEquals(SmartCollectionBuilder.FORGOTTEN_GEMS_LIMIT, result.visibleLimit)
+        assertEquals((60L downTo 11L).toList(), result.songs.map { it.id })
+
+        val collection = SmartCollectionBuilder.build(songs, s)
+            .first { it.type == SmartCollectionType.FORGOTTEN_GEMS }
+        assertEquals(SmartCollectionBuilder.FORGOTTEN_GEMS_LIMIT, collection.songCount)
+        assertEquals(56, collection.totalEligibleCount)
+        assertTrue(collection.isCapped)
     }
 
     @Test fun `build omits forgotten gems when no songs qualify`() {

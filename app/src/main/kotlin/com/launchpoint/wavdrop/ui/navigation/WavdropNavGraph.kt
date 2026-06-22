@@ -53,6 +53,7 @@ import com.launchpoint.wavdrop.ui.screen.settings.SettingsBackupScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsBluetoothScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsDiagnosticsScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsLibraryScreen
+import com.launchpoint.wavdrop.ui.screen.settings.SettingsEqualizerScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsPlaybackScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsScreen
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsStatisticsScreen
@@ -75,6 +76,7 @@ sealed class Screen(val route: String) {
     data object BackupImportPreview : Screen("backup_import_preview")
     data object NowPlaying          : Screen("now_playing")
     data object Settings            : Screen("settings")
+    data object SettingsEqualizer   : Screen("settings/equalizer")
     data object SettingsPlayback    : Screen("settings/playback")
     data object SettingsBluetooth   : Screen("settings/bluetooth")
     data object SettingsLibrary     : Screen("settings/library")
@@ -480,6 +482,7 @@ fun WavdropNavGraph(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 onNavigateBack           = { navController.popBackStack() },
+                onEqualizerClick         = { navController.navigate(Screen.SettingsEqualizer.route) },
                 onPlaybackClick          = { navController.navigate(Screen.SettingsPlayback.route) },
                 onBluetoothClick         = { navController.navigate(Screen.SettingsBluetooth.route) },
                 onLibrarySettingsClick   = { navController.navigate(Screen.SettingsLibrary.route) },
@@ -488,6 +491,9 @@ fun WavdropNavGraph(
                 onStatisticsClick        = { navController.navigate(Screen.SettingsStatistics.route) },
                 onAboutClick             = { navController.navigate(Screen.SettingsAbout.route) },
             )
+        }
+        composable(Screen.SettingsEqualizer.route) {
+            SettingsEqualizerScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.SettingsWrapped.route) {
             SettingsWrappedScreen(

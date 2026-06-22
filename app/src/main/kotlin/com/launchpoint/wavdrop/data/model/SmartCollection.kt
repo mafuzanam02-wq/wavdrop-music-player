@@ -6,4 +6,9 @@ data class SmartCollection(
     val description: String,
     val type: SmartCollectionType,
     val songCount: Int,
-)
+    val totalEligibleCount: Int = songCount,
+    val visibleLimit: Int? = null,
+) {
+    val isCapped: Boolean
+        get() = totalEligibleCount > songCount
+}

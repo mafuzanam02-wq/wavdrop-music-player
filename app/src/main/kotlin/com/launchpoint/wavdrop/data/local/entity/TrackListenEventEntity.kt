@@ -44,7 +44,7 @@ data class TrackListenEventEntity(
         /** Reserved — not written today. BlackPlayer imports remain aggregate-only. */
         const val SOURCE_BLACKPLAYER_IMPORT = "blackplayer_import"
 
-        /** Reserved — for future Wavdrop JSON restore support. */
+        /** Written by WavdropBackupImportRepository when restoring listen events from a backup. */
         const val SOURCE_MANUAL_RESTORE = "manual_restore"
 
         /** Preserved from verified Wavdrop Desktop playback event imports. */

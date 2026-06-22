@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
@@ -56,6 +57,10 @@ android {
     ksp {
         arg("room.schemaLocation", "$projectDir/schemas")
     }
+
+    kapt {
+        correctErrorTypes = true
+    }
 }
 
 dependencies {
@@ -87,7 +92,7 @@ dependencies {
     implementation(libs.androidx.media3.ui)
 
     implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
+    kapt(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
     implementation(libs.coil.compose)

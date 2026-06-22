@@ -63,6 +63,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -359,6 +360,7 @@ fun WrappedScreen(
             )
             is WrappedUiState.Content -> WrappedContent(
                 state = state,
+                viewModel = viewModel,
                 onSelectScope = viewModel::selectScope,
                 onSelectYear = viewModel::selectYear,
                 onSelectMonth = viewModel::selectMonth,
@@ -410,6 +412,7 @@ private fun EmptyContent(
 @Composable
 private fun WrappedContent(
     state: WrappedUiState.Content,
+    viewModel: WrappedViewModel,
     onSelectScope: (WrappedScope) -> Unit,
     onSelectYear: (Int) -> Unit,
     onSelectMonth: (MonthYear) -> Unit,
@@ -450,19 +453,40 @@ private fun WrappedContent(
         milestonePreferenceEnabled = state.showMilestoneCelebrations,
         hasMilestones = milestones.isNotEmpty(),
     )
+    val reportKey = state.currentPeriod.toWrappedReportKey()
+    val restoredSnapshot = remember(reportKey, pageCount) {
+        viewModel.getStorySnapshot(reportKey, pageCount)
+    }
+    val initialStoryPage = restoredSnapshot?.page ?: 0
 
-    val pagerState = rememberPagerState(pageCount = { pageCount })
+    val pagerState = rememberPagerState(
+        initialPage = initialStoryPage,
+        pageCount = { pageCount },
+    )
     var pagerBoundsInWindow by remember { mutableStateOf<AndroidRect?>(null) }
 
     // ── Story mode ────────────────────────────────────────────────────────────
     // Story starts playing automatically unless the OS reduce-motion flag is set.
-    var storyPlaying by remember { mutableStateOf(!reduceMotion) }
-    val slideProgress = remember { Animatable(0f) }
+    var storyPlaying by remember {
+        mutableStateOf(restoredSnapshot?.isPlaying ?: !reduceMotion)
+    }
+    val slideProgress = remember {
+        Animatable(restoredSnapshot?.progress ?: 0f)
+    }
+    var activeReportKey by remember { mutableStateOf(reportKey) }
+    var progressReportKey by remember { mutableStateOf(reportKey) }
+    var progressPage by remember { mutableStateOf(initialStoryPage) }
 
-    LaunchedEffect(state.currentPeriod) {
-        pagerState.scrollToPage(0)
-        slideProgress.snapTo(0f)
-        storyPlaying = !reduceMotion
+    LaunchedEffect(reportKey) {
+        if (activeReportKey != reportKey) {
+            viewModel.clearStorySnapshotIfReportChanged(reportKey)
+            pagerState.scrollToPage(0)
+            slideProgress.snapTo(0f)
+            storyPlaying = !reduceMotion
+            progressReportKey = reportKey
+            progressPage = 0
+            activeReportKey = reportKey
+        }
     }
 
     LaunchedEffect(pageCount) {
@@ -476,8 +500,50 @@ private fun WrappedContent(
     // Resets progress when the page changes (manual swipe, auto-advance, scope/period change).
     // Pause/resume does not change settledPage, so this effect does not run on toggle — progress
     // is preserved across pause/resume cycles by the Animatable cancellation mechanism.
-    LaunchedEffect(currentStoryPage) {
-        slideProgress.snapTo(0f)
+    LaunchedEffect(currentStoryPage, reportKey) {
+        if (progressReportKey == reportKey && progressPage != currentStoryPage) {
+            slideProgress.snapTo(0f)
+        }
+        progressReportKey = reportKey
+        progressPage = currentStoryPage
+    }
+
+    val latestReportKey by rememberUpdatedState(reportKey)
+    val latestStoryPage by rememberUpdatedState(currentStoryPage)
+    val latestStoryPlaying by rememberUpdatedState(storyPlaying)
+    val latestStoryProgress by rememberUpdatedState(slideProgress.value)
+
+    fun saveStorySnapshot() {
+        viewModel.saveStorySnapshot(
+            reportKey = reportKey,
+            page = currentStoryPage,
+            isPlaying = storyPlaying,
+            progress = slideProgress.value,
+        )
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.saveStorySnapshot(
+                reportKey = latestReportKey,
+                page = latestStoryPage,
+                isPlaying = latestStoryPlaying,
+                progress = latestStoryProgress,
+            )
+        }
+    }
+
+    val openTrackDetails: (Long) -> Unit = { songId ->
+        saveStorySnapshot()
+        onTrackDetailsClick(songId)
+    }
+    val openArtistDetails: (String) -> Unit = { artistKey ->
+        saveStorySnapshot()
+        onArtistClick(artistKey)
+    }
+    val openAlbumDetails: (String) -> Unit = { albumKey ->
+        saveStorySnapshot()
+        onAlbumClick(albumKey)
     }
 
     // Drives the progress bar and auto-advance. Restarts on page change (progress already
@@ -591,22 +657,22 @@ private fun WrappedContent(
                     WrappedScope.ALL_TIME -> when (page) {
                         0    -> IntroPage(wrapped, periodCopy, visualSettings)
                         1    -> OverviewPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
-                        2    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
-                        3    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
-                        4    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
-                        5    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick, isCurrentPage, reduceMotion)
-                        else -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                        2    -> TopTracksPage(wrapped, periodCopy, visualSettings, openTrackDetails)
+                        3    -> TopArtistsPage(wrapped, periodCopy, visualSettings, openArtistDetails)
+                        4    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, openAlbumDetails)
+                        5    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, openTrackDetails, isCurrentPage, reduceMotion)
+                        else -> RecentPlaysPage(wrapped, periodCopy, openTrackDetails)
                     }
                     else -> when (page) {
                         0    -> IntroPage(wrapped, periodCopy, visualSettings)
                         1    -> OverviewPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
                         2    -> StreaksPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
                         3    -> PatternsPage(wrapped, periodCopy, visualSettings)
-                        4    -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick)
-                        5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistClick)
-                        6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumClick)
-                        7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetailsClick, isCurrentPage, reduceMotion)
-                        8    -> RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                        4    -> TopTracksPage(wrapped, periodCopy, visualSettings, openTrackDetails)
+                        5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, openArtistDetails)
+                        6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, openAlbumDetails)
+                        7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, openTrackDetails, isCurrentPage, reduceMotion)
+                        8    -> RecentPlaysPage(wrapped, periodCopy, openTrackDetails)
                         else -> if (showMilestonePage) {
                             MilestonePage(
                                 milestones = milestones,
@@ -615,7 +681,7 @@ private fun WrappedContent(
                                 reduceMotion = reduceMotion,
                             )
                         } else {
-                            RecentPlaysPage(wrapped, periodCopy, onTrackDetailsClick)
+                            RecentPlaysPage(wrapped, periodCopy, openTrackDetails)
                         }
                     }
                 }

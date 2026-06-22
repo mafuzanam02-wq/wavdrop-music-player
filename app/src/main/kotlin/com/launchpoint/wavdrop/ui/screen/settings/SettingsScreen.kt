@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
+    onEqualizerClick: () -> Unit,
     onPlaybackClick: () -> Unit,
     onBluetoothClick: () -> Unit,
     onLibrarySettingsClick: () -> Unit,
@@ -60,6 +62,33 @@ fun SettingsScreen(
                 .fillMaxSize(),
         ) {
             item { SectionHeader("Listening") }
+            item {
+                SettingsGroupCard {
+                    ClickableSettingsRow(
+                        title       = "Equalizer",
+                        subtitle    = "Shape how your music sounds.",
+                        onClick     = onEqualizerClick,
+                        leadingIcon = Icons.Default.GraphicEq,
+                    )
+                    CardInternalDivider()
+                    DisabledSettingsRow(
+                        title    = "Output Profiles",
+                        subtitle = "Speaker, wired, and Bluetooth profiles. Coming later.",
+                    )
+                    CardInternalDivider()
+                    DisabledSettingsRow(
+                        title    = "Headphones",
+                        subtitle = "Headphone tuning and profiles. Coming later.",
+                    )
+                    CardInternalDivider()
+                    DisabledSettingsRow(
+                        title    = "Loudness Protection",
+                        subtitle = "Safer loudness and headroom tools. Coming later.",
+                    )
+                }
+            }
+
+            item { SectionHeader("Playback") }
             item {
                 SettingsGroupCard {
                     ClickableSettingsRow(

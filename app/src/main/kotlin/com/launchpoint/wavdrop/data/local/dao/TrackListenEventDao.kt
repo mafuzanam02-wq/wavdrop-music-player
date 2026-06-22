@@ -39,11 +39,19 @@ interface TrackListenEventDao {
     fun observeForSong(songId: Long): Flow<List<TrackListenEventEntity>>
 
     /**
-     * Per-song engagement summary from native Wavdrop playback only.
+     * Per-song engagement summary from trusted Wavdrop playback sources.
+     *
+     * Trusted sources:
+     *   - 'wavdrop_playback'       — native on-device playback
+     *   - 'manual_restore'         — events restored from a Wavdrop backup
+     *   - 'wavdrop_desktop_playback' — verified events imported from Wavdrop Desktop
+     *
+     * BlackPlayer import events are excluded — they are aggregate-only and carry no
+     * reliable per-event listenedMs/durationMs completion evidence.
      *
      * Aggregates both PLAY events (threshold crossed) and SKIP events (abandoned before
      * threshold) so that usually-abandoned songs are visible even when they only produce
-     * SKIP events. Songs with source != 'wavdrop_playback' (imports, restores) are excluded.
+     * SKIP events.
      *
      * [avgCompletion] averages only PLAY events with known durationMs (> 0), capped at 1.0
      * per event via CASE WHEN. Yields 0.0 via COALESCE when no valid plays exist.
@@ -62,7 +70,11 @@ interface TrackListenEventDao {
                 END
             ELSE NULL END), 0.0) AS avgCompletion
         FROM track_listen_events
-        WHERE source = 'wavdrop_playback'
+        WHERE source IN (
+            'wavdrop_playback',
+            'manual_restore',
+            'wavdrop_desktop_playback'
+        )
         GROUP BY songId
     """)
     fun observeCompletionSummaries(): Flow<List<SongCompletionSummary>>

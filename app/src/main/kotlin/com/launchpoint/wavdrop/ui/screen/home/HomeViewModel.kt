@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
+import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
@@ -215,9 +216,7 @@ class HomeViewModel @Inject constructor(
                 .mapNotNull { songsById[it.songId] }
                 .take(DASHBOARD_SONG_PREVIEW_LIMIT),
             playlists = playlists.take(DASHBOARD_COLLECTION_PREVIEW_LIMIT),
-            smartCollections = smartCollections
-                .filter { it.songCount > 0 }
-                .take(DASHBOARD_COLLECTION_PREVIEW_LIMIT),
+            smartCollections = selectHomeSmartCollections(smartCollections),
             wrapped = latestWrapped,
         )
     }.stateIn(
@@ -366,5 +365,36 @@ class HomeViewModel @Inject constructor(
 internal fun isFolderModeNeedsSelection(settings: LibraryScanSettings): Boolean =
     settings.scanMode == LibraryScanMode.SELECTED_FOLDERS &&
         settings.selectedFolderUris.isEmpty()
+
+internal fun selectHomeSmartCollections(
+    collections: List<SmartCollection>,
+    limit: Int = DASHBOARD_COLLECTION_PREVIEW_LIMIT,
+): List<SmartCollection> {
+    if (limit <= 0) return emptyList()
+    val priorityByType = HOME_SMART_COLLECTION_PRIORITY
+        .withIndex()
+        .associate { (index, type) -> type to index }
+    return collections
+        .filter { it.songCount > 0 }
+        .sortedWith(
+            compareBy<SmartCollection> { priorityByType[it.type] ?: Int.MAX_VALUE }
+                .thenBy { it.type.ordinal },
+        )
+        .take(limit)
+}
+
+internal val HOME_SMART_COLLECTION_PRIORITY = listOf(
+    SmartCollectionType.ALWAYS_FINISH,
+    SmartCollectionType.FORGOTTEN_GEMS,
+    SmartCollectionType.USUALLY_ABANDON,
+    SmartCollectionType.NEVER_PLAYED,
+    SmartCollectionType.RECENTLY_PLAYED,
+    SmartCollectionType.FAVORITES,
+    SmartCollectionType.MOST_PLAYED,
+    SmartCollectionType.RECENTLY_ADDED,
+    SmartCollectionType.MOST_SKIPPED,
+    SmartCollectionType.LONG_TRACKS,
+    SmartCollectionType.SHORT_TRACKS,
+)
 
 private const val SEARCH_TAG = "WavdropSearchPlayback"

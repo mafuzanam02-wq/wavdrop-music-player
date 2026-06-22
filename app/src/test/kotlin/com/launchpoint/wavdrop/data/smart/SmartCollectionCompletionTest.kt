@@ -101,6 +101,50 @@ class SmartCollectionCompletionTest {
         assertEquals(listOf(2L, 1L, 3L), alwaysFinish(songs, completions).map { it.id })
     }
 
+    @Test fun `always finish ranks full eligible set before applying 50 cap`() {
+        val songs = (55L downTo 1L).map { song(it) }
+        val completions = songs.map {
+            completion(
+                songId = it.id,
+                nativePlays = 3,
+                avgCompletion = 0.85f + it.id / 1_000f,
+            )
+        }
+
+        val result = SmartCollectionBuilder.songsResultFor(
+            SmartCollectionType.ALWAYS_FINISH,
+            songs,
+            noStats,
+            completions,
+        )
+
+        assertEquals(SmartCollectionBuilder.ALWAYS_FINISH_LIMIT, result.songs.size)
+        assertEquals(55, result.totalEligibleCount)
+        assertEquals(SmartCollectionBuilder.ALWAYS_FINISH_LIMIT, result.visibleLimit)
+        assertEquals((55L downTo 6L).toList(), result.songs.map { it.id })
+    }
+
+    @Test fun `always finish improved song naturally enters capped visible ranking`() {
+        val songs = (1L..51L).map { song(it) }
+        val initial = songs.map {
+            completion(
+                songId = it.id,
+                nativePlays = 3,
+                avgCompletion = if (it.id == 51L) 0.85f else 0.90f,
+            )
+        }
+        val improved = initial.map {
+            if (it.songId == 51L) it.copy(avgCompletion = 1f) else it
+        }
+
+        val before = alwaysFinish(songs, initial).map { it.id }
+        val after = alwaysFinish(songs, improved).map { it.id }
+
+        assertTrue(51L !in before)
+        assertEquals(51L, after.first())
+        assertEquals(SmartCollectionBuilder.ALWAYS_FINISH_LIMIT, after.size)
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // USUALLY ABANDON — via repeated native skips
     // ══════════════════════════════════════════════════════════════════════════
@@ -203,6 +247,31 @@ class SmartCollectionCompletionTest {
         assertEquals(listOf(1L), usuallyAbandon(songs, completions).map { it.id })
     }
 
+    @Test fun `usually abandon ranks full eligible set before applying 30 cap`() {
+        val songs = (40L downTo 1L).map { song(it) }
+        val completions = songs.map {
+            val skips = 60 + it.id.toInt()
+            completion(
+                songId = it.id,
+                nativePlays = 100 - skips,
+                nativeSkips = skips,
+                validCompletionPlays = 0,
+            )
+        }
+
+        val result = SmartCollectionBuilder.songsResultFor(
+            SmartCollectionType.USUALLY_ABANDON,
+            songs,
+            noStats,
+            completions,
+        )
+
+        assertEquals(SmartCollectionBuilder.USUALLY_ABANDON_LIMIT, result.songs.size)
+        assertEquals(40, result.totalEligibleCount)
+        assertEquals(SmartCollectionBuilder.USUALLY_ABANDON_LIMIT, result.visibleLimit)
+        assertEquals((40L downTo 11L).toList(), result.songs.map { it.id })
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // Empty and imported-only data
     // ══════════════════════════════════════════════════════════════════════════
@@ -217,6 +286,69 @@ class SmartCollectionCompletionTest {
 
     @Test fun `imported-only songs have no completion summary and are excluded from both collections`() {
         // BlackPlayer imports write no native events — no SongCompletionSummary row for these songs
+        val songs = listOf(song(1))
+        val completions = emptyList<SongCompletionSummary>()
+        assertTrue(alwaysFinish(songs, completions).isEmpty())
+        assertTrue(usuallyAbandon(songs, completions).isEmpty())
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Restore / multi-source coverage
+    //
+    // TrackListenEventDao.observeCompletionSummaries() now includes events from
+    // 'manual_restore' and 'wavdrop_desktop_playback' in addition to
+    // 'wavdrop_playback'. The DAO SQL runs in the Android Room layer and cannot
+    // be tested as a pure JVM unit test; these tests confirm that the
+    // SmartCollectionBuilder processes the resulting SongCompletionSummary rows
+    // correctly regardless of which trusted source produced them.
+    //
+    // BlackPlayer events are never written as individual listen events, so they
+    // produce no SongCompletionSummary row and are excluded at the DAO level
+    // (tested in "imported-only songs" below).
+    // ══════════════════════════════════════════════════════════════════════════
+
+    @Test fun `always finish repopulates from manual_restore completion events after backup restore`() {
+        // After restore, events tagged manual_restore now produce SongCompletionSummary rows.
+        // Builder must accept qualifying summaries regardless of their originating source.
+        val songs = listOf(song(1))
+        val completions = listOf(completion(1, nativePlays = 3, avgCompletion = 0.90f))
+        assertEquals(listOf(1L), alwaysFinish(songs, completions).map { it.id })
+    }
+
+    @Test fun `always finish repopulates from wavdrop_desktop_playback completion events`() {
+        val songs = listOf(song(1))
+        val completions = listOf(completion(1, nativePlays = 5, avgCompletion = 0.92f))
+        assertEquals(listOf(1L), alwaysFinish(songs, completions).map { it.id })
+    }
+
+    @Test fun `usually abandon repopulates from restored skip evidence after backup restore`() {
+        val songs = listOf(song(1))
+        val completions = listOf(completion(1, nativePlays = 0, nativeSkips = 5))
+        assertEquals(listOf(1L), usuallyAbandon(songs, completions).map { it.id })
+    }
+
+    @Test fun `usually abandon repopulates from restored low-completion plays after backup restore`() {
+        val songs = listOf(song(1))
+        val completions = listOf(
+            completion(1, nativePlays = 4, nativeSkips = 0, validCompletionPlays = 4, avgCompletion = 0.22f),
+        )
+        assertEquals(listOf(1L), usuallyAbandon(songs, completions).map { it.id })
+    }
+
+    @Test fun `native wavdrop_playback events continue to qualify for both collections after source filter change`() {
+        // Regression: widening the source filter must not affect native-event behaviour.
+        val songs = listOf(song(1), song(2))
+        val completions = listOf(
+            completion(1, nativePlays = 3, avgCompletion = 0.90f),
+            completion(2, nativePlays = 0, nativeSkips = 4),
+        )
+        assertEquals(listOf(1L), alwaysFinish(songs, completions).map { it.id })
+        assertEquals(listOf(2L), usuallyAbandon(songs, completions).map { it.id })
+    }
+
+    @Test fun `blackplayer import events produce no completion summary and both collections remain empty`() {
+        // BlackPlayer imports are aggregate-only; no individual events are written,
+        // so no SongCompletionSummary row is produced for these songs.
         val songs = listOf(song(1))
         val completions = emptyList<SongCompletionSummary>()
         assertTrue(alwaysFinish(songs, completions).isEmpty())
