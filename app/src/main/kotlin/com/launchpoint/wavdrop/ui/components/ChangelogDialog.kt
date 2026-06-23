@@ -19,6 +19,30 @@ private sealed interface ChangelogEntry {
     data class Item(val text: String) : ChangelogEntry
 }
 
+private val BETA_9_ENTRIES: List<ChangelogEntry> = listOf(
+    ChangelogEntry.Section("Better Listening History"),
+    ChangelogEntry.Item("Backup and restore now better protect your listening history, stats, playlists, and recovery data."),
+    ChangelogEntry.Item("Duplicate imports are handled more safely, so restored history is less likely to be inflated."),
+    ChangelogEntry.Item("Backup integrity checks are stronger when listening events are restored."),
+
+    ChangelogEntry.Section("Equalizer"),
+    ChangelogEntry.Item("New Equalizer support with device-supported controls and presets."),
+    ChangelogEntry.Item("Equalizer availability depends on your device."),
+
+    ChangelogEntry.Section("Listening Settings"),
+    ChangelogEntry.Item("Audio and listening controls are now easier to find in the dedicated Listening section."),
+
+    ChangelogEntry.Section("Smarter Collections"),
+    ChangelogEntry.Item("Smart Collections rank tracks more consistently."),
+    ChangelogEntry.Item("Collection counts and refresh behavior have been improved."),
+
+    ChangelogEntry.Section("Wrapped Improvements"),
+    ChangelogEntry.Item("Returning from track, album, or artist details now preserves your Wrapped position."),
+
+    ChangelogEntry.Section("Stability & Polish"),
+    ChangelogEntry.Item("Reliability improvements across playback, library scanning, imports, backups, and recovery."),
+)
+
 private val BETA_7_9_ENTRIES: List<ChangelogEntry> = listOf(
     ChangelogEntry.Section("Your Music Story"),
     ChangelogEntry.Item("Wrapped now plays automatically — tap to pause, swipe to navigate, and resume right where you left off."),
@@ -151,8 +175,8 @@ private fun fullBeta5Entries(): List<ChangelogEntry> = listOf(
 @Composable
 fun ChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
-        title = "What's new in Beta 7.9",
-        entries = BETA_7_9_ENTRIES,
+        title = "What's new in Beta 9",
+        entries = BETA_9_ENTRIES,
         onDismiss = onDismiss,
     )
 }
@@ -162,6 +186,8 @@ fun FullChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
         title = "Wavdrop Changelog",
         entries = buildList {
+            add(ChangelogEntry.Section("Beta 9 — Equalizer, Listening Settings & Backup Protection"))
+            addAll(BETA_9_ENTRIES)
             add(ChangelogEntry.Section("Beta 7.9 — Story Mode, Smart Collections & More"))
             addAll(BETA_7_9_ENTRIES)
             add(ChangelogEntry.Section("Beta 7 — Navigation, Discoverability & Polish"))
