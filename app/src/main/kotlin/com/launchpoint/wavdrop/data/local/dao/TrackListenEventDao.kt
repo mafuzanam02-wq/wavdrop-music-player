@@ -22,6 +22,17 @@ interface TrackListenEventDao {
     """)
     suspend fun getInRangeSnapshot(fromMs: Long, toMs: Long): List<TrackListenEventEntity>
 
+    /**
+     * Non-null eventIds in an inclusive occurredAt range. Used by restore dedup to skip an
+     * incoming event whose stable eventId already exists locally (P2-B1). Range-scoped to mirror
+     * [getInRangeSnapshot]; legacy/null-eventId rows are excluded by the IS NOT NULL filter.
+     */
+    @Query("""
+        SELECT eventId FROM track_listen_events
+        WHERE eventId IS NOT NULL AND occurredAt >= :fromMs AND occurredAt <= :toMs
+    """)
+    suspend fun getEventIdsInRangeSnapshot(fromMs: Long, toMs: Long): List<String>
+
     /** All events, most recent first. Use for full-history analytics (Monthly Reports, Wrapped). */
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     fun observeAll(): Flow<List<TrackListenEventEntity>>

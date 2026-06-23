@@ -17,6 +17,7 @@ import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 import com.launchpoint.wavdrop.data.model.TrackStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -51,6 +52,8 @@ class StatsRepository @Inject constructor(
                     listenedMs = listenedMs,
                     durationMs = durationMs,
                     source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+                    // Stable per-event id generated at creation time (contract §9.2).
+                    eventId = UUID.randomUUID().toString(),
                 )
             )
         }
@@ -61,6 +64,14 @@ class StatsRepository @Inject constructor(
      *
      * [durationMs] is the track's total duration — 0 if unknown. Used only for the event record.
      */
+    override suspend fun recordListenStart(songId: Long, contentUri: String) {
+        val nowMs = System.currentTimeMillis()
+        db.withTransaction {
+            dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
+            dao.updateLastListenedAt(songId, nowMs)
+        }
+    }
+
     override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
         db.withTransaction {
             val nowMs = System.currentTimeMillis()
@@ -74,6 +85,8 @@ class StatsRepository @Inject constructor(
                     listenedMs = 0L,
                     durationMs = durationMs,
                     source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+                    // Stable per-event id generated at creation time (contract §9.2).
+                    eventId = UUID.randomUUID().toString(),
                 )
             )
         }
@@ -161,11 +174,13 @@ class StatsRepository @Inject constructor(
             // Pass 0 for totalListeningTimeMs — BlackPlayer does not provide listening time,
             // so MAX(current, 0) = current, leaving it unchanged.
             dao.mergeMaxStats(
-                songId                  = song.id,
-                importedPlayCount       = row.playCount,
-                importedSkipCount       = row.skipCount,
+                songId                 = song.id,
+                importedPlayCount      = row.playCount,
+                importedSkipCount      = row.skipCount,
                 importedListeningTimeMs = 0L,
-                importedLastPlayedAt    = row.lastPlayedMs,
+                importedLastPlayedAt   = row.lastPlayedMs,
+                // BlackPlayer has no lastListenedAt — pass 0 so MAX(local, 0) = local unchanged.
+                importedLastListenedAt = 0L,
             )
 
             val effect = StatsImportMerger.computeEffect(

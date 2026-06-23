@@ -25,6 +25,16 @@ data class BackupTrackStats(
     val lastPlayedAt: Long,
     val totalListeningTimeMs: Long,
     val isFavorite: Boolean,
+    /**
+     * Epoch ms of last qualifying 5-second listen.
+     *
+     * null  = parsed from a v1 backup (field absent in v1 format).
+     * ≥ 0   = parsed from a v2 backup; 0 means no qualifying listen occurred.
+     *
+     * The import path branches on [WavdropBackup.sourceVersion] — never on this value
+     * being null vs 0 — to decide which effective lastListenedAt to apply.
+     */
+    val lastListenedAt: Long? = null,
 )
 
 data class BackupImportBaseline(
@@ -109,6 +119,12 @@ data class BackupListenEvent(
     val listenedMs: Long,
     val durationMs: Long,
     val source: String,
+    /**
+     * Stable per-event id (contract §9.2). Optional: null for legacy events (pre-eventId rows)
+     * and for v1 backups. Preserved verbatim through export/parse — never fabricated. Not yet
+     * consumed by restore/dedup (later phase) and not yet covered by the integrity fingerprint.
+     */
+    val eventId: String? = null,
 )
 
 /**
@@ -186,6 +202,7 @@ data class BackupManifest(
 }
 
 data class WavdropBackup(
+    /** ISO-8601 string used by v1 exports. Empty string for v2 (use [exportedAtMs] instead). */
     val exportedAt: String,
     val songs: List<BackupSong>,
     val trackStats: List<BackupTrackStats>,
@@ -195,9 +212,19 @@ data class WavdropBackup(
     val playlists: List<BackupPlaylist> = emptyList(),
     val listenEvents: List<BackupListenEvent> = emptyList(),
     // ── Metadata written by newer exporters; null for legacy backups. ─────────
-    // None of these participate in the payload fingerprint.
     val appVersionCode: Int? = null,
     val appVersionName: String? = null,
     val manifest: BackupManifest? = null,
+    /** v1 integrity: optional checksum. v2 uses a separate integrity object — this is null. */
     val payloadSha256: String? = null,
+
+    // ── v2-only fields; all null when sourceVersion == V1. ───────────────────
+    /** Format version derived from the parsed backup. Drives import branching logic. */
+    val sourceVersion: BackupFormatVersion = BackupFormatVersion.V1,
+    /** v2: unique identifier for this specific backup artifact. Fresh UUID per export. */
+    val backupId: String? = null,
+    /** v2: stable per-installation UUID, persisted in DataStore across exports and upgrades. */
+    val sourceInstallationId: String? = null,
+    /** v2: [exportedAt] as epoch milliseconds (JSON integer). null in v1 backups. */
+    val exportedAtMs: Long? = null,
 )

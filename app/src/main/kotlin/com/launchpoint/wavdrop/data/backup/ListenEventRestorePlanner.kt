@@ -46,6 +46,12 @@ object ListenEventRestorePlanner {
         existingFingerprints: Set<String>,
         nowMs: Long = System.currentTimeMillis(),
         zone: ZoneId = ZoneId.systemDefault(),
+        /**
+         * Existing local non-null eventIds (P2-B1). An incoming event with a non-null eventId
+         * already in this set — or already seen earlier in this batch — is a duplicate. Null/legacy
+         * events never use this path; they fall through to the [existingFingerprints] fallback.
+         */
+        existingEventIds: Set<String> = emptySet(),
     ): Plan {
         val validEventTypes = setOf(
             TrackListenEventEntity.TYPE_PLAY,
@@ -55,6 +61,7 @@ object ListenEventRestorePlanner {
         val currentMonth = ListeningPeriodRange.month(now.year, now.monthValue, zone)
 
         val seen = existingFingerprints.toHashSet()
+        val seenEventIds = existingEventIds.toHashSet()
         val toInsert = mutableListOf<TrackListenEventEntity>()
         var skippedDuplicate = 0
         var skippedUnmatched = 0
@@ -75,12 +82,21 @@ object ListenEventRestorePlanner {
                 skippedUnmatched++
                 continue
             }
+            // eventId dedup: only when the incoming eventId is non-null. A match against an
+            // existing local non-null eventId — or one already seen earlier in this batch —
+            // is a duplicate. Null/legacy events skip this and use the fingerprint fallback.
+            val incomingEventId = event.eventId
+            if (incomingEventId != null && incomingEventId in seenEventIds) {
+                skippedDuplicate++
+                continue
+            }
             val key = fingerprint(song.id, event)
             if (key in seen) {
                 skippedDuplicate++
                 continue
             }
             seen += key
+            if (incomingEventId != null) seenEventIds += incomingEventId
             toInsert += TrackListenEventEntity(
                 songId     = song.id,
                 eventType  = event.eventType,
@@ -88,6 +104,7 @@ object ListenEventRestorePlanner {
                 listenedMs = event.listenedMs,
                 durationMs = event.durationMs,
                 source     = TrackListenEventEntity.SOURCE_MANUAL_RESTORE,
+                eventId    = incomingEventId,  // carry through when present; null stays null
             )
             if (currentMonth.contains(event.occurredAt)) currentMonthRestored++
         }

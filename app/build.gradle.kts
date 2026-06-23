@@ -15,8 +15,8 @@ android {
         applicationId = "com.launchpoint.wavdrop"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.0-beta7.9"
+        versionCode = 9
+        versionName = "0.1.0-beta9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -56,6 +56,12 @@ android {
 
     ksp {
         arg("room.schemaLocation", "$projectDir/schemas")
+    }
+
+    sourceSets {
+        // Make exported Room schema JSON files available to instrumentation tests
+        // so MigrationTestHelper can validate migrations against the known schema.
+        getByName("androidTest").assets.srcDirs("$projectDir/schemas")
     }
 
     kapt {
@@ -103,6 +109,7 @@ dependencies {
     testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.espresso)
+    androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.androidx.compose.ui.test)
     debugImplementation(libs.androidx.compose.ui.tooling)

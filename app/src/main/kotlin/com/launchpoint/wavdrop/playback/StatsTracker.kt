@@ -29,6 +29,11 @@ class StatsTracker @Inject constructor(
         const val TAG = "WavStats-ST"
 
         const val DEBUG_STATS = false
+
+        // Minimum accumulated playback time required to update lastListenedAt.
+        // Deliberately lower than the meaningful-play threshold so that rapid Next
+        // still registers in Recently Played without inflating play counts.
+        const val LISTEN_THRESHOLD_MS = 5_000L
     }
 
     // Overridable in tests (Dispatchers.Unconfined makes launch calls synchronous).
@@ -45,6 +50,11 @@ class StatsTracker @Inject constructor(
     // Guard: once we've counted a meaningful play we don't count again for the same
     // continuous play session (even if the user pauses and resumes).
     private var playCountedForCurrent: Boolean = false
+
+    // Guard: once lastListenedAt has been written for the current song we don't write it
+    // again during the same continuous song session. Resets on song change (including
+    // same-song REPEAT_ONE loop boundary) so each fresh selection can qualify again.
+    private var listenStartWrittenForCurrent: Boolean = false
 
     // Overridable in tests (internal visibility keeps it out of production call sites).
     internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
@@ -74,17 +84,20 @@ class StatsTracker @Inject constructor(
             // (no pause between loops) would silently discard each loop's listen time.
             flushSession()
             checkAndRecordPlay()
-            accumulatedMs         = 0L
-            sessionStartedAt      = -1L
-            playCountedForCurrent = false
+            checkAndRecordListenStart()
+            accumulatedMs                = 0L
+            sessionStartedAt             = -1L
+            playCountedForCurrent        = false
+            listenStartWrittenForCurrent = false
             if (DEBUG_STATS) Log.d(TAG, "[onSongSelected] same-song reset done")
             return
         }
         finalizeCurrentSong(explicitSkip = !playCountedForCurrent)
-        currentSong           = newSong
-        accumulatedMs         = 0L
-        sessionStartedAt      = -1L
-        playCountedForCurrent = false
+        currentSong                  = newSong
+        accumulatedMs                = 0L
+        sessionStartedAt             = -1L
+        playCountedForCurrent        = false
+        listenStartWrittenForCurrent = false
         if (DEBUG_STATS) Log.d(TAG, "[onSongSelected] switched to new song ${newSong.id}")
     }
 
@@ -102,6 +115,7 @@ class StatsTracker @Inject constructor(
         if (DEBUG_STATS) Log.d(TAG, "[onPlaybackPaused] songId=${currentSong?.id} sessionStartedAt=$sessionStartedAt accumulatedMs=$accumulatedMs")
         flushSession()
         checkAndRecordPlay()
+        checkAndRecordListenStart()
     }
 
     // ── Internal ─────────────────────────────────────────────────────────────
@@ -156,12 +170,33 @@ class StatsTracker @Inject constructor(
     }
 
     /**
+     * Check whether the 5-second listen threshold has been crossed and, if so,
+     * write lastListenedAt exactly once per song selection.
+     * Shares [accumulatedMs] with the meaningful-play check — no separate timer needed.
+     */
+    private fun checkAndRecordListenStart() {
+        if (listenStartWrittenForCurrent) return
+        val song = currentSong ?: return
+        if (accumulatedMs < LISTEN_THRESHOLD_MS) return
+        listenStartWrittenForCurrent = true
+        if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordListenStart] songId=${song.id} accumulatedMs=$accumulatedMs → writing lastListenedAt")
+        scope.launch {
+            runCatching {
+                playEventWriter.recordListenStart(song.id, song.uri)
+            }.onFailure { e ->
+                Log.w(TAG, "Failed to record listen start for songId=${song.id}", e)
+            }
+        }
+    }
+
+    /**
      * Flush pending time, attempt a final threshold check, then optionally
      * record a skip if the song was abandoned before the threshold.
      */
     private fun finalizeCurrentSong(explicitSkip: Boolean) {
         flushSession()
         checkAndRecordPlay()        // might push over threshold right at the end
+        checkAndRecordListenStart() // might push over 5 s threshold right at the end
 
         if (explicitSkip && !playCountedForCurrent) {
             val song = currentSong ?: return

@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportApplyResult
+import com.launchpoint.wavdrop.data.backup.CleanInstallRecoveryUiText
+import com.launchpoint.wavdrop.ui.permission.audioPermission
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,7 +65,7 @@ fun BackupImportPreviewScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    val folderPickerLauncher = rememberLauncherForActivityResult(
+    val backupFolderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
@@ -75,6 +77,24 @@ fun BackupImportPreviewScreen(
             }.isSuccess
             viewModel.saveAutoBackupFolder(uri.toString(), permissionGranted)
         }
+    }
+    val musicFolderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            val permissionGranted = runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }.isSuccess
+            viewModel.selectRecoveryMusicFolder(uri.toString(), permissionGranted)
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) viewModel.continueAfterMusicPermission()
     }
 
     LaunchedEffect(selectedUri) {
@@ -122,7 +142,31 @@ fun BackupImportPreviewScreen(
 
             BackupImportUiState.Applying ->
                 LoadingContent(
-                    message  = "Applying import…",
+                    message  = "Restoring settings…",
+                    modifier = Modifier.padding(innerPadding),
+                )
+
+            BackupImportUiState.AwaitingMusicPermission ->
+                RecoveryActionContent(
+                    title = "Music access required",
+                    message = "Allow music access so Wavdrop can scan this device before attaching history.",
+                    actionLabel = "Allow music access",
+                    onAction = { permissionLauncher.launch(audioPermission) },
+                    modifier = Modifier.padding(innerPadding),
+                )
+
+            BackupImportUiState.AwaitingFolderSelection ->
+                RecoveryActionContent(
+                    title = CleanInstallRecoveryUiText.FOLDERS_NEED_RESELECTION,
+                    message = "Old folder permissions cannot transfer after reinstall. Select a folder on this device to continue the same recovery.",
+                    actionLabel = "Select music folder",
+                    onAction = { musicFolderPickerLauncher.launch(null) },
+                    modifier = Modifier.padding(innerPadding),
+                )
+
+            BackupImportUiState.ScanningLibrary ->
+                LoadingContent(
+                    message = CleanInstallRecoveryUiText.SCAN_IN_PROGRESS,
                     modifier = Modifier.padding(innerPadding),
                 )
 
@@ -130,8 +174,14 @@ fun BackupImportPreviewScreen(
                 AppliedContent(
                     result              = state.result,
                     onNavigateBack      = onNavigateBack,
-                    onChooseFolder      = { folderPickerLauncher.launch(null) },
+                    onChooseFolder      = { backupFolderPickerLauncher.launch(null) },
                     modifier            = Modifier.padding(innerPadding),
+                )
+
+            BackupImportUiState.NoChanges ->
+                NoChangesContent(
+                    onNavigateBack = onNavigateBack,
+                    modifier       = Modifier.padding(innerPadding),
                 )
 
             is BackupImportUiState.Error ->
@@ -206,6 +256,7 @@ private fun PreviewContent(
     if (showDialog) {
         ConfirmApplyDialog(
             isDesktopBackup = state.isDesktopBackup,
+            cleanInstallRecovery = state.cleanInstallRecovery,
             onConfirm = { showDialog = false; onApplyConfirmed() },
             onDismiss = { showDialog = false },
         )
@@ -246,28 +297,85 @@ private fun PreviewContent(
         }
 
         item { Spacer(Modifier.height(16.dp)) }
+        if (state.legacyWarning != null) {
+            item {
+                LegacyBackupNotice(
+                    text     = state.legacyWarning,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+        if (state.mergeNotice != null) {
+            item {
+                MergeRestoreNotice(
+                    text     = state.mergeNotice,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+        if (state.tracksToPreserve > 0 || state.tracksAlreadyPreserved > 0) {
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { SectionLabel("Unmatched history", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+            item {
+                if (state.tracksToPreserve > 0) {
+                    StatRow("Preserved for later matching", state.tracksToPreserve.toString())
+                }
+                if (state.tracksAlreadyPreserved > 0) {
+                    StatRow("Already preserved", state.tracksAlreadyPreserved.toString())
+                }
+            }
+        }
+        if (state.capabilityWarnings.isNotEmpty()) {
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { SectionLabel("Partial restore", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+            state.capabilityWarnings.forEach { w ->
+                item {
+                    CapabilityWarningNotice(
+                        text     = w,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        }
+        if (state.noOpReason != null) {
+            item {
+                NoOpNotice(
+                    text     = state.noOpReason,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+        }
         item {
             if (state.warning != null) {
                 PreviewNotice(
                     text = state.warning,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
-            } else {
+            } else if (state.mergeNotice == null && state.noOpReason == null) {
                 PreviewNotice(modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
         item {
             Spacer(Modifier.height(16.dp))
+            val applyEnabled = if (state.isDesktopBackup) {
+                state.matchedSongs > 0 || state.statsCount > 0 || state.lyricsOverridesCount > 0
+                    || state.playlistCount > 0 || state.listenEventsCount > 0
+                    || state.baselineCount > 0
+            } else {
+                state.hasMergeableData
+            }
             Button(
-                onClick  = { showDialog = true },
-                enabled  = state.matchedSongs > 0 || state.statsCount > 0 || state.lyricsOverridesCount > 0
-                        || state.playlistCount > 0 || state.listenEventsCount > 0
-                        || state.baselineCount > 0 || state.hasPreferences,
+                onClick  = { if (applyEnabled) showDialog = true },
+                enabled  = applyEnabled,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
             ) {
-                Text("Apply Import")
+                Text(if (state.cleanInstallRecovery) "Start Recovery" else "Apply Import")
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -279,21 +387,32 @@ private fun PreviewContent(
 @Composable
 private fun ConfirmApplyDialog(
     isDesktopBackup: Boolean,
+    cleanInstallRecovery: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Restore Wavdrop backup?") },
+        title = {
+            Text(
+                when {
+                    isDesktopBackup -> "Restore desktop backup?"
+                    cleanInstallRecovery -> "Recover this clean install?"
+                    else -> "Merge backup?"
+                },
+            )
+        },
         text  = {
             Text(
                 text  = if (isDesktopBackup) {
                     "Desktop stats, favorites, playlists, and listening history will be restored by matching songs in your library. Play counts and listening time only increase, and backup import does not modify audio files."
+                } else if (cleanInstallRecovery) {
+                    "Supported settings will be restored first. Wavdrop will then request any required access, scan the library, and merge history once. Old folder permissions, Equalizer, playback mode, and queue position are not transferred."
                 } else {
-                    "Stats will be restored from this backup. Songs that match are set " +
-                        "to the exact backup values, replacing current stats. " +
-                        "Lyrics are only replaced if the backup copy is newer. " +
-                        "Backup import does not modify audio files."
+                    "Listening history and stats from this backup will be merged with your " +
+                        "current library. Play counts and listening time only increase — " +
+                        "existing local data is never replaced. Lyrics use the newer version. " +
+                        "Settings are not changed. Backup import does not modify audio files."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
@@ -353,10 +472,17 @@ private fun AppliedContent(
                 modifier           = Modifier.size(64.dp),
             )
             Spacer(Modifier.height(16.dp))
-            Text("Restore complete", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (result.cleanInstallRecovery) "Recovery complete" else "Merge complete",
+                style = MaterialTheme.typography.titleMedium,
+            )
             Spacer(Modifier.height(4.dp))
             Text(
-                text  = "Your backup has been applied to this library.",
+                text  = if (result.cleanInstallRecovery) {
+                    "The library scan finished and compatible history was merged with this device."
+                } else {
+                    "Compatible backup data has been merged into your library."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
             )
@@ -373,13 +499,23 @@ private fun AppliedContent(
                         StatRow("Needs review", result.ambiguousTracks.toString())
                     }
                     StatRow("Stats updated",     result.statsUpdated.toString())
-                    StatRow("Lyrics restored",   result.lyricsRestored.toString())
-                    StatRow("Favorites restored", result.favoritesRestored.toString())
-                    if (result.preferencesRestored) {
-                        StatRow("Preferences", "Restored")
+                    if (result.statsRetainedLocal > 0) {
+                        val n = result.statsRetainedLocal
+                        StatRow(
+                            label = "Newer local statistics retained",
+                            value = "$n ${if (n == 1) "track" else "tracks"}",
+                        )
                     }
-                    if (result.launcherIconRestored) {
-                        StatRow("Launcher icon", "Restored")
+                    StatRow("Lyrics merged",     result.lyricsRestored.toString())
+                    StatRow("Favorites merged",  result.favoritesRestored.toString())
+                    if (result.preferencesSkipped) {
+                        StatRow("Settings", "Not applied")
+                    }
+                    if (result.preferencesRestored) {
+                        StatRow(CleanInstallRecoveryUiText.SETTINGS_RESTORED, "Yes")
+                    }
+                    if (result.libraryScanCompleted) {
+                        StatRow("Library scan", "Complete")
                     }
                     if (result.playlistsRestored > 0 || result.playlistSongsRestored > 0) {
                         StatRow("Playlists created", result.playlistsRestored.toString())
@@ -404,8 +540,23 @@ private fun AppliedContent(
                             StatRow("History could not match", result.eventsSkippedUnmatched.toString())
                         }
                     }
+                    if (result.pendingTracksPreserved > 0) {
+                        StatRow(
+                            CleanInstallRecoveryUiText.HISTORY_PRESERVED,
+                            result.pendingTracksPreserved.toString(),
+                        )
+                    }
+                    if (result.pendingEventsPreserved > 0) {
+                        StatRow("History events preserved", result.pendingEventsPreserved.toString())
+                    }
+                    if (result.pendingPlaylistEntriesPreserved > 0) {
+                        StatRow("Playlist entries preserved", result.pendingPlaylistEntriesPreserved.toString())
+                    }
                     result.warnings.forEach { warning ->
                         StatRow("Note", warning)
+                    }
+                    result.notRestoredOnThisDevice.forEach { item ->
+                        StatRow(item, CleanInstallRecoveryUiText.NOT_RESTORED)
                     }
                 }
             }
@@ -416,6 +567,71 @@ private fun AppliedContent(
             ) {
                 Text("Done")
             }
+        }
+    }
+}
+
+@Composable
+private fun RecoveryActionContent(
+    title: String,
+    message: String,
+    actionLabel: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(56.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onAction) { Text(actionLabel) }
+        }
+    }
+}
+
+// ── No changes ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun NoChangesContent(
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier            = Modifier.padding(horizontal = 32.dp),
+        ) {
+            Icon(
+                imageVector        = Icons.Default.Info,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.secondary,
+                modifier           = Modifier.size(56.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            Text("Nothing new to merge", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text  = "All compatible backup data is already present or older than your current library data.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onNavigateBack) { Text("Done") }
         }
     }
 }
@@ -489,9 +705,159 @@ private fun StatRow(label: String, value: String, modifier: Modifier = Modifier)
     }
 }
 
+/**
+ * Non-blocking merge-semantics notice shown for all Wavdrop Android backup imports.
+ * Kept visually distinct from [LegacyBackupNotice] and [PreviewNotice].
+ */
+@Composable
+private fun MergeRestoreNotice(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color    = MaterialTheme.colorScheme.secondaryContainer,
+        shape    = RoundedCornerShape(12.dp),
+    ) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            Icon(
+                imageVector        = Icons.Default.Info,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier           = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    text       = "Merge restore",
+                    style      = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text  = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Calm non-blocking notice shown only for UNVERIFIED_LEGACY backups.
+ * Kept visually distinct from [PreviewNotice] so users can tell them apart.
+ */
+@Composable
+private fun LegacyBackupNotice(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color    = MaterialTheme.colorScheme.tertiaryContainer,
+        shape    = RoundedCornerShape(12.dp),
+    ) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            Icon(
+                imageVector        = Icons.Default.Info,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier           = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    text       = "Unverified backup",
+                    style      = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text  = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Shown when a Wavdrop Android backup has no mergeable data (all-no-op, preferences-only, etc.).
+ * Explains the reason so users are not confused by a disabled Apply button.
+ */
+@Composable
+private fun NoOpNotice(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color    = MaterialTheme.colorScheme.tertiaryContainer,
+        shape    = RoundedCornerShape(12.dp),
+    ) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            Icon(
+                imageVector        = Icons.Default.Info,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier           = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    text       = "Nothing to merge",
+                    style      = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text  = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Shown for each unknown optional capability declared by a v2 backup.
+ * Non-blocking — the import proceeds, but the user sees the partial-restore scope
+ * before committing to apply. Uses a neutral tertiary container rather than error
+ * styling so users understand the file is valid but some data will be skipped.
+ */
+@Composable
+private fun CapabilityWarningNotice(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color    = MaterialTheme.colorScheme.tertiaryContainer,
+        shape    = RoundedCornerShape(12.dp),
+    ) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            Icon(
+                imageVector        = Icons.Default.Info,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier           = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    text       = "Partial restore",
+                    style      = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text  = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun PreviewNotice(
-    text: String = "Stats will be restored from this backup. Songs that match take the backup values exactly. Backup import does not modify audio files.",
+    text: String = "Backup import does not modify audio files.",
     modifier: Modifier = Modifier,
 ) {
     Surface(

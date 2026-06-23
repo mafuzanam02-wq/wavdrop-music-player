@@ -2,22 +2,17 @@ package com.launchpoint.wavdrop.data.backup
 
 object WavdropBackupParser {
     const val SUPPORTED_FORMAT = "wavdrop_backup"
-    const val SUPPORTED_VERSION = 1
+    const val SUPPORTED_VERSION = 2
 
-    /**
-     * Calm user-facing message for checksum/manifest mismatches. Surfaced verbatim
-     * by restore preview and verification — keep it plain language.
-     */
     const val INTEGRITY_ERROR = "Backup integrity check failed. The file may be damaged."
 
-    private val requiredRootFields = listOf(
-        "app",
-        "format",
-        "version",
-        "songs",
-        "trackStats",
-        "importBaselines",
-    )
+    const val NEWER_VERSION_ERROR =
+        "This backup was created by a newer version of Wavdrop. Update Wavdrop and try again."
+
+    // Capabilities known to this version of the parser. Any required capability
+    // not in this set causes the import to be rejected cleanly.
+    private val KNOWN_REQUIRED_CAPABILITIES = emptySet<String>()
+    private val KNOWN_OPTIONAL_CAPABILITIES = emptySet<String>()
 
     fun parse(content: String): WavdropBackupImportResult {
         if (content.isBlank()) {
@@ -28,10 +23,8 @@ object WavdropBackupParser {
             JsonReader(content).parse() as? Map<*, *> ?: return failure("Malformed JSON")
         } catch (_: JsonParseException) {
             return failure("Malformed JSON")
-        }
-
-        requiredRootFields.firstOrNull { !root.hasField(it) }?.let { field ->
-            return failure("Missing field: $field")
+        } catch (e: BackupParseException) {
+            return failure(e.message ?: "Malformed JSON")
         }
 
         val format = root["format"] as? String
@@ -39,73 +32,80 @@ object WavdropBackupParser {
             return failure("Invalid backup format")
         }
 
+        if (!root.hasField("version")) {
+            return failure("Missing field: version")
+        }
         val version = try {
             root.requiredInt("version", "version")
         } catch (_: BackupParseException) {
-            return failure("Unsupported backup version: ${root["version"]}")
+            return failure("This file does not appear to be a valid Wavdrop backup.")
         }
-        if (version != SUPPORTED_VERSION) {
-            return failure("Unsupported backup version: $version")
+
+        return when {
+            version == 1 -> parseV1(root)
+            version == 2 -> parseV2(root)
+            version > SUPPORTED_VERSION -> failure(NEWER_VERSION_ERROR)
+            else -> failure("Unsupported backup version: $version")
+        }
+    }
+
+    // ── v1 ────────────────────────────────────────────────────────────────────
+
+    private val requiredV1RootFields = listOf(
+        "app",
+        "format",
+        "version",
+        "songs",
+        "trackStats",
+        "importBaselines",
+    )
+
+    private fun parseV1(root: Map<*, *>): WavdropBackupImportResult {
+        requiredV1RootFields.firstOrNull { !root.hasField(it) }?.let { field ->
+            return failure("Missing field: $field")
         }
 
         return try {
             val songs = root.requiredArray("songs").mapObjects("songs") { index, item ->
                 BackupSong(
-                    id = item.requiredLong("songs[$index].id", "id"),
-                    uri = item.requiredString("songs[$index].uri", "uri"),
-                    title = item.requiredString("songs[$index].title", "title"),
-                    artist = item.requiredString("songs[$index].artist", "artist"),
-                    album = item.requiredString("songs[$index].album", "album"),
-                    albumId = item.requiredLong("songs[$index].albumId", "albumId"),
-                    duration = item.requiredLong("songs[$index].duration", "duration"),
-                    dateAdded = item.requiredLong("songs[$index].dateAdded", "dateAdded"),
+                    id          = item.requiredLong("songs[$index].id", "id"),
+                    uri         = item.requiredString("songs[$index].uri", "uri"),
+                    title       = item.requiredString("songs[$index].title", "title"),
+                    artist      = item.requiredString("songs[$index].artist", "artist"),
+                    album       = item.requiredString("songs[$index].album", "album"),
+                    albumId     = item.requiredLong("songs[$index].albumId", "albumId"),
+                    duration    = item.requiredLong("songs[$index].duration", "duration"),
+                    dateAdded   = item.requiredLong("songs[$index].dateAdded", "dateAdded"),
                     trackNumber = item.requiredInt("songs[$index].trackNumber", "trackNumber"),
-                    year = item.requiredInt("songs[$index].year", "year"),
-                    // Optional identity fields added after v1 launch; absent in older backups.
-                    folderPath = item["folderPath"] as? String,
-                    folderName = item["folderName"] as? String,
+                    year        = item.requiredInt("songs[$index].year", "year"),
+                    folderPath  = item["folderPath"] as? String,
+                    folderName  = item["folderName"] as? String,
                 )
             }
 
             val trackStats = root.requiredArray("trackStats").mapObjects("trackStats") { index, item ->
                 BackupTrackStats(
-                    songId = item.requiredLong("trackStats[$index].songId", "songId"),
-                    contentUri = item.requiredString("trackStats[$index].contentUri", "contentUri"),
-                    playCount = item.requiredInt("trackStats[$index].playCount", "playCount"),
-                    skipCount = item.requiredInt("trackStats[$index].skipCount", "skipCount"),
-                    lastPlayedAt = item.requiredLong("trackStats[$index].lastPlayedAt", "lastPlayedAt"),
-                    totalListeningTimeMs = item.requiredLong(
-                        "trackStats[$index].totalListeningTimeMs",
-                        "totalListeningTimeMs",
-                    ),
-                    isFavorite = item.requiredBoolean("trackStats[$index].isFavorite", "isFavorite"),
+                    songId               = item.requiredLong("trackStats[$index].songId", "songId"),
+                    contentUri           = item.requiredString("trackStats[$index].contentUri", "contentUri"),
+                    playCount            = item.requiredInt("trackStats[$index].playCount", "playCount"),
+                    skipCount            = item.requiredInt("trackStats[$index].skipCount", "skipCount"),
+                    lastPlayedAt         = item.requiredLong("trackStats[$index].lastPlayedAt", "lastPlayedAt"),
+                    totalListeningTimeMs = item.requiredLong("trackStats[$index].totalListeningTimeMs", "totalListeningTimeMs"),
+                    isFavorite           = item.requiredBoolean("trackStats[$index].isFavorite", "isFavorite"),
+                    // v1 does not carry lastListenedAt — null is the typed absence marker.
+                    lastListenedAt       = null,
                 )
             }
 
             val importBaselines = root.requiredArray("importBaselines")
                 .mapObjects("importBaselines") { index, item ->
                     BackupImportBaseline(
-                        songId = item.requiredLong("importBaselines[$index].songId", "songId"),
-                        sourceType = item.requiredString(
-                            "importBaselines[$index].sourceType",
-                            "sourceType",
-                        ),
-                        sourceKey = item.requiredString(
-                            "importBaselines[$index].sourceKey",
-                            "sourceKey",
-                        ),
-                        lastImportedPlayCount = item.requiredInt(
-                            "importBaselines[$index].lastImportedPlayCount",
-                            "lastImportedPlayCount",
-                        ),
-                        lastImportedSkipCount = item.requiredInt(
-                            "importBaselines[$index].lastImportedSkipCount",
-                            "lastImportedSkipCount",
-                        ),
-                        lastImportedAt = item.requiredLong(
-                            "importBaselines[$index].lastImportedAt",
-                            "lastImportedAt",
-                        ),
+                        songId                = item.requiredLong("importBaselines[$index].songId", "songId"),
+                        sourceType            = item.requiredString("importBaselines[$index].sourceType", "sourceType"),
+                        sourceKey             = item.requiredString("importBaselines[$index].sourceKey", "sourceKey"),
+                        lastImportedPlayCount = item.requiredInt("importBaselines[$index].lastImportedPlayCount", "lastImportedPlayCount"),
+                        lastImportedSkipCount = item.requiredInt("importBaselines[$index].lastImportedSkipCount", "lastImportedSkipCount"),
+                        lastImportedAt        = item.requiredLong("importBaselines[$index].lastImportedAt", "lastImportedAt"),
                     )
                 }
 
@@ -158,7 +158,6 @@ object WavdropBackupParser {
                     )
                 } ?: emptyList()
 
-            // Optional metadata written by newer exporters; all absent in legacy backups.
             val manifest = (root["manifest"] as? Map<*, *>)?.let { m ->
                 BackupManifest(
                     songCount           = m.optCount("songCount"),
@@ -185,42 +184,267 @@ object WavdropBackupParser {
                 appVersionName  = root["appVersionName"] as? String,
                 manifest        = manifest,
                 payloadSha256   = payloadSha256,
+                sourceVersion   = BackupFormatVersion.V1,
             )
 
-            // Integrity validation — only for backups that carry the metadata.
-            // Legacy backups (no checksum/manifest) stay fully valid.
-            if (payloadSha256 != null &&
-                payloadSha256 != WavdropBackupIntegrity.payloadFingerprint(backup)
-            ) {
-                return failure(INTEGRITY_ERROR)
+            var integrityStatus = BackupIntegrityStatus.UNVERIFIED_LEGACY
+            if (payloadSha256 != null) {
+                if (payloadSha256 != WavdropBackupIntegrity.payloadFingerprint(backup)) {
+                    return failure(INTEGRITY_ERROR)
+                }
+                integrityStatus = BackupIntegrityStatus.VERIFIED
             }
             if (manifest != null && !manifest.matchesContentOf(backup)) {
                 return failure(INTEGRITY_ERROR)
             }
 
-            success(backup)
+            success(backup, integrityStatus)
         } catch (e: BackupParseException) {
             failure(e.message ?: "Invalid backup file")
         }
     }
 
-    private fun success(backup: WavdropBackup) = WavdropBackupImportResult(
-        backup = backup,
-        error = null,
+    // ── v2 ────────────────────────────────────────────────────────────────────
+
+    private fun parseV2(root: Map<*, *>): WavdropBackupImportResult {
+        return try {
+            // ── 1. Root version consistency ───────────────────────────────────
+            val formatMajor = try {
+                root.requiredInt("formatMajor", "formatMajor")
+            } catch (_: BackupParseException) {
+                return failure("Missing field: formatMajor")
+            }
+            if (formatMajor != 2) {
+                return failure("Inconsistent backup format: version=2 but formatMajor=$formatMajor")
+            }
+            val formatMinor = try {
+                root.requiredInt("formatMinor", "formatMinor")
+            } catch (_: BackupParseException) {
+                return failure("Missing field: formatMinor")
+            }
+            if (formatMinor < 0) {
+                return failure("Invalid formatMinor: $formatMinor")
+            }
+
+            // ── 2. Capabilities ───────────────────────────────────────────────
+            val reqCaps = (root["requiredCapabilities"] as? List<*>)
+                ?: return failure("Missing field: requiredCapabilities")
+            for (cap in reqCaps) {
+                val capStr = cap as? String
+                    ?: return failure("requiredCapabilities must contain strings")
+                if (capStr !in KNOWN_REQUIRED_CAPABILITIES) {
+                    return failure(
+                        "This backup requires a feature this version of Wavdrop does not " +
+                            "support: $capStr. Update Wavdrop and try again."
+                    )
+                }
+            }
+            val optCaps = (root["optionalCapabilities"] as? List<*>)
+                ?: return failure("Missing field: optionalCapabilities")
+            val unknownOptional = optCaps
+                .filterIsInstance<String>()
+                .filter { it !in KNOWN_OPTIONAL_CAPABILITIES }
+
+            // ── 3. v2-only root fields ────────────────────────────────────────
+            val backupId = root.requiredString("backupId", "backupId")
+            val sourceInstallationId = root.requiredString("sourceInstallationId", "sourceInstallationId")
+            val exportedAtMs = root.requiredLongStrict("exportedAt", "exportedAt")
+
+            // ── 4. Integrity object (required for v2) ─────────────────────────
+            val integrityObj = root["integrity"] as? Map<*, *>
+                ?: return failure("Missing required integrity data")
+            val integrityV = (integrityObj["v"] as? Long)?.toInt()
+            if (integrityV != 2) {
+                return failure("Integrity data is invalid or not recognised")
+            }
+            val integrityFingerprint = integrityObj["fingerprint"] as? String
+                ?: return failure("Missing integrity fingerprint")
+
+            // ── 5. Payload sections ───────────────────────────────────────────
+            val songs = root.requiredArray("songs").mapObjects("songs") { index, item ->
+                BackupSong(
+                    id          = item.requiredStringOpaqueId("songs[$index].id", "id"),
+                    uri         = item.requiredString("songs[$index].uri", "uri"),
+                    title       = item.requiredString("songs[$index].title", "title"),
+                    artist      = item.requiredString("songs[$index].artist", "artist"),
+                    album       = item.requiredString("songs[$index].album", "album"),
+                    albumId     = item.requiredStringOpaqueId("songs[$index].albumId", "albumId"),
+                    duration    = item.requiredLongStrict("songs[$index].duration", "duration"),
+                    dateAdded   = item.requiredLongStrict("songs[$index].dateAdded", "dateAdded"),
+                    trackNumber = item.requiredIntStrict("songs[$index].trackNumber", "trackNumber"),
+                    year        = item.requiredIntStrict("songs[$index].year", "year"),
+                    folderPath  = item["folderPath"] as? String,
+                    folderName  = item["folderName"] as? String,
+                )
+            }
+
+            val trackStats = root.requiredArray("trackStats").mapObjects("trackStats") { index, item ->
+                val lastListenedAt = item.requiredLongStrict("trackStats[$index].lastListenedAt", "lastListenedAt")
+                if (lastListenedAt < 0) {
+                    throw BackupParseException("Field trackStats[$index].lastListenedAt must be non-negative")
+                }
+                BackupTrackStats(
+                    songId               = item.requiredStringOpaqueId("trackStats[$index].songId", "songId"),
+                    contentUri           = item.requiredString("trackStats[$index].contentUri", "contentUri"),
+                    playCount            = item.requiredIntStrict("trackStats[$index].playCount", "playCount"),
+                    skipCount            = item.requiredIntStrict("trackStats[$index].skipCount", "skipCount"),
+                    lastPlayedAt         = item.requiredLongStrict("trackStats[$index].lastPlayedAt", "lastPlayedAt"),
+                    totalListeningTimeMs = item.requiredLongStrict("trackStats[$index].totalListeningTimeMs", "totalListeningTimeMs"),
+                    isFavorite           = item.requiredBoolean("trackStats[$index].isFavorite", "isFavorite"),
+                    lastListenedAt       = lastListenedAt,
+                )
+            }
+
+            val importBaselines = root.requiredArray("importBaselines")
+                .mapObjects("importBaselines") { index, item ->
+                    BackupImportBaseline(
+                        songId                = item.requiredStringOpaqueId("importBaselines[$index].songId", "songId"),
+                        sourceType            = item.requiredString("importBaselines[$index].sourceType", "sourceType"),
+                        sourceKey             = item.requiredString("importBaselines[$index].sourceKey", "sourceKey"),
+                        lastImportedPlayCount = item.requiredIntStrict("importBaselines[$index].lastImportedPlayCount", "lastImportedPlayCount"),
+                        lastImportedSkipCount = item.requiredIntStrict("importBaselines[$index].lastImportedSkipCount", "lastImportedSkipCount"),
+                        lastImportedAt        = item.requiredLongStrict("importBaselines[$index].lastImportedAt", "lastImportedAt"),
+                    )
+                }
+
+            val lyricsOverrides = (root["lyricsOverrides"] as? List<*>)
+                ?.mapObjects("lyricsOverrides") { index, item ->
+                    BackupLyricsOverride(
+                        songId     = item.requiredStringOpaqueId("lyricsOverrides[$index].songId", "songId"),
+                        contentUri = item.requiredString("lyricsOverrides[$index].contentUri", "contentUri"),
+                        lyrics     = item.requiredString("lyricsOverrides[$index].lyrics", "lyrics"),
+                        updatedAt  = item.requiredLongStrict("lyricsOverrides[$index].updatedAt", "updatedAt"),
+                    )
+                } ?: emptyList()
+
+            val preferences = root.parseAndroidPreferences()
+
+            val playlists = (root["playlists"] as? List<*>)
+                ?.mapObjects("playlists") { pi, playlist ->
+                    BackupPlaylist(
+                        id        = playlist.requiredStringOpaqueId("playlists[$pi].id", "id"),
+                        name      = playlist.requiredString("playlists[$pi].name", "name"),
+                        createdAt = playlist.requiredLongStrict("playlists[$pi].createdAt", "createdAt"),
+                        updatedAt = playlist.requiredLongStrict("playlists[$pi].updatedAt", "updatedAt"),
+                        songs     = (playlist["songs"] as? List<*>)
+                            ?.mapObjects("playlists[$pi].songs") { si, song ->
+                                BackupPlaylistSong(
+                                    songId     = song.requiredStringOpaqueId("playlists[$pi].songs[$si].songId", "songId"),
+                                    contentUri = song.requiredString("playlists[$pi].songs[$si].contentUri", "contentUri"),
+                                    position   = song.requiredIntStrict("playlists[$pi].songs[$si].position", "position"),
+                                    title      = song.requiredString("playlists[$pi].songs[$si].title", "title"),
+                                    artist     = song.requiredString("playlists[$pi].songs[$si].artist", "artist"),
+                                    album      = song.requiredString("playlists[$pi].songs[$si].album", "album"),
+                                )
+                            } ?: emptyList(),
+                    )
+                } ?: emptyList()
+
+            val listenEvents = (root["listenEvents"] as? List<*>)
+                ?.mapObjects("listenEvents") { index, item ->
+                    BackupListenEvent(
+                        songId     = item.requiredStringOpaqueId("listenEvents[$index].songId", "songId"),
+                        contentUri = item.requiredString("listenEvents[$index].contentUri", "contentUri"),
+                        title      = item.requiredString("listenEvents[$index].title", "title"),
+                        artist     = item.requiredString("listenEvents[$index].artist", "artist"),
+                        album      = item.requiredString("listenEvents[$index].album", "album"),
+                        eventType  = item.requiredString("listenEvents[$index].eventType", "eventType"),
+                        occurredAt = item.requiredLongStrict("listenEvents[$index].occurredAt", "occurredAt"),
+                        listenedMs = item.requiredLongStrict("listenEvents[$index].listenedMs", "listenedMs"),
+                        durationMs = item.requiredLongStrict("listenEvents[$index].durationMs", "durationMs"),
+                        source     = item.requiredString("listenEvents[$index].source", "source"),
+                        // Optional in v2 — null when absent (legacy events). Never fabricated.
+                        eventId    = item["eventId"] as? String,
+                    )
+                } ?: emptyList()
+
+            val manifest = (root["manifest"] as? Map<*, *>)?.let { m ->
+                BackupManifest(
+                    songCount           = m.optCount("songCount"),
+                    trackStatsCount     = m.optCount("trackStatsCount"),
+                    listenEventCount    = m.optCount("listenEventCount"),
+                    importBaselineCount = m.optCount("importBaselineCount"),
+                    lyricsOverrideCount = m.optCount("lyricsOverrideCount"),
+                    playlistCount       = m.optCount("playlistCount"),
+                    preferenceCount     = m.optCount("preferenceCount"),
+                )
+            }
+
+            val backup = WavdropBackup(
+                exportedAt            = "",
+                exportedAtMs          = exportedAtMs,
+                backupId              = backupId,
+                sourceInstallationId  = sourceInstallationId,
+                sourceVersion         = BackupFormatVersion.V2,
+                songs                 = songs,
+                trackStats            = trackStats,
+                importBaselines       = importBaselines,
+                lyricsOverrides       = lyricsOverrides,
+                preferences           = preferences,
+                playlists             = playlists,
+                listenEvents          = listenEvents,
+                manifest              = manifest,
+                appVersionCode        = (root["producer"] as? Map<*, *>)
+                    ?.let { (it["appVersionCode"] as? Long)?.toInt() },
+                appVersionName        = (root["producer"] as? Map<*, *>)
+                    ?.let { it["appVersionName"] as? String },
+            )
+
+            // ── 6. Integrity verification (required for v2) ───────────────────
+            val computedFingerprint = WavdropBackupIntegrityV2.fingerprint(backup)
+            if (integrityFingerprint != computedFingerprint) {
+                return failure(INTEGRITY_ERROR)
+            }
+
+            // ── 7. Manifest validation (if present) ───────────────────────────
+            if (manifest != null && !manifest.matchesContentOf(backup)) {
+                return failure(INTEGRITY_ERROR)
+            }
+
+            val warnings = if (unknownOptional.isNotEmpty()) {
+                listOf(
+                    "This backup includes optional features not supported by this version of " +
+                        "Wavdrop. Some data may not be fully restored: ${unknownOptional.joinToString()}."
+                )
+            } else {
+                emptyList()
+            }
+
+            success(backup, BackupIntegrityStatus.VERIFIED, warnings)
+        } catch (e: BackupParseException) {
+            failure(e.message ?: "Invalid backup file")
+        }
+    }
+
+    // ── Result helpers ────────────────────────────────────────────────────────
+
+    private fun success(
+        backup: WavdropBackup,
+        integrityStatus: BackupIntegrityStatus,
+        warnings: List<String> = emptyList(),
+    ) = WavdropBackupImportResult(
+        backup          = backup,
+        error           = null,
+        integrityStatus = integrityStatus,
+        warnings        = warnings,
     )
 
     private fun failure(message: String) = WavdropBackupImportResult(
-        backup = null,
-        error = message,
+        backup          = null,
+        error           = message,
+        integrityStatus = BackupIntegrityStatus.INVALID,
     )
 }
+
+// ── Parse exceptions ──────────────────────────────────────────────────────────
 
 private class BackupParseException(message: String) : IllegalArgumentException(message)
 private class JsonParseException(message: String) : IllegalArgumentException(message)
 
+// ── Map helpers — shared by v1 and v2 ────────────────────────────────────────
+
 private fun Map<*, *>.hasField(name: String): Boolean = containsKey(name) && this[name] != null
 
-/** Lenient manifest count: missing or non-numeric values read as 0. */
 private fun Map<*, *>.optCount(name: String): Int = (this[name] as? Long)?.toInt() ?: 0
 
 private fun Map<*, *>.parseAndroidPreferences(): BackupPreferences? {
@@ -231,7 +455,6 @@ private fun Map<*, *>.parseAndroidPreferences(): BackupPreferences? {
     val isPlatformScoped = preferences.containsKey("android") || preferences.containsKey("desktop")
     if (isPlatformScoped) return null
 
-    // Legacy Android backups wrote Android-only settings directly under "preferences".
     return preferences.toBackupPreferences()
 }
 
@@ -241,14 +464,11 @@ private fun Map<*, *>.toBackupPreferences(): BackupPreferences = BackupPreferenc
     mostPlayedLimit             = this["mostPlayedLimit"] as? String,
     songSortMode                = this["songSortMode"] as? String,
     searchTapBehavior           = this["searchTapBehavior"] as? String,
-    homeVisibleSections         = (this["homeVisibleSections"] as? List<*>)
-        ?.filterIsInstance<String>(),
+    homeVisibleSections         = (this["homeVisibleSections"] as? List<*>)?.filterIsInstance<String>(),
     scanMode                    = this["scanMode"] as? String,
-    selectedFolderUris          = (this["selectedFolderUris"] as? List<*>)
-        ?.filterIsInstance<String>(),
+    selectedFolderUris          = (this["selectedFolderUris"] as? List<*>)?.filterIsInstance<String>(),
     minimumTrackDurationSeconds = (this["minimumTrackDurationSeconds"] as? Long)
-        ?.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }
-        ?.toInt(),
+        ?.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt(),
     themeMode                   = this["themeMode"] as? String,
     accentColor                 = this["accentColor"] as? String,
     launcherIcon                = this["launcherIcon"] as? String,
@@ -296,12 +516,14 @@ private fun Map<*, *>.requiredString(path: String, name: String): String {
         ?: throw BackupParseException("Field $path must be a string")
 }
 
+// ── v1 lenient number helpers (allow whole-Double coercion) ──────────────────
+
 private fun Map<*, *>.requiredLong(path: String, name: String): Long {
     if (!hasField(name)) throw BackupParseException("Missing field: $path")
     return when (val value = this[name]) {
-        is Long -> value
+        is Long   -> value
         is Double -> value.toWholeLongOrNull()
-        else -> null
+        else      -> null
     } ?: throw BackupParseException("Field $path must be a number")
 }
 
@@ -311,6 +533,48 @@ private fun Map<*, *>.requiredInt(path: String, name: String): Int {
         throw BackupParseException("Field $path must be a number")
     }
     return longValue.toInt()
+}
+
+// ── v2 strict number helpers (reject Double — no decimal or exponent notation) ─
+
+/** v2: rejects decimals and exponent notation (JSON number returned as Double). */
+private fun Map<*, *>.requiredLongStrict(path: String, name: String): Long {
+    if (!hasField(name)) throw BackupParseException("Missing field: $path")
+    return when (val value = this[name]) {
+        is Long   -> value
+        is Double -> throw BackupParseException(
+            "Field $path must be an integer (decimal or exponent notation is not allowed)"
+        )
+        else      -> null
+    } ?: throw BackupParseException("Field $path must be an integer")
+}
+
+private fun Map<*, *>.requiredIntStrict(path: String, name: String): Int {
+    val longValue = requiredLongStrict(path, name)
+    if (longValue < Int.MIN_VALUE || longValue > Int.MAX_VALUE) {
+        throw BackupParseException("Field $path is out of the supported range")
+    }
+    return longValue.toInt()
+}
+
+/**
+ * v2: reads a string-typed opaque identifier and converts it to Long.
+ *
+ * Valid: digits only, no sign, no decimal, no exponent, no leading zero except "0",
+ * value must fit in [Long.MIN_VALUE]..[Long.MAX_VALUE].
+ */
+private fun Map<*, *>.requiredStringOpaqueId(path: String, name: String): Long {
+    if (!hasField(name)) throw BackupParseException("Missing field: $path")
+    val str = this[name] as? String
+        ?: throw BackupParseException("Field $path must be a string identifier")
+    if (str.isEmpty() || !str.all { it.isDigit() }) {
+        throw BackupParseException("Field $path is not a valid identifier (digits only, no sign)")
+    }
+    if (str.length > 1 && str[0] == '0') {
+        throw BackupParseException("Field $path is not a valid identifier (no leading zeros)")
+    }
+    return str.toLongOrNull()
+        ?: throw BackupParseException("Field $path is out of the supported range")
 }
 
 private fun Map<*, *>.requiredBoolean(path: String, name: String): Boolean {
@@ -323,6 +587,8 @@ private fun Double.toWholeLongOrNull(): Long? {
     val asLong = toLong()
     return if (isFinite() && this == asLong.toDouble()) asLong else null
 }
+
+// ── Custom JSON reader ────────────────────────────────────────────────────────
 
 private class JsonReader(private val input: String) {
     private var index = 0
@@ -361,6 +627,9 @@ private class JsonReader(private val input: String) {
             skipWhitespace()
             if (peek() != '"') fail("Expected object key")
             val key = parseString()
+            if (output.containsKey(key)) {
+                throw BackupParseException("Backup file is invalid: duplicate field '$key'.")
+            }
             skipWhitespace()
             consume(':')
             output[key] = parseValue()
@@ -395,7 +664,7 @@ private class JsonReader(private val input: String) {
         val output = StringBuilder()
         while (index < input.length) {
             when (val char = input[index++]) {
-                '"' -> return output.toString()
+                '"'  -> return output.toString()
                 '\\' -> output.append(parseEscape())
                 else -> output.append(char)
             }
@@ -406,15 +675,15 @@ private class JsonReader(private val input: String) {
     private fun parseEscape(): Char {
         if (index >= input.length) fail("Unterminated escape")
         return when (val escaped = input[index++]) {
-            '"' -> '"'
+            '"'  -> '"'
             '\\' -> '\\'
-            '/' -> '/'
-            'b' -> '\b'
-            'f' -> '\u000C'
-            'n' -> '\n'
-            'r' -> '\r'
-            't' -> '\t'
-            'u' -> parseUnicodeEscape()
+            '/'  -> '/'
+            'b'  -> '\b'
+            'f'  -> ''
+            'n'  -> '\n'
+            'r'  -> '\r'
+            't'  -> '\t'
+            'u'  -> parseUnicodeEscape()
             else -> fail("Invalid escape: $escaped")
         }
     }
@@ -432,20 +701,14 @@ private class JsonReader(private val input: String) {
         if (peek() == '-') index++
         consumeDigits()
         val hasFraction = if (peek() == '.') {
-            index++
-            consumeDigits()
-            true
-        } else {
-            false
-        }
+            index++; consumeDigits(); true
+        } else false
         val hasExponent = if (peek() == 'e' || peek() == 'E') {
             index++
             if (peek() == '+' || peek() == '-') index++
             consumeDigits()
             true
-        } else {
-            false
-        }
+        } else false
 
         val raw = input.substring(start, index)
         return if (hasFraction || hasExponent) {
@@ -467,13 +730,9 @@ private class JsonReader(private val input: String) {
         return value
     }
 
-    private fun skipWhitespace() {
-        while (peek().isWhitespace()) index++
-    }
+    private fun skipWhitespace() { while (peek().isWhitespace()) index++ }
 
-    private fun consume(expected: Char) {
-        if (!tryConsume(expected)) fail("Expected '$expected'")
-    }
+    private fun consume(expected: Char) { if (!tryConsume(expected)) fail("Expected '$expected'") }
 
     private fun tryConsume(expected: Char): Boolean {
         if (peek() != expected) return false
@@ -481,9 +740,7 @@ private class JsonReader(private val input: String) {
         return true
     }
 
-    private fun peek(): Char = input.getOrNull(index) ?: '\u0000'
+    private fun peek(): Char = input.getOrNull(index) ?: ' '
 
-    private fun fail(message: String): Nothing {
-        throw JsonParseException(message)
-    }
+    private fun fail(message: String): Nothing { throw JsonParseException(message) }
 }

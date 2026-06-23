@@ -59,6 +59,9 @@ class DesktopWavdropBackupImportRepository @Inject constructor(
                     importedSkipCount = row.mergedStats.skipCount,
                     importedListeningTimeMs = row.desktopSong.totalListeningTimeMs,
                     importedLastPlayedAt = row.desktopSong.lastPlayedAt,
+                    // Desktop backup format has no separate lastListenedAt;
+                    // use lastPlayedAt as conservative fallback.
+                    importedLastListenedAt = row.desktopSong.lastPlayedAt,
                 )
                 if (row.desktopSong.favorite) {
                     trackStatsDao.setFavorite(row.song.id, true)

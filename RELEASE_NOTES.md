@@ -4,6 +4,62 @@ Historical record of completed and shipped work. Newest changes first.
 
 ---
 
+## 0.1.0-beta9
+
+### Better Listening History Protection
+
+- Your listening history is now more resilient during backup and restore. Wavdrop does a better job preserving your music activity, listening statistics, playlists, and personal library information when moving between installs or recovering from a device reset.
+
+### Improved Backup Reliability
+
+- Backup and restore has been strengthened to reduce the risk of duplicate listening history and improve long-term data consistency. Your library information is now validated more carefully during import and recovery.
+
+### Stronger Recovery Support
+
+- Recovery from backups has been improved to better protect years of listening activity and personal library data.
+
+### Equalizer
+
+Fine-tune your sound with the new Equalizer.
+
+- Device-supported frequency controls
+- System equalizer integration
+- Built-in sound presets
+- Persistent settings
+- Dynamic capability detection
+
+Equalizer availability depends on your device.
+
+### Listening Settings
+
+- A dedicated Listening section has been added to Settings, making audio controls easier to discover and manage.
+
+### Smart Collection Improvements
+
+- Smart Collections now prioritize the most relevant tracks more consistently and provide better visibility into how many songs qualify for each collection.
+
+### Wrapped Improvements
+
+- Returning from artist, album, or track details now preserves your position instead of restarting your Wrapped journey.
+
+### Stability Improvements
+
+- Numerous reliability improvements across playback, statistics, backups, imports, recovery, and library scanning.
+
+### Internal Notes (P2-B1 Identity Foundation Complete)
+
+- Added device-local TrackIdentity foundation.
+- Added Room v12 migration.
+- Added scan-owned identity lifecycle.
+- Added stable event identity generation for new playback events.
+- Added eventId backup serialization.
+- Added eventId integrity protection.
+- Added eventId-aware import dedup.
+- Preserved legacy event behavior and Backup v2 compatibility rules.
+- Validation: unit + instrumentation tests passed on Samsung S21; assembleDebug, upgrade install, fresh install, rescan, song removal, song re-add, playback event, backup export, backup import, duplicate import, and tamper detection all passed.
+
+---
+
 ## 0.1.0-beta7.9
 
 Beta 7.9 is the major public-facing upgrade from Beta 4. Betas 5, 6, 7, and 7.5 were internal builds.

@@ -353,6 +353,7 @@ class StatsTrackerTest {
                 recorded += songId
             }
             override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {}
+            override suspend fun recordListenStart(songId: Long, contentUri: String) {}
         }
         val resilientTracker = StatsTracker(throwOnFirstWriter).also {
             it.scope = CoroutineScope(Dispatchers.Unconfined)
@@ -386,14 +387,126 @@ class StatsTrackerTest {
         assertEquals(1L, fakeWriter.skips[0].songId)
     }
 
+    // ── lastListenedAt / 5-second listen threshold ────────────────────────────
+
+    @Test
+    fun `1 second play does not write listen start and does not record play`() {
+        tracker.onSongSelected(song(1))
+        playFor(1_000L)
+
+        assertTrue(fakeWriter.listenStarts.isEmpty())
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
+    @Test
+    fun `3 seconds play does not write listen start and does not record play`() {
+        tracker.onSongSelected(song(1))
+        playFor(3_000L)
+
+        assertTrue(fakeWriter.listenStarts.isEmpty())
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
+    @Test
+    fun `exactly 5 seconds play writes listen start but does not record play`() {
+        tracker.onSongSelected(song(1))
+        playFor(5_000L)
+
+        assertEquals(1, fakeWriter.listenStarts.size)
+        assertEquals(1L, fakeWriter.listenStarts[0].songId)
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
+    @Test
+    fun `10 seconds play then next writes listen start but does not record play`() {
+        tracker.onSongSelected(song(1))
+        playFor(10_000L)
+        tracker.onSongSelected(song(2))  // finalises song 1
+
+        assertEquals(1, fakeWriter.listenStarts.size)
+        assertEquals(1L, fakeWriter.listenStarts[0].songId)
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
+    @Test
+    fun `accumulated listen across pause and resume crosses 5s threshold`() {
+        tracker.onSongSelected(song(1))
+        playFor(2_000L)   // 2 s — below 5 s
+        assertTrue(fakeWriter.listenStarts.isEmpty())
+
+        playFor(2_000L)   // 4 s — still below
+        assertTrue(fakeWriter.listenStarts.isEmpty())
+
+        playFor(2_000L)   // 6 s total — threshold crossed
+        assertEquals(1, fakeWriter.listenStarts.size)
+        assertEquals(1L, fakeWriter.listenStarts[0].songId)
+    }
+
+    @Test
+    fun `listen start written at most once per song selection even when threshold crossed multiple times`() {
+        tracker.onSongSelected(song(1))
+        playFor(5_000L)   // threshold crossed on first pause
+        playFor(5_000L)   // second pause — guard must suppress repeated write
+
+        assertEquals(1, fakeWriter.listenStarts.size)
+    }
+
+    @Test
+    fun `song that crosses meaningful-play threshold also writes listen start`() {
+        tracker.onSongSelected(song(1))
+        playFor(30_000L)
+
+        assertEquals(1, fakeWriter.plays.size)
+        assertEquals(1, fakeWriter.listenStarts.size)
+        assertEquals(1L, fakeWriter.listenStarts[0].songId)
+    }
+
+    @Test
+    fun `listen start guard resets on same-song loop so second loop can qualify`() {
+        tracker.onSongSelected(song(1))
+        playFor(5_000L)   // first loop: listen start written
+        assertEquals(1, fakeWriter.listenStarts.size)
+
+        tracker.onSongSelected(song(1))  // loop boundary reset
+        playFor(5_000L)   // second loop: should write again
+        assertEquals(2, fakeWriter.listenStarts.size)
+    }
+
+    @Test
+    fun `rapid next through three songs each played 5s writes three listen starts no plays`() {
+        for (id in 1L..3L) {
+            tracker.onSongSelected(song(id))
+            playFor(5_000L)
+        }
+        tracker.onSongSelected(song(4))  // finalises song 3
+
+        assertEquals(3, fakeWriter.listenStarts.size)
+        assertEquals(listOf(1L, 2L, 3L), fakeWriter.listenStarts.map { it.songId })
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
+    @Test
+    fun `rapid next through three songs each played 2s writes no listen starts no plays`() {
+        for (id in 1L..3L) {
+            tracker.onSongSelected(song(id))
+            playFor(2_000L)
+        }
+        tracker.onSongSelected(song(4))  // finalises song 3
+
+        assertTrue(fakeWriter.listenStarts.isEmpty())
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
     // ── fake helpers ──────────────────────────────────────────────────────────
 
     private data class PlayCall(val songId: Long, val listenedMs: Long)
     private data class SkipCall(val songId: Long)
+    private data class ListenStartCall(val songId: Long)
 
     private class FakePlayEventWriter : PlayEventWriter {
         val plays = mutableListOf<PlayCall>()
         val skips = mutableListOf<SkipCall>()
+        val listenStarts = mutableListOf<ListenStartCall>()
 
         override suspend fun recordPlay(
             songId: Long,
@@ -406,6 +519,10 @@ class StatsTrackerTest {
 
         override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
             skips += SkipCall(songId)
+        }
+
+        override suspend fun recordListenStart(songId: Long, contentUri: String) {
+            listenStarts += ListenStartCall(songId)
         }
     }
 
@@ -426,5 +543,7 @@ class StatsTrackerTest {
             skipAttempts++
             if (throwOnSkip) throw RuntimeException("simulated skip write failure")
         }
+
+        override suspend fun recordListenStart(songId: Long, contentUri: String) {}
     }
 }

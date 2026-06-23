@@ -32,17 +32,19 @@ class SmartCollectionBuilderTest {
 
     private fun stats(
         songId: Long,
-        playCount: Int    = 0,
-        skipCount: Int    = 0,
-        lastPlayedAt: Long = 0L,
+        playCount: Int      = 0,
+        skipCount: Int      = 0,
+        lastPlayedAt: Long  = 0L,
+        lastListenedAt: Long = 0L,
         isFavorite: Boolean = false,
     ) = TrackStatsEntity(
-        songId       = songId,
-        contentUri   = "content://media/external/audio/media/$songId",
-        playCount    = playCount,
-        skipCount    = skipCount,
-        lastPlayedAt = lastPlayedAt,
-        isFavorite   = isFavorite,
+        songId         = songId,
+        contentUri     = "content://media/external/audio/media/$songId",
+        playCount      = playCount,
+        skipCount      = skipCount,
+        lastPlayedAt   = lastPlayedAt,
+        lastListenedAt = lastListenedAt,
+        isFavorite     = isFavorite,
     )
 
     // ── Empty input ───────────────────────────────────────────────────────────
@@ -121,23 +123,37 @@ class SmartCollectionBuilderTest {
 
     // ── Recently Played ───────────────────────────────────────────────────────
 
-    @Test fun `recently played excludes songs with lastPlayedAt zero`() {
+    @Test fun `recently played excludes songs with lastListenedAt zero`() {
         val songs = listOf(song(1), song(2))
-        val stats  = listOf(stats(1, lastPlayedAt = 1_000L), stats(2, lastPlayedAt = 0L))
+        val stats  = listOf(stats(1, lastListenedAt = 1_000L), stats(2, lastListenedAt = 0L))
         val result = SmartCollectionBuilder.songsFor(SmartCollectionType.RECENTLY_PLAYED, songs, stats)
         assertEquals(listOf(1L), result.map { it.id })
     }
 
-    @Test fun `recently played sorted by lastPlayedAt descending`() {
+    @Test fun `recently played sorted by lastListenedAt descending`() {
         val songs = listOf(song(1), song(2), song(3))
         val stats  = listOf(
-            stats(1, lastPlayedAt = 100L),
-            stats(2, lastPlayedAt = 300L),
-            stats(3, lastPlayedAt = 200L),
+            stats(1, lastListenedAt = 100L),
+            stats(2, lastListenedAt = 300L),
+            stats(3, lastListenedAt = 200L),
         )
         val ids = SmartCollectionBuilder.songsFor(SmartCollectionType.RECENTLY_PLAYED, songs, stats)
             .map { it.id }
         assertEquals(listOf(2L, 3L, 1L), ids)
+    }
+
+    @Test fun `recently played uses lastListenedAt not lastPlayedAt — semantic separation`() {
+        // A song with a meaningful play (lastPlayedAt set) but no listen-start yet
+        // should NOT appear in Recently Played. The migration backfills this in the real DB,
+        // but the builder itself must only look at lastListenedAt.
+        val songs = listOf(song(1), song(2))
+        val stats = listOf(
+            stats(1, lastPlayedAt = 5_000L, lastListenedAt = 0L),  // meaningful play, no listen-start
+            stats(2, lastPlayedAt = 0L,     lastListenedAt = 1_000L), // listen-start only
+        )
+        val ids = SmartCollectionBuilder.songsFor(SmartCollectionType.RECENTLY_PLAYED, songs, stats)
+            .map { it.id }
+        assertEquals(listOf(2L), ids)
     }
 
     // ── Never Played ──────────────────────────────────────────────────────────

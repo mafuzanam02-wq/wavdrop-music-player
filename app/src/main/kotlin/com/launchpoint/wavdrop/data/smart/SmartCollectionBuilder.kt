@@ -116,9 +116,9 @@ object SmartCollectionBuilder {
 
         SmartCollectionType.RECENTLY_PLAYED ->
             songs
-                .filter { (statsById[it.id]?.lastPlayedAt ?: 0L) > 0L }
+                .filter { (statsById[it.id]?.lastListenedAt ?: 0L) > 0L }
                 .sortedWith(
-                    compareByDescending<Song> { statsById[it.id]?.lastPlayedAt ?: 0L }
+                    compareByDescending<Song> { statsById[it.id]?.lastListenedAt ?: 0L }
                         .thenBy { it.id },
                 )
 

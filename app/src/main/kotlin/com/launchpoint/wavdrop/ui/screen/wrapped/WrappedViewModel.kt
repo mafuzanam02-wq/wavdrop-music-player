@@ -90,7 +90,7 @@ class WrappedViewModel @Inject constructor(
 
     private val zone = ZoneId.systemDefault()
     private val storySnapshotStore = WrappedStorySnapshotStore()
-    private val selectedScope = MutableStateFlow(WrappedScope.YEARLY)
+    private val selectedScope = MutableStateFlow(WrappedScope.MONTHLY)
     private val selectedYear = MutableStateFlow<Int?>(null)
     private val selectedMonth = MutableStateFlow<MonthYear?>(null)
     private val selection = combine(

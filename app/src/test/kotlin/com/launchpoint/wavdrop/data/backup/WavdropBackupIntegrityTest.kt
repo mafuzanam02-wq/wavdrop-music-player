@@ -116,14 +116,96 @@ class WavdropBackupIntegrityTest {
         assertEquals(1, parsed.songs.size)
     }
 
+    // ── v2 integrity tests (P1-D1) ────────────────────────────────────────────
+
     @Test
-    fun `unsupported future version is rejected with a calm message`() {
+    fun `v2 fingerprint is deterministic for the same backup`() {
+        val v2 = WavdropBackup(
+            exportedAt = "", exportedAtMs = 1_782_230_400_000L,
+            backupId = "bkp-001", sourceInstallationId = "inst-001",
+            sourceVersion = BackupFormatVersion.V2,
+            songs = listOf(
+                BackupSong(3316L, "content://media/3316", "Ghost Song", "Doors",
+                    "Other Voices", 42L, 180_000L, 1_000_000L, 1, 1971),
+            ),
+            trackStats = listOf(
+                BackupTrackStats(3316L, "content://media/3316", 10, 1,
+                    lastPlayedAt = 1_782_230_000_000L,
+                    totalListeningTimeMs = 180_000L,
+                    isFavorite = false,
+                    lastListenedAt = 1_782_230_100_000L),
+            ),
+            importBaselines = emptyList(),
+        )
+        assertEquals(
+            WavdropBackupIntegrityV2.fingerprint(v2),
+            WavdropBackupIntegrityV2.fingerprint(v2),
+        )
+    }
+
+    @Test
+    fun `v2 fingerprint differs from v1 fingerprint for equivalent payload`() {
+        val v1 = backup()
+        val v2 = WavdropBackup(
+            exportedAt = "", exportedAtMs = 1_782_230_400_000L,
+            backupId = "bkp-001", sourceInstallationId = "inst-001",
+            sourceVersion = BackupFormatVersion.V2,
+            songs = v1.songs,
+            trackStats = listOf(
+                BackupTrackStats(1L, "content://media/1", 10, 1,
+                    lastPlayedAt = 100L, totalListeningTimeMs = 1_000L,
+                    isFavorite = false, lastListenedAt = 100L),
+            ),
+            importBaselines = emptyList(),
+        )
+        val v1Fp = WavdropBackupIntegrity.payloadFingerprint(v1)
+        val v2Fp = WavdropBackupIntegrityV2.fingerprint(v2)
+        assertTrue("v1 and v2 fingerprints must differ", v1Fp != v2Fp)
+    }
+
+    @Test
+    fun `v2 fingerprint covers exportedAtMs (changes when exportedAtMs changes)`() {
+        val base = WavdropBackup(
+            exportedAt = "", exportedAtMs = 1_000L,
+            backupId = "bkp-001", sourceInstallationId = "inst-001",
+            sourceVersion = BackupFormatVersion.V2,
+            songs = emptyList(), trackStats = emptyList(), importBaselines = emptyList(),
+        )
+        val changed = base.copy(exportedAtMs = 2_000L)
+        assertTrue(WavdropBackupIntegrityV2.fingerprint(base) != WavdropBackupIntegrityV2.fingerprint(changed))
+    }
+
+    @Test
+    fun `QuarantinePlanner backupFingerprint returns v2 fingerprint for v2 backups`() {
+        val v2 = WavdropBackup(
+            exportedAt = "", exportedAtMs = 1_000L,
+            backupId = "bkp-001", sourceInstallationId = "inst-001",
+            sourceVersion = BackupFormatVersion.V2,
+            songs = emptyList(), trackStats = emptyList(), importBaselines = emptyList(),
+        )
+        assertEquals(
+            WavdropBackupIntegrityV2.fingerprint(v2),
+            QuarantinePlanner.backupFingerprint(v2),
+        )
+    }
+
+    @Test
+    fun `QuarantinePlanner backupFingerprint returns v1 fingerprint for v1 backups`() {
+        val v1 = backup()
+        assertEquals(
+            WavdropBackupIntegrity.payloadFingerprint(v1),
+            QuarantinePlanner.backupFingerprint(v1),
+        )
+    }
+
+    @Test
+    fun `unsupported future version is rejected with the newer-version message`() {
         val futureJson = JSONObject(WavdropBackupExporter.toJson(backup()))
             .put("version", 99)
             .toString(2)
 
         val result = WavdropBackupParser.parse(futureJson)
         assertNull(result.backup)
-        assertEquals("Unsupported backup version: 99", result.error)
+        assertEquals(WavdropBackupParser.NEWER_VERSION_ERROR, result.error)
     }
 }

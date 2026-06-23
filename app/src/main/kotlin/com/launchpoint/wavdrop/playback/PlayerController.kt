@@ -133,6 +133,13 @@ internal fun planPlayAllNext(
 }
 
 /**
+ * Returns the first playback-queue index of [songId], or -1 if not present.
+ * Extracted as a pure function so it can be tested without a MediaController.
+ */
+internal fun recentlyPlayedQueueIndex(queue: List<Song>, songId: Long): Int =
+    queue.indexOfFirst { it.id == songId }
+
+/**
  * Singleton bridge between the UI layer and PlaybackService.
  *
  * Connects to PlaybackService via MediaController asynchronously on first
@@ -668,6 +675,21 @@ class PlayerController @Inject constructor(
         if (playbackIndex !in playbackQueue.indices) return
         // playbackIndex is directly the ExoPlayer media item index since ExoPlayer holds playbackQueue.
         seekToPlaybackIndex(controller, playbackIndex)
+    }
+
+    /**
+     * Jumps to the first occurrence of [songId] in the current playback queue without
+     * rebuilding the queue, session, shuffle order, or repeat mode.
+     *
+     * Returns true if the song was found and playback jumped to it.
+     * Returns false if the song is not in the current queue; the caller should fall back
+     * to its normal playback path.
+     */
+    fun jumpToSongById(songId: Long): Boolean {
+        val playbackIndex = recentlyPlayedQueueIndex(playbackQueue, songId)
+        if (playbackIndex < 0) return false
+        jumpToQueueItem(playbackIndex)
+        return true
     }
 
     fun removeFromQueue(playbackIndex: Int) {

@@ -33,6 +33,11 @@ data class TrackListenEventEntity(
     val listenedMs: Long = 0L,  // accumulated continuous listening time (0 for SKIP events)
     val durationMs: Long = 0L,  // track duration at event time (0 if unknown)
     val source: String,         // playback/restored source identifier
+    // Stable per-event identifier (contract §9.2). Generated at event creation — NOT here in
+    // P2-B1 Phase 1, which only adds the column. null = legacy event (pre-eventId or never
+    // assigned); legacy rows are never backfilled. Dedup may key on this only when both sides
+    // are non-null; otherwise the (songId, occurredAt, eventType, listenedMs) fingerprint applies.
+    val eventId: String? = null,
 ) {
     companion object {
         const val TYPE_PLAY = "PLAY"

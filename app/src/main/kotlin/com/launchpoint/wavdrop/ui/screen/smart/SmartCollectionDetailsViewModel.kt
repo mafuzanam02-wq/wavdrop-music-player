@@ -178,6 +178,7 @@ class SmartCollectionDetailsViewModel @Inject constructor(
     fun playSong(song: Song) {
         val queue = uiState.value.songs
         if (queue.isEmpty()) return
+        if (type == SmartCollectionType.RECENTLY_PLAYED && playerController.jumpToSongById(song.id)) return
         playerController.playFromQueue(queue = queue, startSong = song)
     }
 

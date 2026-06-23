@@ -237,6 +237,7 @@ fun HomeScreen(
                     onArtistClick            = onArtistClick,
                     onReportsAndInsightsClick = onReportsAndInsightsClick,
                     onSongClick              = viewModel::playSong,
+                    onRecentlyPlayedSongClick = viewModel::playRecentlyPlayedSong,
                     onToggleFavorite         = { song, wasFavorite ->
                         viewModel.toggleFavorite(song.id)
                         coroutineScope.launch {
@@ -488,6 +489,7 @@ private fun HomeDashboardContent(
     onArtistClick: (String) -> Unit,
     onReportsAndInsightsClick: () -> Unit,
     onSongClick: (Song) -> Unit,
+    onRecentlyPlayedSongClick: (Song) -> Unit,
     onToggleFavorite: (Song, Boolean) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onPlayNext: (Song) -> Unit,
@@ -555,7 +557,7 @@ private fun HomeDashboardContent(
                         emptyText = "",
                         currentSongId = currentSongId,
                         favoriteSongIds = favoriteSongIds,
-                        onSongClick = onSongClick,
+                        onSongClick = onRecentlyPlayedSongClick,
                         onToggleFavorite = onToggleFavorite,
                         onTrackDetailsClick = onTrackDetailsClick,
                         onPlayNext = onPlayNext,

@@ -504,7 +504,7 @@ private fun BackupStatusCard(
             )
             Spacer(Modifier.height(6.dp))
             BackupStatusLine(
-                label = "Last successful backup",
+                label = "Last verified backup",
                 value = if (hasBackup) formatBackupTime(lastBackupAtMillis) else "Never",
             )
             BackupStatusLine(
@@ -524,12 +524,7 @@ private fun BackupStatusCard(
             )
             BackupStatusLine(
                 label = "Automatic backup",
-                value = when (interval) {
-                    AutoBackupInterval.OFF     -> "Off"
-                    AutoBackupInterval.DAILY   -> "Daily"
-                    AutoBackupInterval.WEEKLY  -> "Weekly"
-                    AutoBackupInterval.MONTHLY -> "Monthly"
-                },
+                value = interval.toStatusLabel(),
             )
             if (!healthy) {
                 Spacer(Modifier.height(8.dp))
@@ -593,11 +588,18 @@ private fun formatAutoBackupCheckStatus(
     return "$dateLabel, $timeLabel — ${result.toAutoBackupStatusText()}"
 }
 
-private fun AutoBackupCheckResult.toAutoBackupStatusText(): String = when (this) {
+internal fun AutoBackupCheckResult.toAutoBackupStatusText(): String = when (this) {
     AutoBackupCheckResult.OFF                -> "Off"
     AutoBackupCheckResult.NO_FOLDER_SELECTED -> "Choose backup folder"
     AutoBackupCheckResult.NOT_DUE            -> "Not due yet"
     AutoBackupCheckResult.SUCCESS            -> "Backup saved"
     AutoBackupCheckResult.FOLDER_UNAVAILABLE -> "Folder unavailable"
     AutoBackupCheckResult.FAILURE            -> "Failed"
+}
+
+internal fun AutoBackupInterval.toStatusLabel(): String = when (this) {
+    AutoBackupInterval.OFF     -> "Off"
+    AutoBackupInterval.DAILY   -> "Daily, on open"
+    AutoBackupInterval.WEEKLY  -> "Weekly, on open"
+    AutoBackupInterval.MONTHLY -> "Monthly, on open"
 }

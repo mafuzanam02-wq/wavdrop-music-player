@@ -1,19 +1,27 @@
-# What's New — Wavdrop Beta 7.9
+# What's New — Wavdrop Version 9
 
-Your music story, smarter library, and a smoother experience — the major upgrade from Beta 4.
+A new Equalizer, stronger backups, and better protection for your listening history.
 
-## Your music story
+## New Equalizer
 
-Wrapped now plays through your slides automatically. Tap to pause, swipe to navigate, and resume right where you left off. Monthly, Yearly, and All-Time Wrapped give you a recap for every period — with Top 3 rankings, Skip Habits slides, artwork-backed backgrounds, and animated counters.
+Fine-tune your sound with the new Equalizer — device-supported frequency controls, system equalizer integration, and built-in sound presets that stay put between sessions. Availability depends on your device.
 
-## Smarter library
+## Listening settings
 
-Two new Smart Collections: **Always Finish** surfaces songs you almost always listen through. **Usually Abandon** surfaces the ones you rarely finish. Both are powered by your actual native playback behaviour, not imported counts.
+A dedicated **Listening** section in Settings makes audio controls easier to discover and manage.
 
-## Safer backups
+## Better protection for your history
 
-Backup and restore is more resilient across reinstalls, device switches, and version upgrades. Your listening history, Wrapped stats, playlists, and preferences survive restore more reliably.
+Your listening history, statistics, playlists, and library information are now more resilient during backup and restore — with stronger recovery support after reinstalling the app.
 
-## Faster, smoother experience
+## More reliable backups
 
-Insights is now a main tab. Settings moved to the Home gear. Albums, Artists, and Playlists have sorting. Global Search finds Smart Collections and playlists. Analytics runs off the main thread.
+Backup and restore has been strengthened to reduce duplicate listening history and improve long-term data consistency, with more careful validation during import and recovery.
+
+## Smart Collections & Wrapped
+
+Smart Collections rank the most relevant tracks more consistently and show how many songs qualify for each collection. Returning from artist, album, or track details in Wrapped now keeps your place instead of restarting.
+
+## Stability
+
+General reliability improvements across playback, statistics, backups, imports, recovery, and library scanning.

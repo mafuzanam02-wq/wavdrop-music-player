@@ -2,6 +2,10 @@ package com.launchpoint.wavdrop.data.backup
 
 import android.content.Context
 import android.net.Uri
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
@@ -40,7 +44,7 @@ import com.launchpoint.wavdrop.data.settings.ThemeMode
 import kotlinx.coroutines.flow.first
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
-import java.time.Instant
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +53,7 @@ import kotlinx.coroutines.withContext
 @Singleton
 class WavdropBackupRepository @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val dataStore: DataStore<Preferences>,
     private val songDao: SongDao,
     private val trackStatsDao: TrackStatsDao,
     private val importBaselineDao: ImportBaselineDao,
@@ -60,6 +65,19 @@ class WavdropBackupRepository @Inject constructor(
     private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
     private val resumeBehaviorSettingsRepository: ResumeBehaviorSettingsRepository,
 ) {
+    private val installationIdKey = stringPreferencesKey("source_installation_id")
+
+    /**
+     * Returns the stable per-installation UUID, creating and persisting it on first call.
+     * Never overwritten from an imported backup.
+     */
+    private suspend fun getOrCreateInstallationId(): String {
+        val existing = dataStore.data.first()[installationIdKey]
+        if (existing != null) return existing
+        val newId = UUID.randomUUID().toString()
+        dataStore.edit { prefs -> prefs[installationIdKey] = newId }
+        return newId
+    }
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
         val json = buildBackupJson()
         // "wt" truncates before writing. The default "w" mode does not truncate on all
@@ -112,6 +130,7 @@ class WavdropBackupRepository @Inject constructor(
                     listenedMs = event.listenedMs,
                     durationMs = event.durationMs,
                     source     = event.source,
+                    eventId    = event.eventId,  // preserve if present; null for legacy rows
                 )
             }
         val playlists = playlistDao.getAllPlaylistsSnapshot().map { playlist ->
@@ -208,20 +227,25 @@ class WavdropBackupRepository @Inject constructor(
                 .takeIf { it != WrappedFallbackTheme.AUTO }?.name,
         )
 
+        val exportedAtMs = System.currentTimeMillis()
         val backup = WavdropBackup(
-            exportedAt      = Instant.now().toString(),
-            appVersionCode  = BuildConfig.VERSION_CODE,
-            appVersionName  = BuildConfig.VERSION_NAME,
-            songs           = songs.map(SongEntity::toBackup),
-            trackStats      = stats.map(TrackStatsEntity::toBackup),
-            importBaselines = baselines.map(ImportBaselineEntity::toBackup),
-            lyricsOverrides = lyrics.map(LyricsOverrideEntity::toBackup),
-            preferences     = preferences,
-            playlists       = playlists,
-            listenEvents    = listenEvents,
+            exportedAt           = "",
+            exportedAtMs         = exportedAtMs,
+            backupId             = UUID.randomUUID().toString(),
+            sourceInstallationId = getOrCreateInstallationId(),
+            sourceVersion        = BackupFormatVersion.V2,
+            appVersionCode       = BuildConfig.VERSION_CODE,
+            appVersionName       = BuildConfig.VERSION_NAME,
+            songs                = songs.map(SongEntity::toBackup),
+            trackStats           = stats.map(TrackStatsEntity::toBackupV2),
+            importBaselines      = baselines.map(ImportBaselineEntity::toBackup),
+            lyricsOverrides      = lyrics.map(LyricsOverrideEntity::toBackup),
+            preferences          = preferences,
+            playlists            = playlists,
+            listenEvents         = listenEvents,
         )
 
-        WavdropBackupExporter.toJson(backup)
+        WavdropBackupExporterV2.toJson(backup)
     }
 }
 
@@ -242,12 +266,13 @@ private fun SongEntity.toBackup() = BackupSong(
     folderName  = folderName,
 )
 
-private fun TrackStatsEntity.toBackup() = BackupTrackStats(
+private fun TrackStatsEntity.toBackupV2() = BackupTrackStats(
     songId               = songId,
     contentUri           = contentUri,
     playCount            = playCount,
     skipCount            = skipCount,
     lastPlayedAt         = lastPlayedAt,
+    lastListenedAt       = lastListenedAt,  // non-null from entity (v2 required field)
     totalListeningTimeMs = totalListeningTimeMs,
     isFavorite           = isFavorite,
 )

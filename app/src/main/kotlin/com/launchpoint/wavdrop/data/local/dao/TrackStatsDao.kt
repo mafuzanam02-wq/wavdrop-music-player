@@ -45,6 +45,9 @@ interface TrackStatsDao {
     """)
     suspend fun incrementPlayCount(songId: Long, nowMs: Long, listenedMs: Long)
 
+    @Query("UPDATE track_stats SET lastListenedAt = :nowMs WHERE songId = :songId")
+    suspend fun updateLastListenedAt(songId: Long, nowMs: Long)
+
     @Query("UPDATE track_stats SET skipCount = skipCount + 1 WHERE songId = :songId")
     suspend fun incrementSkipCount(songId: Long)
 
@@ -103,12 +106,17 @@ interface TrackStatsDao {
     )
 
     /**
-     * Idempotent MAX-reconciliation merge used by BlackPlayer import (merge mode).
+     * Idempotent MAX-reconciliation merge used by Wavdrop backup restore.
      * Each counter is set to MAX(current, imported), so:
      * - Local stats are never reduced.
      * - If the import has higher totals, the local value is brought up.
      * - Importing the same values again is a no-op.
-     * - lastPlayedAt is set to MAX(current, imported) (keeps newer timestamp).
+     * - lastPlayedAt and lastListenedAt are each set to MAX(current, imported).
+     *
+     * [importedLastListenedAt] must be pre-computed by the caller:
+     *   v1 backup → pass [importedLastPlayedAt] (conservative fallback).
+     *   v2 backup → pass the exact [BackupTrackStats.lastListenedAt] value.
+     *
      * Row must already exist (call [insertIfAbsent] first).
      */
     @Query("""
@@ -116,7 +124,8 @@ interface TrackStatsDao {
         SET playCount            = MAX(playCount,            :importedPlayCount),
             skipCount            = MAX(skipCount,            :importedSkipCount),
             totalListeningTimeMs = MAX(totalListeningTimeMs, :importedListeningTimeMs),
-            lastPlayedAt         = MAX(lastPlayedAt,         :importedLastPlayedAt)
+            lastPlayedAt         = MAX(lastPlayedAt,         :importedLastPlayedAt),
+            lastListenedAt       = MAX(lastListenedAt,       :importedLastListenedAt)
         WHERE songId = :songId
     """)
     suspend fun mergeMaxStats(
@@ -125,6 +134,7 @@ interface TrackStatsDao {
         importedSkipCount: Int,
         importedListeningTimeMs: Long,
         importedLastPlayedAt: Long,
+        importedLastListenedAt: Long,
     )
 
     @Query("SELECT * FROM track_stats WHERE songId = :songId")

@@ -11,12 +11,19 @@ import com.launchpoint.wavdrop.data.local.MIGRATION_3_4
 import com.launchpoint.wavdrop.data.local.MIGRATION_4_5
 import com.launchpoint.wavdrop.data.local.MIGRATION_5_6
 import com.launchpoint.wavdrop.data.local.MIGRATION_6_7
+import com.launchpoint.wavdrop.data.local.MIGRATION_7_8
+import com.launchpoint.wavdrop.data.local.MIGRATION_8_9
+import com.launchpoint.wavdrop.data.local.MIGRATION_9_10
+import com.launchpoint.wavdrop.data.local.MIGRATION_10_11
+import com.launchpoint.wavdrop.data.local.MIGRATION_11_12
 import com.launchpoint.wavdrop.data.local.WAVDROP_DATABASE_NAME
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.dao.PendingTrackDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
+import com.launchpoint.wavdrop.data.local.dao.TrackIdentityDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import dagger.Module
@@ -45,6 +52,11 @@ object AppModule {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -71,4 +83,10 @@ object AppModule {
 
     @Provides
     fun provideLyricsOverrideDao(db: WavdropDatabase): LyricsOverrideDao = db.lyricsOverrideDao()
+
+    @Provides
+    fun providePendingTrackDao(db: WavdropDatabase): PendingTrackDao = db.pendingTrackDao()
+
+    @Provides
+    fun provideTrackIdentityDao(db: WavdropDatabase): TrackIdentityDao = db.trackIdentityDao()
 }

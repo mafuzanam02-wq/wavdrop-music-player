@@ -5,6 +5,7 @@ import com.launchpoint.wavdrop.data.model.ListeningPeriodRange
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.stats.ListeningAnalyticsBuilder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.LocalDate
 import java.time.ZoneId
@@ -210,6 +211,86 @@ class ListenEventRestorePlannerTest {
         )
         assertEquals(1, plan.restored)
         assertEquals(42L, plan.toInsert.single().songId)
+    }
+
+    // ── P2-B1 Phase 7: eventId dedup (only when non-null) ─────────────────────
+
+    private fun eventWithId(songId: Long, occurredAt: Long, eventId: String?) =
+        event(songId = songId, occurredAt = occurredAt).copy(eventId = eventId)
+
+    @Test
+    fun `phase7 - incoming non-null eventId already existing locally is skipped`() {
+        val plan = ListenEventRestorePlanner.plan(
+            events = listOf(eventWithId(1L, epochMs(2026, 6, 5), eventId = "evt-1")),
+            resolveSong = { song(7L) },
+            existingFingerprints = emptySet(),
+            nowMs = nowMs,
+            zone = utc,
+            existingEventIds = setOf("evt-1"),
+        )
+        assertEquals(0, plan.restored)
+        assertEquals(1, plan.skippedDuplicate)
+    }
+
+    @Test
+    fun `phase7 - duplicate non-null eventId within same batch skips the second`() {
+        val plan = ListenEventRestorePlanner.plan(
+            // Different occurredAt → distinct fingerprints; only eventId collides.
+            events = listOf(
+                eventWithId(1L, epochMs(2026, 6, 5), eventId = "evt-1"),
+                eventWithId(1L, epochMs(2026, 6, 6), eventId = "evt-1"),
+            ),
+            resolveSong = { song(7L) },
+            existingFingerprints = emptySet(),
+            nowMs = nowMs,
+            zone = utc,
+        )
+        assertEquals(1, plan.restored)
+        assertEquals(1, plan.skippedDuplicate)
+    }
+
+    @Test
+    fun `phase7 - null eventId still uses fingerprint fallback`() {
+        val nullEvent = eventWithId(1L, epochMs(2026, 6, 5), eventId = null)
+        val fingerprint = "7|${nullEvent.occurredAt}|${nullEvent.eventType}|${nullEvent.listenedMs}"
+        val plan = ListenEventRestorePlanner.plan(
+            events = listOf(nullEvent),
+            resolveSong = { song(7L) },
+            existingFingerprints = setOf(fingerprint),
+            nowMs = nowMs,
+            zone = utc,
+            // A populated eventId set must not affect a null-eventId event.
+            existingEventIds = setOf("evt-1"),
+        )
+        assertEquals(0, plan.restored)
+        assertEquals(1, plan.skippedDuplicate)
+    }
+
+    @Test
+    fun `phase7 - new non-null eventId with no duplicate restores and preserves eventId`() {
+        val plan = ListenEventRestorePlanner.plan(
+            events = listOf(eventWithId(1L, epochMs(2026, 6, 5), eventId = "evt-new")),
+            resolveSong = { song(7L) },
+            existingFingerprints = emptySet(),
+            nowMs = nowMs,
+            zone = utc,
+            existingEventIds = setOf("evt-other"),
+        )
+        assertEquals(1, plan.restored)
+        assertEquals("evt-new", plan.toInsert.single().eventId)
+    }
+
+    @Test
+    fun `phase7 - restored legacy null-eventId event stays null`() {
+        val plan = ListenEventRestorePlanner.plan(
+            events = listOf(eventWithId(1L, epochMs(2026, 6, 5), eventId = null)),
+            resolveSong = { song(7L) },
+            existingFingerprints = emptySet(),
+            nowMs = nowMs,
+            zone = utc,
+        )
+        assertEquals(1, plan.restored)
+        assertNull(plan.toInsert.single().eventId)
     }
 
     private fun planInvalidEvent(event: BackupListenEvent): ListenEventRestorePlanner.Plan =

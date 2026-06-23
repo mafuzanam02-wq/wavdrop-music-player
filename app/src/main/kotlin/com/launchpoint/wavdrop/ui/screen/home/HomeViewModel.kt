@@ -206,8 +206,8 @@ class HomeViewModel @Inject constructor(
         HomeDashboardUiState(
             totalSongs = loadedSongs.size,
             recentlyPlayed = stats
-                .filter { it.lastPlayedAt > 0 }
-                .sortedByDescending { it.lastPlayedAt }
+                .filter { it.lastListenedAt > 0 }
+                .sortedByDescending { it.lastListenedAt }
                 .mapNotNull { songsById[it.songId] }
                 .take(DASHBOARD_SONG_PREVIEW_LIMIT),
             mostPlayed = stats
@@ -297,6 +297,12 @@ class HomeViewModel @Inject constructor(
     }
 
     fun playSong(song: Song) {
+        val queue = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
+        playerController.playFromQueue(queue = queue, startSong = song)
+    }
+
+    fun playRecentlyPlayedSong(song: Song) {
+        if (playerController.jumpToSongById(song.id)) return
         val queue = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
         playerController.playFromQueue(queue = queue, startSong = song)
     }

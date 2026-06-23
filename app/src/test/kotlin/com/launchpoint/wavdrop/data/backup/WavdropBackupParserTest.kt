@@ -101,10 +101,21 @@ class WavdropBackupParserTest {
     }
 
     @Test
-    fun `version 2 fails`() {
+    fun `higher version returns newer-version message`() {
+        // v2 is now supported; use v3 to trigger the newer-version message.
         assertError(
-            validBackupJson().replace("\"version\": 1", "\"version\": 2"),
-            "Unsupported backup version: 2",
+            validBackupJson().replace("\"version\": 1", "\"version\": 3"),
+            WavdropBackupParser.NEWER_VERSION_ERROR,
+        )
+    }
+
+    @Test
+    fun `missing version returns missing-field message`() {
+        // "version" is in requiredRootFields so its absence is caught before
+        // the version-parse block; the error is the clear field-missing message.
+        assertError(
+            minimalJsonWithout("version"),
+            "Missing field: version",
         )
     }
 
