@@ -104,6 +104,14 @@ class StatsRepository @Inject constructor(
     /** All listen events (PLAY + SKIP), most recent first. Used by Monthly Reports / analytics. */
     fun allListenEvents(): Flow<List<TrackListenEventEntity>> = listenEventDao.observeAll()
 
+    /**
+     * Listen events within an inclusive [fromMs]..[toMs] window. Lets callers that only need a
+     * bounded slice (e.g. current-month Most Played sorting) avoid observing the full event table
+     * and re-emitting on every out-of-range insert (WC-02).
+     */
+    fun listenEventsInRange(fromMs: Long, toMs: Long): Flow<List<TrackListenEventEntity>> =
+        listenEventDao.observeInRange(fromMs, toMs)
+
     /** Per-song completion summaries from native Wavdrop playback. Used by Smart Collections. */
     fun observeCompletionSummaries(): Flow<List<SongCompletionSummary>> =
         listenEventDao.observeCompletionSummaries()

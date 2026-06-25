@@ -6,12 +6,14 @@ import android.util.Log
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
+import com.launchpoint.wavdrop.data.repository.localDayRefreshFlow
 import com.launchpoint.wavdrop.data.search.LibrarySearch
 import com.launchpoint.wavdrop.data.search.SongSort
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
@@ -33,22 +35,35 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.launchpoint.wavdrop.ui.components.GroupedSearchResults
 import com.launchpoint.wavdrop.ui.components.buildGroupedSearchResults
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.ZoneId
 import javax.inject.Inject
 
 private const val DASHBOARD_SONG_PREVIEW_LIMIT = 4
 private const val DASHBOARD_COLLECTION_PREVIEW_LIMIT = 3
+
+// Matches the debounce already used by songSearchResults so both Home search pipelines
+// coalesce keystrokes consistently (WC-01).
+private const val SEARCH_DEBOUNCE_MS = 200L
 
 sealed interface HomeUiState {
     data object Loading : HomeUiState
@@ -102,17 +117,27 @@ class HomeViewModel @Inject constructor(
             initialValue = emptyList(),
         )
 
-    val uiState: StateFlow<HomeUiState> = combine(allSongs, _searchQuery) { songs, query ->
+    // WC-01: filtering runs off the Main thread with a short debounce, mirroring the
+    // songSearchResults pipeline below. Debouncing only the query (not allSongs) keeps
+    // Loading/Empty and library-change updates reactive — a new allSongs emission still
+    // recombines immediately — while keystrokes coalesce and cancel obsolete filter work.
+    // Search semantics (LibrarySearch.filterSongs, ordering, empty-state) are unchanged.
+    val uiState: StateFlow<HomeUiState> = combine(
+        allSongs,
+        _searchQuery.debounce(SEARCH_DEBOUNCE_MS),
+    ) { songs, query ->
         when {
             songs == null -> HomeUiState.Loading
             songs.isEmpty() -> HomeUiState.Empty
             else            -> HomeUiState.Songs(LibrarySearch.filterSongs(songs, query))
         }
-    }.stateIn(
-        scope        = viewModelScope,
-        started      = SharingStarted.WhileSubscribed(5_000),
-        initialValue = HomeUiState.Loading,
-    )
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = HomeUiState.Loading,
+        )
 
     val songSortMode: StateFlow<SongSortMode> = appSettingsRepository.songSortMode.stateIn(
         scope        = viewModelScope,
@@ -126,6 +151,43 @@ class HomeViewModel @Inject constructor(
         initialValue = SearchTapBehavior.DEFAULT,
     )
 
+    // Month key (year*12 + month) that advances at each local month boundary. Driven by the
+    // existing day-boundary ticker (localDayRefreshFlow) — a month rollover is always a day
+    // rollover — and distinctUntilChanged so it only changes monthly, not daily (WC-02 follow-up).
+    private val currentMonthKey: Flow<Int> = localDayRefreshFlow()
+        .map { nowMs ->
+            val ym = YearMonth.from(Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault()))
+            ym.year * 12 + ym.monthValue
+        }
+        .distinctUntilChanged()
+
+    // WC-02: only MOST_PLAYED_THIS_MONTH needs raw listen events, and only those in the current
+    // month. For every other sort mode this emits an empty list once and never re-subscribes, so
+    // appending a PLAY/SKIP event no longer recomputes the Songs list. When the THIS_MONTH sort is
+    // active we observe just the current-month window (observeInRange) instead of the whole table,
+    // so only in-range inserts trigger a re-sort. Sort semantics are unchanged — MostPlayedBuilder
+    // still derives the exact counts from these events.
+    //
+    // The (mode, monthKey) pair is distinctUntilChanged so the month window is recomputed — and the
+    // DB query re-subscribed — when the month rolls over while the app stays open, without
+    // re-subscribing on every day tick. Non-month modes still resolve to a single empty emission.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val songsSortEvents: Flow<List<TrackListenEventEntity>> =
+        combine(songSortMode, currentMonthKey) { mode, monthKey -> mode to monthKey }
+            .distinctUntilChanged()
+            .flatMapLatest { (mode, _) ->
+                if (mode == SongSortMode.MOST_PLAYED_THIS_MONTH) {
+                    val zone  = ZoneId.systemDefault()
+                    val today = LocalDate.now(zone)
+                    val start = today.withDayOfMonth(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                    val end   = today.withDayOfMonth(1).plusMonths(1)
+                        .atStartOfDay(zone).toInstant().toEpochMilli() - 1
+                    statsRepository.listenEventsInRange(start, end)
+                } else {
+                    flowOf(emptyList())
+                }
+            }
+
     // songsUiState intentionally does NOT combine with _searchQuery so that typing
     // in the Songs search bar does not trigger a full re-sort of the library on every
     // keystroke. When search is active, SongsScreen shows songSearchResults instead.
@@ -133,7 +195,7 @@ class HomeViewModel @Inject constructor(
         allSongs,
         songSortMode,
         statsRepository.allPlayCounts(),
-        statsRepository.allListenEvents(),
+        songsSortEvents,
     ) { songs, sortMode, allTimePlayCounts, events ->
         when {
             songs == null -> HomeUiState.Loading
