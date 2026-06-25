@@ -1,0 +1,738 @@
+Wavdrop Backup v2 Preservation Contract
+
+Status: Proposed architecture baseline
+Scope: Design only. No implementation implied.
+Applies to: Wavdrop Android backup, restore, migration, preservation, and future desktop interoperability.
+
+Wavdrop’s backup system must preserve a user’s music life, not merely transfer whichever songs happen to be visible in the current MediaStore scan.
+
+Current restore behavior depends on destination songs existing at import time; unmatched stats, events, lyrics, baselines, and playlist entries are skipped. Backup v2 must close that preservation gap.
+
+1. Product Contract
+1.1 What a Wavdrop backup protects
+
+A Wavdrop backup protects:
+
+Listening history
+Play counts, skips, and listening time
+Recently Played state
+Favourites
+Playlists and playlist order
+Lyrics overrides
+Import baselines
+Wavdrop preferences
+Equalizer intent and portable custom settings
+Historical identities for music not currently available
+Future music-memory systems such as Timeline, Eras, Rediscovery, and Wrapped
+1.2 What it does not protect
+
+A Wavdrop backup does not contain the underlying audio files.
+
+Wavdrop Backup
+= music library state and listening life
+
+Music File Backup
+= user-owned audio files stored separately
+
+User-facing wording must never imply that Wavdrop restores deleted MP3, FLAC, M4A, or other audio files.
+
+2. Core Guarantees
+
+Backup v2 must guarantee:
+
+1. No silent historical loss because music is temporarily absent.
+
+2. No silent partial restore.
+
+3. No future-format partial import.
+
+4. No destructive restore without explicit user intent.
+
+5. No backup is reported successful until it has been read back and verified.
+
+6. No automatic deletion of historical music data merely because files disappeared.
+
+7. No weak match is allowed to attach a user’s listening history to the wrong song.
+
+8. A backup can be inspected, explained, and verified by the user.
+3. Definitions
+3.1 Current Library Track
+
+A song currently discovered through MediaStore and available for playback.
+
+CurrentLibraryTrack
+→ device-local
+→ may disappear or receive a new MediaStore ID
+→ not a durable identity
+3.2 Track Identity
+
+A Wavdrop-owned historical identity for a piece of music.
+
+TrackIdentity
+→ durable across reinstall, file move, MediaStore rescan, and temporary absence
+→ references a current local song when available
+→ remains valid when no current file exists
+3.3 Source Reference
+
+A low-trust device-specific hint.
+
+Examples:
+
+MediaStore song ID
+MediaStore album ID
+content:// URI
+folder path
+legacy Room song ID
+
+These assist matching but must never become the sole long-term identity.
+
+3.4 Historical Tombstone
+
+A retained historical Track Identity whose source audio is unavailable.
+
+A tombstone is not corruption, an error, or a deleted memory.
+
+4. Track Availability State Model
+LIVE
+→ matched to a playable local song
+
+PENDING
+→ restored from backup, but no local song is currently matched
+
+GHOST
+→ previously LIVE, but its local song later disappeared
+
+ARCHIVED
+→ unavailable for 12+ months; retained but hidden from ordinary library surfaces
+
+PURGED
+→ explicitly removed by the user
+4.1 State transitions
+Backup restore, no local match
+→ PENDING
+
+Local song disappears after scan
+→ GHOST
+
+PENDING or GHOST song matches after a later scan
+→ LIVE
+
+PENDING or GHOST remains unavailable for 12 months
+→ ARCHIVED
+
+User permanently deletes selected historical record
+→ PURGED
+4.2 Rules
+No automatic transition to PURGED.
+
+ARCHIVED is a visibility/storage-management state,
+not a data-loss state.
+
+A returning song may transition ARCHIVED → LIVE.
+5. Durable Track Identity Model
+
+Every preserved track requires:
+
+identityUuid
+→ Wavdrop-generated UUID
+→ durable primary portable identity
+
+portableTrackKey
+→ deterministic metadata fingerprint
+→ used for conservative cross-device matching
+
+metadata
+→ title
+→ artist
+→ album
+→ duration
+→ track number
+→ year
+
+sourceReferences
+→ MediaStore ID
+→ album ID
+→ URI
+→ folder path
+→ legacy IDs
+
+availability state
+→ LIVE / PENDING / GHOST / ARCHIVED
+
+resolution metadata
+→ currentResolvedSongId
+→ lastResolvedAt
+→ unavailableSince
+5.1 Identity rule
+MediaStore ID is not identity.
+
+content URI is not identity.
+
+Room song ID is not identity.
+
+Wavdrop UUID is identity.
+5.2 Portable track key
+
+The portable key should be derived from normalized music metadata, not a local ID.
+
+Conceptually:
+
+normalized title
++ normalized artist
++ normalized album
++ duration bucket
++ track number where trustworthy
+
+The key is a matching aid, not proof of equality. A collision or ambiguity must remain unresolved rather than risking a wrong historical attachment.
+
+6. Unmatched Data Retention Policy
+6.1 Default policy
+Track identity and metadata
+→ retain indefinitely
+
+Aggregate statistics
+→ retain indefinitely
+
+Listening events
+→ retain indefinitely for now
+
+Lyrics overrides
+→ retain indefinitely
+
+Playlist position
+→ retain indefinitely
+
+Dead source references
+→ retain as low-priority metadata only
+6.2 After 12 months unmatched
+PENDING / GHOST
+→ ARCHIVED
+
+Archived records:
+
+Do not appear in Songs.
+Do not appear in active playback queues.
+Do not appear in ordinary Smart Collections.
+Remain visible in Lifetime History and Storage Management.
+Remain eligible for historical Wrapped and Timeline surfaces.
+Can automatically reconnect when matching music returns.
+6.3 Permanent deletion
+
+Permanent deletion must be initiated by the user through a deliberate review flow.
+
+Storage Management
+→ Historical Music
+→ Select records
+→ Review affected history
+→ Confirm permanent purge
+
+The confirmation screen must disclose:
+
+This permanently removes:
+- listening history
+- statistics
+- playlist placeholders
+- lyrics overrides
+- future rematch capability
+
+No vague “clear stale data” action.
+
+7. Historical Data Behavior
+7.1 Statistics
+
+Statistics for unavailable tracks remain valid historical data.
+
+They should contribute to:
+
+Lifetime analytics
+All-Time Wrapped
+Listening Timeline
+Listening Eras
+Lifetime Favorites
+
+They should not contribute to:
+
+Current-library Smart Collections
+Playable queue recommendations
+Current available-song counts
+7.2 Listening events
+
+Events are immutable historical facts.
+
+A listen event remains valid
+even if the audio file later disappears.
+
+Future event records require stable eventId values.
+
+7.3 Playlists
+
+Unavailable tracks remain in playlists as placeholders.
+
+Example:
+
+Late Night Songs
+
+1. Active Song
+2. Active Song
+3. Unavailable — Old Song by Artist
+4. Active Song
+
+Rules:
+
+Do not silently remove unavailable playlist entries.
+
+Do not collapse positions.
+
+Do not reorder remaining songs.
+
+Reconnect in the original position if the song returns.
+7.4 Lyrics overrides
+
+User-authored lyrics overrides remain attached to the Track Identity, not only to a current local URI.
+
+8. Restore Modes
+
+The current implementation mixes exact restoration and additive merging. Backup v2 must make the user’s intent explicit.
+
+8.1 Recovery Restore
+
+Use when:
+
+New phone
+Factory reset
+Clean install
+Damaged local database
+Intentional rollback
+Contract
+Backup is authoritative.
+
+Local state is replaced or deliberately superseded.
+
+History unavailable on the device becomes PENDING,
+not discarded.
+Behavior
+Data	Recovery Restore behavior
+Stats	Backup exact values
+Favourites	Exact backup state
+Events	Restore backup events
+Playlists	Rebuild exact structure and order
+Lyrics	Backup overwrites local version
+Preferences	Restore selected supported preferences
+Queue/session	Optional, only if all tracks resolve safely
+Unmatched songs	Persist as PENDING identities
+Safety rule
+
+If local data exists:
+
+Recovery Restore
+→ create verified pre-restore safety snapshot
+→ then allow replacement
+
+No successful safety snapshot:
+
+Recovery Restore is blocked.
+8.2 Merge Restore
+
+Use when:
+
+Bringing history from another device
+Recovering partial history
+Combining Wavdrop state
+Contract
+Both local and backup state are valid.
+
+The merge must never lower known history
+or duplicate immutable events.
+Behavior
+Data	Merge Restore behavior
+Events with stable IDs	Union, deduplicated by eventId
+Stats supported by complete events	Recompute from facts where possible
+Legacy aggregates	Conservative reconciliation
+Favourites	Union
+Lyrics	Latest updatedAt wins
+Playlists	Add missing playlists and entries; preserve local extras
+Preferences	Not merged by default
+Unmatched tracks	Persist as PENDING identities
+8.3 Legacy merge rule
+
+For old backups without stable event IDs or complete event history:
+
+Do not claim perfect combination.
+
+Use conservative aggregate reconciliation
+and disclose the limitation.
+
+MAX(local, backup) can be a fallback, but it is not mathematically equivalent to combining independent listening histories.
+
+9. Event and Statistics Authority
+9.1 Long-term model
+Immutable events
++ imported baselines
+= derived aggregate statistics
+9.2 Event requirements
+
+Every new event must have:
+
+eventId
+trackIdentityUuid
+occurredAt
+eventType
+listenedMs
+durationMs
+origin
+
+eventId must be generated when the event is created, not during export.
+
+9.3 Imported baselines
+
+Imported totals from BlackPlayer or another historic source must retain provenance:
+
+sourceType
+sourceKey
+importedAt
+playCount baseline
+skipCount baseline
+
+This prevents double-counting when data is imported or restored repeatedly.
+
+9.4 Aggregate stats
+
+Aggregates remain useful for fast UI, but they are not the sole durable truth once Wavdrop has complete event coverage.
+
+10. Backup Format v2 Contract
+10.1 Root structure
+{
+  "format": "wavdrop_backup",
+  "formatMajor": 2,
+  "formatMinor": 0,
+  "backupId": "uuid",
+  "exportedAt": 1782230400000,
+
+  "producer": {
+    "platform": "android",
+    "appVersionCode": 9,
+    "appVersionName": "0.1.0-beta8.5"
+  },
+
+  "requiredCapabilities": [],
+  "optionalCapabilities": [],
+
+  "manifest": {},
+  "integrity": {},
+
+  "trackIdentities": [],
+  "trackStats": [],
+  "listenEvents": [],
+  "importBaselines": [],
+  "lyricsOverrides": [],
+  "playlists": [],
+  "preferences": {},
+  "extensions": {}
+}
+10.2 Version policy
+v1 backup → v2 app
+→ supported indefinitely through a legacy adapter
+
+v2 backup → v1 app
+→ rejected clearly as created by a newer Wavdrop version
+
+future major backup → current app
+→ reject before parsing/apply
+
+future minor backup
+→ accept known fields
+→ warn for unknown optional capabilities
+→ reject only unknown required capabilities
+10.3 Required capabilities
+
+A future backup may declare capabilities needed for correct restoration.
+
+{
+  "requiredCapabilities": [
+    "track_identity_v1",
+    "stable_event_id_v1"
+  ]
+}
+
+Unknown required capability:
+
+Reject safely.
+10.4 Optional capabilities
+{
+  "optionalCapabilities": [
+    "custom_eq_curve_v1"
+  ]
+}
+
+Unknown optional capability:
+
+Import supported data.
+Show explicit partial-restore warning.
+11. JSON Type Rules
+11.1 Opaque identifiers
+
+Opaque identifiers must be strings.
+
+{
+  "mediaStoreSongId": "3316",
+  "albumId": "6222274914773407000",
+  "legacySongId": "3316"
+}
+
+Validation:
+
+Digits only
+No sign
+No decimal
+No exponent
+No leading zero except "0"
+11.2 Timestamps
+
+Timestamps remain JSON integers.
+
+{
+  "occurredAt": 1782230400000
+}
+
+Validation:
+
+Integer only
+No exponent notation
+Reasonable date range
+11.3 Durations and counters
+
+Remain JSON integers.
+
+{
+  "durationMs": 152856,
+  "playCount": 42
+}
+
+Validation:
+
+Non-negative
+Within explicit supported bounds
+No exponent notation
+11.4 Duplicate JSON keys
+
+Backup v2 must reject duplicate keys.
+
+"playCount": 5,
+"playCount": 999
+
+This is invalid backup input.
+
+No last-write-wins behavior.
+
+12. Integrity and Trust Levels
+12.1 Required v2 integrity
+
+Every v2 backup must contain:
+
+semantic model fingerprint
+manifest counts
+payload size
+backup ID
+format version
+
+A v2 file without integrity data is invalid.
+
+12.2 Trust levels
+VERIFIED
+→ checksum present and correct
+→ manifest valid
+→ schema valid
+
+UNVERIFIED_LEGACY
+→ valid v1 structure
+→ no checksum available
+
+INVALID
+→ malformed, unsupported, corrupted, or integrity mismatch
+
+The UI must never present UNVERIFIED_LEGACY as fully verified.
+
+12.3 Integrity limitations
+
+The checksum protects against accidental alteration and ordinary corruption.
+
+It does not prove hostile tamper resistance because the checksum algorithm is public and stored with the file.
+
+This is acceptable for normal backup integrity. Encryption or signing is a separate future feature.
+
+13. Export Reliability Contract
+
+A backup is successful only after:
+
+1. Consistent database snapshot
+2. Export model validation
+3. Deterministic serialization
+4. Temporary file write
+5. Read-back parse
+6. Integrity verification
+7. Final snapshot creation
+8. Read-back verification of final snapshot
+9. Backup receipt persistence
+13.1 Snapshot policy
+
+Default mode:
+
+Append verified snapshots.
+
+Example:
+
+wavdrop-backup-2026-06-23T20-15-02.json
+wavdrop-backup-2026-06-22T20-10-54.json
+wavdrop-backup-2026-06-21T20-08-11.json
+
+Retention:
+
+Keep latest 7 verified snapshots by default.
+Prune only after a new snapshot verifies.
+
+REPLACE_PREVIOUS should not be the default.
+
+If supported, it must retain a verified prior copy until the replacement verifies.
+
+13.2 Backup receipt
+
+A successful backup records:
+
+timestamp
+destination
+file name
+backup ID
+format version
+track identity count
+stats count
+event count
+playlist count
+integrity fingerprint
+verification result
+
+The user should see:
+
+Last verified backup
+23 June 2026, 20:15
+
+Contains
+732 tracks
+2,775 listening events
+8 playlists
+36 lyrics overrides
+14. Automatic Backup Contract
+
+Current behavior is not background scheduling. It runs when Wavdrop is opened after the configured interval has elapsed.
+
+14.1 Current truthful wording
+Back up when you open Wavdrop,
+if at least [interval] has passed since your last verified backup.
+
+Do not say:
+
+Daily backup
+Scheduled backup
+Background backup
+Automatic backup every day
+
+without qualification.
+
+14.2 Future WorkManager wording
+
+After a real WorkManager implementation:
+
+Wavdrop attempts a background backup approximately every [interval],
+subject to Android scheduling, battery, storage, and folder access.
+15. Rematching Contract
+15.1 Trigger
+
+Run rematching after:
+
+Library scan completion
+Manual rescan
+Restore completion
+Folder re-selection
+Music storage availability change
+15.2 Matching hierarchy
+1. Exact Wavdrop identity reference
+2. Exact known source reference
+3. Strong normalized metadata + duration match
+4. Conservative metadata match with tolerance
+5. Leave unresolved
+15.3 Safety rule
+Ambiguous match
+→ do not attach history automatically
+→ remain PENDING or ARCHIVED
+→ surface for optional user review later
+
+A wrong match is worse than an unresolved song.
+
+16. UI Contract
+16.1 Restore preview must show
+Matched tracks
+Pending historical tracks
+Ambiguous tracks
+Unavailable playlist entries retained
+Events restored
+Events skipped as invalid
+Preferences supported
+Preferences skipped
+Integrity status
+Restore mode
+16.2 Post-restore result must show
+Verified restore completed
+
+612 tracks reconnected
+120 tracks preserved for later matching
+2,775 listening events restored
+8 playlists restored
+14 unavailable playlist entries preserved
+16.3 Archive management must show
+Historical Music
+
+120 unavailable tracks
+Oldest unavailable: 14 May 2025
+History size: 18 MB
+
+Actions:
+- Keep everything
+- Review archived tracks
+- Export history archive
+- Permanently purge selected records
+17. Implementation Sequencing
+P1 — Trust and restore semantics
+1. Truthful automatic-backup wording
+2. Integrity-status distinction
+3. Duplicate-key rejection
+4. Recovery Restore vs Merge Restore
+5. Mandatory pre-restore safety snapshot
+6. Clear future-version rejection messaging
+P2 — Preservation capability
+7. Pending historical-data quarantine
+8. Retain unmatched stats/events/lyrics/baselines/playlist entries
+9. Post-scan rematching
+10. lastListenedAt backup support
+11. Snapshot retention and receipts
+12. Playlist order preservation
+P3 — Full music-memory architecture
+13. TrackIdentity migration
+14. Stable event IDs
+15. Event-led analytics reconciliation
+16. WorkManager best-effort scheduling
+17. Streaming import/export
+18. Optional encrypted backups
+18. Release Gate
+
+Backup v2 must not be described as a preservation-grade system until all of the following are true:
+
+- Unmatched history is retained rather than discarded.
+- Restore mode is explicit.
+- Backup integrity status is visible.
+- Backup success requires read-back verification.
+- Previous verified snapshots survive new-write failure.
+- Recently Played data survives restoration.
+- Playlist order survives recovery restoration.
+- Future-version backups fail safely.
+- Auto-backup wording accurately describes actual behavior.
+
+This contract should now become the reference used to review Claude’s next architectural design pass and any later implementation plan.

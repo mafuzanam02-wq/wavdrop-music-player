@@ -10,6 +10,15 @@ import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRules
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
+/**
+ * Thrown when the MediaStore scan cannot complete — e.g. audio permission was revoked between
+ * the gate check and the query, the provider died, or the cursor failed mid-iteration (WB-02).
+ *
+ * Callers must treat this as a *failed scan*, which is NOT the same as "0 songs found": the
+ * existing library must be preserved, never cleared, when this is raised.
+ */
+class MediaStoreScanException(cause: Throwable) : Exception(cause)
+
 class MediaStoreScanner @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
@@ -42,7 +51,8 @@ class MediaStoreScanner @Inject constructor(
                 "AND ${MediaStore.Audio.Media.DURATION} >= ?"
         val selectionArgs = arrayOf(minimumDurationMs.toString())
 
-        context.contentResolver.query(
+        try {
+            context.contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             projection,
             selection,
@@ -93,6 +103,13 @@ class MediaStoreScanner @Inject constructor(
                     folderName  = folderInfo?.name,
                 )
             }
+        }
+        } catch (e: MediaStoreScanException) {
+            throw e
+        } catch (e: Exception) {
+            // SecurityException (permission revoked), provider death, or a cursor failure mid-scan.
+            // Surface as a typed failure so the caller preserves the existing library (WB-02).
+            throw MediaStoreScanException(e)
         }
 
         return LibraryScanSettingsRules.filterSongsForScanSettings(

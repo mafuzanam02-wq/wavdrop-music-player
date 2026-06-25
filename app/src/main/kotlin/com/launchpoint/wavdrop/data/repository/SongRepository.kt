@@ -9,6 +9,7 @@ import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackIdentityDao
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackIdentityEntity
+import com.launchpoint.wavdrop.data.mediastore.MediaStoreScanException
 import com.launchpoint.wavdrop.data.mediastore.MediaStoreScanner
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playlists.PlaylistSongRemapPlanner
@@ -43,7 +44,19 @@ class SongRepository @Inject constructor(
 
     suspend fun sync(): LibrarySyncResult = withContext(Dispatchers.IO) {
         val scanSettings = scanSettingsRepository.settings.first()
-        val found = scanner.scanSongs(scanSettings)
+
+        // A failed scan (permission revoked, MediaStore failure, cursor error) must NOT be
+        // treated as an empty library. Contain it here, before any DB transaction runs, so no
+        // songs are deleted and no identity reconciliation runs against an invalid result (WB-02).
+        val found = try {
+            scanner.scanSongs(scanSettings)
+        } catch (e: MediaStoreScanException) {
+            Log.e(TAG, "Library scan failed — existing library preserved, no changes made", e)
+            return@withContext LibrarySyncResult.Failed(
+                "Library scan could not complete. Your existing songs were kept. " +
+                    "Check your media permission or storage and try again."
+            )
+        }
 
         db.withTransaction {
             val existingEntities = dao.getAllSongsSnapshot()

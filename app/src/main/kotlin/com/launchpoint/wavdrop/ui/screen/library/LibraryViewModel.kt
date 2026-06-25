@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.ui.screen.library
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.grouping.AlbumGrouper
@@ -48,6 +49,15 @@ class LibraryViewModel @Inject constructor(
     fun syncIfNeeded() {
         if (hasSynced) return
         hasSynced = true
-        viewModelScope.launch { songRepository.sync() }
+        // sync() contains scan failures and returns a typed result; this catch is a final guard
+        // so no unexpected error (e.g. from the DB transaction) can crash the app (WB-02).
+        viewModelScope.launch {
+            runCatching { songRepository.sync() }
+                .onFailure { Log.e(TAG, "Library sync failed", it) }
+        }
+    }
+
+    private companion object {
+        const val TAG = "LibraryViewModel"
     }
 }

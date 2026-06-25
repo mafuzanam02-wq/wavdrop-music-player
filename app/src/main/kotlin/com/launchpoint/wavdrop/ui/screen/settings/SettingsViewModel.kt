@@ -571,6 +571,7 @@ class SettingsViewModel @Inject constructor(
                     when (result) {
                         is LibrarySyncResult.Success       -> LibraryScanUiState.Complete
                         is LibrarySyncResult.EmptyPreserved -> LibraryScanUiState.Warning(result.reason)
+                        is LibrarySyncResult.Failed        -> LibraryScanUiState.Error(result.reason)
                     }
                 },
                 onFailure = { e ->

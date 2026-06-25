@@ -277,7 +277,12 @@ class HomeViewModel @Inject constructor(
     fun syncIfNeeded() {
         if (hasSynced) return
         hasSynced = true
-        viewModelScope.launch { repository.sync() }
+        // sync() contains scan failures and returns a typed result; this catch is a final guard
+        // so no unexpected error can escape the coroutine and crash the app (WB-02).
+        viewModelScope.launch {
+            runCatching { repository.sync() }
+                .onFailure { Log.e("HomeViewModel", "Library sync failed", it) }
+        }
     }
 
     private val _isRefreshing = MutableStateFlow(false)
@@ -289,7 +294,11 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _isRefreshing.value = true
             try {
-                repository.sync()
+                // sync() never throws for scan failures (returns a typed Failed result); this
+                // catch guards against any other unexpected error so refresh state still clears
+                // and the app does not crash (WB-02).
+                runCatching { repository.sync() }
+                    .onFailure { Log.e("HomeViewModel", "Library refresh failed", it) }
             } finally {
                 _isRefreshing.value = false
             }

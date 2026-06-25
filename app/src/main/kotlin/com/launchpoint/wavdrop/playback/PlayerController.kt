@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -330,6 +331,81 @@ class PlayerController @Inject constructor(
             }
             syncNowPlayingState()
         }
+
+        override fun onPlayerError(error: PlaybackException) {
+            // WB-01: a track that cannot be played (moved, deleted, or unsupported) latches the
+            // pipeline in STATE_IDLE with this error. Without handling, playback stays stuck on
+            // the bad item. Recover by bypassing the failing item using the existing skip/stop
+            // queue logic, never corrupting queue/session state and never fabricating stats.
+            Log.w(TAG, "[playerError] code=${error.errorCodeName} message=${error.message}")
+            recoverFromCurrentPlaybackError()
+        }
+    }
+
+    /**
+     * Bypasses the current item after a Media3 [PlaybackException] (WB-01).
+     *
+     * Mirrors [handleCurrentSongDeleted]: advance to the next valid queue item if one exists,
+     * otherwise stop cleanly and clear the broken playing state. The difference is that the
+     * pipeline is in an error state here, so [MediaController.prepare] is issued first to clear
+     * the latched error before seeking — otherwise the next item would not start.
+     *
+     * No stats are touched beyond what the shared skip path ([seekToPlaybackIndex]) already does
+     * for a manual skip, and no identity or session corruption occurs.
+     *
+     * User-facing messaging ("Couldn't play this track…") is intentionally NOT shown: the playback
+     * layer has no existing transient-message channel, and inventing one is out of scope for this
+     * fix. Surfacing that message remains a documented follow-up.
+     */
+    private fun recoverFromCurrentPlaybackError() {
+        val controller = mediaController
+        val failingIndex = currentPlaybackIndex()
+
+        // Can't reason about the queue position — stop cleanly rather than risk a bad seek.
+        if (controller == null || failingIndex == null || failingIndex !in playbackQueue.indices) {
+            stopAndClearAfterPlaybackError(controller)
+            return
+        }
+
+        // Use nextIndex (not automaticNextIndex) so RepeatMode.ONE advances past the failing
+        // song instead of looping back onto it.
+        val nextIdx = QueueNavigator.nextIndex(
+            queueSize    = playbackQueue.size,
+            currentIndex = failingIndex,
+            repeatMode   = repeatMode,
+        )
+
+        if (nextIdx == null || nextIdx == failingIndex) {
+            stopAndClearAfterPlaybackError(controller)
+            return
+        }
+
+        // Clear the latched error so the pipeline can load and play the next item, then advance
+        // and drop the failing entry — same ordering as handleCurrentSongDeleted.
+        controller.prepare()
+        seekToPlaybackIndex(controller, nextIdx)
+        controller.play()
+        removeFromQueue(failingIndex)
+    }
+
+    private fun stopAndClearAfterPlaybackError(controller: MediaController?) {
+        controller?.pause()
+        controller?.clearMediaItems()
+        libraryQueue        = emptyList()
+        playbackOrder       = emptyList()
+        playbackQueue       = emptyList()
+        lastKnownPositionMs = -1L
+        _nowPlayingState.update {
+            it.copy(
+                song         = null,
+                isPlaying    = false,
+                queue        = emptyList(),
+                currentIndex = 0,
+                positionMs   = 0L,
+                durationMs   = 0L,
+            )
+        }
+        saveSessionAsync()
     }
 
     init {
