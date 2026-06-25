@@ -28,14 +28,14 @@ class PlayerControllerBulkQueueTest {
             as PlayAllNextPlan.InsertAfterCurrent
 
         val current = song(99)
-        val resultingQueue = plan.songs.asReversed().fold(listOf(current)) { queue, next ->
-            QueueMutation.insertAfterCurrent(
-                playbackQueue = queue,
-                song = next,
-                currentPlaybackIndex = 0,
-            )!!
-        }
-        assertEquals(listOf(current) + songs, resultingQueue)
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(current),
+            playbackOrder = listOf(0),
+            currentPlaybackIndex = 0,
+            songs = plan.songs,
+        )!!
+
+        assertEquals(listOf(current) + songs, result.playbackQueue)
     }
 
     @Test
@@ -54,11 +54,65 @@ class PlayerControllerBulkQueueTest {
         val existing = listOf(song(99))
         val songs = listOf(song(1), song(2), song(3))
 
-        val resultingQueue = songs.fold(existing) { queue, next ->
-            QueueMutation.append(queue, next)
-        }
+        val result = QueueMutation.appendAll(
+            libraryQueue = existing,
+            playbackOrder = listOf(0),
+            songs = songs,
+        )
 
-        assertEquals(existing + songs, resultingQueue)
+        assertEquals(existing + songs, result.playbackQueue)
+        assertEquals(listOf(0, 1, 2, 3), result.playbackOrder)
+    }
+
+    @Test
+    fun `playAllNext batch preserves current item index`() {
+        val existing = listOf(song(10), song(20), song(30))
+        val songs = listOf(song(1), song(2), song(3))
+
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = existing,
+            playbackOrder = listOf(0, 1, 2),
+            currentPlaybackIndex = 1,
+            songs = songs,
+        )!!
+
+        assertEquals(song(20), result.playbackQueue[1])
+        assertEquals(listOf(10L, 20L, 1L, 2L, 3L, 30L), result.playbackQueue.map { it.id })
+        assertEquals(listOf(0, 1, 3, 4, 5, 2), result.playbackOrder)
+    }
+
+    @Test
+    fun `playAllNext batch preserves shuffled playback order around current item`() {
+        val existing = listOf(song(10), song(20), song(30), song(40), song(50))
+        val shuffledOrder = listOf(2, 4, 1, 0, 3)
+        val songs = listOf(song(101), song(102))
+
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = existing,
+            playbackOrder = shuffledOrder,
+            currentPlaybackIndex = 1,
+            songs = songs,
+        )!!
+
+        assertEquals(listOf(30L, 50L, 101L, 102L, 20L, 10L, 40L), result.playbackQueue.map { it.id })
+        assertEquals(listOf(2, 4, 5, 6, 1, 0, 3), result.playbackOrder)
+    }
+
+    @Test
+    fun `large batch insertion appends all songs in one computed model`() {
+        val existing = listOf(song(99))
+        val songs = (1L..5_000L).map(::song)
+
+        val result = QueueMutation.appendAll(
+            libraryQueue = existing,
+            playbackOrder = listOf(0),
+            songs = songs,
+        )
+
+        assertEquals(5_001, result.libraryQueue.size)
+        assertEquals(5_001, result.playbackOrder.size)
+        assertEquals(99L, result.playbackQueue.first().id)
+        assertEquals(5_000L, result.playbackQueue.last().id)
     }
 
     @Test

@@ -18,6 +18,11 @@ internal object QueueMutation {
         val fromLibraryIndex: Int,
         val toLibraryIndex: Int,
     )
+    data class BatchInsertResult(
+        val libraryQueue: List<Song>,
+        val playbackOrder: List<Int>,
+        val playbackQueue: List<Song>,
+    )
 
     fun shuffleToggleModel(
         libraryQueue: List<Song>,
@@ -104,6 +109,56 @@ internal object QueueMutation {
         song: Song,
     ): List<Song> =
         playbackQueue.toMutableList().also { it.add(song) }
+
+    fun appendAll(
+        libraryQueue: List<Song>,
+        playbackOrder: List<Int>,
+        songs: List<Song>,
+    ): BatchInsertResult {
+        if (songs.isEmpty()) {
+            return BatchInsertResult(
+                libraryQueue = libraryQueue,
+                playbackOrder = playbackOrder,
+                playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) },
+            )
+        }
+        val firstNewLibraryIndex = libraryQueue.size
+        val newLibraryQueue = libraryQueue + songs
+        val newPlaybackOrder = playbackOrder + (firstNewLibraryIndex until newLibraryQueue.size)
+        return BatchInsertResult(
+            libraryQueue = newLibraryQueue,
+            playbackOrder = newPlaybackOrder,
+            playbackQueue = newPlaybackOrder.mapNotNull { newLibraryQueue.getOrNull(it) },
+        )
+    }
+
+    fun insertAllAfterCurrent(
+        libraryQueue: List<Song>,
+        playbackOrder: List<Int>,
+        currentPlaybackIndex: Int,
+        songs: List<Song>,
+    ): BatchInsertResult? {
+        if (currentPlaybackIndex !in playbackOrder.indices) return null
+        if (songs.isEmpty()) {
+            return BatchInsertResult(
+                libraryQueue = libraryQueue,
+                playbackOrder = playbackOrder,
+                playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) },
+            )
+        }
+        val firstNewLibraryIndex = libraryQueue.size
+        val newLibraryQueue = libraryQueue + songs
+        val newLibraryIndexes = (firstNewLibraryIndex until newLibraryQueue.size).toList()
+        val insertPlaybackIndex = (currentPlaybackIndex + 1).coerceAtMost(playbackOrder.size)
+        val newPlaybackOrder = playbackOrder.toMutableList().also {
+            it.addAll(insertPlaybackIndex, newLibraryIndexes)
+        }
+        return BatchInsertResult(
+            libraryQueue = newLibraryQueue,
+            playbackOrder = newPlaybackOrder,
+            playbackQueue = newPlaybackOrder.mapNotNull { newLibraryQueue.getOrNull(it) },
+        )
+    }
 
     fun searchPreserveQueue(
         playbackQueue: List<Song>,

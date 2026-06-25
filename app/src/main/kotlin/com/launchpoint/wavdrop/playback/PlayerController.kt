@@ -497,21 +497,27 @@ class PlayerController @Inject constructor(
             song = song,
         )
         if (plan == null) {
-            Log.d(
-                SEARCH_TAG,
-                "preserve search tap ignored: unresolved current index " +
-                    "mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
-                    "stateSongId=${_nowPlayingState.value.song?.id} before=${effectiveQueueBefore.idList()} " +
-                    "tap=${song.id}",
-            )
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    SEARCH_TAG,
+                    "preserve search tap ignored: unresolved current index " +
+                        "mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
+                        "stateSongId=${_nowPlayingState.value.song?.id} " +
+                        "before=${effectiveQueueBefore.queueLogSummary()} tap=${song.id}",
+                )
+            }
             return
         }
-        Log.d(
-            SEARCH_TAG,
-            "preserve search tap mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
-                "resolvedIndex=$resolvedCurrentIndex before=${effectiveQueueBefore.idList()} " +
-                "tap=${song.id} after=${plan.queue.idList()} newIndex=${plan.currentIndex}",
-        )
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                SEARCH_TAG,
+                "preserve search tap mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
+                    "resolvedIndex=$resolvedCurrentIndex " +
+                    "before=${effectiveQueueBefore.queueLogSummary(currentSongId = currentMediaSongId)} " +
+                    "tap=${song.id} after=${plan.queue.queueLogSummary(currentSongId = song.id)} " +
+                    "newIndex=${plan.currentIndex}",
+            )
+        }
         playPreservedSearchPlan(plan = plan, startSong = song)
     }
 
@@ -717,8 +723,7 @@ class PlayerController @Inject constructor(
             is PlayAllNextPlan.StartQueue ->
                 playFromQueue(queue = plan.queue, startSong = plan.startSong)
             is PlayAllNextPlan.InsertAfterCurrent -> {
-                // Inserting each song at currentIndex+1 in reversed order produces the original order.
-                plan.songs.asReversed().forEach { playNext(it) }
+                insertAllAfterCurrent(plan.songs)
             }
         }
     }
@@ -726,7 +731,33 @@ class PlayerController @Inject constructor(
     /** Appends [songs] to the end of the queue in their original order. */
     fun addAllToQueue(songs: List<Song>) {
         if (songs.isEmpty()) return
-        songs.forEach { addToQueue(it) }
+        val currentPlaybackIndex = currentPlaybackIndex()
+        if (libraryQueue.isEmpty() || currentPlaybackIndex == null) {
+            playFromQueue(queue = songs, startSong = songs.first())
+            return
+        }
+        val result = QueueMutation.appendAll(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            songs = songs,
+        )
+        libraryQueue = result.libraryQueue
+        playbackOrder = result.playbackOrder
+        playbackQueue = result.playbackQueue
+
+        if (!playerQueueNeedsSync) {
+            mediaController?.addMediaItems(songs.map { it.toMediaItem() })
+        }
+
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
     }
 
     fun addToQueue(song: Song) {
@@ -743,6 +774,37 @@ class PlayerController @Inject constructor(
         // Appends to the end of the ExoPlayer playlist (playbackQueue).
         if (!playerQueueNeedsSync) {
             mediaController?.addMediaItem(song.toMediaItem())
+        }
+
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
+    }
+
+    private fun insertAllAfterCurrent(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val currentPlaybackIndex = currentPlaybackIndex() ?: return
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            currentPlaybackIndex = currentPlaybackIndex,
+            songs = songs,
+        ) ?: return
+        libraryQueue = result.libraryQueue
+        playbackOrder = result.playbackOrder
+        playbackQueue = result.playbackQueue
+
+        if (!playerQueueNeedsSync) {
+            mediaController?.addMediaItems(
+                currentPlaybackIndex + 1,
+                songs.map { it.toMediaItem() },
+            )
         }
 
         _nowPlayingState.update {
@@ -1903,8 +1965,19 @@ class PlayerController @Inject constructor(
     private fun Long.coerceForDuration(durationMs: Long): Long =
         if (durationMs > 0L) coerceIn(0L, durationMs) else coerceAtLeast(0L)
 
-    private fun List<Song>.idList(): String =
-        joinToString(prefix = "[", postfix = "]") { it.id.toString() }
+    private fun List<Song>.queueLogSummary(currentSongId: Long? = null): String {
+        val sampleSize = 3
+        fun List<Song>.ids(): String =
+            joinToString(prefix = "[", postfix = "]") { it.id.toString() }
+
+        val samples = if (size <= sampleSize * 2) {
+            "ids=${ids()}"
+        } else {
+            "head=${take(sampleSize).ids()} tail=${takeLast(sampleSize).ids()}"
+        }
+        val current = currentSongId?.let { " current=$it" }.orEmpty()
+        return "queue(size=$size $samples$current)"
+    }
 
     // Returns the library index of the current song.
     // controller.currentMediaItemIndex is a playback index; map via playbackOrder.
