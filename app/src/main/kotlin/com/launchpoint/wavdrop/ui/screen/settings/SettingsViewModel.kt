@@ -23,6 +23,7 @@ import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
+import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
@@ -228,6 +229,13 @@ class SettingsViewModel @Inject constructor(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = NotificationControlsSetting.STANDARD,
+        )
+
+    val previousButtonBehavior: StateFlow<PreviousButtonBehavior> =
+        appSettingsRepository.previousButtonBehavior.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = PreviousButtonBehavior.DEFAULT,
         )
 
     val searchTapBehavior: StateFlow<SearchTapBehavior> =
@@ -469,6 +477,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationControlsSetting(setting: NotificationControlsSetting) {
         viewModelScope.launch { appSettingsRepository.setNotificationControlsSetting(setting) }
+    }
+
+    fun setPreviousButtonBehavior(behavior: PreviousButtonBehavior) {
+        viewModelScope.launch { appSettingsRepository.setPreviousButtonBehavior(behavior) }
     }
 
     fun setSearchTapBehavior(behavior: SearchTapBehavior) {

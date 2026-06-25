@@ -462,6 +462,20 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val previousButtonBehavior: Flow<PreviousButtonBehavior> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            PreviousButtonBehavior.fromStoredNameOrDefault(preferences[PREVIOUS_BUTTON_BEHAVIOR_KEY])
+        }
+
+    suspend fun setPreviousButtonBehavior(behavior: PreviousButtonBehavior) {
+        dataStore.edit { preferences ->
+            preferences[PREVIOUS_BUTTON_BEHAVIOR_KEY] = behavior.name
+        }
+    }
+
     private fun String.toAutoBackupInterval(): AutoBackupInterval? =
         runCatching { AutoBackupInterval.valueOf(this) }.getOrNull()
 
@@ -508,6 +522,7 @@ class AppSettingsRepository @Inject constructor(
         val LAST_AUTO_BACKUP_RESULT_KEY             = stringPreferencesKey("last_auto_backup_result")
         val BACKUP_FILE_MODE_KEY                    = stringPreferencesKey("backup_file_mode")
         val NOTIFICATION_CONTROLS_KEY               = stringPreferencesKey("notification_controls")
+        val PREVIOUS_BUTTON_BEHAVIOR_KEY            = stringPreferencesKey("previous_button_behavior")
         val LAST_SEEN_CHANGELOG_VERSION_KEY         = intPreferencesKey("last_seen_changelog_version")
         val ARTWORK_CORNER_STYLE_KEY                = stringPreferencesKey("artwork_corner_style")
         val SHOW_SONG_THUMBNAILS_KEY                = booleanPreferencesKey("show_song_thumbnails")

@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -29,6 +30,7 @@ import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.AudioEnhancementsRepository
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
+import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.ui.widget.WidgetPlaybackSnapshot
 import com.launchpoint.wavdrop.ui.widget.WidgetStateStore
@@ -63,6 +65,8 @@ class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
+    private var previousRestartThresholdMs: Long =
+        PreviousButtonBehavior.DEFAULT.previousRestartThresholdMs()
 
     // Fires when audio devices are added or removed. Runs on the main thread (null handler).
     private val audioDeviceCallback = object : AudioDeviceCallback() {
@@ -111,6 +115,10 @@ class PlaybackService : MediaSessionService() {
             .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        val sessionPlayer = PreviousBehaviorPlayer(
+            player = player,
+            thresholdProvider = { previousRestartThresholdMs },
+        )
 
         if (BuildConfig.DEBUG) {
             Log.d(AUDIO_SESSION_TAG, "[init] player created audioSessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
@@ -236,6 +244,12 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        serviceScope.launch {
+            appSettingsRepository.previousButtonBehavior.collect { behavior ->
+                previousRestartThresholdMs = behavior.previousRestartThresholdMs()
+            }
+        }
+
         // Register for audio device connection events. Null handler → main thread.
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, null)
@@ -246,7 +260,7 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        mediaSession = MediaSession.Builder(this, player)
+        mediaSession = MediaSession.Builder(this, sessionPlayer)
             .setCallback(WavdropSessionCallback())
             .setSessionActivity(openAppIntent)
             .build()
@@ -427,6 +441,26 @@ class PlaybackService : MediaSessionService() {
 
     private fun logResume(message: String) {
         if (BuildConfig.DEBUG) Log.d(RESUME_TAG, message)
+    }
+
+    @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+    private class PreviousBehaviorPlayer(
+        player: Player,
+        private val thresholdProvider: () -> Long,
+    ) : ForwardingPlayer(player) {
+
+        override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
+
+        override fun seekToPrevious() {
+            val thresholdMs = thresholdProvider()
+            if (thresholdMs > 0L && currentPosition > thresholdMs) {
+                seekTo(0L)
+            } else if (hasPreviousMediaItem()) {
+                seekToPreviousMediaItem()
+            } else {
+                seekTo(0L)
+            }
+        }
     }
 
     companion object {

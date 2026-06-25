@@ -32,6 +32,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
+import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.playback.SleepTimerOption
@@ -48,9 +49,11 @@ fun SettingsPlaybackScreen(
     val resumeBehavior              by viewModel.resumeBehaviorSettings.collectAsStateWithLifecycle()
     val sleepTimerState             by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     val notificationControlsSetting by viewModel.notificationControlsSetting.collectAsStateWithLifecycle()
+    val previousButtonBehavior      by viewModel.previousButtonBehavior.collectAsStateWithLifecycle()
     val searchTapBehavior           by viewModel.searchTapBehavior.collectAsStateWithLifecycle()
     val timeDisplayMode             by viewModel.nowPlayingTimeDisplayMode.collectAsStateWithLifecycle()
     var showStartupDialog       by remember { mutableStateOf(false) }
+    var showPreviousDialog      by remember { mutableStateOf(false) }
     var showSleepTimerDialog    by remember { mutableStateOf(false) }
     var showSearchTapDialog     by remember { mutableStateOf(false) }
     var showTimeDisplayDialog   by remember { mutableStateOf(false) }
@@ -90,6 +93,13 @@ fun SettingsPlaybackScreen(
             item { SectionDivider() }
 
             item { SectionHeader("Session") }
+            item {
+                ClickableSettingsRow(
+                    title    = "Previous button",
+                    subtitle = previousButtonBehavior.displayName,
+                    onClick  = { showPreviousDialog = true },
+                )
+            }
             item {
                 ToggleSettingsRow(
                     title           = "Remember last played track",
@@ -184,6 +194,16 @@ fun SettingsPlaybackScreen(
             onDismiss = { showStartupDialog = false },
         )
     }
+    if (showPreviousDialog) {
+        PreviousButtonBehaviorDialog(
+            selected  = previousButtonBehavior,
+            onSelect  = { behavior ->
+                viewModel.setPreviousButtonBehavior(behavior)
+                showPreviousDialog = false
+            },
+            onDismiss = { showPreviousDialog = false },
+        )
+    }
     if (showSearchTapDialog) {
         SearchTapBehaviorDialog(
             selected  = searchTapBehavior,
@@ -208,6 +228,45 @@ fun SettingsPlaybackScreen(
             onDismiss = { showSleepTimerDialog = false },
         )
     }
+}
+
+@Composable
+private fun PreviousButtonBehaviorDialog(
+    selected: PreviousButtonBehavior,
+    onSelect: (PreviousButtonBehavior) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title            = { Text("Previous button") },
+        text             = {
+            Column {
+                PreviousButtonBehavior.entries.forEach { behavior ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(behavior) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = behavior == selected,
+                            onClick  = { onSelect(behavior) },
+                        )
+                        Text(
+                            text     = behavior.displayName,
+                            style    = MaterialTheme.typography.bodyLarge,
+                            color    = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
@@ -333,4 +392,3 @@ private fun SleepTimerState.summary(): String = when {
     isActive -> option.displayName
     else -> SleepTimerOption.OFF.displayName
 }
-

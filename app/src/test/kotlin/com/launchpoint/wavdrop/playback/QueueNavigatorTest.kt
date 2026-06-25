@@ -48,6 +48,45 @@ class QueueNavigatorTest {
     }
 
     @Test
+    fun `previous with zero threshold moves to previous even after normal restart point`() {
+        val action = QueueNavigator.previousAction(
+            queueSize = 3,
+            currentIndex = 2,
+            currentPositionMs = 10_000L,
+            repeatMode = RepeatMode.OFF,
+            restartThresholdMs = 0L,
+        )
+
+        assertEquals(PreviousQueueAction.MoveTo(1), action)
+    }
+
+    @Test
+    fun `previous with zero threshold at first track repeat off still restarts current`() {
+        val action = QueueNavigator.previousAction(
+            queueSize = 3,
+            currentIndex = 0,
+            currentPositionMs = 10_000L,
+            repeatMode = RepeatMode.OFF,
+            restartThresholdMs = 0L,
+        )
+
+        assertEquals(PreviousQueueAction.RestartCurrent, action)
+    }
+
+    @Test
+    fun `previous with zero threshold at first track repeat all wraps to last`() {
+        val action = QueueNavigator.previousAction(
+            queueSize = 3,
+            currentIndex = 0,
+            currentPositionMs = 10_000L,
+            repeatMode = RepeatMode.ALL,
+            restartThresholdMs = 0L,
+        )
+
+        assertEquals(PreviousQueueAction.MoveTo(2), action)
+    }
+
+    @Test
     fun `previous at start repeat off restarts current song`() {
         val action = QueueNavigator.previousAction(
             queueSize = 3,

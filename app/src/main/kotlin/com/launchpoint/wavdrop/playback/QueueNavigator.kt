@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.playback
 
+import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import kotlin.random.Random
 
 sealed interface PreviousQueueAction {
@@ -38,7 +39,9 @@ object QueueNavigator {
         restartThresholdMs: Long = PREVIOUS_RESTART_THRESHOLD_MS,
     ): PreviousQueueAction? {
         if (!isValid(queueSize, currentIndex)) return null
-        if (currentPositionMs > restartThresholdMs) return PreviousQueueAction.RestartCurrent
+        if (restartThresholdMs > 0L && currentPositionMs > restartThresholdMs) {
+            return PreviousQueueAction.RestartCurrent
+        }
         if (currentIndex > 0) return PreviousQueueAction.MoveTo(currentIndex - 1)
         return if (repeatMode == RepeatMode.ALL && queueSize > 1) {
             PreviousQueueAction.MoveTo(queueSize - 1)
@@ -99,4 +102,9 @@ object QueueNavigator {
 
     private fun isValid(queueSize: Int, currentIndex: Int): Boolean =
         queueSize > 0 && currentIndex in 0 until queueSize
+}
+
+internal fun PreviousButtonBehavior.previousRestartThresholdMs(): Long = when (this) {
+    PreviousButtonBehavior.RESTART_CURRENT -> QueueNavigator.PREVIOUS_RESTART_THRESHOLD_MS
+    PreviousButtonBehavior.PREVIOUS_TRACK  -> 0L
 }

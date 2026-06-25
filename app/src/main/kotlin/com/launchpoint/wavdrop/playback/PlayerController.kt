@@ -18,7 +18,9 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRules
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionSnapshot
+import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
+import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -166,6 +168,7 @@ class PlayerController @Inject constructor(
     private val statsTracker: StatsTracker,
     private val sessionRepository: PlaybackSessionRepository,
     private val resumeBehaviorRepository: ResumeBehaviorSettingsRepository,
+    private val appSettingsRepository: AppSettingsRepository,
 ) {
     private companion object {
         const val TAG = "WavStats-PC"
@@ -206,6 +209,7 @@ class PlayerController @Inject constructor(
     private var playerQueueNeedsSync: Boolean = false
     private var shuffleEnabled: Boolean = false
     private var repeatMode: RepeatMode = RepeatMode.OFF
+    private var previousButtonBehavior: PreviousButtonBehavior = PreviousButtonBehavior.DEFAULT
 
     // Last position observed by the 500 ms ticker. Starts at -1 (uninitialized).
     // Reset to -1 whenever a new song/session starts so the loop detector doesn't see
@@ -409,6 +413,12 @@ class PlayerController @Inject constructor(
     }
 
     init {
+        scope.launch {
+            appSettingsRepository.previousButtonBehavior.collect { behavior ->
+                previousButtonBehavior = behavior
+            }
+        }
+
         val token = SessionToken(
             context,
             ComponentName(context, PlaybackService::class.java),
@@ -997,6 +1007,7 @@ class PlayerController @Inject constructor(
             currentIndex = currentPlaybackIndex,
             currentPositionMs = controller.currentPosition,
             repeatMode = repeatMode,
+            restartThresholdMs = previousButtonBehavior.previousRestartThresholdMs(),
         )) {
             is PreviousQueueAction.MoveTo -> seekToPlaybackIndex(controller, action.index)
             PreviousQueueAction.RestartCurrent -> {
