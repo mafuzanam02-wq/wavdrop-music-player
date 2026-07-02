@@ -23,6 +23,10 @@ object SongSort {
             compareByDescending<Song> { it.dateAdded }
                 .then(byTitle),
         )
+        SongSortMode.OLDEST_ADDED -> songs.sortedWith(
+            compareBy<Song> { it.dateAdded }
+                .then(byTitle),
+        )
         SongSortMode.MOST_PLAYED_THIS_MONTH -> songs.sortedWith(
             compareByDescending<Song> { thisMonthPlayCounts[it.id] ?: 0 }
                 .then(byTitle),

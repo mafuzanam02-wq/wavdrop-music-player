@@ -56,6 +56,36 @@ class SongSortTest {
     }
 
     @Test
+    fun `oldest added sorts oldest first with title tiebreak`() {
+        val sortedTitles = SongSort.sortSongs(
+            songs = listOf(
+                song(1, "Beta", dateAdded = 20),
+                song(2, "Alpha", dateAdded = 20),
+                song(3, "Newest", dateAdded = 30),
+                song(4, "Oldest", dateAdded = 10),
+            ),
+            mode = SongSortMode.OLDEST_ADDED,
+        ).map { it.title }
+
+        assertEquals(listOf("Oldest", "Alpha", "Beta", "Newest"), sortedTitles)
+    }
+
+    @Test
+    fun `oldest added is the exact reverse ordering of recently added by date`() {
+        val songs = listOf(
+            song(1, "Beta", dateAdded = 30),
+            song(2, "Alpha", dateAdded = 10),
+            song(3, "Gamma", dateAdded = 20),
+        )
+
+        val recentDates = SongSort.sortSongs(songs, mode = SongSortMode.RECENTLY_ADDED).map { it.dateAdded }
+        val oldestDates = SongSort.sortSongs(songs, mode = SongSortMode.OLDEST_ADDED).map { it.dateAdded }
+
+        assertEquals(listOf(30L, 20L, 10L), recentDates)
+        assertEquals(listOf(10L, 20L, 30L), oldestDates)
+    }
+
+    @Test
     fun `all time most played sorts by play count with title tiebreak`() {
         val sortedTitles = SongSort.sortSongs(
             songs = listOf(song(1, "Beta"), song(2, "Alpha"), song(3, "Zero")),
