@@ -427,6 +427,513 @@ re-proposed as new — and so the reasoning for not pursuing them is preserved.
 - Real-device validation breadth for share targets, Bluetooth/wired resume, launcher icon caching,
   and notification shuffle/repeat control visibility (OEM-dependent behaviour outside app control).
 
+# Playback Session Hydration Architecture (Approved Design)
+
+**Status:** Design Approved (Audit Complete, Implementation Pending)
+
+**Phase:** Soft Launch Stabilization
+
+---
+
+# Background
+
+During Beta 9 stabilization, testing identified an architectural issue affecting cold-start playback initiated from external media controls.
+
+Observed behavior:
+
+* If the application process is warm, Bluetooth/headset PLAY, notification PLAY, lock-screen PLAY, and widget PLAY behave correctly.
+* If the application process is cold or suspended, explicit PLAY commands do not begin playback until the application UI is opened.
+* Opening the application immediately restores the previous session, after which the same PLAY command succeeds.
+
+The issue is therefore not BLE connectivity, MediaSession creation, or foreground-service configuration.
+
+It is a playback session hydration problem.
+
+---
+
+# Root Cause
+
+Current architecture restores the playback session primarily from the Activity startup path.
+
+Current flow:
+
+MainActivity
+
+↓
+
+PlaybackStartupCoordinator.restoreOnce()
+
+↓
+
+PlayerController.restoreSessionIfNeeded()
+
+↓
+
+Queue restored
+
+↓
+
+MediaItems prepared
+
+↓
+
+Playback available
+
+However, MediaSession PLAY commands follow a different path.
+
+Notification PLAY
+
+↓
+
+Bluetooth PLAY
+
+↓
+
+Lock-screen PLAY
+
+↓
+
+MediaSession PLAY
+
+↓
+
+player.play()
+
+If the ExoPlayer queue is empty, `player.play()` has nothing to play.
+
+No hydration occurs before the play request.
+
+Therefore playback appears to "wake" only after the Activity later performs session restoration.
+
+---
+
+# Existing Problems Identified
+
+## 1. Duplicate restoration implementations
+
+Current restoration logic exists in multiple places.
+
+Notably:
+
+* restoreSessionIfNeeded()
+* resumeSessionCold()
+
+Both perform nearly identical work:
+
+* load session
+* apply resume rules
+* map songs
+* restore playback order
+* rebuild queue
+* prepare MediaItems
+
+Only autoplay behavior differs.
+
+This duplication increases maintenance cost and future bug risk.
+
+---
+
+## 2. One-shot restore claim
+
+Current implementation uses a process-local one-shot restore claim.
+
+Characteristics:
+
+* attempt-based
+* process-local
+* consumed before restoration succeeds
+* not success-based
+
+Failure scenario:
+
+Bluetooth PLAY
+
+↓
+
+claim()
+
+↓
+
+library unavailable
+
+↓
+
+restore fails
+
+↓
+
+claim consumed
+
+↓
+
+Activity opens
+
+↓
+
+startup restore skipped
+
+A failed restore can therefore prevent a later successful restore inside the same process.
+
+This is considered an architectural weakness.
+
+---
+
+## 3. Hydration and autoplay are coupled
+
+Current design mixes two separate responsibilities:
+
+* rebuilding playback state
+* deciding whether playback should actually begin
+
+These are independent concerns and should not be coupled.
+
+---
+
+# Approved Engineering Principles
+
+## Principle 1 — Hydration is separate from autoplay
+
+Hydration restores player state.
+
+Hydration must never decide whether playback starts.
+
+Playback remains the responsibility of the caller.
+
+Examples:
+
+Activity startup
+
+* hydrate
+* prepare
+* do not play
+
+Notification PLAY
+
+* hydrate if needed
+* caller issues play
+
+Bluetooth PLAY
+
+* hydrate if needed
+* caller issues play
+
+Reconnect broadcast
+
+* evaluate reconnect policy
+* hydrate if permitted
+* caller issues play
+
+---
+
+## Principle 2 — Hydration is idempotent
+
+Multiple callers may request hydration simultaneously.
+
+Regardless of caller count:
+
+* only one hydration attempt may execute at a time
+* all callers observe the same resulting queue
+* successful hydration satisfies every caller
+* failed hydration never permanently blocks future attempts
+
+Engineering invariant:
+
+Repeated or concurrent calls to
+
+ensurePlayerHydratedFromSession()
+
+must perform at most one actual hydration attempt while preserving future retry eligibility.
+
+---
+
+## Principle 3 — Player state is authoritative
+
+Hydration is not tracked using a boolean.
+
+Hydration is inferred from actual player state.
+
+Examples:
+
+Hydrated when:
+
+* logical playback queue exists
+
+or
+
+* Media3 player already owns MediaItems
+
+If a queue already exists:
+
+ensurePlayerHydratedFromSession()
+
+must immediately return without rebuilding anything.
+
+---
+
+# Proposed Hydration Primitive
+
+Future reusable primitive:
+
+ensurePlayerHydratedFromSession()
+
+Responsibilities:
+
+* restore queue if needed
+* restore playback order
+* restore current song
+* restore playback position
+* prepare MediaItems
+
+Must not:
+
+* autoplay
+* modify playback policy
+* duplicate existing queue
+* overwrite active manual queues
+
+Possible result values:
+
+* AlreadyHydrated
+* Hydrated
+* NoSavedSession
+* FilteredBySettings
+* NoResolvableSong
+* ControllerUnavailable
+* MediaSetupFailed
+* SkippedActiveQueue
+
+---
+
+# Hydration State Model
+
+The design intentionally uses a minimal state model.
+
+States:
+
+NotHydrated
+
+Hydrating
+
+FailedRetryAllowed
+
+Hydrated is intentionally derived from actual queue/player state rather than stored as mutable state.
+
+---
+
+# Retry Policy
+
+Retry is allowed for transient failures including:
+
+* storage not ready
+* library scan incomplete
+* controller unavailable
+* MediaItem setup failure
+* no resolvable songs
+* no saved session
+
+Retry is intentionally not consumed by failed attempts.
+
+Permanent no-op cases:
+
+* rememberLastTrack = false
+* restore filtered by settings
+
+These remain no-op until settings change.
+
+---
+
+# Playback Policy
+
+Hydration never starts playback.
+
+Caller decides.
+
+### Explicit PLAY
+
+Should hydrate then play:
+
+* notification PLAY
+* lock-screen PLAY
+* Bluetooth media button PLAY
+* headset PLAY
+* widget PLAY
+* in-app PLAY
+
+### Automatic events
+
+Reconnect broadcasts remain governed by existing reconnect policies.
+
+Examples:
+
+Resume If Interrupted
+
+Always Resume
+
+Never Resume
+
+These settings affect autoplay only.
+
+They do not determine whether hydration may occur.
+
+---
+
+# Interception Strategy
+
+Preferred interception point:
+
+ForwardingPlayer.play()
+
+Reasons:
+
+Covers:
+
+* MediaSession
+* Notification
+* Bluetooth
+* Headset
+* Lock screen
+* MediaController
+* Widget (through MediaSession player)
+
+Avoids duplicating restore checks across multiple command paths.
+
+Reconnect broadcasts remain separate because they represent automatic playback policy rather than explicit PLAY commands.
+
+---
+
+# Existing Restore Claim
+
+Current PlaybackSessionRestoreClaim should not remain the primary synchronization mechanism.
+
+Reason:
+
+It tracks attempted restoration rather than successful hydration.
+
+Future implementation should replace it with:
+
+* mutex-protected hydration
+* queue re-checks before and after hydration
+* success-oriented completion
+
+---
+
+# Concurrency Requirements
+
+Concurrent callers:
+
+Activity startup
+
+Bluetooth PLAY
+
+Notification PLAY
+
+Widget PLAY
+
+Lock-screen PLAY
+
+must never perform multiple independent restorations.
+
+Expected behavior:
+
+One hydration executes.
+
+Remaining callers wait or re-check.
+
+All callers observe the hydrated queue.
+
+---
+
+# Manual Queue Priority
+
+Manual user actions always take precedence.
+
+If the user selects a different song while hydration is in progress:
+
+Hydration must re-check current player state immediately before applying restored data.
+
+If a new queue already exists:
+
+Hydration must discard its result.
+
+It must never overwrite an active user-selected queue.
+
+---
+
+# Failure Handling
+
+Expected behavior:
+
+No saved session
+
+* no-op
+
+Library unavailable
+
+* retry later
+
+Deleted current song
+
+* restore nearest valid queue item where possible
+
+No remaining songs
+
+* retry after future library scan
+
+Permission unavailable
+
+* retry after permission granted
+
+Hydration failure
+
+* return retryable state
+
+No failure may permanently consume hydration eligibility.
+
+---
+
+# Test Requirements
+
+Future implementation must include:
+
+State transition tests
+
+Concurrent hydration tests
+
+Explicit PLAY tests
+
+Reconnect policy tests
+
+Startup restore tests
+
+Failure retry tests
+
+Manual Bluetooth validation
+
+Notification validation
+
+Lock-screen validation
+
+Widget validation
+
+Cold process validation
+
+Manual queue precedence validation
+
+Deleted-song restoration validation
+
+---
+
+# Long-Term Architecture
+
+Future playback restoration should converge on a single hydration primitive.
+
+Every entry point should share the same restoration logic.
+
+Only playback policy should differ.
+
+This reduces duplicated code, simplifies maintenance, improves correctness, and guarantees consistent behavior regardless of whether playback begins from the UI, notification, Bluetooth headset, lock screen, widget, or MediaSession.
+
+
 ---
 
 *End of document. Update in place as work ships, decisions change, or audits complete — amend
