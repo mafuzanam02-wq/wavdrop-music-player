@@ -116,6 +116,34 @@ class PlayerControllerBulkQueueTest {
     }
 
     @Test
+    fun `batch play next with non-empty queue routes to insert not start-queue`() {
+        // playAllNext treats any non-empty library queue as active (hasActiveCurrentItem = true),
+        // so an unresolvable current index no longer flips to StartQueue and replaces the queue.
+        val songs = listOf(song(1), song(2))
+
+        val plan = planPlayAllNext(songs, hasActiveCurrentItem = true)
+
+        assert(plan is PlayAllNextPlan.InsertAfterCurrent)
+    }
+
+    @Test
+    fun `batch play next unresolved current index appends instead of dropping`() {
+        // insertAllAfterCurrent falls back to QueueMutation.appendAll when the current index is
+        // unresolved. The existing queue is preserved and the batch is appended, never dropped.
+        val existing = listOf(song(10), song(20), song(30))
+        val songs = listOf(song(1), song(2), song(3))
+
+        val result = QueueMutation.appendAll(
+            libraryQueue = existing,
+            playbackOrder = listOf(0, 1, 2),
+            songs = songs,
+        )
+
+        assertEquals(existing + songs, result.playbackQueue)
+        assertEquals(existing.size + songs.size, result.playbackQueue.size)
+    }
+
+    @Test
     fun `bulk queue actions preserve duplicate tracks`() {
         val duplicate = song(1)
         val songs = listOf(duplicate, song(2), duplicate)

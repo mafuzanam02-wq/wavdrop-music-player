@@ -93,11 +93,19 @@ class PlayerControllerSessionHardeningTest {
     }
 
     @Test
-    fun `startup and reconnect restore paths share one claim`() {
-        val claim = PlaybackSessionRestoreClaim()
+    fun `hydrated results allow caller to apply autoplay policy`() {
+        assertTrue(playerHydrationAllowsPlay(PlayerHydrationResult.Hydrated))
+        assertTrue(playerHydrationAllowsPlay(PlayerHydrationResult.AlreadyHydrated))
+    }
 
-        assertTrue("first restore path should claim", claim.claim())
-        assertFalse("second restore path must not mutate state", claim.claim())
+    @Test
+    fun `failed or skipped hydration results do not autoplay`() {
+        val noPlayResults = PlayerHydrationResult.entries -
+            setOf(PlayerHydrationResult.Hydrated, PlayerHydrationResult.AlreadyHydrated)
+
+        noPlayResults.forEach { result ->
+            assertFalse("$result must not autoplay", playerHydrationAllowsPlay(result))
+        }
     }
 
     @Test

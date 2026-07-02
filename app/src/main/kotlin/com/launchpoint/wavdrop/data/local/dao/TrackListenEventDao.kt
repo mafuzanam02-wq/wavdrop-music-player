@@ -13,6 +13,9 @@ interface TrackListenEventDao {
     @Insert
     suspend fun insert(event: TrackListenEventEntity)
 
+    @Insert
+    suspend fun insertAll(events: List<TrackListenEventEntity>)
+
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     suspend fun getAllSnapshot(): List<TrackListenEventEntity>
 

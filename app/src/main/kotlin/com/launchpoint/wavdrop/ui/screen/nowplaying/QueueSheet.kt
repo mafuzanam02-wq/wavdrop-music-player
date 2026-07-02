@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -126,9 +126,18 @@ private fun QueueSheetContent(
     onViewStats: (Long) -> Unit,
 ) {
     val currentIndex = state.currentIndex
-    val previousSongs = if (currentIndex > 0) state.queue.take(currentIndex) else emptyList()
+    val previousCount = if (currentIndex > 0) {
+        currentIndex.coerceAtMost(state.queue.size)
+    } else {
+        0
+    }
     val currentSong = state.queue.getOrNull(currentIndex)
-    val upNextSongs = if (currentIndex >= 0) state.queue.drop(currentIndex + 1) else emptyList()
+    val upNextStartIndex = if (currentIndex >= 0) {
+        (currentIndex + 1).coerceAtMost(state.queue.size)
+    } else {
+        state.queue.size
+    }
+    val upNextCount = state.queue.size - upNextStartIndex
 
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -182,8 +191,8 @@ private fun QueueSheetContent(
         val target = upNextItems.firstOrNull { (item, _) ->
             pointerY < item.offset + item.size / 2f
         }?.second ?: upNextItems.last().second
-        val firstIdx = currentIndex + 1
-        val lastIdx = currentIndex + upNextSongs.size
+        val firstIdx = upNextStartIndex
+        val lastIdx = upNextStartIndex + upNextCount - 1
         dragTargetPlaybackIndex = target.coerceIn(firstIdx, lastIdx)
     }
 
@@ -271,15 +280,16 @@ private fun QueueSheetContent(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
         // ── Previously played ─────────────────────────────────────────────────
-        if (previousSongs.isNotEmpty()) {
+        if (previousCount > 0) {
             item {
-                QueueSectionHeader(label = "Previously played · ${previousSongs.size}")
+                QueueSectionHeader(label = "Previously played · $previousCount")
             }
-            itemsIndexed(
-                items = previousSongs,
+            items(
+                count = previousCount,
                 // key = absolute queue index (0..currentIndex-1), always unique
-                key = { index, song -> "previous-${song.id}-$index" },
-            ) { index, song ->
+                key = { index -> "previous-${state.queue[index].id}-$index" },
+            ) { index ->
+                val song = state.queue[index]
                 QueuePreviousItemRow(
                     song = song,
                     onJump = { onJumpToItem(index) },
@@ -288,7 +298,7 @@ private fun QueueSheetContent(
                     onViewStats = { onViewStats(song.id) },
                     onShare = { onShareSong(song) },
                 )
-                if (index < previousSongs.lastIndex) {
+                if (index < previousCount - 1) {
                     HorizontalDivider(
                         modifier = Modifier.padding(start = 56.dp),
                         thickness = 0.5.dp,
@@ -303,7 +313,7 @@ private fun QueueSheetContent(
             item {
                 QueueSectionHeader(
                     label = "Playing now",
-                    modifier = Modifier.padding(top = if (previousSongs.isNotEmpty()) 8.dp else 0.dp),
+                    modifier = Modifier.padding(top = if (previousCount > 0) 8.dp else 0.dp),
                 )
             }
             item {
@@ -312,21 +322,25 @@ private fun QueueSheetContent(
         }
 
         // ── Up next ───────────────────────────────────────────────────────────
-        if (upNextSongs.isNotEmpty()) {
+        if (upNextCount > 0) {
             item {
                 QueueSectionHeader(
-                    label = "Up next · ${upNextSongs.size}",
+                    label = "Up next · $upNextCount",
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            itemsIndexed(
-                items = upNextSongs,
+            items(
+                count = upNextCount,
                 // key = absolute queue index (currentIndex+1..), always unique
-                key = { index, song -> "up-next-${song.id}-${currentIndex + 1 + index}" },
-            ) { index, song ->
-                val playbackIndex = currentIndex + 1 + index
+                key = { index ->
+                    val playbackIndex = upNextStartIndex + index
+                    "up-next-${state.queue[playbackIndex].id}-$playbackIndex"
+                },
+            ) { index ->
+                val playbackIndex = upNextStartIndex + index
+                val song = state.queue[playbackIndex]
                 val isFirstUpNext = index == 0
-                val isLastUpNext = index == upNextSongs.lastIndex
+                val isLastUpNext = index == upNextCount - 1
                 val isDragging = draggingPlaybackIndex == playbackIndex
                 SwipeableQueueItemRow(
                     song = song,
@@ -379,11 +393,12 @@ private fun QueueSheetContent(
                         stopAutoScroll()
                         isDragActive = false
                         val from             = dragStartPlaybackIndex
-                        val firstIdx         = currentIndex + 1
+                        val firstIdx         = upNextStartIndex
                         val fromLocalIdx     = from - firstIdx
                         val to = dragTargetPlaybackIndex
                         val draggedStillExists = draggingSongId != null &&
-                            upNextSongs.getOrNull(fromLocalIdx)?.id == draggingSongId
+                            fromLocalIdx in 0 until upNextCount &&
+                            state.queue.getOrNull(from)?.id == draggingSongId
                         if (draggedStillExists && fromLocalIdx >= 0 && to != null && to != from) {
                             onMoveItemTo(from, to)
                         }
@@ -393,11 +408,12 @@ private fun QueueSheetContent(
                         stopAutoScroll()
                         isDragActive = false
                         val from         = dragStartPlaybackIndex
-                        val firstIdx     = currentIndex + 1
+                        val firstIdx     = upNextStartIndex
                         val fromLocalIdx = from - firstIdx
                         val to = dragTargetPlaybackIndex
                         val draggedStillExists = draggingSongId != null &&
-                            upNextSongs.getOrNull(fromLocalIdx)?.id == draggingSongId
+                            fromLocalIdx in 0 until upNextCount &&
+                            state.queue.getOrNull(from)?.id == draggingSongId
                         if (draggedStillExists && fromLocalIdx >= 0 && to != null && to != from) {
                             onMoveItemTo(from, to)
                         }

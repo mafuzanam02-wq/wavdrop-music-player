@@ -43,6 +43,23 @@ internal object SearchPlaybackPlanner {
         )
     }
 
+    /**
+     * Deterministic fallback for [preserveQueue] when the current playback index cannot be
+     * resolved but an active [playbackQueue] exists. The tapped [song] becomes the current item
+     * and the entire existing queue is preserved as up-next (with any duplicate of [song] removed),
+     * so nothing is destroyed. Falls back to a single-song queue only when the active queue is empty.
+     */
+    fun preserveQueueFallback(
+        playbackQueue: List<Song>,
+        song: Song,
+    ): SearchPlaybackPlan {
+        if (playbackQueue.isEmpty()) {
+            return SearchPlaybackPlan(queue = listOf(song), currentIndex = 0)
+        }
+        val continuation = playbackQueue.filterNot { it.id == song.id }
+        return SearchPlaybackPlan(queue = listOf(song) + continuation, currentIndex = 0)
+    }
+
     fun replaceQueue(
         searchContext: List<Song>,
         song: Song,

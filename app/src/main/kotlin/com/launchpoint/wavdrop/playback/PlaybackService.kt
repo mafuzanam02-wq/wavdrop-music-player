@@ -118,6 +118,10 @@ class PlaybackService : MediaSessionService() {
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
             thresholdProvider = { previousRestartThresholdMs },
+            scope = serviceScope,
+            playerController = playerController,
+            songsProvider = { songRepository.songs.first() },
+            logResume = ::logResume,
         )
 
         if (BuildConfig.DEBUG) {
@@ -447,9 +451,35 @@ class PlaybackService : MediaSessionService() {
     private class PreviousBehaviorPlayer(
         player: Player,
         private val thresholdProvider: () -> Long,
+        private val scope: CoroutineScope,
+        private val playerController: PlayerController,
+        private val songsProvider: suspend () -> List<com.launchpoint.wavdrop.data.model.Song>,
+        private val logResume: (String) -> Unit,
     ) : ForwardingPlayer(player) {
 
         override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
+
+        override fun play() {
+            if (currentMediaItem != null || mediaItemCount > 0) {
+                playForwarded()
+                return
+            }
+            scope.launch {
+                val result = runCatching {
+                    playerController.ensurePlayerHydratedFromSession(
+                        availableSongs = songsProvider(),
+                        operation = "explicit_play",
+                    )
+                }.getOrElse { error ->
+                    logResume("explicit PLAY hydration failed: ${error::class.simpleName} ${error.message}")
+                    PlayerHydrationResult.MediaSetupFailed
+                }
+                logResume("explicit PLAY hydration result=$result")
+                if (playerHydrationAllowsPlay(result)) {
+                    playForwarded()
+                }
+            }
+        }
 
         override fun seekToPrevious() {
             val thresholdMs = thresholdProvider()
@@ -460,6 +490,10 @@ class PlaybackService : MediaSessionService() {
             } else {
                 seekTo(0L)
             }
+        }
+
+        private fun playForwarded() {
+            super.play()
         }
     }
 

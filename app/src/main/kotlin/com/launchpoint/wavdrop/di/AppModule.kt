@@ -16,10 +16,12 @@ import com.launchpoint.wavdrop.data.local.MIGRATION_8_9
 import com.launchpoint.wavdrop.data.local.MIGRATION_9_10
 import com.launchpoint.wavdrop.data.local.MIGRATION_10_11
 import com.launchpoint.wavdrop.data.local.MIGRATION_11_12
+import com.launchpoint.wavdrop.data.local.MIGRATION_12_13
 import com.launchpoint.wavdrop.data.local.WAVDROP_DATABASE_NAME
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.dao.PendingBackupExtensionDao
 import com.launchpoint.wavdrop.data.local.dao.PendingTrackDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
@@ -57,6 +59,7 @@ object AppModule {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -89,4 +92,8 @@ object AppModule {
 
     @Provides
     fun provideTrackIdentityDao(db: WavdropDatabase): TrackIdentityDao = db.trackIdentityDao()
+
+    @Provides
+    fun providePendingBackupExtensionDao(db: WavdropDatabase): PendingBackupExtensionDao =
+        db.pendingBackupExtensionDao()
 }

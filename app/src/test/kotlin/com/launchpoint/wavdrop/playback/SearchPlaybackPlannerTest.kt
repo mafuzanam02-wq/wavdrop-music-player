@@ -192,6 +192,86 @@ class SearchPlaybackPlannerTest {
     }
 
     @Test
+    fun `preserve with shuffled order makes current previous and keeps shuffled future`() {
+        // Visible shuffled order; current item is `a` at playback index 2. Tapping `x`.
+        val shuffledVisibleOrder = listOf(c, o, a, m, b, n)
+
+        val plan = SearchPlaybackPlanner.preserveQueue(
+            playbackQueue = shuffledVisibleOrder,
+            currentPlaybackIndex = 2,
+            song = x,
+        )!!
+
+        // History (c, o, a) preserved; x becomes current; shuffled future (m, b, n) preserved.
+        assertEquals(listOf(c, o, a, x, m, b, n), plan.queue)
+        assertEquals(3, plan.currentIndex)
+        // Previously-current song `a` is now the item immediately before X (the "previous").
+        assertEquals(a, plan.queue[plan.currentIndex - 1])
+        // The up-next is the shuffled future, not the sorted/library order.
+        assertEquals(listOf(m, b, n), plan.queue.drop(plan.currentIndex + 1))
+    }
+
+    @Test
+    fun `preserve does not reorder to library order under shuffle`() {
+        // Same set of songs but in a shuffled visible order; the result must follow the shuffled
+        // order verbatim, never the ascending library/id order.
+        val shuffledVisibleOrder = listOf(c, o, a, m, b, n)
+
+        val plan = SearchPlaybackPlanner.preserveQueue(
+            playbackQueue = shuffledVisibleOrder,
+            currentPlaybackIndex = 2,
+            song = x,
+        )!!
+
+        val libraryLikeSortedIds = plan.queue.map { it.id }.sorted()
+        assert(plan.queue.map { it.id } != libraryLikeSortedIds) {
+            "preserved queue must retain shuffled order, not collapse to sorted library order"
+        }
+        // The relative order of the pre-existing songs is unchanged by the insertion of X.
+        assertEquals(
+            shuffledVisibleOrder,
+            plan.queue.filterNot { it.id == x.id },
+        )
+    }
+
+    @Test
+    fun `preserve queue fallback keeps existing queue as up-next after tapped song`() {
+        // Simulates the unresolved-current-index case: nothing is destroyed, the whole active
+        // queue is preserved as up-next and the tapped song becomes current.
+        val fallback = SearchPlaybackPlanner.preserveQueueFallback(
+            playbackQueue = listOf(a, b, c),
+            song = x,
+        )
+
+        assertEquals(listOf(x, a, b, c), fallback.queue)
+        assertEquals(0, fallback.currentIndex)
+        assertEquals(x, fallback.queue[fallback.currentIndex])
+    }
+
+    @Test
+    fun `preserve queue fallback removes duplicate of tapped song from continuation`() {
+        val fallback = SearchPlaybackPlanner.preserveQueueFallback(
+            playbackQueue = listOf(a, x, b),
+            song = x,
+        )
+
+        assertEquals(listOf(x, a, b), fallback.queue)
+        assertEquals(0, fallback.currentIndex)
+        assertEquals(1, fallback.queue.count { it.id == x.id })
+    }
+
+    @Test
+    fun `preserve queue fallback yields single-song queue when active queue empty`() {
+        val fallback = SearchPlaybackPlanner.preserveQueueFallback(
+            playbackQueue = emptyList(),
+            song = x,
+        )
+
+        assertEquals(listOf(x), fallback.queue)
+        assertEquals(0, fallback.currentIndex)
+    }
+
+    @Test
     fun `preserve queue allows one-song fallback only when active queue is empty`() {
         val plan = SearchPlaybackPlanner.preserveQueue(
             playbackQueue = emptyList(),

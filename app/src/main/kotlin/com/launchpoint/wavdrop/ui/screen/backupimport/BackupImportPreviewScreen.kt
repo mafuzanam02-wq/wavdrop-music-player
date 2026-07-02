@@ -127,9 +127,9 @@ fun BackupImportPreviewScreen(
                     modifier       = Modifier.padding(innerPadding),
                 )
 
-            BackupImportUiState.Loading ->
+            is BackupImportUiState.Loading ->
                 LoadingContent(
-                    message  = "Reading backup…",
+                    stage    = state.stage,
                     modifier = Modifier.padding(innerPadding),
                 )
 
@@ -140,9 +140,9 @@ fun BackupImportPreviewScreen(
                     modifier         = Modifier.padding(innerPadding),
                 )
 
-            BackupImportUiState.Applying ->
+            is BackupImportUiState.Applying ->
                 LoadingContent(
-                    message  = "Restoring settings…",
+                    stage    = state.stage,
                     modifier = Modifier.padding(innerPadding),
                 )
 
@@ -166,7 +166,7 @@ fun BackupImportPreviewScreen(
 
             BackupImportUiState.ScanningLibrary ->
                 LoadingContent(
-                    message = CleanInstallRecoveryUiText.SCAN_IN_PROGRESS,
+                    stage    = BackupLoadingStage(CleanInstallRecoveryUiText.SCAN_IN_PROGRESS),
                     modifier = Modifier.padding(innerPadding),
                 )
 
@@ -229,16 +229,27 @@ private fun IdleContent(
 // ── Loading (shared for Reading + Applying) ───────────────────────────────────
 
 @Composable
-private fun LoadingContent(message: String, modifier: Modifier = Modifier) {
+private fun LoadingContent(stage: BackupLoadingStage, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
             CircularProgressIndicator()
             Spacer(Modifier.height(12.dp))
             Text(
-                text  = message,
+                text  = stage.label,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
             )
+            if (stage.step > 0 && stage.totalSteps > 0) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text  = "Step ${stage.step} of ${stage.totalSteps}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.40f),
+                )
+            }
         }
     }
 }

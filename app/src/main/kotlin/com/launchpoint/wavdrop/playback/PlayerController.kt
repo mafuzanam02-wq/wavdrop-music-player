@@ -38,19 +38,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.LinkedHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
-
-internal class PlaybackSessionRestoreClaim {
-    private var claimed = false
-
-    @Synchronized
-    fun claim(): Boolean {
-        if (claimed) return false
-        claimed = true
-        return true
-    }
-}
 
 internal enum class PlaybackSessionPersistenceAction {
     NONE,
@@ -85,11 +75,50 @@ internal class PlaybackSessionPersistenceGate {
         }
 }
 
+internal fun repeatModeFromPlayerMode(playerRepeatMode: Int): RepeatMode = when (playerRepeatMode) {
+    Player.REPEAT_MODE_ALL -> RepeatMode.ALL
+    Player.REPEAT_MODE_ONE -> RepeatMode.ONE
+    else                   -> RepeatMode.OFF
+}
+
+/**
+ * Returns the logical repeat mode to adopt when Media3 reports [incoming] while the current
+ * logical mode is [current], or null when no change is required.
+ *
+ * Returning null when the values already match is what prevents an infinite callback loop:
+ * Wavdrop's own writes to controller.repeatMode fire onRepeatModeChanged with a value that
+ * already equals the logical field, so nothing is re-applied or re-emitted.
+ */
+internal fun externalRepeatModeUpdate(current: RepeatMode, incoming: RepeatMode): RepeatMode? =
+    incoming.takeIf { it != current }
+
+/**
+ * Wavdrop keeps Media3 shuffle permanently OFF and models shuffle logically via playbackOrder.
+ * Whenever an external surface enables native shuffle it must be reasserted false. Reasserting
+ * false re-enters the callback with `false`, which returns false here — so there is no loop.
+ */
+internal fun shouldReassertMediaShuffleOff(shuffleModeEnabled: Boolean): Boolean = shuffleModeEnabled
+
 internal fun shouldSkipStartupSessionRestore(
     isExternalPlayback: Boolean,
     hasLogicalQueue: Boolean,
     hasMediaQueue: Boolean,
 ): Boolean = isExternalPlayback || hasLogicalQueue || hasMediaQueue
+
+enum class PlayerHydrationResult {
+    AlreadyHydrated,
+    Hydrated,
+    NoSavedSession,
+    FilteredBySettings,
+    NoResolvableSong,
+    ControllerUnavailable,
+    MediaSetupFailed,
+    SkippedActiveQueue,
+}
+
+internal fun playerHydrationAllowsPlay(result: PlayerHydrationResult): Boolean =
+    result == PlayerHydrationResult.Hydrated ||
+        result == PlayerHydrationResult.AlreadyHydrated
 
 internal const val PLAYBACK_POSITION_CHECKPOINT_INTERVAL_MS = 10_000L
 internal const val PLAYBACK_POSITION_CHECKPOINT_MIN_DELTA_MS = 5_000L
@@ -174,8 +203,10 @@ class PlayerController @Inject constructor(
         const val TAG = "WavStats-PC"
         const val SEARCH_TAG = "WavdropSearchPlayback"
         const val RESUME_TAG = "WavdropResume"
+        const val QUEUE_PERF_TAG = "WavdropQueuePerf"
         const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
         const val BLUETOOTH_RESUME_DEBOUNCE_MS = 1_500L
+        const val MEDIA_ITEM_CACHE_MAX_SIZE = 12_288
 
         const val DEBUG_STATS = false
     }
@@ -196,7 +227,7 @@ class PlayerController @Inject constructor(
     private var pendingExternalPlaybackRequest: ExternalPlaybackRequest? = null
     private var pendingRestorePositionMs: Long? = null
     private var pendingPreserveSearchPlan: SearchPlaybackPlan? = null
-    private val sessionRestoreClaim = PlaybackSessionRestoreClaim()
+    private val sessionHydrationMutex = Mutex()
     private val sessionPersistenceGate = PlaybackSessionPersistenceGate()
     private var isExternalPlayback = false
 
@@ -207,6 +238,14 @@ class PlayerController @Inject constructor(
     private var playbackOrder: List<Int> = emptyList()
     private var playbackQueue: List<Song> = emptyList()
     private var playerQueueNeedsSync: Boolean = false
+    private val mediaItemCache = object : LinkedHashMap<MediaItemCacheKey, MediaItem>(
+        MEDIA_ITEM_CACHE_MAX_SIZE,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<MediaItemCacheKey, MediaItem>?): Boolean =
+            size > MEDIA_ITEM_CACHE_MAX_SIZE
+    }
     private var shuffleEnabled: Boolean = false
     private var repeatMode: RepeatMode = RepeatMode.OFF
     private var previousButtonBehavior: PreviousButtonBehavior = PreviousButtonBehavior.DEFAULT
@@ -344,6 +383,36 @@ class PlayerController @Inject constructor(
             Log.w(TAG, "[playerError] code=${error.errorCodeName} message=${error.message}")
             recoverFromCurrentPlaybackError()
         }
+
+        override fun onRepeatModeChanged(newRepeatMode: Int) {
+            // Repeat is mirrored to Media3 and does not mutate queue structure, so an external
+            // surface (system UI, Android Auto, Bluetooth/AVRCP) that changes the player's repeat
+            // mode directly is accepted and synchronised back into the logical source of truth.
+            //
+            // Loop safety: when Wavdrop itself sets controller.repeatMode (toggle, hydration, play
+            // paths) the mapped value already equals `repeatMode`, so this early-returns without
+            // re-touching the player or re-emitting.
+            val mapped = repeatModeFromPlayerMode(newRepeatMode)
+            val updated = externalRepeatModeUpdate(current = repeatMode, incoming = mapped) ?: return
+            if (DEBUG_STATS) Log.d(TAG, "[repeatModeChanged] external -> $updated (was $repeatMode)")
+            repeatMode = updated
+            _nowPlayingState.update { it.copy(repeatMode = updated) }
+            saveSessionAsync()
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            // Wavdrop models shuffle logically via `playbackOrder` and deliberately keeps Media3
+            // shuffle OFF (see the many `shuffleModeEnabled = false` assignments). Native shuffle
+            // must never become a second source of truth, so if any external surface flips Media3
+            // shuffle on, reassert false and leave the logical `shuffleEnabled` untouched.
+            //
+            // Loop safety: setting it back to false re-enters this callback with
+            // shuffleModeEnabled=false, which falls through the guard and does nothing.
+            if (shouldReassertMediaShuffleOff(shuffleModeEnabled)) {
+                if (DEBUG_STATS) Log.d(TAG, "[shuffleModeChanged] external shuffle=true -> reasserting false")
+                mediaController?.shuffleModeEnabled = false
+            }
+        }
     }
 
     /**
@@ -465,10 +534,11 @@ class PlayerController @Inject constructor(
                             controller.repeatMode = repeatMode.toPlayerRepeatMode()
                             controller.shuffleModeEnabled = false
                             // Load ExoPlayer with playbackQueue (shuffle order).
-                            controller.setMediaItems(
-                                playbackQueue.map { it.toMediaItem() },
-                                startPlaybackIndex,
-                                restorePos,
+                            controller.setMeasuredMediaItems(
+                                operation = "deferred_restore",
+                                songs = playbackQueue,
+                                startIndex = startPlaybackIndex,
+                                positionMs = restorePos,
                             )
                             controller.prepare()
                             syncNowPlayingState()
@@ -491,22 +561,28 @@ class PlayerController @Inject constructor(
         val currentMediaSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
         val effectiveQueueBefore = playbackQueue
         val resolvedCurrentIndex = currentPlaybackIndex()
-        val plan = SearchPlaybackPlanner.preserveQueue(
+        val resolvedPlan = SearchPlaybackPlanner.preserveQueue(
             playbackQueue = effectiveQueueBefore,
             currentPlaybackIndex = resolvedCurrentIndex,
             song = song,
         )
-        if (plan == null) {
-            if (BuildConfig.DEBUG) {
-                Log.d(
-                    SEARCH_TAG,
-                    "preserve search tap ignored: unresolved current index " +
-                        "mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
-                        "stateSongId=${_nowPlayingState.value.song?.id} " +
-                        "before=${effectiveQueueBefore.queueLogSummary()} tap=${song.id}",
-                )
-            }
-            return
+        // When the current index is unresolvable, fall back to a plan that keeps the whole existing
+        // queue as up-next after the tapped song instead of silently ignoring the tap.
+        val usedFallback = resolvedPlan == null
+        val plan = resolvedPlan
+            ?: SearchPlaybackPlanner.preserveQueueFallback(
+                playbackQueue = effectiveQueueBefore,
+                song = song,
+            )
+        if (usedFallback && BuildConfig.DEBUG) {
+            Log.d(
+                SEARCH_TAG,
+                "preserve search tap fallback: unresolved current index " +
+                    "mediaIndex=$currentMediaIndex mediaSongId=$currentMediaSongId " +
+                    "stateSongId=${_nowPlayingState.value.song?.id} " +
+                    "before=${effectiveQueueBefore.queueLogSummary()} tap=${song.id} " +
+                    "after=${plan.queue.queueLogSummary(currentSongId = song.id)}",
+            )
         }
         if (BuildConfig.DEBUG) {
             Log.d(
@@ -526,6 +602,13 @@ class PlayerController @Inject constructor(
         startSong: Song,
     ) {
         isExternalPlayback = false
+        // Shuffle-truthfulness invariant: `plan.queue` is derived from the current visible
+        // `playbackQueue` (see playSearchResultPreservingQueue), so when shuffle is ON it already
+        // carries the active shuffled order. We adopt it verbatim as the new libraryQueue with an
+        // identity playbackOrder — this preserves the visible/played order exactly (history + X +
+        // shuffled future) and keeps `shuffleEnabled` truthful. Do NOT rebuild from the original
+        // library order here: that would flatten the shuffled continuation to sequential while the
+        // shuffle button still reads ON.
         libraryQueue = plan.queue.ifEmpty { listOf(startSong) }
         playbackOrder = libraryQueue.indices.toList()
         playbackQueue = libraryQueue
@@ -569,7 +652,12 @@ class PlayerController @Inject constructor(
 
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
-        controller.setMediaItems(playbackQueue.map { it.toMediaItem() }, playbackStartIndex, 0L)
+        controller.setMeasuredMediaItems(
+            operation = "preserve_search",
+            songs = playbackQueue,
+            startIndex = playbackStartIndex,
+            positionMs = 0L,
+        )
         controller.prepare()
         controller.play()
         saveSessionAsync()
@@ -607,7 +695,12 @@ class PlayerController @Inject constructor(
 
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
-        controller.setMediaItems(listOf(song.toMediaItem()), 0, 0L)
+        controller.setMeasuredMediaItems(
+            operation = "external_uri",
+            songs = listOf(song),
+            startIndex = 0,
+            positionMs = 0L,
+        )
         controller.prepare()
         syncNowPlayingState(notifyStats = false)
         controller.play()
@@ -671,7 +764,12 @@ class PlayerController @Inject constructor(
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         // ExoPlayer is loaded with playbackQueue so auto-transitions follow shuffle order.
-        controller.setMediaItems(playbackQueue.map { it.toMediaItem() }, playbackStartIndex, 0L)
+        controller.setMeasuredMediaItems(
+            operation = "play_from_queue",
+            songs = playbackQueue,
+            startIndex = playbackStartIndex,
+            positionMs = 0L,
+        )
         controller.prepare()
         syncNowPlayingState()
         controller.play()
@@ -688,9 +786,19 @@ class PlayerController @Inject constructor(
     }
 
     fun playNext(song: Song) {
-        val currentPlaybackIndex = currentPlaybackIndex()
-        if (libraryQueue.isEmpty() || currentPlaybackIndex == null) {
+        if (libraryQueue.isEmpty()) {
             playSong(song)
+            return
+        }
+        val currentPlaybackIndex = currentPlaybackIndex()
+        if (currentPlaybackIndex == null) {
+            // Active queue but the current index is temporarily unresolvable. Do NOT fall back to
+            // playSong here: that would replace the whole queue. Append instead so the item is
+            // still queued and the existing queue is preserved.
+            if (BuildConfig.DEBUG) {
+                Log.d(SEARCH_TAG, "playNext: unresolved current index, appending song=${song.id}")
+            }
+            appendAllPreservingQueue(listOf(song))
             return
         }
 
@@ -706,7 +814,7 @@ class PlayerController @Inject constructor(
 
         // addMediaItem at playback position — no setMediaItems/prepare/play needed.
         if (!playerQueueNeedsSync) {
-            mediaController?.addMediaItem(insertPlaybackIndex, song.toMediaItem())
+            mediaController?.addMediaItem(insertPlaybackIndex, song.toCachedMediaItem())
         }
 
         _nowPlayingState.update {
@@ -717,7 +825,10 @@ class PlayerController @Inject constructor(
 
     /** Inserts [songs] immediately after the current item in their original order. */
     fun playAllNext(songs: List<Song>) {
-        val hasActiveCurrentItem = libraryQueue.isNotEmpty() && currentPlaybackIndex() != null
+        // A non-empty library queue counts as active even if the current index is momentarily
+        // unresolvable: insertAllAfterCurrent then appends rather than dropping the batch. Only a
+        // genuinely empty queue starts a new one.
+        val hasActiveCurrentItem = libraryQueue.isNotEmpty()
         when (val plan = planPlayAllNext(songs, hasActiveCurrentItem)) {
             PlayAllNextPlan.NoOp -> Unit
             is PlayAllNextPlan.StartQueue ->
@@ -746,7 +857,10 @@ class PlayerController @Inject constructor(
         playbackQueue = result.playbackQueue
 
         if (!playerQueueNeedsSync) {
-            mediaController?.addMediaItems(songs.map { it.toMediaItem() })
+            mediaController?.addMeasuredMediaItems(
+                operation = "add_all_to_queue",
+                songs = songs,
+            )
         }
 
         _nowPlayingState.update {
@@ -773,7 +887,7 @@ class PlayerController @Inject constructor(
 
         // Appends to the end of the ExoPlayer playlist (playbackQueue).
         if (!playerQueueNeedsSync) {
-            mediaController?.addMediaItem(song.toMediaItem())
+            mediaController?.addMediaItem(song.toCachedMediaItem())
         }
 
         _nowPlayingState.update {
@@ -789,21 +903,32 @@ class PlayerController @Inject constructor(
 
     private fun insertAllAfterCurrent(songs: List<Song>) {
         if (songs.isEmpty()) return
-        val currentPlaybackIndex = currentPlaybackIndex() ?: return
-        val result = QueueMutation.insertAllAfterCurrent(
-            libraryQueue = libraryQueue,
-            playbackOrder = playbackOrder,
-            currentPlaybackIndex = currentPlaybackIndex,
-            songs = songs,
-        ) ?: return
+        val currentPlaybackIndex = currentPlaybackIndex()
+        val result = currentPlaybackIndex?.let {
+            QueueMutation.insertAllAfterCurrent(
+                libraryQueue = libraryQueue,
+                playbackOrder = playbackOrder,
+                currentPlaybackIndex = it,
+                songs = songs,
+            )
+        }
+        if (currentPlaybackIndex == null || result == null) {
+            // Current index unresolved — append the batch instead of silently dropping it.
+            if (BuildConfig.DEBUG) {
+                Log.d(SEARCH_TAG, "playAllNext: unresolved current index, appending ${songs.size} songs")
+            }
+            appendAllPreservingQueue(songs)
+            return
+        }
         libraryQueue = result.libraryQueue
         playbackOrder = result.playbackOrder
         playbackQueue = result.playbackQueue
 
         if (!playerQueueNeedsSync) {
-            mediaController?.addMediaItems(
-                currentPlaybackIndex + 1,
-                songs.map { it.toMediaItem() },
+            mediaController?.addMeasuredMediaItems(
+                operation = "play_all_next",
+                index = currentPlaybackIndex + 1,
+                songs = songs,
             )
         }
 
@@ -811,6 +936,43 @@ class PlayerController @Inject constructor(
             it.copy(
                 queue = playbackQueue,
                 currentIndex = currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
+    }
+
+    /**
+     * Appends [songs] to the end of the queue without needing a resolvable current index.
+     * Used as the deterministic fallback for Play Next / Play All Next when the current playback
+     * index cannot be resolved: appending preserves the existing queue and the user's intent to
+     * enqueue, instead of silently dropping the items or destroying the queue.
+     */
+    private fun appendAllPreservingQueue(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        val result = QueueMutation.appendAll(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            songs = songs,
+        )
+        libraryQueue = result.libraryQueue
+        playbackOrder = result.playbackOrder
+        playbackQueue = result.playbackQueue
+
+        if (!playerQueueNeedsSync) {
+            mediaController?.addMeasuredMediaItems(
+                operation = "append_fallback",
+                songs = songs,
+            )
+        }
+
+        // Appending to the end does not move the current item, so keep the existing current index
+        // (coerced defensively into the new bounds).
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = it.currentIndex.takeIf { idx -> idx in playbackQueue.indices } ?: 0,
                 shuffleEnabled = shuffleEnabled,
                 repeatMode = repeatMode,
             )
@@ -1136,29 +1298,54 @@ class PlayerController @Inject constructor(
     }
 
     fun restoreSessionIfNeeded(availableSongs: List<Song>) {
-        if (hasActiveSessionForStartupRestore()) return
-        if (!sessionRestoreClaim.claim()) return
         scope.launch {
-            val rawSnapshot = sessionRepository.load() ?: return@launch
+            val result = ensurePlayerHydratedFromSession(
+                availableSongs = availableSongs,
+                operation = "startup_restore",
+            )
+            if (BuildConfig.DEBUG) Log.d(RESUME_TAG, "restoreSessionIfNeeded: result=$result")
+        }
+    }
+
+    suspend fun ensurePlayerHydratedFromSession(
+        availableSongs: List<Song>,
+        operation: String = "session_hydration",
+    ): PlayerHydrationResult {
+        if (hasActivePlaybackQueue()) return PlayerHydrationResult.AlreadyHydrated
+
+        return sessionHydrationMutex.withLock {
+            if (hasActivePlaybackQueue()) return@withLock PlayerHydrationResult.AlreadyHydrated
+
+            val controller = awaitMediaController()
+                ?: return@withLock PlayerHydrationResult.ControllerUnavailable
+            val rawSnapshot = sessionRepository.load()
+                ?: return@withLock PlayerHydrationResult.NoSavedSession
             val resumeSettings = resumeBehaviorRepository.settings.first()
             val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, resumeSettings)
-                ?: return@launch
+                ?: return@withLock PlayerHydrationResult.FilteredBySettings
 
             val idSet = availableSongs.associateBy { it.id }
             val mappedQueue = snapshot.queueSongIds.mapNotNull { idSet[it] }
             val startSong = PlaybackSessionRules.resolveStartSong(
                 sessionSongId = snapshot.currentSongId,
-                sessionIndex  = PlaybackSessionRules.clampIndex(snapshot.currentIndex, mappedQueue.size),
-                mappedQueue   = mappedQueue,
-            ) ?: return@launch
+                sessionIndex = PlaybackSessionRules.clampIndex(snapshot.currentIndex, mappedQueue.size),
+                mappedQueue = mappedQueue,
+            ) ?: return@withLock PlayerHydrationResult.NoResolvableSong
 
-            // A queue may have become active while DataStore and settings were loading.
-            // Never replace a user-started or reconnect-restored Media3 session.
-            if (hasActiveSessionForStartupRestore()) return@launch
+            if (hasActivePlaybackQueue()) return@withLock PlayerHydrationResult.SkippedActiveQueue
 
-            libraryQueue   = mappedQueue
+            val previousLibraryQueue = libraryQueue
+            val previousPlaybackOrder = playbackOrder
+            val previousPlaybackQueue = playbackQueue
+            val previousShuffleEnabled = shuffleEnabled
+            val previousRepeatMode = repeatMode
+            val previousPlayerQueueNeedsSync = playerQueueNeedsSync
+            val previousLastKnownPositionMs = lastKnownPositionMs
+            val previousState = _nowPlayingState.value
+
+            libraryQueue = mappedQueue
             shuffleEnabled = snapshot.shuffleEnabled
-            repeatMode     = snapshot.repeatMode
+            repeatMode = snapshot.repeatMode
             val startLibraryIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0)
             restorePlaybackQueue(
                 currentQueueIndex = startLibraryIndex,
@@ -1166,35 +1353,48 @@ class PlayerController @Inject constructor(
             )
             playerQueueNeedsSync = false
             val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex).takeIf { it >= 0 } ?: 0
+            lastKnownPositionMs = -1L
 
             _nowPlayingState.update {
                 it.copy(
-                    song               = startSong,
-                    queue              = playbackQueue,
-                    currentIndex       = startPlaybackIndex,
-                    shuffleEnabled     = shuffleEnabled,
-                    repeatMode         = repeatMode,
-                    positionMs         = snapshot.positionMs,
-                    durationMs         = startSong.duration.coerceAtLeast(0L),
+                    song = startSong,
+                    queue = playbackQueue,
+                    currentIndex = startPlaybackIndex,
+                    shuffleEnabled = shuffleEnabled,
+                    repeatMode = repeatMode,
+                    positionMs = snapshot.positionMs,
+                    durationMs = startSong.duration.coerceAtLeast(0L),
                     bufferedPositionMs = 0L,
-                    isSeekable         = false,
+                    isSeekable = false,
                 )
             }
 
-            val controller = mediaController
-            if (controller == null) {
-                pendingRestorePositionMs = snapshot.positionMs
-                return@launch
-            }
-            controller.repeatMode         = repeatMode.toPlayerRepeatMode()
-            controller.shuffleModeEnabled = false
-            controller.setMediaItems(
-                playbackQueue.map { it.toMediaItem() },
-                startPlaybackIndex,
-                snapshot.positionMs,
+            runCatching {
+                controller.repeatMode = repeatMode.toPlayerRepeatMode()
+                controller.shuffleModeEnabled = false
+                controller.setMeasuredMediaItems(
+                    operation = operation,
+                    songs = playbackQueue,
+                    startIndex = startPlaybackIndex,
+                    positionMs = snapshot.positionMs,
+                )
+                controller.prepare()
+                syncNowPlayingState()
+            }.fold(
+                onSuccess = { PlayerHydrationResult.Hydrated },
+                onFailure = { error ->
+                    Log.w(TAG, "Session hydration failed during $operation", error)
+                    libraryQueue = previousLibraryQueue
+                    playbackOrder = previousPlaybackOrder
+                    playbackQueue = previousPlaybackQueue
+                    shuffleEnabled = previousShuffleEnabled
+                    repeatMode = previousRepeatMode
+                    playerQueueNeedsSync = previousPlayerQueueNeedsSync
+                    lastKnownPositionMs = previousLastKnownPositionMs
+                    _nowPlayingState.value = previousState
+                    PlayerHydrationResult.MediaSetupFailed
+                },
             )
-            controller.prepare()
-            syncNowPlayingState()
         }
     }
 
@@ -1338,8 +1538,12 @@ class PlayerController @Inject constructor(
             ResumeAttemptResult.STARTED
         } else {
             logResume("attemptBluetoothResume: no active queue — loading session cold")
-            val coldResult = resumeSessionCold(availableSongs, settings)
-            if (coldResult) ResumeAttemptResult.STARTED else ResumeAttemptResult.SKIPPED_NO_SESSION
+            when (resumeSessionCold(availableSongs)) {
+                PlayerHydrationResult.Hydrated,
+                PlayerHydrationResult.AlreadyHydrated -> ResumeAttemptResult.STARTED
+                PlayerHydrationResult.ControllerUnavailable -> ResumeAttemptResult.SKIPPED_CONTROLLER_NOT_READY
+                else -> ResumeAttemptResult.SKIPPED_NO_SESSION
+            }
         }
     }
 
@@ -1404,93 +1608,41 @@ class PlayerController @Inject constructor(
             ResumeAttemptResult.STARTED
         } else {
             logResume("attemptWiredResume: no active queue — loading session cold")
-            val coldResult = resumeSessionCold(availableSongs, settings)
-            if (coldResult) ResumeAttemptResult.STARTED else ResumeAttemptResult.SKIPPED_NO_SESSION
+            when (resumeSessionCold(availableSongs)) {
+                PlayerHydrationResult.Hydrated,
+                PlayerHydrationResult.AlreadyHydrated -> ResumeAttemptResult.STARTED
+                PlayerHydrationResult.ControllerUnavailable -> ResumeAttemptResult.SKIPPED_CONTROLLER_NOT_READY
+                else -> ResumeAttemptResult.SKIPPED_NO_SESSION
+            }
         }
     }
 
     /**
-     * Loads the persisted session from DataStore, hydrates the queue, and calls play().
-     * Returns true if playback was started, false if the session could not be resolved.
+     * Hydrates the persisted session if needed, then applies reconnect autoplay policy.
+     * The hydration primitive itself never calls play and never consumes retry eligibility.
      */
     private suspend fun resumeSessionCold(
         availableSongs: List<Song>,
-        settings: ResumeBehaviorSettings,
-    ): Boolean {
-        if (!sessionRestoreClaim.claim()) {
-            logResume("resumeSessionCold: session restore already claimed, aborting")
-            return false
-        }
-        logResume("resumeSessionCold: availableSongs=${availableSongs.size}")
-        val rawSnapshot = sessionRepository.load()
-        if (rawSnapshot == null) {
-            logResume("resumeSessionCold: no saved session, aborting")
-            return false
-        }
-        val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, settings)
-        if (snapshot == null) {
-            logResume("resumeSessionCold: session filtered out by resume rules, aborting")
-            return false
-        }
-
-        val idSet = availableSongs.associateBy { it.id }
-        val mappedQueue = snapshot.queueSongIds.mapNotNull { idSet[it] }
-        val startSong = PlaybackSessionRules.resolveStartSong(
-            sessionSongId = snapshot.currentSongId,
-            sessionIndex  = PlaybackSessionRules.clampIndex(snapshot.currentIndex, mappedQueue.size),
-            mappedQueue   = mappedQueue,
+    ): PlayerHydrationResult {
+        val result = ensurePlayerHydratedFromSession(
+            availableSongs = availableSongs,
+            operation = "cold_resume",
         )
-        if (startSong == null) {
-            logResume("resumeSessionCold: could not resolve start song (mappedQueue=${mappedQueue.size}), aborting")
-            return false
+        if (!playerHydrationAllowsPlay(result)) {
+            logResume("resumeSessionCold: hydration result=$result")
+            return result
         }
-        logResume("resumeSessionCold: songId=${startSong.id} queueSize=${mappedQueue.size} positionMs=${snapshot.positionMs}")
-
-        libraryQueue   = mappedQueue
-        shuffleEnabled = snapshot.shuffleEnabled
-        repeatMode     = snapshot.repeatMode
-        val startLibraryIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0)
-        restorePlaybackQueue(
-            currentQueueIndex = startLibraryIndex,
-            savedPlaybackOrder = snapshot.playbackOrder,
-        )
-        playerQueueNeedsSync = false
-        val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex).takeIf { it >= 0 } ?: 0
-
-        lastKnownPositionMs = -1L
-        statsTracker.onSongSelected(startSong)
-
-        _nowPlayingState.update {
-            it.copy(
-                song               = startSong,
-                queue              = playbackQueue,
-                currentIndex       = startPlaybackIndex,
-                shuffleEnabled     = shuffleEnabled,
-                repeatMode         = repeatMode,
-                positionMs         = snapshot.positionMs,
-                durationMs         = startSong.duration.coerceAtLeast(0L),
-                bufferedPositionMs = 0L,
-                isSeekable         = false,
-            )
-        }
-
         val controller = mediaController
         if (controller == null) {
             logResume("resumeSessionCold: mediaController null at play step, aborting")
-            return false
+            return PlayerHydrationResult.ControllerUnavailable
         }
-        logResume("resumeSessionCold: loading ExoPlayer and calling play()")
-        controller.repeatMode         = repeatMode.toPlayerRepeatMode()
-        controller.shuffleModeEnabled = false
-        controller.setMediaItems(
-            playbackQueue.map { it.toMediaItem() },
-            startPlaybackIndex,
-            snapshot.positionMs,
-        )
-        controller.prepare()
-        syncNowPlayingState()
+        _nowPlayingState.value.song?.let { song ->
+            if (!isExternalPlayback) statsTracker.onSongSelected(song)
+        }
+        logResume("resumeSessionCold: hydration result=$result, calling play()")
         controller.play()
-        return true
+        return result
     }
 
     /**
@@ -1511,7 +1663,7 @@ class PlayerController @Inject constructor(
     ) {
         if (controller.currentMediaItem == null || controller.mediaItemCount == 0) {
             logResume("$source: hot resume has no media item (mediaItemCount=${controller.mediaItemCount}) — falling back to cold resume")
-            resumeSessionCold(availableSongs, settings)
+            resumeSessionCold(availableSongs)
             return
         }
 
@@ -1665,6 +1817,9 @@ class PlayerController @Inject constructor(
         )
     }
 
+    private fun hasActivePlaybackQueue(): Boolean =
+        hasActiveSessionForStartupRestore()
+
     fun release() {
         stopPositionTicker()
         sleepTimerJob?.cancel()
@@ -1673,6 +1828,7 @@ class PlayerController @Inject constructor(
         mediaController?.removeListener(playerListener)
         mediaController?.release()
         mediaController = null
+        mediaItemCache.clear()
     }
 
     private fun startPositionTicker() {
@@ -1827,10 +1983,11 @@ class PlayerController @Inject constructor(
         playWhenReady: Boolean,
     ) {
         playerQueueNeedsSync = false
-        controller.setMediaItems(
-            playbackQueue.map { it.toMediaItem() },
-            playbackIndex,
-            positionMs,
+        controller.setMeasuredMediaItems(
+            operation = "sync_player_queue",
+            songs = playbackQueue,
+            startIndex = playbackIndex,
+            positionMs = positionMs,
         )
         controller.prepare()
         if (playWhenReady) controller.play()
@@ -2013,16 +2170,195 @@ class PlayerController @Inject constructor(
         return playbackQueue.indexOfFirst { it.id == currentSongId }.takeIf { it >= 0 }
     }
 
-    private fun Song.toMediaItem(): MediaItem =
+    private fun MediaController.setMeasuredMediaItems(
+        operation: String,
+        songs: List<Song>,
+        startIndex: Int,
+        positionMs: Long,
+    ) {
+        if (!BuildConfig.DEBUG) {
+            setMediaItems(materializeMediaItems(songs).mediaItems, startIndex, positionMs)
+            return
+        }
+        val totalStartedAtMs = SystemClock.elapsedRealtime()
+        val materializationStartedAtMs = SystemClock.elapsedRealtime()
+        val materialization = materializeMediaItems(songs)
+        val materializationElapsedMs = SystemClock.elapsedRealtime() - materializationStartedAtMs
+        val mutationStartedAtMs = SystemClock.elapsedRealtime()
+        setMediaItems(materialization.mediaItems, startIndex, positionMs)
+        val mutationElapsedMs = SystemClock.elapsedRealtime() - mutationStartedAtMs
+        logQueuePerf(
+            operation = operation,
+            inputQueueSize = songs.size,
+            mediaItemCount = materialization.mediaItems.size,
+            currentIndex = startIndex,
+            materializationElapsedMs = materializationElapsedMs,
+            mutationElapsedMs = mutationElapsedMs,
+            totalElapsedMs = SystemClock.elapsedRealtime() - totalStartedAtMs,
+            cacheHits = materialization.cacheHits,
+            cacheMisses = materialization.cacheMisses,
+            cacheSize = mediaItemCache.size,
+        )
+    }
+
+    private fun MediaController.addMeasuredMediaItems(
+        operation: String,
+        songs: List<Song>,
+    ) {
+        if (!BuildConfig.DEBUG) {
+            addMediaItems(materializeMediaItems(songs).mediaItems)
+            return
+        }
+        val totalStartedAtMs = SystemClock.elapsedRealtime()
+        val materializationStartedAtMs = SystemClock.elapsedRealtime()
+        val materialization = materializeMediaItems(songs)
+        val materializationElapsedMs = SystemClock.elapsedRealtime() - materializationStartedAtMs
+        val mutationStartedAtMs = SystemClock.elapsedRealtime()
+        addMediaItems(materialization.mediaItems)
+        val mutationElapsedMs = SystemClock.elapsedRealtime() - mutationStartedAtMs
+        logQueuePerf(
+            operation = operation,
+            inputQueueSize = songs.size,
+            mediaItemCount = materialization.mediaItems.size,
+            currentIndex = currentMediaItemIndex,
+            materializationElapsedMs = materializationElapsedMs,
+            mutationElapsedMs = mutationElapsedMs,
+            totalElapsedMs = SystemClock.elapsedRealtime() - totalStartedAtMs,
+            cacheHits = materialization.cacheHits,
+            cacheMisses = materialization.cacheMisses,
+            cacheSize = mediaItemCache.size,
+        )
+    }
+
+    private fun MediaController.addMeasuredMediaItems(
+        operation: String,
+        index: Int,
+        songs: List<Song>,
+    ) {
+        if (!BuildConfig.DEBUG) {
+            addMediaItems(index, materializeMediaItems(songs).mediaItems)
+            return
+        }
+        val totalStartedAtMs = SystemClock.elapsedRealtime()
+        val materializationStartedAtMs = SystemClock.elapsedRealtime()
+        val materialization = materializeMediaItems(songs)
+        val materializationElapsedMs = SystemClock.elapsedRealtime() - materializationStartedAtMs
+        val mutationStartedAtMs = SystemClock.elapsedRealtime()
+        addMediaItems(index, materialization.mediaItems)
+        val mutationElapsedMs = SystemClock.elapsedRealtime() - mutationStartedAtMs
+        logQueuePerf(
+            operation = operation,
+            inputQueueSize = songs.size,
+            mediaItemCount = materialization.mediaItems.size,
+            currentIndex = index,
+            materializationElapsedMs = materializationElapsedMs,
+            mutationElapsedMs = mutationElapsedMs,
+            totalElapsedMs = SystemClock.elapsedRealtime() - totalStartedAtMs,
+            cacheHits = materialization.cacheHits,
+            cacheMisses = materialization.cacheMisses,
+            cacheSize = mediaItemCache.size,
+        )
+    }
+
+    private fun logQueuePerf(
+        operation: String,
+        inputQueueSize: Int,
+        mediaItemCount: Int,
+        currentIndex: Int,
+        materializationElapsedMs: Long,
+        mutationElapsedMs: Long,
+        totalElapsedMs: Long,
+        cacheHits: Int,
+        cacheMisses: Int,
+        cacheSize: Int,
+    ) {
+        if (!BuildConfig.DEBUG) return
+        Log.d(
+            QUEUE_PERF_TAG,
+            "operation=$operation inputQueueSize=$inputQueueSize " +
+                "mediaItemCount=$mediaItemCount currentIndex=$currentIndex " +
+                "materializationMs=$materializationElapsedMs " +
+                "media3MutationMs=$mutationElapsedMs totalMs=$totalElapsedMs " +
+                "cacheHits=$cacheHits cacheMisses=$cacheMisses cacheSize=$cacheSize",
+        )
+    }
+
+    private data class MediaItemCacheKey(
+        val id: Long,
+        val uri: String,
+        val title: String,
+        val artist: String,
+        val album: String,
+        val duration: Long,
+        val albumId: Long,
+    )
+
+    private data class MediaItemMaterialization(
+        val mediaItems: List<MediaItem>,
+        val cacheHits: Int,
+        val cacheMisses: Int,
+    )
+
+    private fun materializeMediaItems(songs: List<Song>): MediaItemMaterialization {
+        if (songs.isEmpty()) {
+            return MediaItemMaterialization(
+                mediaItems = emptyList(),
+                cacheHits = 0,
+                cacheMisses = 0,
+            )
+        }
+
+        var cacheHits = 0
+        var cacheMisses = 0
+        val mediaItems = ArrayList<MediaItem>(songs.size)
+        val pendingCacheWrites = LinkedHashMap<MediaItemCacheKey, MediaItem>()
+        songs.forEach { song ->
+            val key = song.mediaItemCacheKey()
+            val cached = mediaItemCache[key] ?: pendingCacheWrites[key]
+            if (cached != null) {
+                cacheHits += 1
+                mediaItems += cached
+            } else {
+                cacheMisses += 1
+                val mediaItem = song.toMediaItem(key)
+                pendingCacheWrites[key] = mediaItem
+                mediaItems += mediaItem
+            }
+        }
+        pendingCacheWrites.forEach { (key, mediaItem) ->
+            mediaItemCache[key] = mediaItem
+        }
+        return MediaItemMaterialization(
+            mediaItems = mediaItems,
+            cacheHits = cacheHits,
+            cacheMisses = cacheMisses,
+        )
+    }
+
+    private fun Song.toCachedMediaItem(): MediaItem =
+        materializeMediaItems(listOf(this)).mediaItems.first()
+
+    private fun Song.mediaItemCacheKey(): MediaItemCacheKey =
+        MediaItemCacheKey(
+            id = id,
+            uri = uri,
+            title = displayTitle,
+            artist = displayArtist,
+            album = album,
+            duration = duration,
+            albumId = albumId,
+        )
+
+    private fun Song.toMediaItem(key: MediaItemCacheKey): MediaItem =
         MediaItem.Builder()
-            .setUri(uri)
-            .setMediaId(id.toString())
+            .setUri(key.uri)
+            .setMediaId(key.id.toString())
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle(displayTitle)
-                    .setArtist(displayArtist)
-                    .setAlbumTitle(album)
-                    .setExtras(Bundle().apply { putLong("wavdrop_album_id", albumId) })
+                    .setTitle(key.title)
+                    .setArtist(key.artist)
+                    .setAlbumTitle(key.album)
+                    .setExtras(Bundle().apply { putLong("wavdrop_album_id", key.albumId) })
                     .build()
             )
             .build()

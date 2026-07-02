@@ -31,9 +31,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+data class BackupLoadingStage(
+    val label: String,
+    val step: Int = 0,
+    val totalSteps: Int = 0,
+)
+
 sealed interface BackupImportUiState {
-    data object Idle    : BackupImportUiState
-    data object Loading : BackupImportUiState
+    data object Idle : BackupImportUiState
+    data class Loading(val stage: BackupLoadingStage) : BackupImportUiState
 
     data class Preview(
         val format               : String,
@@ -91,7 +97,7 @@ sealed interface BackupImportUiState {
         val requiresFolderReselection: Boolean = false,
     ) : BackupImportUiState
 
-    data object Applying : BackupImportUiState
+    data class Applying(val stage: BackupLoadingStage) : BackupImportUiState
     data object AwaitingMusicPermission : BackupImportUiState
     data object AwaitingFolderSelection : BackupImportUiState
     data object ScanningLibrary : BackupImportUiState
@@ -130,7 +136,7 @@ class BackupImportPreviewViewModel @Inject constructor(
     // ── File loading ──────────────────────────────────────────────────────────
 
     fun processFile(uri: Uri) {
-        _uiState.value = BackupImportUiState.Loading
+        _uiState.value = BackupImportUiState.Loading(BackupLoadingStage("Reading backup file…"))
         viewModelScope.launch {
             _uiState.value = runCatching { readAndParse(uri) }.getOrElse { e ->
                 BackupImportUiState.Error(e.message ?: "Failed to read backup file.")
@@ -139,6 +145,10 @@ class BackupImportPreviewViewModel @Inject constructor(
     }
 
     private suspend fun readAndParse(uri: Uri): BackupImportUiState {
+        fun setStage(label: String, step: Int = 0, total: Int = 0) {
+            _uiState.value = BackupImportUiState.Loading(BackupLoadingStage(label, step, total))
+        }
+
         // Gate by file name first: only .json files belong here. Files without a
         // usable display name fall through to the content sniff below.
         val displayName = ImportFileValidation.displayName(context, uri)
@@ -161,9 +171,11 @@ class BackupImportPreviewViewModel @Inject constructor(
         }
 
         if (DesktopWavdropBackupParser.isDesktopBackupContent(content)) {
+            setStage("Parsing backup data…", 2, 3)
             val result = DesktopWavdropBackupParser.parse(content)
             val backup = result.backup
                 ?: return BackupImportUiState.Error(userFacingParseError(result.error))
+            setStage("Matching tracks to your library…", 3, 3)
             val plan = withContext(Dispatchers.IO) {
                 desktopImportRepository.previewImport(backup)
             }
@@ -190,6 +202,7 @@ class BackupImportPreviewViewModel @Inject constructor(
             )
         }
 
+        setStage("Parsing backup data…")
         val result = withContext(Dispatchers.Default) { WavdropBackupParser.parse(content) }
         val backup = result.backup
             ?: return BackupImportUiState.Error(userFacingParseError(result.error))
@@ -204,7 +217,18 @@ class BackupImportPreviewViewModel @Inject constructor(
             null
         }
 
-        val mergePreview = withContext(Dispatchers.IO) { importRepository.previewMerge(backup) }
+        val hasDesktopOverlay = backup.desktopOverlay != null
+        val totalSteps = if (hasDesktopOverlay) 6 else 5
+        setStage("Verifying backup integrity…", 3, totalSteps)
+
+        var nextRepoStep = 4
+        val mergePreview = withContext(Dispatchers.IO) {
+            importRepository.previewMerge(backup) { label ->
+                _uiState.value = BackupImportUiState.Loading(
+                    BackupLoadingStage(label, nextRepoStep++, totalSteps)
+                )
+            }
+        }
         val cleanInstallRecovery = withContext(Dispatchers.IO) {
             importRepository.isCleanInstallRecoveryCandidate()
         }
@@ -302,7 +326,7 @@ class BackupImportPreviewViewModel @Inject constructor(
     fun applyImport() {
         val preview = _uiState.value as? BackupImportUiState.Preview ?: return
 
-        _uiState.value = BackupImportUiState.Applying
+        _uiState.value = BackupImportUiState.Applying(BackupLoadingStage("Checking what changed…"))
         viewModelScope.launch {
             if (preview.cleanInstallRecovery && parsedDesktopBackup == null) {
                 beginCleanInstallRecovery()
@@ -372,7 +396,11 @@ class BackupImportPreviewViewModel @Inject constructor(
         _uiState.value = runCatching {
             withContext(Dispatchers.IO) {
                 parsedDesktopBackup?.let { desktopImportRepository.applyImport(it) }
-                    ?: parsedBackup?.let { importRepository.applyImport(it) }
+                    ?: parsedBackup?.let { backup ->
+                        importRepository.applyImport(backup) { label ->
+                            _uiState.value = BackupImportUiState.Applying(BackupLoadingStage(label))
+                        }
+                    }
                     ?: error("No parsed backup to import.")
             }
         }.fold(
