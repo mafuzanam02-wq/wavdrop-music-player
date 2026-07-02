@@ -2,15 +2,18 @@ package com.launchpoint.wavdrop.data.backup
 
 import android.util.Log
 import androidx.room.withTransaction
+import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.dao.PendingBackupExtensionDao
 import com.launchpoint.wavdrop.data.local.dao.PendingTrackDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
 import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
+import com.launchpoint.wavdrop.data.local.entity.PendingBackupExtensionEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingLyricsOverrideEntity
@@ -35,6 +38,7 @@ class WavdropBackupImportRepository @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val trackListenEventDao: TrackListenEventDao,
     private val pendingTrackDao: PendingTrackDao,
+    private val pendingBackupExtensionDao: PendingBackupExtensionDao,
 ) {
     /**
      * Recovery is offered only when no local listening/history state exists. The songs table
@@ -48,7 +52,15 @@ class WavdropBackupImportRepository @Inject constructor(
             playlistDao.getAllPlaylistsSnapshot().isEmpty() &&
             pendingTrackDao.getAllOriginKeys().isEmpty()
 
-    suspend fun applyImport(backup: WavdropBackup): WavdropBackupImportApplyResult {
+    suspend fun applyImport(
+        backup: WavdropBackup,
+        onStage: ((String) -> Unit)? = null,
+    ): WavdropBackupImportApplyResult {
+        val t0 = System.currentTimeMillis()
+        if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "start rootStats=${backup.trackStats.size} " +
+            "rootEvents=${backup.listenEvents.size} overlay=${backup.desktopOverlay != null} " +
+            "overlayStats=${backup.desktopOverlay?.trackStats?.size ?: 0} " +
+            "overlayEvents=${backup.desktopOverlay?.listenEvents?.size ?: 0}")
         val dbResult = db.withTransaction {
 
             // ── 1. Load all snapshots upfront (single read pass inside the transaction)
@@ -79,22 +91,10 @@ class WavdropBackupImportRepository @Inject constructor(
             // authoritative mergeability recheck (§8.2 apply-side).
             val currentStatsById = trackStatsDao.getAllStatsSnapshot().associateBy { it.songId }
 
-            val existingEventFingerprints: Set<String> = if (backup.listenEvents.isNotEmpty()) {
-                val minMs = backup.listenEvents.minOf { it.occurredAt }
-                val maxMs = backup.listenEvents.maxOf { it.occurredAt }
-                trackListenEventDao.getInRangeSnapshot(minMs, maxMs)
-                    .mapTo(HashSet()) { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
-            } else {
-                emptySet()
-            }
-
-            val existingEventIds: Set<String> = if (backup.listenEvents.isNotEmpty()) {
-                val minMs = backup.listenEvents.minOf { it.occurredAt }
-                val maxMs = backup.listenEvents.maxOf { it.occurredAt }
-                trackListenEventDao.getEventIdsInRangeSnapshot(minMs, maxMs).toHashSet()
-            } else {
-                emptySet()
-            }
+            // Union root + overlay event timestamps; same logic as previewMerge via the shared helper.
+            val dedupSnapshot = loadEventDedupSnapshot(backup)
+            val existingEventFingerprints = dedupSnapshot.fingerprints
+            val existingEventIds = dedupSnapshot.eventIds
 
             val existingBaselines = importBaselineDao.getAllImportBaselinesSnapshot()
 
@@ -122,6 +122,64 @@ class WavdropBackupImportRepository @Inject constructor(
                 emptyMap()
             }
 
+            val backupSongById = backup.songs.associateBy { it.id }
+            val linkResolver = BackupSongLinkResolver(currentSongs, resolvedBySongId)
+
+            var eventPlan = ListenEventRestorePlanner.Plan(
+                toInsert = emptyList(), eventsInBackup = 0, restored = 0,
+                skippedDuplicate = 0, skippedUnmatched = 0, skippedInvalidType = 0,
+                currentMonthRestored = 0,
+            )
+
+            if (backup.listenEvents.isNotEmpty()) {
+                val tEvents = System.currentTimeMillis()
+                eventPlan = ListenEventRestorePlanner.plan(
+                    events = backup.listenEvents,
+                    resolveSong = { event ->
+                        linkResolver.resolve(
+                            backupSongId = event.songId,
+                            contentUri = event.contentUri,
+                            title = event.title,
+                            artist = event.artist,
+                            album = event.album,
+                        )
+                    },
+                    existingFingerprints = existingEventFingerprints,
+                    existingEventIds = existingEventIds,
+                )
+                if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "root event plan done " +
+                    "toInsert=${eventPlan.toInsert.size} skipped=${eventPlan.skippedTotal} " +
+                    "planMs=${System.currentTimeMillis() - tEvents}ms t=${System.currentTimeMillis() - t0}ms")
+            }
+
+            val eventFingerprintsAfterAndroidRestore = existingEventFingerprints.toMutableSet().apply {
+                eventPlan.toInsert.forEach {
+                    add("${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}")
+                }
+            }
+            val eventIdsAfterAndroidRestore = existingEventIds.toMutableSet().apply {
+                eventPlan.toInsert.mapNotNullTo(this) { it.eventId }
+            }
+
+            val precomputedDesktopOverlayPlan = backup.desktopOverlay?.let { overlay ->
+                val tOverlay = System.currentTimeMillis()
+                DesktopOverlayRestorePlanner.plan(
+                    overlay = overlay,
+                    currentSongs = currentSongs,
+                    currentStats = currentStatsById,
+                    existingEventFingerprints = eventFingerprintsAfterAndroidRestore,
+                    existingEventIds = eventIdsAfterAndroidRestore,
+                ).also { plan ->
+                    if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "overlay planner done " +
+                        "matched=${plan.matchedStats.size} unresolved=${plan.unresolvedStats.size} " +
+                        "toInsert=${plan.eventPlan.toInsert.size} " +
+                        "planMs=${System.currentTimeMillis() - tOverlay}ms t=${System.currentTimeMillis() - t0}ms")
+                }
+            }
+            if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "snapshots loaded songs=${currentSongs.size} " +
+                "stats=${currentStatsById.size} fingerprints=${existingEventFingerprints.size} " +
+                "eventIds=${existingEventIds.size} t=${System.currentTimeMillis() - t0}ms")
+
             // ── 2. Authoritative no-op recheck — same shared analyzer used at preview.
             //       Runs inside the transaction so it sees the current committed state;
             //       preview state may have been stale if playback or scans ran between
@@ -136,7 +194,10 @@ class WavdropBackupImportRepository @Inject constructor(
                 existingBaselines            = existingBaselines,
                 existingLyrics               = existingLyricsMap,
                 existingPlaylists            = existingPlaylistsMap,
+                precomputedDesktopOverlayPlan = precomputedDesktopOverlayPlan,
             )
+            if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "mergeCheck done " +
+                "hasMergeable=${mergeCheck.hasMergeableData} t=${System.currentTimeMillis() - t0}ms")
             if (!mergeCheck.hasMergeableData) {
                 // No persistent state change is possible. Return without any writes.
                 return@withTransaction WavdropBackupImportApplyResult(
@@ -148,6 +209,7 @@ class WavdropBackupImportRepository @Inject constructor(
             }
 
             // ── 3. Proceed with writes ────────────────────────────────────────────────
+            onStage?.invoke("Restoring song matches…")
             val importedAt        = System.currentTimeMillis()
             var statsUpdated      = 0
             var statsRetainedLocal = 0
@@ -203,11 +265,13 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
+            if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "stats merged matched=${match.matchedRows.size} " +
+                "updated=$statsUpdated t=${System.currentTimeMillis() - t0}ms")
+
             // Shared resolver for song-linked rows (lyrics, playlist entries, events):
             // tier-matched songId first, then URI, then tags only when unambiguous.
-            val backupSongById = backup.songs.associateBy { it.id }
-            val linkResolver   = BackupSongLinkResolver(currentSongs, resolvedBySongId)
 
+            onStage?.invoke("Restoring lyrics…")
             // Lyrics overrides restore — use the pre-loaded snapshot to avoid N per-song queries.
             var lyricsRestored  = 0
             var lyricsUnmatched = 0
@@ -242,6 +306,10 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
+            if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "lyrics restored=$lyricsRestored " +
+                "unmatched=$lyricsUnmatched t=${System.currentTimeMillis() - t0}ms")
+
+            onStage?.invoke("Restoring playlists…")
             // Playlist restore
             var playlistsRestored        = 0
             var playlistSongsRestored    = 0
@@ -279,13 +347,15 @@ class WavdropBackupImportRepository @Inject constructor(
                     nextPosition    = playlistDao.getMaxPosition(playlistId) + 1,
                 )
 
-                for (entry in entryPlan.toAdd) {
-                    playlistDao.insertSong(
-                        PlaylistSongEntity(
-                            playlistId = playlistId,
-                            songId     = entry.songId,
-                            position   = entry.position,
-                        )
+                if (entryPlan.toAdd.isNotEmpty()) {
+                    playlistDao.insertSongs(
+                        entryPlan.toAdd.map { entry ->
+                            PlaylistSongEntity(
+                                playlistId = playlistId,
+                                songId     = entry.songId,
+                                position   = entry.position,
+                            )
+                        }
                     )
                 }
                 playlistSongsRestored    += entryPlan.restored
@@ -303,42 +373,79 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
-            // Listen event restore. Song identity goes through the same tier matcher
-            // as stats so events follow their track to the new song id after a
-            // reinstall — exact-tag-only matching previously dropped most events,
-            // leaving Monthly Reports/Wrapped empty even though aggregates restored.
-            var eventPlan = ListenEventRestorePlanner.Plan(
-                toInsert = emptyList(), eventsInBackup = 0, restored = 0,
-                skippedDuplicate = 0, skippedUnmatched = 0, skippedInvalidType = 0,
-                currentMonthRestored = 0,
-            )
+            if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "playlists restored=$playlistsRestored " +
+                "songs=$playlistSongsRestored t=${System.currentTimeMillis() - t0}ms")
 
-            if (backup.listenEvents.isNotEmpty()) {
-                eventPlan = ListenEventRestorePlanner.plan(
-                    events = backup.listenEvents,
-                    // Tier-matched songId, then URI, then tags-only-if-unique — the
-                    // tags fallback covers old backups whose songs array lacks this
-                    // track, without guessing between duplicate-tag songs.
-                    resolveSong = { event ->
-                        linkResolver.resolve(
-                            backupSongId = event.songId,
-                            contentUri   = event.contentUri,
-                            title        = event.title,
-                            artist       = event.artist,
-                            album        = event.album,
-                        )
-                    },
-                    existingFingerprints = existingEventFingerprints,
-                    existingEventIds     = existingEventIds,
-                )
-
-                for (entity in eventPlan.toInsert) {
-                    trackListenEventDao.insert(entity)
-                }
+            onStage?.invoke("Restoring listening history…")
+            if (eventPlan.toInsert.isNotEmpty()) {
+                trackListenEventDao.insertAll(eventPlan.toInsert)
+                if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "event insertAll done " +
+                    "count=${eventPlan.toInsert.size} t=${System.currentTimeMillis() - t0}ms")
             }
             val eventsRestored = eventPlan.restored
             val eventsSkipped  = eventPlan.skippedTotal
 
+            var desktopOverlayStatsUpdated = 0
+            var desktopOverlayFavoritesRestored = 0
+            var desktopOverlayEventsRestored = 0
+            var desktopOverlayEventsSkipped = 0
+            var desktopOverlayEventsSkippedDuplicate = 0
+            var desktopOverlayEventsSkippedUnmatched = 0
+            var desktopOverlayCurrentMonthEventsRestored = 0
+            var desktopOverlayUnmatchedTracks = 0
+            var desktopOverlayFavoritesInBackup = 0
+            var desktopOverlayFavoritesUnmatched = 0
+
+            backup.desktopOverlay?.let { overlay ->
+                onStage?.invoke("Restoring Desktop activity…")
+                desktopOverlayFavoritesInBackup = overlay.trackStats.count { it.favorite }
+                pendingBackupExtensionDao.upsert(
+                    PendingBackupExtensionEntity(
+                        rootName = DESKTOP_OVERLAY_ROOT,
+                        rawJson = overlay.rawJson,
+                        importedAt = importedAt,
+                    )
+                )
+                // Reuse the stats snapshot already loaded at the top of the transaction.
+                // currentStatsById reflects the state before Android stats were merged,
+                // which is acceptable for the reporting counters (statsWillIncrease /
+                // favoriteWillApply) — actual DB writes are always max-merge idempotent.
+                val overlayPlan = requireNotNull(precomputedDesktopOverlayPlan)
+                for (row in overlayPlan.matchedStats) {
+                    trackStatsDao.insertIfAbsent(
+                        TrackStatsEntity(songId = row.song.id, contentUri = row.song.uri)
+                    )
+                    trackStatsDao.mergeMaxStats(
+                        songId = row.song.id,
+                        importedPlayCount = row.stats.playCount,
+                        importedSkipCount = row.stats.skipCount,
+                        importedListeningTimeMs = row.stats.totalListeningTimeMs,
+                        importedLastPlayedAt = row.stats.lastPlayedAt,
+                        importedLastListenedAt = row.stats.lastListenedAt,
+                    )
+                    if (row.statsWillIncrease) desktopOverlayStatsUpdated++
+                    if (row.stats.favorite) {
+                        trackStatsDao.setFavorite(row.song.id, true)
+                        if (row.favoriteWillApply) desktopOverlayFavoritesRestored++
+                    }
+                }
+                if (overlayPlan.eventPlan.toInsert.isNotEmpty()) {
+                    trackListenEventDao.insertAll(overlayPlan.eventPlan.toInsert)
+                    if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "overlay event insertAll done " +
+                        "count=${overlayPlan.eventPlan.toInsert.size} t=${System.currentTimeMillis() - t0}ms")
+                }
+                desktopOverlayEventsRestored = overlayPlan.eventPlan.restored
+                desktopOverlayEventsSkipped = overlayPlan.eventPlan.skippedTotal
+                desktopOverlayEventsSkippedDuplicate = overlayPlan.eventPlan.skippedDuplicate
+                desktopOverlayEventsSkippedUnmatched = overlayPlan.eventPlan.skippedUnmatched
+                desktopOverlayCurrentMonthEventsRestored = overlayPlan.eventPlan.currentMonthRestored
+                desktopOverlayUnmatchedTracks = overlayPlan.unresolvedStats.size
+                desktopOverlayFavoritesUnmatched =
+                    overlayPlan.unresolvedStats.count { it.favorite }
+            }
+
+            onStage?.invoke("Restoring import baselines…")
+            if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "events done t=${System.currentTimeMillis() - t0}ms")
             // Import baseline restore. Baselines track what previous BlackPlayer
             // imports contributed; without them, a future re-import reports inflated
             // "plays imported" numbers (stored stats stay correct via MAX-merge).
@@ -353,6 +460,9 @@ class WavdropBackupImportRepository @Inject constructor(
                 importBaselineDao.upsertBaseline(entity)
             }
 
+            onStage?.invoke("Finishing import…")
+            if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "baselines restored=${baselinePlan.restored} " +
+                "t=${System.currentTimeMillis() - t0}ms")
             // ── Quarantine: preserve unmatched backup history ─────────────────────────
             val fp = QuarantinePlanner.backupFingerprint(backup)
             val quarantinePlan = QuarantinePlanner.plan(
@@ -460,34 +570,40 @@ class WavdropBackupImportRepository @Inject constructor(
 
             WavdropBackupImportApplyResult(
                 matchedTracks         = match.matchedRows.size,
-                unmatchedTracks       = match.unmatchedCount,
+                unmatchedTracks       = match.unmatchedCount + desktopOverlayUnmatchedTracks,
                 matchDiagnostics      = match.diagnostics,
-                statsUpdated          = statsUpdated,
+                statsUpdated          = statsUpdated + desktopOverlayStatsUpdated,
                 statsRetainedLocal    = statsRetainedLocal,
                 lyricsRestored        = lyricsRestored,
                 lyricsInBackup        = backup.lyricsOverrides.size,
                 lyricsUnmatched       = lyricsUnmatched,
-                favoritesRestored     = favoritesRestored,
-                favoritesInBackup     = favoritesInBackup,
-                favoritesUnmatched    = favoritesInBackup - matchedFavorites,
+                favoritesRestored     = favoritesRestored + desktopOverlayFavoritesRestored,
+                favoritesInBackup     = favoritesInBackup + desktopOverlayFavoritesInBackup,
+                favoritesUnmatched    = favoritesInBackup - matchedFavorites +
+                    desktopOverlayFavoritesUnmatched,
                 playlistsRestored     = playlistsRestored,
                 playlistsInBackup     = backup.playlists.size,
                 playlistSongsRestored = playlistSongsRestored,
                 playlistEntriesInBackup  = backup.playlists.sumOf { it.songs.size },
                 playlistEntriesUnmatched = playlistEntriesUnmatched,
                 playlistRestoreSummaries = playlistSummaries,
-                eventsRestored        = eventsRestored,
+                eventsRestored        = eventsRestored + desktopOverlayEventsRestored,
                 baselinesRestored     = baselinePlan.restored,
-                eventsSkipped         = eventsSkipped,
-                eventsSkippedDuplicate        = eventPlan.skippedDuplicate,
-                eventsSkippedUnmatched        = eventPlan.skippedUnmatched,
-                currentMonthEventsRestored    = eventPlan.currentMonthRestored,
+                eventsSkipped         = eventsSkipped + desktopOverlayEventsSkipped,
+                eventsSkippedDuplicate        =
+                    eventPlan.skippedDuplicate + desktopOverlayEventsSkippedDuplicate,
+                eventsSkippedUnmatched        =
+                    eventPlan.skippedUnmatched + desktopOverlayEventsSkippedUnmatched,
+                currentMonthEventsRestored    =
+                    eventPlan.currentMonthRestored + desktopOverlayCurrentMonthEventsRestored,
                 pendingTracksPreserved        = pendingTracksInserted,
                 pendingEventsPreserved        = pendingEventsInserted,
                 pendingPlaylistEntriesPreserved = pendingPlaylistEntriesInserted,
             )
         }
 
+        if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "transaction done isNoOp=${dbResult.isNoOp} " +
+            "totalMs=${System.currentTimeMillis() - t0}ms")
         // No-op result: nothing was written. Return immediately — no diagnostic log,
         // no preferences-skipped decoration; the result flag drives a calm UI state.
         if (dbResult.isNoOp) return dbResult
@@ -542,12 +658,44 @@ class WavdropBackupImportRepository @Inject constructor(
     }
 
     /**
+     * Loads existing event fingerprints and eventIds for the time range spanned by all
+     * events in [backup] — both root listenEvents and desktopOverlay listenEvents.
+     *
+     * Unifying the range in one place ensures [previewMerge] and [applyImport] use
+     * identical dedup sets. Querying with a per-section range (root-only) would miss DB
+     * fingerprints for overlay events whose timestamps fall outside the root-event window,
+     * causing duplicate overlay event insertion on apply.
+     */
+    private suspend fun loadEventDedupSnapshot(backup: WavdropBackup): EventDedupSnapshot {
+        val rootTimes = backup.listenEvents.map { it.occurredAt }
+        val overlayTimes = backup.desktopOverlay?.listenEvents
+            ?.mapNotNull { it.occurredAt.takeIf { t -> t > 0L } }.orEmpty()
+        val allTimes = rootTimes + overlayTimes
+        if (allTimes.isEmpty()) return EventDedupSnapshot(emptySet(), emptySet())
+        val minMs = allTimes.min()
+        val maxMs = allTimes.max()
+        val fingerprints = trackListenEventDao.getInRangeSnapshot(minMs, maxMs)
+            .mapTo(HashSet()) { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
+        val eventIds = trackListenEventDao.getEventIdsInRangeSnapshot(minMs, maxMs).toHashSet()
+        return EventDedupSnapshot(fingerprints, eventIds)
+    }
+
+    /**
      * Read-only preview: queries DB snapshots and delegates to [WavdropMergePreviewAnalyzer]
      * to determine whether the backup contains any data that would actually be written.
      * No data is modified. Called during the preview phase to drive the Apply button and
      * the no-op explanation notice.
      */
-    suspend fun previewMerge(backup: WavdropBackup): WavdropMergePreviewAnalyzer.Result {
+    suspend fun previewMerge(
+        backup: WavdropBackup,
+        onStage: ((String) -> Unit)? = null,
+    ): WavdropMergePreviewAnalyzer.Result {
+        val t0 = System.currentTimeMillis()
+        Log.d(TAG, "previewMerge: start rootStats=${backup.trackStats.size} " +
+            "rootEvents=${backup.listenEvents.size} overlay=${backup.desktopOverlay != null} " +
+            "overlayStats=${backup.desktopOverlay?.trackStats?.size ?: 0} " +
+            "overlayEvents=${backup.desktopOverlay?.listenEvents?.size ?: 0}")
+
         val currentSongs = songDao.getAllSongsSnapshot().map { e ->
             Song(
                 id          = e.id,
@@ -566,23 +714,16 @@ class WavdropBackupImportRepository @Inject constructor(
         }
 
         val existingStats = trackStatsDao.getAllStatsSnapshot().associateBy { it.songId }
+        Log.d(TAG, "previewMerge: snapshots loaded songs=${currentSongs.size} " +
+            "stats=${existingStats.size} t=${System.currentTimeMillis() - t0}ms")
+        onStage?.invoke("Loading your music library…")
 
-        val existingEventFingerprints: Set<String> = if (backup.listenEvents.isNotEmpty()) {
-            val minMs = backup.listenEvents.minOf { it.occurredAt }
-            val maxMs = backup.listenEvents.maxOf { it.occurredAt }
-            trackListenEventDao.getInRangeSnapshot(minMs, maxMs)
-                .mapTo(HashSet()) { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
-        } else {
-            emptySet()
-        }
-
-        val existingEventIds: Set<String> = if (backup.listenEvents.isNotEmpty()) {
-            val minMs = backup.listenEvents.minOf { it.occurredAt }
-            val maxMs = backup.listenEvents.maxOf { it.occurredAt }
-            trackListenEventDao.getEventIdsInRangeSnapshot(minMs, maxMs).toHashSet()
-        } else {
-            emptySet()
-        }
+        val dedupSnapshot = loadEventDedupSnapshot(backup)
+        val existingEventFingerprints = dedupSnapshot.fingerprints
+        val existingEventIds = dedupSnapshot.eventIds
+        Log.d(TAG, "previewMerge: fingerprints loaded count=${existingEventFingerprints.size} " +
+            "eventIds=${existingEventIds.size} t=${System.currentTimeMillis() - t0}ms")
+        onStage?.invoke("Checking listening history…")
 
         val existingBaselines = importBaselineDao.getAllImportBaselinesSnapshot()
 
@@ -611,7 +752,12 @@ class WavdropBackupImportRepository @Inject constructor(
         val existingQuarantineOriginKeys: Set<String> =
             pendingTrackDao.getAllOriginKeys().toHashSet()
 
-        return WavdropMergePreviewAnalyzer.analyze(
+        if (backup.desktopOverlay != null) {
+            onStage?.invoke("Checking Desktop activity…")
+        }
+        Log.d(TAG, "previewMerge: all snapshots ready — calling analyzer " +
+            "t=${System.currentTimeMillis() - t0}ms")
+        val result = WavdropMergePreviewAnalyzer.analyze(
             backup                       = backup,
             currentSongs                 = currentSongs,
             existingQuarantineOriginKeys = existingQuarantineOriginKeys,
@@ -622,6 +768,9 @@ class WavdropBackupImportRepository @Inject constructor(
             existingLyrics               = existingLyrics,
             existingPlaylists            = existingPlaylists,
         )
+        Log.d(TAG, "previewMerge: done hasMergeable=${result.hasMergeableData} " +
+            "t=${System.currentTimeMillis() - t0}ms")
+        return result
     }
 
     /**
@@ -668,4 +817,10 @@ class WavdropBackupImportRepository @Inject constructor(
     }
 }
 
+private data class EventDedupSnapshot(
+    val fingerprints: Set<String>,
+    val eventIds: Set<String>,
+)
+
 private const val TAG = "WavdropRestore"
+private const val APPLY_TAG = "WavdropImportApply"

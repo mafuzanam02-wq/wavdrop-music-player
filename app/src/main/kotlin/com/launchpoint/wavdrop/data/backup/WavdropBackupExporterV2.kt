@@ -57,6 +57,9 @@ object WavdropBackupExporterV2 {
             backup.preferences?.let { put("preferences", platformPreferencesObject(it)) }
             put("playlists", playlistsArray(backup.playlists))
             put("listenEvents", listenEventsArray(backup.listenEvents))
+            backup.desktopOverlay?.rawJson?.let { raw ->
+                put("desktopOverlay", JSONObject(raw))
+            }
         }.toString(2)
     }
 

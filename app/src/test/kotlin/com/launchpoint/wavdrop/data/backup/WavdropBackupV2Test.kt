@@ -927,6 +927,141 @@ class WavdropBackupV2Test {
     }
 
     @Test
+    fun `desktopOverlay is parsed after v2 integrity and excluded from fingerprint`() {
+        val base = JSONObject(v2Json())
+        val integrityBeforeOverlay = base.getJSONObject("integrity").getString("fingerprint")
+        base.put("desktopOverlay", desktopOverlayJson())
+
+        val result = WavdropBackupParser.parse(base.toString(2))
+
+        assertNotNull("Parse failed: ${result.error}", result.backup)
+        assertEquals(BackupIntegrityStatus.VERIFIED, result.integrityStatus)
+        assertEquals(integrityBeforeOverlay, base.getJSONObject("integrity").getString("fingerprint"))
+        assertEquals(1, result.backup!!.desktopOverlay!!.schemaVersion)
+        assertEquals("desktop", result.backup!!.desktopOverlay!!.producerPlatform)
+        assertEquals(integrityBeforeOverlay, WavdropBackupIntegrityV2.fingerprint(result.backup!!))
+    }
+
+    @Test
+    fun `desktopOverlay aliases parse but do not enter v2 integrity`() {
+        val json = JSONObject(v2Json()).apply {
+            put(
+                "desktopOverlay",
+                JSONObject()
+                    .put("schemaVersion", 1)
+                    .put("producer", JSONObject().put("platform", "desktop"))
+                    .put(
+                        "songs",
+                        org.json.JSONArray().put(
+                            JSONObject()
+                                .put("id", "desktop-track-1")
+                                .put("title", "Ghost Song")
+                                .put("artist", "Doors")
+                                .put("album", "Other Voices")
+                                .put("durationMs", 180_000L),
+                        ),
+                    )
+                    .put(
+                        "listenEvents",
+                        org.json.JSONArray().put(
+                            JSONObject()
+                                .put("songId", "desktop-track-1")
+                                .put("occurredAt", 1_782_230_500_000L)
+                                .put("listenedMs", 30_000L)
+                                .put("durationMs", 180_000L),
+                        ),
+                    ),
+            )
+        }
+
+        val result = WavdropBackupParser.parse(json.toString(2))
+
+        assertNotNull("Parse failed: ${result.error}", result.backup)
+        assertEquals("desktop-track-1", result.backup!!.desktopOverlay!!.trackStats.single().desktopTrackId)
+        assertEquals("desktop-track-1", result.backup!!.desktopOverlay!!.listenEvents.single().desktopTrackId)
+        assertEquals("PLAY", result.backup!!.desktopOverlay!!.listenEvents.single().eventType)
+        assertEquals(
+            "wavdrop_desktop_playback",
+            result.backup!!.desktopOverlay!!.listenEvents.single().source,
+        )
+    }
+
+    @Test
+    fun `desktopOverlay raw unknown fields survive re-export without changing integrity`() {
+        val json = JSONObject(v2Json()).apply {
+            put(
+                "desktopOverlay",
+                desktopOverlayJson()
+                    .put("unknownRootField", JSONObject().put("keep", true))
+                    .put(
+                        "trackStats",
+                        org.json.JSONArray().put(
+                            JSONObject()
+                                .put("desktopTrackId", "desktop-track-1")
+                                .put("title", "Ghost Song")
+                                .put("artist", "Doors")
+                                .put("album", "Other Voices")
+                                .put("durationMs", 180_000L)
+                                .put("unknownTrackField", "preserve-me"),
+                        ),
+                    ),
+            )
+        }
+        val originalFingerprint = json.getJSONObject("integrity").getString("fingerprint")
+
+        val parsed = WavdropBackupParser.parse(json.toString(2)).backup!!
+        val exported = JSONObject(WavdropBackupExporterV2.toJson(parsed))
+
+        assertEquals(originalFingerprint, exported.getJSONObject("integrity").getString("fingerprint"))
+        assertTrue(exported.getJSONObject("desktopOverlay").has("unknownRootField"))
+        assertEquals(
+            "preserve-me",
+            exported.getJSONObject("desktopOverlay")
+                .getJSONArray("trackStats")
+                .getJSONObject(0)
+                .getString("unknownTrackField"),
+        )
+    }
+
+    private fun desktopOverlayJson(): JSONObject =
+        JSONObject()
+            .put("schemaVersion", 1)
+            .put("producer", JSONObject().put("platform", "desktop"))
+            .put(
+                "trackStats",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("desktopTrackId", "desktop-track-1")
+                        .put("title", "Ghost Song")
+                        .put("artist", "Doors")
+                        .put("album", "Other Voices")
+                        .put("durationMs", 180_000L)
+                        .put("playCount", 4)
+                        .put("skipCount", 1)
+                        .put("totalListeningTimeMs", 120_000L)
+                        .put("lastPlayedAt", 1_782_230_500_000L)
+                        .put("lastListenedAt", 1_782_230_600_000L)
+                        .put("favorite", true),
+                ),
+            )
+            .put(
+                "listenEvents",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("eventId", "desktop-event-1")
+                        .put("desktopTrackId", "desktop-track-1")
+                        .put("title", "Ghost Song")
+                        .put("artist", "Doors")
+                        .put("album", "Other Voices")
+                        .put("durationMs", 180_000L)
+                        .put("occurredAt", 1_782_230_500_000L)
+                        .put("listenedMs", 30_000L)
+                        .put("eventType", "PLAY")
+                        .put("source", "wavdrop_desktop_playback"),
+                ),
+            )
+
+    @Test
     fun `required capability rejection does not produce capability warnings`() {
         val json = JSONObject(v2Json()).apply {
             put("requiredCapabilities", org.json.JSONArray().put("track_identity_v1"))

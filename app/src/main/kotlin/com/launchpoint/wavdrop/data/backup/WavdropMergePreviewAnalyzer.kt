@@ -55,6 +55,7 @@ object WavdropMergePreviewAnalyzer {
         existingBaselines: List<ImportBaselineEntity>,
         existingLyrics: Map<ExistingLyricsKey, Long>,
         existingPlaylists: Map<String, Set<Long>>,
+        precomputedDesktopOverlayPlan: DesktopOverlayRestorePlan? = null,
     ): Result {
         // Empty backup: nothing at all (no data, no preferences).
         val hasAnyContent = backup.trackStats.isNotEmpty() ||
@@ -62,7 +63,8 @@ object WavdropMergePreviewAnalyzer {
             backup.importBaselines.isNotEmpty() ||
             backup.lyricsOverrides.isNotEmpty() ||
             backup.playlists.isNotEmpty() ||
-            backup.preferences != null
+            backup.preferences != null ||
+            backup.desktopOverlay != null
         if (!hasAnyContent) {
             return noOp("This backup contains no data to import.")
         }
@@ -72,7 +74,8 @@ object WavdropMergePreviewAnalyzer {
             backup.listenEvents.isNotEmpty() ||
             backup.importBaselines.isNotEmpty() ||
             backup.lyricsOverrides.isNotEmpty() ||
-            backup.playlists.isNotEmpty()
+            backup.playlists.isNotEmpty() ||
+            backup.desktopOverlay != null
         if (!hasLibraryData) {
             return noOp(
                 "This backup contains settings, but settings are not changed during a merge. " +
@@ -129,6 +132,31 @@ object WavdropMergePreviewAnalyzer {
                 existingEventIds     = existingEventIds,
             )
             if (plan.restored > 0) return mergeable()
+        }
+
+        backup.desktopOverlay?.let { overlay ->
+            val overlayPlan = precomputedDesktopOverlayPlan ?: run {
+                val planStart = System.currentTimeMillis()
+                android.util.Log.d("WavdropPreview",
+                    "analyze: overlay planner start trackStats=${overlay.trackStats.size} " +
+                        "listenEvents=${overlay.listenEvents.size} currentSongs=${currentSongs.size}")
+                DesktopOverlayRestorePlanner.plan(
+                    overlay = overlay,
+                    currentSongs = currentSongs,
+                    currentStats = existingStats,
+                    existingEventFingerprints = existingEventFingerprints,
+                    existingEventIds = existingEventIds,
+                ).also { plan ->
+                    android.util.Log.d("WavdropPreview",
+                        "analyze: overlay planner done in ${System.currentTimeMillis() - planStart}ms " +
+                            "matched=${plan.matchedStats.size} " +
+                            "unresolved=${plan.unresolvedStats.size} " +
+                            "hasWrites=${plan.hasWrites} hasPreserved=${plan.hasPreservedOverlayRows}")
+                }
+            }
+            if (overlayPlan.hasWrites || overlayPlan.hasPreservedOverlayRows) {
+                return mergeable()
+            }
         }
 
         // ── Import baselines: any new or newer baseline ───────────────────────

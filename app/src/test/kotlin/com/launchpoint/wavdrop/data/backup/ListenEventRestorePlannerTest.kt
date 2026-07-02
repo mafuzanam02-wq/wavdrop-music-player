@@ -149,11 +149,71 @@ class ListenEventRestorePlannerTest {
     }
 
     @Test
-    fun `zero listenedMs is skipped as invalid`() {
-        val plan = planInvalidEvent(event(songId = 1L, occurredAt = epochMs(2026, 6, 5), listenedMs = 0L))
+    fun `play with zero listenedMs is skipped as invalid`() {
+        val plan = planInvalidEvent(
+            event(
+                songId = 1L,
+                occurredAt = epochMs(2026, 6, 5),
+                type = TrackListenEventEntity.TYPE_PLAY,
+                listenedMs = 0L,
+            ),
+        )
 
         assertEquals(0, plan.restored)
         assertEquals(1, plan.skippedInvalidType)
+    }
+
+    @Test
+    fun `skip with zero listenedMs restores`() {
+        val plan = ListenEventRestorePlanner.plan(
+            events = listOf(
+                event(
+                    songId = 1L,
+                    occurredAt = epochMs(2026, 6, 5),
+                    type = TrackListenEventEntity.TYPE_SKIP,
+                    listenedMs = 0L,
+                ),
+            ),
+            resolveSong = { song(7L) },
+            existingFingerprints = emptySet(),
+            nowMs = nowMs,
+            zone = utc,
+        )
+
+        assertEquals(1, plan.restored)
+        assertEquals(TrackListenEventEntity.TYPE_SKIP, plan.toInsert.single().eventType)
+        assertEquals(0L, plan.toInsert.single().listenedMs)
+    }
+
+    @Test
+    fun `reimporting zero listenedMs skip is deduplicated`() {
+        val skip = event(
+            songId = 1L,
+            occurredAt = epochMs(2026, 6, 5),
+            type = TrackListenEventEntity.TYPE_SKIP,
+            listenedMs = 0L,
+        )
+        val first = ListenEventRestorePlanner.plan(
+            events = listOf(skip),
+            resolveSong = { song(7L) },
+            existingFingerprints = emptySet(),
+            nowMs = nowMs,
+            zone = utc,
+        )
+        val existing = first.toInsert
+            .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
+            .toSet()
+        val second = ListenEventRestorePlanner.plan(
+            events = listOf(skip),
+            resolveSong = { song(7L) },
+            existingFingerprints = existing,
+            nowMs = nowMs,
+            zone = utc,
+        )
+
+        assertEquals(1, first.restored)
+        assertEquals(0, second.restored)
+        assertEquals(1, second.skippedDuplicate)
     }
 
     @Test

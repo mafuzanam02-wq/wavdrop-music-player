@@ -84,6 +84,7 @@ class MergePreviewAnalyzerTest {
         currentSongs: List<Song> = emptyList(),
         existingStats: Map<Long, com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity> = emptyMap(),
         existingEventFingerprints: Set<String> = emptySet(),
+        existingEventIds: Set<String> = emptySet(),
         existingBaselines: List<ImportBaselineEntity> = emptyList(),
         existingLyrics: Map<WavdropMergePreviewAnalyzer.ExistingLyricsKey, Long> = emptyMap(),
         existingPlaylists: Map<String, Set<Long>> = emptyMap(),
@@ -94,6 +95,7 @@ class MergePreviewAnalyzerTest {
         existingQuarantineOriginKeys = existingQuarantineOriginKeys,
         existingStats                = existingStats,
         existingEventFingerprints    = existingEventFingerprints,
+        existingEventIds             = existingEventIds,
         existingBaselines            = existingBaselines,
         existingLyrics               = existingLyrics,
         existingPlaylists            = existingPlaylists,
@@ -256,5 +258,178 @@ class MergePreviewAnalyzerTest {
         )
         assertTrue(effect.anyIncreased)
         assertFalse(effect.anyRetainedLocal)
+    }
+
+    // ── desktopOverlay: preview detection ────────────────────────────────────
+
+    private fun overlayEvent(
+        occurredAt: Long = 1_782_230_500_000L,
+        listenedMs: Long = 30_000L,
+        eventType: String = "PLAY",
+    ) = BackupDesktopOverlayListenEvent(
+        eventId        = "desktop-event-1",
+        desktopTrackId = "desktop-track-1",
+        title          = "Ghost Song",
+        artist         = "Doors",
+        album          = "Other Voices",
+        durationMs     = 180_000L,
+        occurredAt     = occurredAt,
+        listenedMs     = listenedMs,
+        eventType      = eventType,
+        source         = "wavdrop_desktop_playback",
+    )
+
+    private fun overlayStat(
+        skipCount: Int = 0,
+        playCount: Int = 0,
+        favorite: Boolean = false,
+    ) = BackupDesktopOverlayTrackStats(
+        desktopTrackId       = "desktop-track-1",
+        title                = "Ghost Song",
+        artist               = "Doors",
+        album                = "Other Voices",
+        durationMs           = 180_000L,
+        playCount            = playCount,
+        skipCount            = skipCount,
+        totalListeningTimeMs = 0L,
+        lastPlayedAt         = 0L,
+        lastListenedAt       = 0L,
+        favorite             = favorite,
+    )
+
+    private fun overlayBackup(
+        stats: List<BackupDesktopOverlayTrackStats> = listOf(overlayStat()),
+        events: List<BackupDesktopOverlayListenEvent> = emptyList(),
+    ) = emptyBackup().copy(
+        desktopOverlay = BackupDesktopOverlay(
+            schemaVersion    = 1,
+            producerPlatform = "desktop",
+            trackStats       = stats,
+            listenEvents     = events,
+            rawJson          = "{}",
+        ),
+    )
+
+    private fun overlayCurrentSong() = song(id = 44L, uri = "content://media/44").copy(
+        title  = "Ghost Song",
+        artist = "Doors",
+        album  = "Other Voices",
+    )
+
+    @Test
+    fun `v2 backup with overlay PLAY event — hasMergeableData true (test-1)`() {
+        val backup = overlayBackup(events = listOf(overlayEvent(listenedMs = 30_000L)))
+        val result = analyze(backup, currentSongs = listOf(overlayCurrentSong()))
+        assertTrue("overlay PLAY event must make backup mergeable", result.hasMergeableData)
+        assertNull(result.noOpReason)
+    }
+
+    @Test
+    fun `v2 backup with overlay SKIP listenedMs=0 event — hasMergeableData true (test-2)`() {
+        val backup = overlayBackup(events = listOf(overlayEvent(listenedMs = 0L, eventType = "SKIP")))
+        val result = analyze(backup, currentSongs = listOf(overlayCurrentSong()))
+        assertTrue("overlay zero-time SKIP must make backup mergeable", result.hasMergeableData)
+        assertNull(result.noOpReason)
+    }
+
+    @Test
+    fun `overlay skipCount higher than local — hasMergeableData true (test-6)`() {
+        val localSong = overlayCurrentSong()
+        val backup = overlayBackup(stats = listOf(overlayStat(skipCount = 100)))
+        val localStats = mapOf(
+            localSong.id to com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity(
+                songId    = localSong.id,
+                contentUri = localSong.uri,
+                skipCount  = 5,
+            ),
+        )
+        val result = analyze(backup, currentSongs = listOf(localSong), existingStats = localStats)
+        assertTrue("overlay skipCount > local must be mergeable", result.hasMergeableData)
+    }
+
+    @Test
+    fun `overlay events all duplicate — hasMergeableData false when nothing else to merge (test-re-import)`() {
+        val localSong = overlayCurrentSong()
+        // Event has a non-null eventId; dedup must use eventId path.
+        val evt = overlayEvent(listenedMs = 30_000L)
+        val existingFp = setOf("${localSong.id}|${evt.occurredAt}|${evt.eventType}|${evt.listenedMs}")
+        val existingIds = setOfNotNull(evt.eventId)   // "desktop-event-1"
+        // Stat values equal to local — no increase.
+        val localStats = mapOf(
+            localSong.id to com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity(
+                songId    = localSong.id,
+                contentUri = localSong.uri,
+                skipCount  = 0,
+                playCount  = 0,
+            ),
+        )
+        val backup = overlayBackup(events = listOf(evt))
+        val result = analyze(
+            backup                    = backup,
+            currentSongs              = listOf(localSong),
+            existingStats             = localStats,
+            existingEventFingerprints = existingFp,
+            existingEventIds          = existingIds,
+        )
+        assertFalse("all overlay events duplicate + stats equal → not mergeable", result.hasMergeableData)
+        assertNotNull(result.noOpReason)
+    }
+
+    @Test
+    fun `overlay with only invalid events and empty library — preview completes not mergeable (test-6)`() {
+        // All events are invalid (PLAY with listenedMs=0); no local library to match stats against.
+        // Plan: hasWrites=false, hasPreservedOverlayRows=true (unmatched stat) → mergeable via quarantine path.
+        // Key assertion: analyze() returns without hanging.
+        val backup = overlayBackup(
+            stats = listOf(overlayStat()),
+            events = listOf(overlayEvent(listenedMs = 0L, eventType = "PLAY")), // invalid shape
+        )
+        val result = analyze(backup, currentSongs = emptyList())
+        // Unmatched overlay stat → hasPreservedOverlayRows → mergeable (quarantine path).
+        assertTrue("invalid-event overlay with unmatched stat must be mergeable", result.hasMergeableData)
+    }
+
+    @Test
+    fun `overlay with only invalid events and no stats — preview completes as no-op (test-6b)`() {
+        // Empty trackStats + only invalid events → hasWrites=false, hasPreservedOverlayRows=false.
+        // Falls through to no-op.
+        val backup = emptyBackup().copy(
+            desktopOverlay = BackupDesktopOverlay(
+                schemaVersion    = 1,
+                producerPlatform = "desktop",
+                trackStats       = emptyList(),
+                listenEvents     = listOf(overlayEvent(listenedMs = 0L, eventType = "PLAY")),
+                rawJson          = "{}",
+            ),
+        )
+        val result = analyze(backup, currentSongs = emptyList())
+        assertFalse("overlay with only invalid events and no stats is a no-op", result.hasMergeableData)
+        assertNotNull(result.noOpReason)
+    }
+
+    @Test
+    fun `android-only v2 backup is unaffected by overlay changes (test-8)`() {
+        val songId = 99L
+        val backup = WavdropBackup(
+            exportedAt      = "2026-06-23T00:00:00Z",
+            sourceVersion   = BackupFormatVersion.V2,
+            songs           = listOf(backupSong(songId)),
+            trackStats      = listOf(
+                BackupTrackStats(
+                    songId               = songId,
+                    contentUri           = "content://media/$songId",
+                    playCount            = 10,
+                    skipCount            = 0,
+                    lastPlayedAt         = 1_000L,
+                    totalListeningTimeMs = 60_000L,
+                    isFavorite           = false,
+                    lastListenedAt       = 1_000L,
+                ),
+            ),
+            importBaselines = emptyList(),
+        )
+        val result = analyze(backup, currentSongs = listOf(song(songId)))
+        assertTrue("android-only v2 backup must still be mergeable", result.hasMergeableData)
+        assertNull(result.noOpReason)
     }
 }

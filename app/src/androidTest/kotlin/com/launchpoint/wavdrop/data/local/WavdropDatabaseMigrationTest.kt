@@ -473,6 +473,25 @@ class WavdropDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migration12to13_createsPendingBackupExtensions() {
+        helper.createDatabase(TEST_DB, 12).use { }
+
+        helper.runMigrationsAndValidate(TEST_DB, 13, true, MIGRATION_12_13).use { db ->
+            db.execSQL(
+                """INSERT INTO pending_backup_extensions (rootName, rawJson, importedAt)
+                   VALUES ('desktopOverlay', '{"schemaVersion":1}', 1782230400000)"""
+            )
+
+            db.query("SELECT rawJson, importedAt FROM pending_backup_extensions WHERE rootName = 'desktopOverlay'")
+                .use { c ->
+                    assertTrue("pending_backup_extensions row missing", c.moveToFirst())
+                    assertEquals("""{"schemaVersion":1}""", c.getString(0))
+                    assertEquals(1_782_230_400_000L, c.getLong(1))
+                }
+        }
+    }
+
     companion object {
         private const val TEST_DB = "wavdrop-migration-test.db"
     }

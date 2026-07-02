@@ -6,6 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.dao.PendingBackupExtensionDao
 import com.launchpoint.wavdrop.data.local.dao.PendingTrackDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
@@ -15,6 +16,7 @@ import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingImportBaselineEntity
+import com.launchpoint.wavdrop.data.local.entity.PendingBackupExtensionEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingLyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingPlaylistEntryEntity
@@ -43,8 +45,9 @@ import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
         PendingImportBaselineEntity::class,
         PendingPlaylistEntryEntity::class,
         TrackIdentityEntity::class,
+        PendingBackupExtensionEntity::class,
     ],
-    version      = 12,
+    version      = 13,
     exportSchema = true,
 )
 abstract class WavdropDatabase : RoomDatabase() {
@@ -56,6 +59,7 @@ abstract class WavdropDatabase : RoomDatabase() {
     abstract fun lyricsOverrideDao(): LyricsOverrideDao
     abstract fun pendingTrackDao(): PendingTrackDao
     abstract fun trackIdentityDao(): TrackIdentityDao
+    abstract fun pendingBackupExtensionDao(): PendingBackupExtensionDao
 }
 
 /** Add the track_stats table. */
@@ -374,6 +378,24 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
             "CREATE INDEX IF NOT EXISTS index_track_identities_currentSongId ON track_identities(currentSongId)"
         )
         db.execSQL("ALTER TABLE track_listen_events ADD COLUMN eventId TEXT")
+    }
+}
+
+/**
+ * Preserve raw, non-integrity extension roots from verified backups so newer portable data can
+ * survive Android import/re-export even before Android understands every nested field.
+ */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS pending_backup_extensions (
+                rootName   TEXT    NOT NULL PRIMARY KEY,
+                rawJson    TEXT    NOT NULL,
+                importedAt INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
     }
 }
 

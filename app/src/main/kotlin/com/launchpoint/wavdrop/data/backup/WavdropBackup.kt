@@ -127,6 +127,41 @@ data class BackupListenEvent(
     val eventId: String? = null,
 )
 
+data class BackupDesktopOverlay(
+    val schemaVersion: Int,
+    val producerPlatform: String?,
+    val trackStats: List<BackupDesktopOverlayTrackStats>,
+    val listenEvents: List<BackupDesktopOverlayListenEvent>,
+    val rawJson: String,
+)
+
+data class BackupDesktopOverlayTrackStats(
+    val desktopTrackId: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationMs: Long,
+    val playCount: Int,
+    val skipCount: Int,
+    val totalListeningTimeMs: Long,
+    val lastPlayedAt: Long,
+    val lastListenedAt: Long,
+    val favorite: Boolean,
+)
+
+data class BackupDesktopOverlayListenEvent(
+    val eventId: String?,
+    val desktopTrackId: String?,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationMs: Long,
+    val occurredAt: Long,
+    val listenedMs: Long,
+    val eventType: String,
+    val source: String,
+)
+
 /**
  * Section counts written at export time and re-checked at parse time. A mismatch
  * between the manifest and the actual parsed content indicates a corrupt or
@@ -227,4 +262,9 @@ data class WavdropBackup(
     val sourceInstallationId: String? = null,
     /** v2: [exportedAt] as epoch milliseconds (JSON integer). null in v1 backups. */
     val exportedAtMs: Long? = null,
+    /**
+     * Optional V2 extension root. It is intentionally excluded from the Android V2 fingerprint
+     * so Android can validate sealed roots first, then import/preserve portable Desktop activity.
+     */
+    val desktopOverlay: BackupDesktopOverlay? = null,
 )

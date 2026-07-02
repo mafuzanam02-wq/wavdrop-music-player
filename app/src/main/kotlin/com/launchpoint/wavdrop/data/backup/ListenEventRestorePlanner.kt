@@ -71,8 +71,8 @@ object ListenEventRestorePlanner {
         for (event in events) {
             if (event.eventType !in validEventTypes ||
                 event.occurredAt <= 0L ||
-                event.listenedMs <= 0L ||
-                event.durationMs < 0L
+                event.durationMs < 0L ||
+                !event.hasValidListenedTime()
             ) {
                 skippedInvalidType++
                 continue
@@ -118,5 +118,11 @@ object ListenEventRestorePlanner {
             skippedInvalidType   = skippedInvalidType,
             currentMonthRestored = currentMonthRestored,
         )
+    }
+
+    private fun BackupListenEvent.hasValidListenedTime(): Boolean = when (eventType) {
+        TrackListenEventEntity.TYPE_PLAY -> listenedMs > 0L
+        TrackListenEventEntity.TYPE_SKIP -> listenedMs == 0L
+        else -> false
     }
 }

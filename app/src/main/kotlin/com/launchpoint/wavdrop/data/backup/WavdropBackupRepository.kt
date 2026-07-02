@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
+import com.launchpoint.wavdrop.data.local.dao.PendingBackupExtensionDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
@@ -60,6 +61,7 @@ class WavdropBackupRepository @Inject constructor(
     private val lyricsOverrideDao: LyricsOverrideDao,
     private val playlistDao: PlaylistDao,
     private val trackListenEventDao: TrackListenEventDao,
+    private val pendingBackupExtensionDao: PendingBackupExtensionDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
     private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
@@ -131,8 +133,11 @@ class WavdropBackupRepository @Inject constructor(
                     durationMs = event.durationMs,
                     source     = event.source,
                     eventId    = event.eventId,  // preserve if present; null for legacy rows
-                )
-            }
+            )
+        }
+        val preservedDesktopOverlay = pendingBackupExtensionDao
+            .getByRootName(DESKTOP_OVERLAY_ROOT)
+            ?.rawJson
         val playlists = playlistDao.getAllPlaylistsSnapshot().map { playlist ->
             BackupPlaylist(
                 id        = playlist.playlistId,
@@ -243,11 +248,22 @@ class WavdropBackupRepository @Inject constructor(
             preferences          = preferences,
             playlists            = playlists,
             listenEvents         = listenEvents,
+            desktopOverlay       = preservedDesktopOverlay?.let {
+                BackupDesktopOverlay(
+                    schemaVersion = 1,
+                    producerPlatform = null,
+                    trackStats = emptyList(),
+                    listenEvents = emptyList(),
+                    rawJson = it,
+                )
+            },
         )
 
         WavdropBackupExporterV2.toJson(backup)
     }
 }
+
+const val DESKTOP_OVERLAY_ROOT = "desktopOverlay"
 
 // Entity to backup model mappings.
 

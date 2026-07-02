@@ -1,5 +1,7 @@
 package com.launchpoint.wavdrop.data.backup
 
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+
 object WavdropBackupParser {
     const val SUPPORTED_FORMAT = "wavdrop_backup"
     const val SUPPORTED_VERSION = 2
@@ -369,8 +371,9 @@ object WavdropBackupParser {
                     preferenceCount     = m.optCount("preferenceCount"),
                 )
             }
+            val desktopOverlayRoot = root["desktopOverlay"] as? Map<*, *>
 
-            val backup = WavdropBackup(
+            val sealedBackup = WavdropBackup(
                 exportedAt            = "",
                 exportedAtMs          = exportedAtMs,
                 backupId              = backupId,
@@ -391,15 +394,19 @@ object WavdropBackupParser {
             )
 
             // ── 6. Integrity verification (required for v2) ───────────────────
-            val computedFingerprint = WavdropBackupIntegrityV2.fingerprint(backup)
+            val computedFingerprint = WavdropBackupIntegrityV2.fingerprint(sealedBackup)
             if (integrityFingerprint != computedFingerprint) {
                 return failure(INTEGRITY_ERROR)
             }
 
             // ── 7. Manifest validation (if present) ───────────────────────────
-            if (manifest != null && !manifest.matchesContentOf(backup)) {
+            if (manifest != null && !manifest.matchesContentOf(sealedBackup)) {
                 return failure(INTEGRITY_ERROR)
             }
+
+            val backup = sealedBackup.copy(
+                desktopOverlay = desktopOverlayRoot?.parseDesktopOverlay(),
+            )
 
             val warnings = if (unknownOptional.isNotEmpty()) {
                 listOf(
@@ -494,6 +501,92 @@ private fun Map<*, *>.toBackupPreferences(): BackupPreferences = BackupPreferenc
     wrappedBackgroundIntensity  = this["wrappedBackgroundIntensity"] as? String,
     wrappedFallbackTheme        = this["wrappedFallbackTheme"] as? String,
 )
+
+private fun Map<*, *>.parseDesktopOverlay(): BackupDesktopOverlay {
+    val schemaVersion = requiredIntStrict("desktopOverlay.schemaVersion", "schemaVersion")
+    if (schemaVersion != 1) {
+        throw BackupParseException("Unsupported desktopOverlay schemaVersion: $schemaVersion")
+    }
+    val producer = this["producer"] as? Map<*, *>
+    val trackStatsArray = (this["trackStats"] as? List<*>) ?: (this["songs"] as? List<*>) ?: emptyList<Any?>()
+    val trackStats = trackStatsArray.mapObjects("desktopOverlay.trackStats") { index, item ->
+        BackupDesktopOverlayTrackStats(
+            desktopTrackId = item.desktopTrackId("desktopOverlay.trackStats[$index]"),
+            title = item.optionalString("title"),
+            artist = item.optionalString("artist"),
+            album = item.optionalString("album"),
+            durationMs = item.optionalLongStrict("durationMs").coerceAtLeast(0L),
+            playCount = item.optionalIntStrict("playCount").coerceAtLeast(0),
+            skipCount = item.optionalIntStrict("skipCount").coerceAtLeast(0),
+            totalListeningTimeMs = item.optionalLongStrict("totalListeningTimeMs").coerceAtLeast(0L),
+            lastPlayedAt = item.optionalLongStrict("lastPlayedAt").coerceAtLeast(0L),
+            lastListenedAt = item.optionalLongStrict("lastListenedAt").coerceAtLeast(0L),
+            favorite = item["favorite"] as? Boolean ?: false,
+        )
+    }
+    val listenEvents = ((this["listenEvents"] as? List<*>) ?: emptyList<Any?>())
+        .mapObjects("desktopOverlay.listenEvents") { index, item ->
+            BackupDesktopOverlayListenEvent(
+                eventId = item["eventId"] as? String,
+                desktopTrackId = item.desktopTrackIdOrNull(),
+                title = item.optionalString("title"),
+                artist = item.optionalString("artist"),
+                album = item.optionalString("album"),
+                durationMs = item.optionalLongStrict("durationMs").coerceAtLeast(0L),
+                occurredAt = item.optionalLongStrict("occurredAt"),
+                listenedMs = item.optionalLongStrict("listenedMs"),
+                eventType = item.optionalString("eventType").ifBlank { TrackListenEventEntity.TYPE_PLAY },
+                source = item.optionalString("source").ifBlank {
+                    TrackListenEventEntity.SOURCE_DESKTOP_PLAYBACK
+                },
+            )
+        }
+    return BackupDesktopOverlay(
+        schemaVersion = schemaVersion,
+        producerPlatform = producer?.get("platform") as? String,
+        trackStats = trackStats,
+        listenEvents = listenEvents,
+        rawJson = toJsonObject().toString(),
+    )
+}
+
+private fun Map<*, *>.desktopTrackId(path: String): String =
+    desktopTrackIdOrNull()
+        ?: throw BackupParseException("Missing field: $path.desktopTrackId")
+
+private fun Map<*, *>.desktopTrackIdOrNull(): String? =
+    (this["desktopTrackId"] as? String)
+        ?: (this["id"] as? String)
+        ?: (this["songId"] as? String)
+
+private fun Map<*, *>.optionalString(name: String): String =
+    this[name] as? String ?: ""
+
+private fun Map<*, *>.optionalLongStrict(name: String): Long {
+    if (!hasField(name)) return 0L
+    return requiredLongStrict(name, name)
+}
+
+private fun Map<*, *>.optionalIntStrict(name: String): Int {
+    if (!hasField(name)) return 0
+    return requiredIntStrict(name, name)
+}
+
+private fun Map<*, *>.toJsonObject(): org.json.JSONObject = org.json.JSONObject().apply {
+    for ((key, value) in this@toJsonObject) {
+        if (key is String) put(key, value.toJsonValue())
+    }
+}
+
+private fun List<*>.toJsonArray(): org.json.JSONArray = org.json.JSONArray().apply {
+    this@toJsonArray.forEach { put(it.toJsonValue()) }
+}
+
+private fun Any?.toJsonValue(): Any? = when (this) {
+    is Map<*, *> -> this.toJsonObject()
+    is List<*> -> this.toJsonArray()
+    else -> this
+}
 
 private fun Map<*, *>.requiredArray(name: String): List<*> {
     if (!hasField(name)) throw BackupParseException("Missing field: $name")
