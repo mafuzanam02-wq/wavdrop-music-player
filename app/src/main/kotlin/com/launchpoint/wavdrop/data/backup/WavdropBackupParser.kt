@@ -11,12 +11,19 @@ object WavdropBackupParser {
     const val NEWER_VERSION_ERROR =
         "This backup was created by a newer version of Wavdrop. Update Wavdrop and try again."
 
+    const val IMPLAUSIBLE_STATS_ERROR =
+        "This backup contains statistics values that are out of the supported range. " +
+            "The file may be damaged."
+
     // Capabilities known to this version of the parser. Any required capability
     // not in this set causes the import to be rejected cleanly.
     private val KNOWN_REQUIRED_CAPABILITIES = emptySet<String>()
     private val KNOWN_OPTIONAL_CAPABILITIES = emptySet<String>()
 
-    fun parse(content: String): WavdropBackupImportResult {
+    fun parse(
+        content: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): WavdropBackupImportResult {
         if (content.isBlank()) {
             return failure("The selected file is empty.")
         }
@@ -44,8 +51,8 @@ object WavdropBackupParser {
         }
 
         return when {
-            version == 1 -> parseV1(root)
-            version == 2 -> parseV2(root)
+            version == 1 -> parseV1(root, nowMs)
+            version == 2 -> parseV2(root, nowMs)
             version > SUPPORTED_VERSION -> failure(NEWER_VERSION_ERROR)
             else -> failure("Unsupported backup version: $version")
         }
@@ -62,7 +69,7 @@ object WavdropBackupParser {
         "importBaselines",
     )
 
-    private fun parseV1(root: Map<*, *>): WavdropBackupImportResult {
+    private fun parseV1(root: Map<*, *>, nowMs: Long): WavdropBackupImportResult {
         requiredV1RootFields.firstOrNull { !root.hasField(it) }?.let { field ->
             return failure("Missing field: $field")
         }
@@ -200,6 +207,12 @@ object WavdropBackupParser {
                 return failure(INTEGRITY_ERROR)
             }
 
+            // Plausibility runs only after integrity/manifest checks — the sealed
+            // values are never mutated, and the fingerprint is unaffected (WD-05).
+            if (!backup.trackStats.all { it.isPlausible(nowMs) }) {
+                return failure(IMPLAUSIBLE_STATS_ERROR)
+            }
+
             success(backup, integrityStatus)
         } catch (e: BackupParseException) {
             failure(e.message ?: "Invalid backup file")
@@ -208,7 +221,7 @@ object WavdropBackupParser {
 
     // ── v2 ────────────────────────────────────────────────────────────────────
 
-    private fun parseV2(root: Map<*, *>): WavdropBackupImportResult {
+    private fun parseV2(root: Map<*, *>, nowMs: Long): WavdropBackupImportResult {
         return try {
             // ── 1. Root version consistency ───────────────────────────────────
             val formatMajor = try {
@@ -404,6 +417,15 @@ object WavdropBackupParser {
                 return failure(INTEGRITY_ERROR)
             }
 
+            // ── 8. Portable-stat plausibility (WD-05) ─────────────────────────
+            // Runs after the v2 fingerprint is verified, so sealed values are
+            // never mutated and the fingerprint formula is untouched. The Android
+            // root is sealed: a single implausible row rejects the whole backup,
+            // consistent with the existing invalid-backup policy (no partial apply).
+            if (!sealedBackup.trackStats.all { it.isPlausible(nowMs) }) {
+                return failure(IMPLAUSIBLE_STATS_ERROR)
+            }
+
             val backup = sealedBackup.copy(
                 desktopOverlay = desktopOverlayRoot?.parseDesktopOverlay(),
             )
@@ -447,6 +469,18 @@ object WavdropBackupParser {
 
 private class BackupParseException(message: String) : IllegalArgumentException(message)
 private class JsonParseException(message: String) : IllegalArgumentException(message)
+
+// ── Portable-stat plausibility (WD-05) ───────────────────────────────────────
+
+private fun BackupTrackStats.isPlausible(nowMs: Long): Boolean =
+    ImportedStatPlausibility.isPlausibleTrackStats(
+        playCount = playCount,
+        skipCount = skipCount,
+        totalListeningTimeMs = totalListeningTimeMs,
+        lastPlayedAt = lastPlayedAt,
+        lastListenedAt = lastListenedAt,
+        nowMs = nowMs,
+    )
 
 // ── Map helpers — shared by v1 and v2 ────────────────────────────────────────
 
@@ -688,18 +722,18 @@ private class JsonReader(private val input: String) {
 
     fun parse(): Any? {
         skipWhitespace()
-        val value = parseValue()
+        val value = parseValue(0)
         skipWhitespace()
         if (index != input.length) fail("Unexpected trailing content")
         return value
     }
 
-    private fun parseValue(): Any? {
+    private fun parseValue(depth: Int): Any? {
         skipWhitespace()
         if (index >= input.length) fail("Unexpected end of input")
         return when (val char = input[index]) {
-            '{' -> parseObject()
-            '[' -> parseArray()
+            '{' -> parseObject(depth)
+            '[' -> parseArray(depth)
             '"' -> parseString()
             't' -> parseLiteral("true", true)
             'f' -> parseLiteral("false", false)
@@ -710,7 +744,21 @@ private class JsonReader(private val input: String) {
         }
     }
 
-    private fun parseObject(): Map<String, Any?> {
+    /**
+     * Guards against stack exhaustion from deeply nested structures. Called on
+     * entering an object or array; [depth] is the current nesting level before
+     * descending. Rejecting here — before recursing — keeps a hand-crafted
+     * adversarial backup from overflowing the stack and terminating the process.
+     */
+    private fun enterNesting(depth: Int): Int {
+        if (depth >= MAX_JSON_NESTING_DEPTH) {
+            throw BackupParseException("Backup JSON is nested too deeply")
+        }
+        return depth + 1
+    }
+
+    private fun parseObject(depth: Int): Map<String, Any?> {
+        val childDepth = enterNesting(depth)
         consume('{')
         skipWhitespace()
         if (tryConsume('}')) return emptyMap()
@@ -725,7 +773,7 @@ private class JsonReader(private val input: String) {
             }
             skipWhitespace()
             consume(':')
-            output[key] = parseValue()
+            output[key] = parseValue(childDepth)
             skipWhitespace()
             when {
                 tryConsume(',') -> Unit
@@ -735,14 +783,15 @@ private class JsonReader(private val input: String) {
         }
     }
 
-    private fun parseArray(): List<Any?> {
+    private fun parseArray(depth: Int): List<Any?> {
+        val childDepth = enterNesting(depth)
         consume('[')
         skipWhitespace()
         if (tryConsume(']')) return emptyList()
 
         val output = mutableListOf<Any?>()
         while (true) {
-            output += parseValue()
+            output += parseValue(childDepth)
             skipWhitespace()
             when {
                 tryConsume(',') -> Unit
@@ -836,4 +885,15 @@ private class JsonReader(private val input: String) {
     private fun peek(): Char = input.getOrNull(index) ?: ' '
 
     private fun fail(message: String): Nothing { throw JsonParseException(message) }
+
+    companion object {
+        /**
+         * Maximum permitted JSON nesting depth. The top-level value sits at
+         * depth 1; each nested object or array adds one level. A crafted backup
+         * with deeper nesting is rejected deterministically before recursion can
+         * exhaust the stack. 128 comfortably exceeds any legitimate Wavdrop
+         * backup (the deepest real structure — playlists[].songs[] — is 4).
+         */
+        const val MAX_JSON_NESTING_DEPTH = 128
+    }
 }
