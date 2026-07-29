@@ -12,7 +12,7 @@ as items are completed. Tick `[x]` when done; leave `[ ]` open.
 | `compileSdk = 35` | ✅ Set | `app/build.gradle.kts` |
 | `targetSdk = 35` | ✅ Set | Meets Google Play's current minimum requirement |
 | `minSdk = 26` (Android 8.0) | ✅ Set | Covers a wide device range |
-| `versionCode` set to production value | ⬜ Pending | Currently `1`; must be unique per Play Console upload |
+| `versionCode` set to production value | ⬜ Pending | Currently `9` (`app/build.gradle.kts`); must be incremented before every Play Console upload (each upload requires a unique, higher value) |
 | `versionName` set to release value | ✅ `"0.1.0"` | Appropriate for initial/beta track |
 | Release build signed with production keystore | ⬜ Pending | Generate and store keystore securely before upload |
 | ProGuard/R8 enabled for release build | ✅ `isMinifyEnabled = true`, `isShrinkResources = true` | Confirmed in `app/build.gradle.kts` |

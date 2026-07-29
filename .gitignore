@@ -9,6 +9,14 @@ local.properties
 *.iml
 .claude/settings.local.json
 
+# Release-signing secrets — NEVER commit (WD-06)
+# The committed template is keystore.properties.example (no real values).
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pepk
+
 # Android packaged artifacts
 *.apk
 *.ap_
