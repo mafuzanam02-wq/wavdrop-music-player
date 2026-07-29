@@ -15,7 +15,6 @@ import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.MainActivity
 import com.launchpoint.wavdrop.R
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
-import com.launchpoint.wavdrop.playback.PlaybackService
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -209,28 +208,30 @@ class WavdropWidgetUpdater @Inject constructor(
                 if (isPlaying) R.drawable.widget_btn_accent_bg else R.drawable.widget_btn_idle_bg,
             )
 
-            // Control PendingIntents — direct service calls, same path as notification controls.
+            // Control PendingIntents — delivered to the non-exported WidgetActionReceiver,
+            // which drives a MediaController to our session. The exported PlaybackService
+            // no longer recognizes raw widget action strings (WD-03).
             views.setOnClickPendingIntent(
                 R.id.widget_previous,
-                serviceIntent(context, PlaybackService.ACTION_WIDGET_PREVIOUS, RC_PREVIOUS),
+                broadcastIntent(context, WidgetActionReceiver.ACTION_WIDGET_PREVIOUS, RC_PREVIOUS),
             )
             views.setOnClickPendingIntent(
                 R.id.widget_play_pause,
-                serviceIntent(context, PlaybackService.ACTION_WIDGET_PLAY_PAUSE, RC_PLAY_PAUSE),
+                broadcastIntent(context, WidgetActionReceiver.ACTION_WIDGET_PLAY_PAUSE, RC_PLAY_PAUSE),
             )
             views.setOnClickPendingIntent(
                 R.id.widget_next,
-                serviceIntent(context, PlaybackService.ACTION_WIDGET_NEXT, RC_NEXT),
+                broadcastIntent(context, WidgetActionReceiver.ACTION_WIDGET_NEXT, RC_NEXT),
             )
 
             return views
         }
 
-        private fun serviceIntent(context: Context, action: String, requestCode: Int): PendingIntent =
-            PendingIntent.getService(
+        private fun broadcastIntent(context: Context, action: String, requestCode: Int): PendingIntent =
+            PendingIntent.getBroadcast(
                 context,
                 requestCode,
-                Intent(context, PlaybackService::class.java).setAction(action),
+                Intent(context, WidgetActionReceiver::class.java).setAction(action),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
 

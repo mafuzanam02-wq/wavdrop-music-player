@@ -177,6 +177,16 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            WidgetActionReceiver: receives the widget's play/pause/next/previous taps
+            and drives them through a MediaController on our session.
+            exported="false": only Wavdrop's own widget PendingIntents reach it, so a
+            co-installed app can no longer control playback via a raw service action (WD-03).
+        -->
+        <receiver
+            android:name=".ui.widget.WidgetActionReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".ui.widget.WavdropWidgetProvider"
             android:exported="true">

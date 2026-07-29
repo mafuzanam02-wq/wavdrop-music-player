@@ -306,20 +306,9 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
             }
-            // Widget action intents — routed directly to ExoPlayer, same path as notification controls.
-            ACTION_WIDGET_PLAY_PAUSE -> {
-                val p = mediaSession?.player ?: return super.onStartCommand(intent, flags, startId)
-                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] ACTION_WIDGET_PLAY_PAUSE isPlaying=${p.isPlaying}")
-                if (p.isPlaying) p.pause() else p.play()
-            }
-            ACTION_WIDGET_NEXT -> {
-                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] ACTION_WIDGET_NEXT")
-                mediaSession?.player?.seekToNext()
-            }
-            ACTION_WIDGET_PREVIOUS -> {
-                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] ACTION_WIDGET_PREVIOUS")
-                mediaSession?.player?.seekToPrevious()
-            }
+            // Widget controls are no longer accepted as raw exported service actions
+            // (WD-03). They are delivered to the non-exported WidgetActionReceiver,
+            // which drives them through a MediaController on this session.
         }
         if (BuildConfig.DEBUG) {
             when (intent?.action) {
@@ -502,10 +491,6 @@ class PlaybackService : MediaSessionService() {
         const val EXTRA_AUDIO_OUTPUT_KIND = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
         const val OUTPUT_BLUETOOTH = "bluetooth"
         const val OUTPUT_WIRED = "wired"
-        // Widget action intents — handled in onStartCommand, forwarded directly to ExoPlayer.
-        const val ACTION_WIDGET_PLAY_PAUSE = "com.launchpoint.wavdrop.ACTION_WIDGET_PLAY_PAUSE"
-        const val ACTION_WIDGET_NEXT       = "com.launchpoint.wavdrop.ACTION_WIDGET_NEXT"
-        const val ACTION_WIDGET_PREVIOUS   = "com.launchpoint.wavdrop.ACTION_WIDGET_PREVIOUS"
         private const val CMD_TOGGLE_SHUFFLE = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
         private const val CMD_CYCLE_REPEAT = "com.launchpoint.wavdrop.CYCLE_REPEAT"
         private const val RESUME_TAG = "WavdropResume"
