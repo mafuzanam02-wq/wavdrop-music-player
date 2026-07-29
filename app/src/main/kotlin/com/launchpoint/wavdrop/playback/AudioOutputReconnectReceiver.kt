@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
+import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
@@ -23,12 +24,14 @@ class AudioOutputReconnectReceiver : BroadcastReceiver() {
 
     @Inject lateinit var resumeBehaviorRepository: ResumeBehaviorSettingsRepository
     @Inject lateinit var sessionRepository: PlaybackSessionRepository
+    @Inject lateinit var playerController: PlayerController
+    @Inject lateinit var songRepository: SongRepository
 
     override fun onReceive(context: Context, intent: Intent) {
         logResume(
             "Receiver onReceive action=${intent.action} " +
-                "btState=${intent.getIntExtra(EXTRA_BLUETOOTH_PROFILE_STATE, UNKNOWN_STATE)} " +
-                "headsetState=${intent.getIntExtra(EXTRA_HEADSET_STATE, UNKNOWN_STATE)}",
+                "btState=${intent.getIntExtra(AudioOutputReconnectClassifier.EXTRA_BLUETOOTH_PROFILE_STATE, AudioOutputReconnectClassifier.UNKNOWN_STATE)} " +
+                "headsetState=${intent.getIntExtra(AudioOutputReconnectClassifier.EXTRA_HEADSET_STATE, AudioOutputReconnectClassifier.UNKNOWN_STATE)}",
         )
         val outputKind = intent.connectedOutputKind()
         if (outputKind == null) {
@@ -40,7 +43,8 @@ class AudioOutputReconnectReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 if (shouldStartPlaybackService(outputKind)) {
-                    startPlaybackService(context, outputKind)
+                    startPlaybackService(context)
+                    resumeForOutput(outputKind)
                 } else {
                     logResume("Receiver ignored $outputKind reconnect")
                 }
@@ -69,43 +73,41 @@ class AudioOutputReconnectReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun startPlaybackService(context: Context, outputKind: String) {
-        val serviceIntent = Intent(context, PlaybackService::class.java).apply {
-            action = PlaybackService.ACTION_AUDIO_OUTPUT_CONNECTED
-            putExtra(PlaybackService.EXTRA_AUDIO_OUTPUT_KIND, outputKind)
-        }
+    private fun startPlaybackService(context: Context) {
+        val serviceIntent = Intent(context, PlaybackService::class.java)
         runCatching {
-            logResume("Receiver attempting PlaybackService start outputKind=$outputKind")
+            logResume("Receiver attempting PlaybackService start for reconnect")
             ContextCompat.startForegroundService(context, serviceIntent)
-            logResume("Receiver started PlaybackService for $outputKind reconnect")
+            logResume("Receiver started PlaybackService for reconnect")
         }.onFailure { error ->
             logResume(
-                "Receiver could not start PlaybackService for $outputKind reconnect: " +
+                "Receiver could not start PlaybackService for reconnect: " +
                     "${error.javaClass.simpleName}: ${error.message}",
             )
         }
     }
 
-    private fun Intent.connectedOutputKind(): String? =
-        when (action) {
-            Intent.ACTION_HEADSET_PLUG -> {
-                if (getIntExtra(EXTRA_HEADSET_STATE, DISCONNECTED) == CONNECTED) {
-                    PlaybackService.OUTPUT_WIRED
-                } else {
-                    null
-                }
-            }
-            ACTION_A2DP_CONNECTION_STATE_CHANGED,
-            ACTION_HEADSET_CONNECTION_STATE_CHANGED,
-            ACTION_HEARING_AID_CONNECTION_STATE_CHANGED -> {
-                if (getIntExtra(EXTRA_BLUETOOTH_PROFILE_STATE, DISCONNECTED) == CONNECTED) {
-                    PlaybackService.OUTPUT_BLUETOOTH
-                } else {
-                    null
-                }
-            }
-            else -> null
+    private suspend fun resumeForOutput(outputKind: String) {
+        val songs = songRepository.songs.first()
+        logResume("Receiver got ${songs.size} songs, dispatching resume for outputKind=$outputKind")
+        when (outputKind) {
+            PlaybackService.OUTPUT_BLUETOOTH -> playerController.resumeForBluetooth(songs)
+            PlaybackService.OUTPUT_WIRED -> playerController.resumeForWiredHeadphones(songs)
         }
+    }
+
+    private fun Intent.connectedOutputKind(): String? =
+        AudioOutputReconnectClassifier.connectedOutputKind(
+            action = action,
+            bluetoothProfileState = getIntExtra(
+                AudioOutputReconnectClassifier.EXTRA_BLUETOOTH_PROFILE_STATE,
+                AudioOutputReconnectClassifier.DISCONNECTED,
+            ),
+            headsetState = getIntExtra(
+                AudioOutputReconnectClassifier.EXTRA_HEADSET_STATE,
+                AudioOutputReconnectClassifier.DISCONNECTED,
+            ),
+        )
 
     private fun ResumeBehaviorSettings.resumeMode(outputKind: String): HeadphoneResumeMode =
         when (outputKind) {
@@ -126,17 +128,6 @@ class AudioOutputReconnectReceiver : BroadcastReceiver() {
     }
 
     private companion object {
-        const val ACTION_A2DP_CONNECTION_STATE_CHANGED =
-            "android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED"
-        const val ACTION_HEADSET_CONNECTION_STATE_CHANGED =
-            "android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED"
-        const val ACTION_HEARING_AID_CONNECTION_STATE_CHANGED =
-            "android.bluetooth.hearingaid.profile.action.CONNECTION_STATE_CHANGED"
-        const val EXTRA_BLUETOOTH_PROFILE_STATE = "android.bluetooth.profile.extra.STATE"
-        const val EXTRA_HEADSET_STATE = "state"
-        const val CONNECTED = 2
-        const val DISCONNECTED = 0
-        const val UNKNOWN_STATE = -1
         const val RESUME_TAG = "WavdropResume"
     }
 }

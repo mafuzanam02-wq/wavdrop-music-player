@@ -52,6 +52,13 @@ class MainActivity : ComponentActivity() {
     private fun handleExternalAudioIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
+        val isAllowed = ExternalAudioIntentValidator.isAllowedAudioViewIntent(
+            action = intent.action,
+            uriString = uri.toString(),
+            intentMimeType = intent.type,
+            resolvedMimeTypeProvider = { runCatching { contentResolver.getType(uri) }.getOrNull() },
+        )
+        if (!isAllowed) return
         playerController.playExternalUri(
             uri = uri,
             displayName = uri.displayName(),

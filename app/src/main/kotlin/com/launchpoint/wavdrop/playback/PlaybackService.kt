@@ -291,25 +291,15 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         logResume("onStartCommand: action=${intent?.action}")
-        when (intent?.action) {
-            ACTION_AUDIO_OUTPUT_CONNECTED -> {
-                val outputKind = intent.getStringExtra(EXTRA_AUDIO_OUTPUT_KIND)
-                logResume("onStartCommand: ACTION_AUDIO_OUTPUT_CONNECTED outputKind=$outputKind")
-                if (outputKind != null) {
-                    serviceScope.launch {
-                        val songs = songRepository.songs.first()
-                        logResume("onStartCommand: got ${songs.size} songs, dispatching resume for outputKind=$outputKind")
-                        when (outputKind) {
-                            OUTPUT_BLUETOOTH -> playerController.resumeForBluetooth(songs)
-                            OUTPUT_WIRED -> playerController.resumeForWiredHeadphones(songs)
-                        }
-                    }
-                }
-            }
-            // Widget controls are no longer accepted as raw exported service actions
-            // (WD-03). They are delivered to the non-exported WidgetActionReceiver,
-            // which drives them through a MediaController on this session.
+        PlaybackServiceStartCommandPolicy.reconnectOutputKindForStartCommand(
+            action = intent?.action,
+            outputKind = intent?.getStringExtra(EXTRA_AUDIO_OUTPUT_KIND),
+        )?.let { outputKind ->
+            logResume("onStartCommand: ignored private reconnect command outputKind=$outputKind")
         }
+        // Widget controls and reconnect events are no longer accepted as raw exported
+        // service actions. They are delivered through non-exported receivers, which
+        // drive playback via in-process dependencies / MediaController on this session.
         if (BuildConfig.DEBUG) {
             when (intent?.action) {
                 ACTION_DEBUG_EQ_ENABLE -> {
