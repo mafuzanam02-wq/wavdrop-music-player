@@ -611,7 +611,7 @@ class WavdropBackupImportRepository @Inject constructor(
         // Diagnostics: explains "missing plays" after restore (unmatched tracks are the
         // usual cause — URI changes after reinstall plus tag mismatch).
         val diag = dbResult.matchDiagnostics
-        Log.i(
+        if (BuildConfig.DEBUG) Log.i(
             TAG,
             "Restore applied: statsInBackup=${diag.statsInBackup} " +
                 "matched=${dbResult.matchedTracks} " +
@@ -691,7 +691,7 @@ class WavdropBackupImportRepository @Inject constructor(
         onStage: ((String) -> Unit)? = null,
     ): WavdropMergePreviewAnalyzer.Result {
         val t0 = System.currentTimeMillis()
-        Log.d(TAG, "previewMerge: start rootStats=${backup.trackStats.size} " +
+        if (BuildConfig.DEBUG) Log.d(TAG, "previewMerge: start rootStats=${backup.trackStats.size} " +
             "rootEvents=${backup.listenEvents.size} overlay=${backup.desktopOverlay != null} " +
             "overlayStats=${backup.desktopOverlay?.trackStats?.size ?: 0} " +
             "overlayEvents=${backup.desktopOverlay?.listenEvents?.size ?: 0}")
@@ -714,14 +714,14 @@ class WavdropBackupImportRepository @Inject constructor(
         }
 
         val existingStats = trackStatsDao.getAllStatsSnapshot().associateBy { it.songId }
-        Log.d(TAG, "previewMerge: snapshots loaded songs=${currentSongs.size} " +
+        if (BuildConfig.DEBUG) Log.d(TAG, "previewMerge: snapshots loaded songs=${currentSongs.size} " +
             "stats=${existingStats.size} t=${System.currentTimeMillis() - t0}ms")
         onStage?.invoke("Loading your music library…")
 
         val dedupSnapshot = loadEventDedupSnapshot(backup)
         val existingEventFingerprints = dedupSnapshot.fingerprints
         val existingEventIds = dedupSnapshot.eventIds
-        Log.d(TAG, "previewMerge: fingerprints loaded count=${existingEventFingerprints.size} " +
+        if (BuildConfig.DEBUG) Log.d(TAG, "previewMerge: fingerprints loaded count=${existingEventFingerprints.size} " +
             "eventIds=${existingEventIds.size} t=${System.currentTimeMillis() - t0}ms")
         onStage?.invoke("Checking listening history…")
 
@@ -755,7 +755,7 @@ class WavdropBackupImportRepository @Inject constructor(
         if (backup.desktopOverlay != null) {
             onStage?.invoke("Checking Desktop activity…")
         }
-        Log.d(TAG, "previewMerge: all snapshots ready — calling analyzer " +
+        if (BuildConfig.DEBUG) Log.d(TAG, "previewMerge: all snapshots ready — calling analyzer " +
             "t=${System.currentTimeMillis() - t0}ms")
         val result = WavdropMergePreviewAnalyzer.analyze(
             backup                       = backup,
@@ -768,7 +768,7 @@ class WavdropBackupImportRepository @Inject constructor(
             existingLyrics               = existingLyrics,
             existingPlaylists            = existingPlaylists,
         )
-        Log.d(TAG, "previewMerge: done hasMergeable=${result.hasMergeableData} " +
+        if (BuildConfig.DEBUG) Log.d(TAG, "previewMerge: done hasMergeable=${result.hasMergeableData} " +
             "t=${System.currentTimeMillis() - t0}ms")
         return result
     }

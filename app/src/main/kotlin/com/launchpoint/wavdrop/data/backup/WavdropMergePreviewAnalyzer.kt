@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.data.backup
 
+import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.Song
@@ -137,7 +138,7 @@ object WavdropMergePreviewAnalyzer {
         backup.desktopOverlay?.let { overlay ->
             val overlayPlan = precomputedDesktopOverlayPlan ?: run {
                 val planStart = System.currentTimeMillis()
-                android.util.Log.d("WavdropPreview",
+                if (BuildConfig.DEBUG) android.util.Log.d("WavdropPreview",
                     "analyze: overlay planner start trackStats=${overlay.trackStats.size} " +
                         "listenEvents=${overlay.listenEvents.size} currentSongs=${currentSongs.size}")
                 DesktopOverlayRestorePlanner.plan(
@@ -147,7 +148,7 @@ object WavdropMergePreviewAnalyzer {
                     existingEventFingerprints = existingEventFingerprints,
                     existingEventIds = existingEventIds,
                 ).also { plan ->
-                    android.util.Log.d("WavdropPreview",
+                    if (BuildConfig.DEBUG) android.util.Log.d("WavdropPreview",
                         "analyze: overlay planner done in ${System.currentTimeMillis() - planStart}ms " +
                             "matched=${plan.matchedStats.size} " +
                             "unresolved=${plan.unresolvedStats.size} " +

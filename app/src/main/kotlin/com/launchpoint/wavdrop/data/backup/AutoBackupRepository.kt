@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
+import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.AutoBackupCheckResult
 import com.launchpoint.wavdrop.data.settings.AutoBackupInterval
@@ -141,7 +142,11 @@ class AutoBackupRepository @Inject constructor(
      */
     private suspend fun writeJsonToFolder(folder: DocumentFile, fileName: String): Boolean {
         val backupFileMode = appSettingsRepository.backupFileMode.first()
-        Log.d(TAG, "writeJsonToFolder: mode=$backupFileMode fileName=$fileName folderUri=${folder.uri}")
+        // Contains the SAF destination URI and backup filename — gated so it never
+        // executes outside debug, independent of R8 stripping.
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "writeJsonToFolder: mode=$backupFileMode fileName=$fileName folderUri=${folder.uri}")
+        }
 
         val json = backupRepository.buildBackupJson()
         val tempName = "$fileName.tmp"
