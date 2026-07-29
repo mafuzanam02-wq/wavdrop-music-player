@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.backup.BackupInputReader
 import com.launchpoint.wavdrop.data.backup.ImportFileValidation
 import com.launchpoint.wavdrop.data.legacy.BpstatApplyResult
 import com.launchpoint.wavdrop.data.legacy.BpstatMatchResult
@@ -79,11 +80,12 @@ class BpstatPreviewViewModel @Inject constructor(
             return BpstatPreviewUiState.Error(ImportFileValidation.BPSTAT_WRONG_FILE_MESSAGE)
         }
 
-        val content = withContext(Dispatchers.IO) {
-            context.contentResolver
-                .openInputStream(uri)
-                ?.bufferedReader()
-                ?.use { it.readText() }
+        val content = try {
+            withContext(Dispatchers.IO) {
+                BackupInputReader.readBoundedText(context, uri)
+            }
+        } catch (_: BackupInputReader.InputTooLargeException) {
+            return BpstatPreviewUiState.Error(BackupInputReader.IMPORT_TOO_LARGE_MESSAGE)
         } ?: return BpstatPreviewUiState.Error("Could not open the selected file.")
 
         if (content.isBlank()) {

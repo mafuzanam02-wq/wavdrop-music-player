@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.backup.BackupInputReader
 import com.launchpoint.wavdrop.data.backup.BackupIntegrityStatus
 import com.launchpoint.wavdrop.data.backup.CleanInstallPreferenceRestoreResult
 import com.launchpoint.wavdrop.data.backup.CleanInstallPreferenceRestorer
@@ -157,11 +158,12 @@ class BackupImportPreviewViewModel @Inject constructor(
             return BackupImportUiState.Error(ImportFileValidation.WAVDROP_WRONG_FILE_MESSAGE)
         }
 
-        val content = withContext(Dispatchers.IO) {
-            context.contentResolver
-                .openInputStream(uri)
-                ?.bufferedReader()
-                ?.use { it.readText() }
+        val content = try {
+            withContext(Dispatchers.IO) {
+                BackupInputReader.readBackupText(context, uri)
+            }
+        } catch (_: BackupInputReader.InputTooLargeException) {
+            return BackupImportUiState.Error(BackupInputReader.TOO_LARGE_MESSAGE)
         } ?: return BackupImportUiState.Error("Could not open the selected file.")
 
         // Structural sniff before full parsing — rejects arbitrary JSON/binary

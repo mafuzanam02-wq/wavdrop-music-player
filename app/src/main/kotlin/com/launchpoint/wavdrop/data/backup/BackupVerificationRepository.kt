@@ -67,11 +67,11 @@ class BackupVerificationRepository @Inject constructor(
         val fileSize  = latest.length().takeIf { it > 0 }
         val fileTime  = latest.lastModified().takeIf { it > 0 }
 
-        val content = runCatching {
-            context.contentResolver.openInputStream(latest.uri)
-                ?.bufferedReader()
-                ?.use { it.readText() }
-        }.getOrNull()
+        val content = try {
+            BackupInputReader.readBackupText(context, latest.uri)
+        } catch (_: BackupInputReader.InputTooLargeException) {
+            return failed(fileName, fileSize, fileTime, BackupInputReader.TOO_LARGE_MESSAGE)
+        }
             ?: return failed(fileName, fileSize, fileTime, "The backup file could not be read.")
 
         if (content.isBlank()) {
