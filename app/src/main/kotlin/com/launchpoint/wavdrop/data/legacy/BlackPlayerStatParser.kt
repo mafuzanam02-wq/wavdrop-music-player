@@ -1,5 +1,7 @@
 package com.launchpoint.wavdrop.data.legacy
 
+import com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility
+
 /**
  * Parses the plain-text content of a BlackPlayer EX .bpstat statistics export file.
  *
@@ -67,6 +69,11 @@ object BlackPlayerStatParser {
 
         if (playCount < 0 || skipCount < 0) return null
         if (dateAddedMs < 0 || lastPlayedMs < 0) return null
+        // WD-05: reject implausibly large counters. .bpstat imports only play/skip
+        // counts, so only the count bounds apply here. Existing valid files (real
+        // BlackPlayer exports) sit far below these limits and are unaffected.
+        if (!ImportedStatPlausibility.isPlausiblePlayCount(playCount)) return null
+        if (!ImportedStatPlausibility.isPlausibleSkipCount(skipCount)) return null
 
         return BlackPlayerStatImportRow(
             playCount    = playCount,

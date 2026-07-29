@@ -91,6 +91,16 @@ object DesktopWavdropBackupImportPlanner {
 
     private data class Candidate(val song: Song, val desktopSong: DesktopBackupSong)
 
+    private fun DesktopBackupSong.isPlausible(nowMs: Long): Boolean =
+        ImportedStatPlausibility.isPlausibleTrackStats(
+            playCount = playCount,
+            skipCount = 0,
+            totalListeningTimeMs = totalListeningTimeMs,
+            lastPlayedAt = lastPlayedAt,
+            lastListenedAt = null,
+            nowMs = nowMs,
+        )
+
     fun plan(
         backup: DesktopWavdropBackup,
         currentSongs: List<Song>,
@@ -107,6 +117,13 @@ object DesktopWavdropBackupImportPlanner {
         val ambiguous = mutableListOf<DesktopBackupSong>()
 
         for (desktopSong in backup.songs) {
+            // WD-05: an implausible desktop row is preserved (reported as unmatched)
+            // rather than folded into local stats via MAX. Desktop songs carry no
+            // skipCount/lastListenedAt, so those are treated as absent.
+            if (!desktopSong.isPlausible(nowMs)) {
+                unmatched += desktopSong
+                continue
+            }
             when (val result = matcher.resolve(desktopSong)) {
                 is DesktopSongMatch.Matched -> candidates += Candidate(result.song, desktopSong)
                 DesktopSongMatch.Ambiguous -> ambiguous += desktopSong

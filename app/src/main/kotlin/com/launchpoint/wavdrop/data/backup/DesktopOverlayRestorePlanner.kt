@@ -108,7 +108,12 @@ object DesktopOverlayRestorePlanner {
 
             overlay.trackStats.forEachIndexed { i, stats ->
                 val song = matchedBySynId[(i + 1L)]
-                if (song != null) {
+                // WD-05: an implausible overlay row is preserved as raw/unresolved
+                // rather than applied. The overlay's rawJson is retained verbatim
+                // regardless; we simply never fold out-of-range magnitudes into
+                // local stats via MAX. Overlay counts/timestamps are floored to 0
+                // at parse time, so only the upper bounds can trip here.
+                if (song != null && stats.isPlausible(nowMs)) {
                     matchedStats += stats.toMatchedStats(song, currentStats[song.id])
                     matchedByDesktopId[stats.desktopTrackId] = song
                 } else {
@@ -287,6 +292,16 @@ object DesktopOverlayRestorePlanner {
         }.toMap()
         return FallbackEventMatches(matchedByKey, statsByKey.size)
     }
+
+    private fun BackupDesktopOverlayTrackStats.isPlausible(nowMs: Long): Boolean =
+        ImportedStatPlausibility.isPlausibleTrackStats(
+            playCount = playCount,
+            skipCount = skipCount,
+            totalListeningTimeMs = totalListeningTimeMs,
+            lastPlayedAt = lastPlayedAt,
+            lastListenedAt = lastListenedAt,
+            nowMs = nowMs,
+        )
 
     private fun BackupDesktopOverlayTrackStats.toMatchedStats(
         song: Song,

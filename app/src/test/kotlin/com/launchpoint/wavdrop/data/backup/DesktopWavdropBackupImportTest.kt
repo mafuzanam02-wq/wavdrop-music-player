@@ -595,6 +595,44 @@ class DesktopWavdropBackupImportTest {
         }
     """.trimIndent()
 
+    // ── WD-05: implausible desktop stat rows are preserved, not applied ───────
+
+    @Test
+    fun `implausible desktop song is preserved as unmatched and not applied`() {
+        val plan = DesktopWavdropBackupImportPlanner.plan(
+            backup = backup(
+                desktopSong(
+                    title = "Song", artist = "Artist", album = "Album",
+                    playCount = ImportedStatPlausibility.MAX_PLAY_COUNT + 1, // implausible
+                ),
+            ),
+            currentSongs = listOf(song(id = 1L, title = "Song", artist = "Artist", album = "Album")),
+            currentStats = emptyList(),
+            nowMs = 2_000_000_000_000L,
+        )
+
+        assertEquals("implausible row must not be applied", 0, plan.matchedRows.size)
+        assertEquals(1, plan.unmatchedSongs.size)
+    }
+
+    @Test
+    fun `plausible desktop song is still matched and applied`() {
+        val plan = DesktopWavdropBackupImportPlanner.plan(
+            backup = backup(
+                desktopSong(
+                    title = "Song", artist = "Artist", album = "Album",
+                    playCount = 500,
+                ),
+            ),
+            currentSongs = listOf(song(id = 1L, title = "Song", artist = "Artist", album = "Album")),
+            currentStats = emptyList(),
+            nowMs = 2_000_000_000_000L,
+        )
+
+        assertEquals(1, plan.matchedRows.size)
+        assertEquals(0, plan.unmatchedSongs.size)
+    }
+
     private fun backup(
         vararg songs: DesktopBackupSong,
         playlists: List<DesktopBackupPlaylist> = emptyList(),

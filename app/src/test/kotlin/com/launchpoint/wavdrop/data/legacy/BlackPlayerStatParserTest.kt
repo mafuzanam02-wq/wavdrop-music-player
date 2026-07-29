@@ -27,6 +27,39 @@ class BlackPlayerStatParserTest {
         assertEquals(1779810940727L, row.lastPlayedMs)
     }
 
+    // ── WD-05: count plausibility bounds ──────────────────────────────────────
+
+    @Test
+    fun `maximum allowed play and skip counts are accepted`() {
+        val max = com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility.MAX_PLAY_COUNT
+        val line = "$max;$max;Title;Artist;Album;/storage/emulated/0/Music/max.mp3;0;0"
+        val result = BlackPlayerStatParser.parse(line)
+
+        assertEquals(1, result.validRows.size)
+        assertEquals(max, result.validRows[0].playCount)
+        assertEquals(max, result.validRows[0].skipCount)
+    }
+
+    @Test
+    fun `play count above maximum is rejected`() {
+        val over = com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility.MAX_PLAY_COUNT + 1
+        val line = "$over;0;Title;Artist;Album;/storage/emulated/0/Music/over.mp3;0;0"
+        val result = BlackPlayerStatParser.parse(line)
+
+        assertEquals(0, result.validRows.size)
+        assertEquals(1, result.invalidRows.size)
+    }
+
+    @Test
+    fun `skip count above maximum is rejected`() {
+        val over = com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility.MAX_SKIP_COUNT + 1
+        val line = "0;$over;Title;Artist;Album;/storage/emulated/0/Music/over.mp3;0;0"
+        val result = BlackPlayerStatParser.parse(line)
+
+        assertEquals(0, result.validRows.size)
+        assertEquals(1, result.invalidRows.size)
+    }
+
     @Test
     fun `parses multiple valid rows and sums totals correctly`() {
         val input = """
