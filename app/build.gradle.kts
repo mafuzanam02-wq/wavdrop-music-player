@@ -80,12 +80,12 @@ val releaseStoreFile = if (hasReleaseSigningConfig) {
 
 android {
     namespace = "com.launchpoint.wavdrop"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.launchpoint.wavdrop"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 9
         versionName = "0.1.0-beta9"
 
