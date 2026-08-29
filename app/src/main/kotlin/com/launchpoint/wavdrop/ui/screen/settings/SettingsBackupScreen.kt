@@ -279,11 +279,11 @@ fun SettingsBackupScreen(
                 SettingsMessageRow(
                     message = when {
                         autoBackupFolderUri != null ->
-                            "Backups are saved to your selected folder when Wavdrop opens and a backup is due."
+                            "Backups are saved to your selected folder when a scheduled backup is due."
                         autoBackupInterval != AutoBackupInterval.OFF ->
                             "Setup incomplete: choose a backup folder before automatic checks can save backups."
                         else ->
-                            "Wavdrop checks for due backups when you open the app. Choose a backup folder first."
+                            "Choose a backup folder first, then select a schedule for automatic checks."
                     },
                 )
             }
@@ -298,7 +298,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Daily",
-                    subtitle = "Check once per day when Wavdrop opens.",
+                    subtitle = "Check once per day.",
                     selected = autoBackupInterval == AutoBackupInterval.DAILY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.DAILY) },
                 )
@@ -306,7 +306,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Weekly",
-                    subtitle = "Check once per week when Wavdrop opens.",
+                    subtitle = "Check once per week.",
                     selected = autoBackupInterval == AutoBackupInterval.WEEKLY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.WEEKLY) },
                 )
@@ -314,7 +314,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Monthly",
-                    subtitle = "Check once per month when Wavdrop opens.",
+                    subtitle = "Check once per month.",
                     selected = autoBackupInterval == AutoBackupInterval.MONTHLY,
                     onClick  = { viewModel.setAutoBackupInterval(AutoBackupInterval.MONTHLY) },
                 )
@@ -599,7 +599,7 @@ internal fun AutoBackupCheckResult.toAutoBackupStatusText(): String = when (this
 
 internal fun AutoBackupInterval.toStatusLabel(): String = when (this) {
     AutoBackupInterval.OFF     -> "Off"
-    AutoBackupInterval.DAILY   -> "Daily, on open"
-    AutoBackupInterval.WEEKLY  -> "Weekly, on open"
-    AutoBackupInterval.MONTHLY -> "Monthly, on open"
+    AutoBackupInterval.DAILY   -> "Daily"
+    AutoBackupInterval.WEEKLY  -> "Weekly"
+    AutoBackupInterval.MONTHLY -> "Monthly"
 }

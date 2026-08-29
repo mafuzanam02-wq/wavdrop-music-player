@@ -8,6 +8,7 @@ import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
 import com.launchpoint.wavdrop.data.repository.LibrarySyncResult
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
+import com.launchpoint.wavdrop.data.backup.AutoBackupWorkScheduler
 import com.launchpoint.wavdrop.data.settings.AccentColor
 import com.launchpoint.wavdrop.data.settings.AudioEnhancementsRepository
 import com.launchpoint.wavdrop.data.settings.EqualizerCapabilities
@@ -69,6 +70,7 @@ sealed interface LibraryScanUiState {
 class SettingsViewModel @Inject constructor(
     private val backupRepository: WavdropBackupRepository,
     private val autoBackupRepository: AutoBackupRepository,
+    private val autoBackupWorkScheduler: AutoBackupWorkScheduler,
     private val appSettingsRepository: AppSettingsRepository,
     private val appIconAliasManager: AppIconAliasManager,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
@@ -145,6 +147,7 @@ class SettingsViewModel @Inject constructor(
             if (permissionGranted) {
                 appSettingsRepository.setNeedsAutoBackupFolderSelectionAfterRestore(false)
             }
+            autoBackupWorkScheduler.reconcile()
         }
     }
 
@@ -356,11 +359,17 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setAutoBackupFolderUri(uri: String?) {
-        viewModelScope.launch { appSettingsRepository.setAutoBackupFolderUri(uri) }
+        viewModelScope.launch {
+            appSettingsRepository.setAutoBackupFolderUri(uri)
+            autoBackupWorkScheduler.reconcile()
+        }
     }
 
     fun setAutoBackupInterval(interval: AutoBackupInterval) {
-        viewModelScope.launch { appSettingsRepository.setAutoBackupInterval(interval) }
+        viewModelScope.launch {
+            appSettingsRepository.setAutoBackupInterval(interval)
+            autoBackupWorkScheduler.reconcile()
+        }
     }
 
     fun backupNowToFolder() {

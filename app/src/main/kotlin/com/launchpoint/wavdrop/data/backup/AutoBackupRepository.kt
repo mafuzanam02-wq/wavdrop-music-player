@@ -22,6 +22,7 @@ class AutoBackupRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val appSettingsRepository: AppSettingsRepository,
     private val backupRepository: WavdropBackupRepository,
+    private val backupExecutionSerializer: BackupExecutionSerializer,
 ) {
     sealed interface Result {
         /** Interval is OFF — nothing to do. */
@@ -40,35 +41,41 @@ class AutoBackupRepository @Inject constructor(
 
     /**
      * Runs a backup only if the selected interval is due.
-     * Call once per app session from the root navigation layer.
+     * Used by durable background work and any explicit due-check callers.
      */
     suspend fun runIfDue(): Result = withContext(Dispatchers.IO) {
+        backupExecutionSerializer.withSerializedBackup {
+            runIfDueSerialized()
+        }
+    }
+
+    private suspend fun runIfDueSerialized(): Result {
         val nowMs = System.currentTimeMillis()
         val interval = appSettingsRepository.autoBackupInterval.first()
         if (interval == AutoBackupInterval.OFF) {
             appSettingsRepository.setLastAutoBackupCheck(nowMs, AutoBackupCheckResult.OFF)
-            return@withContext Result.Skipped
+            return Result.Skipped
         }
 
         val folderUriString = appSettingsRepository.autoBackupFolderUri.first()
         if (folderUriString == null) {
             appSettingsRepository.setLastAutoBackupCheck(nowMs, AutoBackupCheckResult.NO_FOLDER_SELECTED)
-            return@withContext Result.NoFolderSelected
+            return Result.NoFolderSelected
         }
 
         val lastBackupAt = appSettingsRepository.lastAutoBackupAtMillis.first()
 
-        if (nowMs - lastBackupAt < interval.toMillis()) {
+        if (!AutoBackupDueRules.shouldRun(interval, lastBackupAt, nowMs)) {
             appSettingsRepository.setLastAutoBackupCheck(nowMs, AutoBackupCheckResult.NOT_DUE)
-            return@withContext Result.NotDue
+            return Result.NotDue
         }
 
         val result = performBackup(folderUriString)
-        if (result is Result.Success) {
-            appSettingsRepository.setLastAutoBackupAtMillis(nowMs)
+        AutoBackupDueRules.successfulBackupTimestamp(result, nowMs)?.let { timestamp ->
+            appSettingsRepository.setLastAutoBackupAtMillis(timestamp)
         }
         appSettingsRepository.setLastAutoBackupCheck(nowMs, result.toAutoBackupCheckResult())
-        result
+        return result
     }
 
     /**
@@ -76,13 +83,16 @@ class AutoBackupRepository @Inject constructor(
      * Requires a folder to be selected; returns [Result.NoFolderSelected] otherwise.
      */
     suspend fun runNow(): Result = withContext(Dispatchers.IO) {
-        val folderUriString = appSettingsRepository.autoBackupFolderUri.first()
-            ?: return@withContext Result.NoFolderSelected
-        val result = performBackup(folderUriString)
-        if (result is Result.Success) {
-            appSettingsRepository.setLastAutoBackupAtMillis(System.currentTimeMillis())
+        backupExecutionSerializer.withSerializedBackup {
+            val folderUriString = appSettingsRepository.autoBackupFolderUri.first()
+                ?: return@withSerializedBackup Result.NoFolderSelected
+            val nowMs = System.currentTimeMillis()
+            val result = performBackup(folderUriString)
+            AutoBackupDueRules.successfulBackupTimestamp(result, nowMs)?.let { timestamp ->
+                appSettingsRepository.setLastAutoBackupAtMillis(timestamp)
+            }
+            result
         }
-        result
     }
 
     private suspend fun performBackup(folderUriString: String): Result {

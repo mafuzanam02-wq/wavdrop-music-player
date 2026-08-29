@@ -194,13 +194,6 @@ fun WavdropNavGraph(
         LocalShowQueueCount           provides showQueueCount,
         LocalNowPlayingTimeDisplayMode provides nowPlayingTimeDisplayMode,
     ) {
-        // Fire auto-backup check once per session, after onboarding is confirmed complete.
-        LaunchedEffect(Unit) {
-            if (hasCompletedOnboarding == true) {
-                viewModel.triggerAutoBackupIfDue()
-            }
-        }
-
         NavHost(
             navController    = navController,
             startDestination = resolvedStartRoute,

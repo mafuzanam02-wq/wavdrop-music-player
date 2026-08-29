@@ -14,6 +14,7 @@ import com.launchpoint.wavdrop.data.backup.ImportFileValidation
 import com.launchpoint.wavdrop.data.backup.DesktopWavdropBackup
 import com.launchpoint.wavdrop.data.backup.DesktopWavdropBackupImportRepository
 import com.launchpoint.wavdrop.data.backup.DesktopWavdropBackupParser
+import com.launchpoint.wavdrop.data.backup.AutoBackupWorkScheduler
 import com.launchpoint.wavdrop.data.backup.WavdropBackup
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportApplyResult
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportRepository
@@ -123,6 +124,7 @@ class BackupImportPreviewViewModel @Inject constructor(
     private val desktopImportRepository: DesktopWavdropBackupImportRepository,
     private val appSettingsRepository: AppSettingsRepository,
     private val preferenceRestorer: CleanInstallPreferenceRestorer,
+    private val autoBackupWorkScheduler: AutoBackupWorkScheduler,
     private val songRepository: SongRepository,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
 ) : ViewModel() {
@@ -299,6 +301,7 @@ class BackupImportPreviewViewModel @Inject constructor(
             if (permissionGranted) {
                 appSettingsRepository.setNeedsAutoBackupFolderSelectionAfterRestore(false)
             }
+            autoBackupWorkScheduler.reconcile()
         }
     }
 
@@ -342,6 +345,7 @@ class BackupImportPreviewViewModel @Inject constructor(
         val backup = parsedBackup
             ?: return setError("No parsed backup to recover.")
         recoveryPreferenceResult = preferenceRestorer.restore(backup.preferences)
+        autoBackupWorkScheduler.reconcile()
         continueRecovery()
     }
 
