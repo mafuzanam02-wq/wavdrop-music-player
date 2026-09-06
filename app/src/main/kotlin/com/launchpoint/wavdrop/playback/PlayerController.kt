@@ -165,6 +165,38 @@ internal fun planPlayAllNext(
     }
 }
 
+internal enum class QueueAddPlan {
+    /** Empty batch: nothing to do. */
+    NoOp,
+
+    /** Genuinely empty queue: start a new queue with the supplied song(s). */
+    StartNewQueue,
+
+    /** An existing queue: append to its tail, preserving every existing item and the current song. */
+    AppendPreservingQueue,
+}
+
+/**
+ * Decides how Add-to-Queue / Add-All-to-Queue should be handled.
+ *
+ * [currentIndexResolvable] is accepted to make the Phase 3 invariant explicit and testable: a
+ * transient inability to resolve the current playback index must NEVER be treated as "there is no
+ * queue". For any non-empty queue the outcome is [QueueAddPlan.AppendPreservingQueue] regardless of
+ * [currentIndexResolvable]; only a genuinely empty queue starts a new one. Appending to the tail
+ * does not need the current index.
+ */
+internal fun planQueueAdd(
+    hasExistingQueue: Boolean,
+    isBatchEmpty: Boolean,
+    @Suppress("UNUSED_PARAMETER") currentIndexResolvable: Boolean,
+): QueueAddPlan = when {
+    isBatchEmpty -> QueueAddPlan.NoOp
+    // An existing queue is always preserved by appending — resolvability of the current index does
+    // NOT gate this (that `||` was the Phase 3 defect). Only a genuinely empty queue starts anew.
+    hasExistingQueue -> QueueAddPlan.AppendPreservingQueue
+    else -> QueueAddPlan.StartNewQueue
+}
+
 /**
  * Returns the first playback-queue index of [songId], or -1 if not present.
  * Extracted as a pure function so it can be tested without a MediaController.
@@ -931,64 +963,36 @@ class PlayerController @Inject constructor(
 
     /** Appends [songs] to the end of the queue in their original order. */
     fun addAllToQueue(songs: List<Song>) {
-        if (songs.isEmpty()) return
-        val currentPlaybackIndex = currentPlaybackIndex()
-        if (libraryQueue.isEmpty() || currentPlaybackIndex == null) {
-            playFromQueue(queue = songs, startSong = songs.first())
-            return
-        }
-        val result = QueueMutation.appendAll(
-            libraryQueue = libraryQueue,
-            playbackOrder = playbackOrder,
-            songs = songs,
-        )
-        libraryQueue = result.libraryQueue
-        playbackOrder = result.playbackOrder
-        playbackQueue = result.playbackQueue
-
-        if (!playerQueueNeedsSync) {
-            mediaController?.addMeasuredMediaItems(
-                operation = "add_all_to_queue",
-                songs = songs,
+        when (
+            planQueueAdd(
+                hasExistingQueue = libraryQueue.isNotEmpty(),
+                isBatchEmpty = songs.isEmpty(),
+                currentIndexResolvable = currentPlaybackIndex() != null,
             )
+        ) {
+            QueueAddPlan.NoOp -> Unit
+            // Only a genuinely empty queue starts anew.
+            QueueAddPlan.StartNewQueue -> playFromQueue(queue = songs, startSong = songs.first())
+            // Existing queue: append to tail, preserving the queue even when the current index is
+            // temporarily unresolvable (previously this destructively replaced the queue).
+            QueueAddPlan.AppendPreservingQueue -> appendAllPreservingQueue(songs)
         }
-
-        _nowPlayingState.update {
-            it.copy(
-                queue = playbackQueue,
-                currentIndex = currentPlaybackIndex,
-                shuffleEnabled = shuffleEnabled,
-                repeatMode = repeatMode,
-            )
-        }
-        saveSessionAsync()
     }
 
     fun addToQueue(song: Song) {
-        val currentPlaybackIndex = currentPlaybackIndex()
-        if (libraryQueue.isEmpty() || currentPlaybackIndex == null) {
-            playSong(song)
-            return
-        }
-        val newLibraryIndex = libraryQueue.size
-        libraryQueue = libraryQueue + song
-        playbackOrder = playbackOrder + newLibraryIndex
-        playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
-
-        // Appends to the end of the ExoPlayer playlist (playbackQueue).
-        if (!playerQueueNeedsSync) {
-            mediaController?.addMediaItem(song.toCachedMediaItem())
-        }
-
-        _nowPlayingState.update {
-            it.copy(
-                queue = playbackQueue,
-                currentIndex = currentPlaybackIndex,
-                shuffleEnabled = shuffleEnabled,
-                repeatMode = repeatMode,
+        when (
+            planQueueAdd(
+                hasExistingQueue = libraryQueue.isNotEmpty(),
+                isBatchEmpty = false,
+                currentIndexResolvable = currentPlaybackIndex() != null,
             )
+        ) {
+            QueueAddPlan.NoOp -> Unit
+            QueueAddPlan.StartNewQueue -> playSong(song)
+            // Existing queue: append to tail via the proven preserving path, which keeps the queue
+            // and current song intact even when the current index is temporarily unresolvable.
+            QueueAddPlan.AppendPreservingQueue -> appendAllPreservingQueue(listOf(song))
         }
-        saveSessionAsync()
     }
 
     private fun insertAllAfterCurrent(songs: List<Song>) {
