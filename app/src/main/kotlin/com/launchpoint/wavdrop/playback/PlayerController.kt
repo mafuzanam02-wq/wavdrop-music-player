@@ -198,11 +198,48 @@ internal fun planQueueAdd(
 }
 
 /**
- * Returns the first playback-queue index of [songId], or -1 if not present.
- * Extracted as a pure function so it can be tested without a MediaController.
+ * Resolves which occurrence of [songId] a song-selection tap should jump to, given the active
+ * [currentPlaybackIndex]. A song id does NOT uniquely identify a queue occurrence once duplicates
+ * are legal, so selection is positional relative to the current playback position:
+ *
+ * 1. the CURRENT occurrence, if the current item is [songId];
+ * 2. otherwise the NEAREST UPCOMING occurrence strictly after current;
+ * 3. otherwise the NEAREST HISTORICAL occurrence strictly before current (nearest, not oldest);
+ * 4. otherwise -1 (not present).
+ *
+ * When [currentPlaybackIndex] is null or out of bounds the position is unknown, so a single
+ * occurrence is returned unambiguously but multiple occurrences yield -1 (the intended occurrence
+ * cannot be determined; callers fall back to their normal playback path rather than guess).
+ *
+ * Operates on the playback queue (the active playback sequence), so it is correct under shuffle.
+ * Pure so it can be tested without a MediaController.
  */
-internal fun recentlyPlayedQueueIndex(queue: List<Song>, songId: Long): Int =
-    queue.indexOfFirst { it.id == songId }
+internal fun resolveQueueOccurrenceIndex(
+    queue: List<Song>,
+    currentPlaybackIndex: Int?,
+    songId: Long,
+): Int {
+    if (queue.isEmpty()) return -1
+    val current = currentPlaybackIndex?.takeIf { it in queue.indices }
+    if (current == null) {
+        // Position unknown: only a single occurrence is unambiguous. Multiple occurrences cannot be
+        // safely disambiguated, so report not-found and let the caller use its normal path.
+        val matches = queue.indices.filter { queue[it].id == songId }
+        return matches.singleOrNull() ?: -1
+    }
+    // 1. current occurrence
+    if (queue[current].id == songId) return current
+    // 2. nearest upcoming occurrence (strictly after current)
+    for (i in current + 1 until queue.size) {
+        if (queue[i].id == songId) return i
+    }
+    // 3. nearest historical occurrence (strictly before current, nearest first)
+    for (i in current - 1 downTo 0) {
+        if (queue[i].id == songId) return i
+    }
+    // 4. not found
+    return -1
+}
 
 /**
  * Singleton bridge between the UI layer and PlaybackService.
@@ -1082,15 +1119,20 @@ class PlayerController @Inject constructor(
     }
 
     /**
-     * Jumps to the first occurrence of [songId] in the current playback queue without
-     * rebuilding the queue, session, shuffle order, or repeat mode.
+     * Jumps to the occurrence of [songId] selected by [resolveQueueOccurrenceIndex] — the current
+     * occurrence, else the nearest upcoming, else the nearest historical one — without rebuilding
+     * the queue, session, shuffle order, or repeat mode.
      *
-     * Returns true if the song was found and playback jumped to it.
-     * Returns false if the song is not in the current queue; the caller should fall back
-     * to its normal playback path.
+     * Returns true if a matching occurrence was found (and a jump was requested).
+     * Returns false if the song is not resolvable in the current queue (absent, or ambiguous while
+     * the current index is unresolved); the caller should fall back to its normal playback path.
      */
     fun jumpToSongById(songId: Long): Boolean {
-        val playbackIndex = recentlyPlayedQueueIndex(playbackQueue, songId)
+        val playbackIndex = resolveQueueOccurrenceIndex(
+            queue = playbackQueue,
+            currentPlaybackIndex = currentPlaybackIndex(),
+            songId = songId,
+        )
         if (playbackIndex < 0) return false
         jumpToQueueItem(playbackIndex)
         return true
