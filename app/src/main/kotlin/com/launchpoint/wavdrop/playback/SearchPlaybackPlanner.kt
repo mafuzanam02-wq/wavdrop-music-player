@@ -37,9 +37,14 @@ internal object SearchPlaybackPlanner {
             currentPlaybackIndex = resolvedCurrentIndex,
             song = song,
         )
+        // The selected occurrence is POSITIONAL, not identity-derived. searchPreserveQueue always
+        // builds `history(take(resolvedCurrentIndex + 1)) + song + filteredContinuation`, so the
+        // newly inserted searched occurrence is unambiguously at `resolvedCurrentIndex + 1`. Using
+        // `indexOfFirst { it.id == song.id }` would return an EARLIER historical occurrence when the
+        // same song already exists in retained history, jumping playback backwards (WD release gate).
         return SearchPlaybackPlan(
             queue = queue,
-            currentIndex = queue.indexOfFirst { it.id == song.id }.takeIf { it >= 0 } ?: 0,
+            currentIndex = resolvedCurrentIndex + 1,
         )
     }
 

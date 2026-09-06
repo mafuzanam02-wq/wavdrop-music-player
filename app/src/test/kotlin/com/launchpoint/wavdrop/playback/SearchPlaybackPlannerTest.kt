@@ -96,6 +96,85 @@ class SearchPlaybackPlannerTest {
     }
 
     @Test
+    fun `preserve queue selects newly inserted searched occurrence when same song exists in history`() {
+        // Reproduction: X already exists in retained playback history (index 1). Tapping X with the
+        // current item at index 4 must insert a NEW X immediately after current and select THAT
+        // occurrence, never jump backwards to the historical X.
+        val plan = SearchPlaybackPlanner.preserveQueue(
+            playbackQueue = listOf(a, x, b, c, m, n, o),
+            currentPlaybackIndex = 4,
+            song = x,
+        )!!
+
+        assertEquals(listOf(a, x, b, c, m, x, n, o), plan.queue)
+        assertEquals(5, plan.currentIndex)
+        assertEquals(x.id, plan.queue[plan.currentIndex].id)
+        // Historical X remains in place.
+        assertEquals(x.id, plan.queue[1].id)
+        assertEquals(m, plan.queue[plan.currentIndex - 1])
+        assertEquals(2, plan.queue.count { it.id == x.id })
+    }
+
+    @Test
+    fun `preserve queue inserts searched song after current when it does not previously exist`() {
+        // Case A: searched song not present anywhere.
+        val plan = SearchPlaybackPlanner.preserveQueue(
+            playbackQueue = listOf(a, b, m, n),
+            currentPlaybackIndex = 2,
+            song = x,
+        )!!
+
+        assertEquals(listOf(a, b, m, x, n), plan.queue)
+        assertEquals(3, plan.currentIndex)
+        assertEquals(m, plan.queue[plan.currentIndex - 1])
+    }
+
+    @Test
+    fun `preserve queue moves future-only duplicate to immediately after current`() {
+        // Case B: searched song exists only in the future queue; it is relocated after current.
+        val plan = SearchPlaybackPlanner.preserveQueue(
+            playbackQueue = listOf(a, m, n, x, o),
+            currentPlaybackIndex = 1,
+            song = x,
+        )!!
+
+        assertEquals(listOf(a, m, x, n, o), plan.queue)
+        assertEquals(2, plan.currentIndex)
+        assertEquals(1, plan.queue.count { it.id == x.id })
+    }
+
+    @Test
+    fun `preserve queue keeps history duplicate but removes future duplicate`() {
+        // Case D: searched song exists in BOTH history and future.
+        val plan = SearchPlaybackPlanner.preserveQueue(
+            playbackQueue = listOf(a, x, b, m, n, x, o),
+            currentPlaybackIndex = 3,
+            song = x,
+        )!!
+
+        assertEquals(listOf(a, x, b, m, x, n, o), plan.queue)
+        assertEquals(4, plan.currentIndex)
+        assertEquals(x.id, plan.queue[plan.currentIndex].id)
+        // Historical occurrence retained at index 1; future occurrence removed; two X total.
+        assertEquals(x.id, plan.queue[1].id)
+        assertEquals(2, plan.queue.count { it.id == x.id })
+    }
+
+    @Test
+    fun `preserve queue appends searched song when current item is final`() {
+        // Case E: current is the last item; searched song is appended and becomes current.
+        val plan = SearchPlaybackPlanner.preserveQueue(
+            playbackQueue = listOf(a, b, m),
+            currentPlaybackIndex = 2,
+            song = x,
+        )!!
+
+        assertEquals(listOf(a, b, m, x), plan.queue)
+        assertEquals(3, plan.currentIndex)
+        assertEquals(x.id, plan.queue[plan.currentIndex].id)
+    }
+
+    @Test
     fun `replace queue uses search context and selected song index`() {
         val plan = SearchPlaybackPlanner.replaceQueue(
             searchContext = listOf(c, x, o),
