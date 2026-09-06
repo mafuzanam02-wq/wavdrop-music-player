@@ -51,6 +51,7 @@ import kotlinx.coroutines.isActive
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -150,13 +151,20 @@ private fun QueueSheetContent(
         }
     }
 
-    var draggingPlaybackIndex  by remember { mutableStateOf<Int?>(null) }
-    var draggingSongId         by remember { mutableStateOf<Long?>(null) }
-    var dragStartPlaybackIndex by remember { mutableStateOf(0) }
+    // Stable identity of the grabbed occurrence for the whole gesture (song id + occurrence ordinal),
+    // plus the immutable grabbed Song for the floating preview. The live source playback index is
+    // re-resolved from the session against the current queue — never assumed fixed.
+    // Always-fresh view of `state` for use inside gesture lambdas, whose enclosing pointerInput does
+    // not restart on recomposition and would otherwise capture a stale `state` snapshot.
+    val latestState            = rememberUpdatedState(state)
+    var dragSession            by remember { mutableStateOf<QueueDragSession?>(null) }
+    var draggingSong           by remember { mutableStateOf<Song?>(null) }
     var dragTargetPlaybackIndex by remember { mutableStateOf<Int?>(null) }
     var pointerViewportY       by remember { mutableStateOf<Float?>(null) }
     var isDragActive           by remember { mutableStateOf(false) }
     var autoScrollJob          by remember { mutableStateOf<Job?>(null) }
+    // Live playback index of the grabbed occurrence in the current queue (null once invalidated).
+    val draggingPlaybackIndex   = dragSession?.let { resolveDraggedOccurrenceIndex(state.queue, it) }
     val anyDragging             = isDragActive && draggingPlaybackIndex != null && pointerViewportY != null
     val compact                 = LocalCompactMode.current
     val density                 = LocalDensity.current
@@ -169,12 +177,11 @@ private fun QueueSheetContent(
 
     fun clearDragState() {
         stopAutoScroll()
-        isDragActive           = false
-        draggingPlaybackIndex  = null
-        draggingSongId         = null
-        dragStartPlaybackIndex = 0
+        isDragActive            = false
+        dragSession             = null
+        draggingSong            = null
         dragTargetPlaybackIndex = null
-        pointerViewportY       = null
+        pointerViewportY        = null
     }
 
     fun updateDragTarget(pointerY: Float) {
@@ -197,14 +204,11 @@ private fun QueueSheetContent(
     }
 
     suspend fun runAutoScrollFrame(): Boolean {
-        val playbackIndex = draggingPlaybackIndex
-        val songId = draggingSongId
+        // Reads only stable MutableState (isDragActive/dragSession/pointerViewportY), never the
+        // captured `state` param which is stale inside this long-lived coroutine. Structural
+        // invalidation (overtake / queue mutation) is handled reactively below, not here.
         val pointerY = pointerViewportY
-        if (!isDragActive || playbackIndex == null || songId == null || pointerY == null) return false
-        if (state.queue.getOrNull(playbackIndex)?.id != songId) {
-            clearDragState()
-            return false
-        }
+        if (!isDragActive || dragSession == null || pointerY == null) return false
 
         val edgePx      = with(density) { 80.dp.toPx() }
         val scrollSpeed = with(density) { 8.dp.toPx() }
@@ -257,9 +261,24 @@ private fun QueueSheetContent(
     //   ci+1 or 0   "Playing now" header         <- scroll target
     //   ci+2 or 1   QueueNowPlayingRow
     LaunchedEffect(currentIndex) {
-        if (currentIndex >= 0) {
+        // Keyed on currentIndex only: a current-track change during a drag is suppressed (does not
+        // yank the viewport), and because the key does not include isDragActive there is no forced
+        // catch-up scroll when the drag later ends — the user's viewport is preserved.
+        if (shouldAutoScrollToPlayingNow(currentIndex, isDragActive)) {
             val target = if (currentIndex > 0) currentIndex + 1 else 0
             listState.scrollToItem(target)
+        }
+    }
+
+    // Reactive mid-drag safety: if playback overtakes the grabbed occurrence or a queue mutation
+    // removes/invalidates it, cancel the drag immediately (stops auto-scroll, no commit). Reads the
+    // FRESH `state` (the auto-scroll coroutine cannot, since it captures a stale snapshot).
+    LaunchedEffect(state.queue, currentIndex, isDragActive) {
+        val session = dragSession
+        if (isDragActive && session != null &&
+            !isDraggedOccurrenceStillValid(state.queue, currentIndex, session)
+        ) {
+            clearDragState()
         }
     }
 
@@ -359,9 +378,12 @@ private fun QueueSheetContent(
                     onViewStats = { onViewStats(song.id) },
                     onShare = { onShareSong(song) },
                     onDragStart = {
-                        draggingPlaybackIndex  = playbackIndex
-                        draggingSongId         = song.id
-                        dragStartPlaybackIndex = playbackIndex
+                        dragSession = QueueDragSession(
+                            sourceSongId = song.id,
+                            sourceOccurrenceOrdinal = queueOccurrenceOrdinal(latestState.value.queue, playbackIndex),
+                            startSourcePlaybackIndex = playbackIndex,
+                        )
+                        draggingSong = song
                         dragTargetPlaybackIndex = playbackIndex
                         val key = "up-next-${song.id}-$playbackIndex"
                         val itemOffset = listState.layoutInfo.visibleItemsInfo
@@ -392,31 +414,27 @@ private fun QueueSheetContent(
                     onDragEnd   = {
                         stopAutoScroll()
                         isDragActive = false
-                        val from             = dragStartPlaybackIndex
-                        val firstIdx         = upNextStartIndex
-                        val fromLocalIdx     = from - firstIdx
-                        val to = dragTargetPlaybackIndex
-                        val draggedStillExists = draggingSongId != null &&
-                            fromLocalIdx in 0 until upNextCount &&
-                            state.queue.getOrNull(from)?.id == draggingSongId
-                        if (draggedStillExists && fromLocalIdx >= 0 && to != null && to != from) {
-                            onMoveItemTo(from, to)
+                        val session = dragSession
+                        // The single, final commit point — reached only for a valid, non-cancelled
+                        // drop. planQueueDragEnd re-resolves the grabbed occurrence against the live
+                        // queue and enforces the Up Next / overtake invariants.
+                        if (session != null) {
+                            val liveState = latestState.value
+                            val decision = planQueueDragEnd(
+                                queue = liveState.queue,
+                                currentIndex = liveState.currentIndex,
+                                session = session,
+                                targetPlaybackIndex = dragTargetPlaybackIndex,
+                                cancelled = false,
+                            )
+                            if (decision is QueueDragEndDecision.Commit) {
+                                onMoveItemTo(decision.fromPlaybackIndex, decision.toPlaybackIndex)
+                            }
                         }
                         clearDragState()
                     },
                     onDragCancel = {
-                        stopAutoScroll()
-                        isDragActive = false
-                        val from         = dragStartPlaybackIndex
-                        val firstIdx     = upNextStartIndex
-                        val fromLocalIdx = from - firstIdx
-                        val to = dragTargetPlaybackIndex
-                        val draggedStillExists = draggingSongId != null &&
-                            fromLocalIdx in 0 until upNextCount &&
-                            state.queue.getOrNull(from)?.id == draggingSongId
-                        if (draggedStillExists && fromLocalIdx >= 0 && to != null && to != from) {
-                            onMoveItemTo(from, to)
-                        }
+                        // Cancel means cancel: never commit a reorder. Just tear down drag state.
                         clearDragState()
                     },
                 )
@@ -441,7 +459,9 @@ private fun QueueSheetContent(
 
         item { Spacer(Modifier.height(24.dp)) }
                 }
-                val previewSong = draggingPlaybackIndex?.let { state.queue.getOrNull(it) }
+                // Immutable captured Song: the preview never flips to a different track if the
+                // queue shifts under an active drag (the old index-based lookup could).
+                val previewSong = draggingSong
                 val previewY = pointerViewportY
                 if (anyDragging && previewSong != null && previewY != null) {
                     QueueItemRow(
