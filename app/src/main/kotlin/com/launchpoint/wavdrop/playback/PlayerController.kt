@@ -241,6 +241,74 @@ internal fun resolveQueueOccurrenceIndex(
     return -1
 }
 
+/** Outcome of a [PlayerController.jumpToSongById] command decision. */
+internal enum class QueueJumpAction {
+    /** The occurrence cannot be safely resolved; the caller should use its fallback path. */
+    Reject,
+
+    /** A live controller is available; seek the resolved occurrence immediately. */
+    ExecuteNow,
+
+    /**
+     * The occurrence is valid but the controller is temporarily unavailable; accept the command,
+     * retain it as a bounded pending jump, and trigger demand-driven reconnection.
+     */
+    DeferAndReconnect,
+}
+
+/**
+ * Decides how a resolved queue-jump command should be handled.
+ *
+ * [resolvedIndex] is the output of [resolveQueueOccurrenceIndex] (< 0 means absent/ambiguous). The
+ * fix: a valid occurrence with no controller must NOT be treated as immediately executed (the
+ * pre-fix contract returned true while [jumpToQueueItem] silently no-oped) — it is deferred and a
+ * reconnection is requested instead.
+ */
+internal fun planQueueJump(
+    resolvedIndex: Int,
+    controllerAvailable: Boolean,
+): QueueJumpAction = when {
+    resolvedIndex < 0 -> QueueJumpAction.Reject
+    controllerAvailable -> QueueJumpAction.ExecuteNow
+    else -> QueueJumpAction.DeferAndReconnect
+}
+
+/** How a pending queue jump should be resolved against the (possibly mutated) queue on reconnect. */
+internal sealed interface PendingQueueJumpResolution {
+    data class Seek(val playbackIndex: Int) : PendingQueueJumpResolution
+    data object Discard : PendingQueueJumpResolution
+}
+
+/**
+ * Validates a deferred queue jump against the current [queue] when the controller reconnects.
+ *
+ * The queue may have mutated while the controller was unavailable (e.g. a remove shifted indices),
+ * so [resolvedPlaybackIndex] can no longer be trusted blindly:
+ * 1. if it still points at the same [songId], seek that exact occurrence;
+ * 2. otherwise re-resolve the occurrence by [songId] using the Phase 4 contract and seek that;
+ * 3. otherwise discard — never seek a different song because the queue moved.
+ */
+internal fun resolvePendingQueueJump(
+    queue: List<Song>,
+    currentPlaybackIndex: Int?,
+    songId: Long,
+    resolvedPlaybackIndex: Int,
+): PendingQueueJumpResolution {
+    if (resolvedPlaybackIndex in queue.indices && queue[resolvedPlaybackIndex].id == songId) {
+        return PendingQueueJumpResolution.Seek(resolvedPlaybackIndex)
+    }
+    val reResolved = resolveQueueOccurrenceIndex(
+        queue = queue,
+        currentPlaybackIndex = currentPlaybackIndex,
+        songId = songId,
+    )
+    return if (reResolved >= 0) {
+        PendingQueueJumpResolution.Seek(reResolved)
+    } else {
+        PendingQueueJumpResolution.Discard
+    }
+}
+
 /**
  * Singleton bridge between the UI layer and PlaybackService.
  *
@@ -311,6 +379,9 @@ class PlayerController @Inject constructor(
     private var pendingExternalPlaybackRequest: ExternalPlaybackRequest? = null
     private var pendingRestorePositionMs: Long? = null
     private var pendingPreserveSearchPlan: SearchPlaybackPlan? = null
+    // Single bounded pending queue-jump (Recently Played tap deferred while the controller is
+    // unavailable). Latest tap wins; drained on reconnect after the queue-replacing requests.
+    private var pendingQueueJumpRequest: QueueJumpRequest? = null
     private val sessionHydrationMutex = Mutex()
     private val sessionPersistenceGate = PlaybackSessionPersistenceGate()
     private var isExternalPlayback = false
@@ -651,10 +722,15 @@ class PlayerController @Inject constructor(
         val preserveSearchRequest = pendingPreserveSearchRequest
         val externalRequest = pendingExternalPlaybackRequest
         val restorePos = pendingRestorePositionMs
+        val jumpRequest = pendingQueueJumpRequest
         pendingPlaybackRequest = null
         pendingPreserveSearchRequest = null
         pendingExternalPlaybackRequest = null
         pendingRestorePositionMs = null
+        // A queue jump is subordinate to any queue-replacing/restore request that also accumulated
+        // while disconnected: the later replace supersedes the older jump (the queue it referred to
+        // is gone). Cleared here so a superseded jump can never fire against a replacement queue.
+        pendingQueueJumpRequest = null
         when {
             externalRequest != null -> playExternalUri(
                 uri = externalRequest.uri,
@@ -689,6 +765,9 @@ class PlayerController @Inject constructor(
                 controller.prepare()
                 syncNowPlayingState()
             }
+            // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
+            // against the (possibly mutated) queue so it never seeks a different song.
+            jumpRequest != null -> executePendingQueueJump(controller, jumpRequest)
             else -> syncNowPlayingState()
         }
     }
@@ -1123,9 +1202,14 @@ class PlayerController @Inject constructor(
      * occurrence, else the nearest upcoming, else the nearest historical one — without rebuilding
      * the queue, session, shuffle order, or repeat mode.
      *
-     * Returns true if a matching occurrence was found (and a jump was requested).
-     * Returns false if the song is not resolvable in the current queue (absent, or ambiguous while
-     * the current index is unresolved); the caller should fall back to its normal playback path.
+     * Returns **true** when the command has been genuinely handled: either seeked immediately, or —
+     * when the controller is temporarily unavailable — accepted as a bounded pending jump with a
+     * demand-driven reconnection requested (Phase 2), so the intended occurrence plays once the
+     * controller reconnects. The active queue is preserved in both cases.
+     *
+     * Returns **false** only when the occurrence cannot be safely resolved (absent, or ambiguous
+     * while the current index is unresolved); the caller should then use its fallback playback path.
+     * A non-null controller that silently no-ops no longer reports a false success.
      */
     fun jumpToSongById(songId: Long): Boolean {
         val playbackIndex = resolveQueueOccurrenceIndex(
@@ -1133,9 +1217,49 @@ class PlayerController @Inject constructor(
             currentPlaybackIndex = currentPlaybackIndex(),
             songId = songId,
         )
-        if (playbackIndex < 0) return false
-        jumpToQueueItem(playbackIndex)
-        return true
+        return when (planQueueJump(resolvedIndex = playbackIndex, controllerAvailable = mediaController != null)) {
+            QueueJumpAction.Reject -> false
+            QueueJumpAction.ExecuteNow -> {
+                // A newer immediate jump supersedes any older deferred one.
+                pendingQueueJumpRequest = null
+                jumpToQueueItem(playbackIndex)
+                true
+            }
+            QueueJumpAction.DeferAndReconnect -> {
+                // Latest explicit tap wins: overwrite any earlier pending jump (single slot).
+                pendingQueueJumpRequest = QueueJumpRequest(
+                    songId = songId,
+                    resolvedPlaybackIndex = playbackIndex,
+                )
+                // Trigger Phase 2's demand-driven acquisition; the jump drains on reconnect. The
+                // controller-null branches of the play* methods do NOT self-reconnect, so this call
+                // is required for the deferred jump to ever execute.
+                ensureControllerConnection()
+                if (BuildConfig.DEBUG) {
+                    Log.d(RESUME_TAG, "jumpToSongById deferred: songId=$songId index=$playbackIndex; reconnecting")
+                }
+                true
+            }
+        }
+    }
+
+    // Main thread only. Executes a deferred queue jump after the controller reconnects, correcting
+    // a stale index if the queue mutated while disconnected (never seeks a different song).
+    private fun executePendingQueueJump(controller: MediaController, request: QueueJumpRequest) {
+        when (
+            val resolution = resolvePendingQueueJump(
+                queue = playbackQueue,
+                currentPlaybackIndex = currentPlaybackIndex(),
+                songId = request.songId,
+                resolvedPlaybackIndex = request.resolvedPlaybackIndex,
+            )
+        ) {
+            is PendingQueueJumpResolution.Seek -> seekToPlaybackIndex(controller, resolution.playbackIndex)
+            PendingQueueJumpResolution.Discard -> {
+                Log.w(TAG, "Discarding stale pending queue jump songId=${request.songId}")
+                syncNowPlayingState()
+            }
+        }
     }
 
     fun removeFromQueue(playbackIndex: Int) {
@@ -2560,6 +2684,16 @@ class PlayerController @Inject constructor(
     private data class ExternalPlaybackRequest(
         val uri: Uri,
         val displayName: String?,
+    )
+
+    /**
+     * A Recently-Played queue jump accepted while the controller was unavailable. Carries both the
+     * resolved playback index and the [songId] so [resolvePendingQueueJump] can detect and correct
+     * a stale index if the queue mutated before reconnection — never seeking a different song.
+     */
+    private data class QueueJumpRequest(
+        val songId: Long,
+        val resolvedPlaybackIndex: Int,
     )
 
 }
