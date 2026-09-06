@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.LinkedHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -221,6 +222,20 @@ class PlayerController @Inject constructor(
     }
 
     private var mediaController: MediaController? = null
+
+    // Connection lifecycle for [mediaController]. Mutated only on the application main thread
+    // (init, the buildAsync completion listener, and MediaController.Listener callbacks all run
+    // there), so no additional synchronization is required. Modelling this explicitly is what
+    // makes a failed/lost connection recover: a failed attempt returns to Disconnected and the
+    // next demand ([awaitMediaController]) starts a fresh build.
+    private var controllerConnectionState = ControllerConnectionState.Disconnected
+
+    // Monotonic identity for the in-flight buildAsync attempt. Incremented when an attempt starts
+    // and when release() invalidates all in-flight attempts. Only the completion whose captured
+    // generation still equals this value is authoritative (see ControllerAttemptOwnership), so a
+    // late completion from a superseded/released attempt can neither install a stale controller
+    // nor reset the state of a newer attempt. Main-thread confined like controllerConnectionState.
+    private var controllerConnectionGeneration = 0L
 
     private var pendingPlaybackRequest: PlaybackRequest? = null
     private var pendingPreserveSearchRequest: PreserveSearchRequest? = null
@@ -488,67 +503,142 @@ class PlayerController @Inject constructor(
             }
         }
 
+        ensureControllerConnection()
+    }
+
+    /**
+     * Demand-driven controller acquisition. Safe to call repeatedly and from any thread: the work
+     * is posted to the main executor and, once there, the [ControllerConnectionDecision] guarantees
+     * at most one in-flight `buildAsync()`. A previously failed or disconnected controller is
+     * rebuilt here; a live or in-flight connection is left untouched.
+     */
+    private fun ensureControllerConnection() {
+        ContextCompat.getMainExecutor(context).execute {
+            when (ControllerConnectionDecision.onRequest(controllerConnectionState)) {
+                ControllerConnectionAction.StartConnection -> startControllerConnection()
+                ControllerConnectionAction.AwaitExisting,
+                ControllerConnectionAction.UseExisting -> Unit
+            }
+        }
+    }
+
+    // Main thread only. Precondition: controllerConnectionState == Disconnected.
+    private fun startControllerConnection() {
+        controllerConnectionState = ControllerConnectionState.Connecting
+        val generation = ++controllerConnectionGeneration
         val token = SessionToken(
             context,
             ComponentName(context, PlaybackService::class.java),
         )
-        val future = MediaController.Builder(context, token).buildAsync()
+        val future = MediaController.Builder(context, token)
+            .setListener(controllerLifecycleListener)
+            .buildAsync()
         future.addListener(
             {
-                runCatching {
-                    val controller = future.get()
-                    mediaController = controller
-                    controller.addListener(playerListener)
-                    controller.repeatMode = repeatMode.toPlayerRepeatMode()
-                    controller.shuffleModeEnabled = false
-                    val playRequest = pendingPlaybackRequest
-                    val preserveSearchRequest = pendingPreserveSearchRequest
-                    val externalRequest = pendingExternalPlaybackRequest
-                    val restorePos = pendingRestorePositionMs
-                    pendingPlaybackRequest = null
-                    pendingPreserveSearchRequest = null
-                    pendingExternalPlaybackRequest = null
-                    pendingRestorePositionMs = null
-                    when {
-                        externalRequest != null -> playExternalUri(
-                            uri = externalRequest.uri,
-                            displayName = externalRequest.displayName,
-                        )
-                        preserveSearchRequest != null -> playPreservedSearchPlan(
-                            plan = preserveSearchRequest.plan,
-                            startSong = preserveSearchRequest.startSong,
-                        )
-                        playRequest != null -> playFromQueueInternal(
-                            queue = playRequest.queue,
-                            startSong = playRequest.startSong,
-                            preservePlaybackOrder = playRequest.preservePlaybackOrder,
-                        )
-                        restorePos != null && libraryQueue.isNotEmpty() -> {
-                            // libraryQueue/playbackOrder/playbackQueue were set by
-                            // restoreSessionIfNeeded; ExoPlayer was not ready at that time.
-                            val startLibraryIndex = _nowPlayingState.value.song?.id
-                                ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
-                                ?.takeIf { it >= 0 } ?: 0
-                            val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex)
-                                .takeIf { it >= 0 } ?: 0
-                            controller.repeatMode = repeatMode.toPlayerRepeatMode()
-                            controller.shuffleModeEnabled = false
-                            // Load ExoPlayer with playbackQueue (shuffle order).
-                            controller.setMeasuredMediaItems(
-                                operation = "deferred_restore",
-                                songs = playbackQueue,
-                                startIndex = startPlaybackIndex,
-                                positionMs = restorePos,
-                            )
-                            controller.prepare()
-                            syncNowPlayingState()
-                        }
-                        else -> syncNowPlayingState()
+                val result = runCatching { future.get() }
+                when (
+                    ControllerAttemptOwnership.onCompletion(
+                        attemptGeneration = generation,
+                        currentGeneration = controllerConnectionGeneration,
+                    )
+                ) {
+                    ControllerAttemptOutcome.DiscardStale -> {
+                        // A newer attempt started (or release() ran) while this build was in
+                        // flight. Release any controller this stale attempt produced and touch no
+                        // state — the authoritative attempt owns mediaController/state/pending.
+                        result.getOrNull()?.release()
+                        Log.w(TAG, "Ignoring stale MediaController connection completion (gen=$generation)")
                     }
+                    ControllerAttemptOutcome.Apply -> result.fold(
+                        onSuccess = { controller -> onControllerConnected(controller) },
+                        onFailure = { error ->
+                            // Observable, non-terminal: clear the connecting state so a later
+                            // demand (awaitMediaController / a playback action) can start a fresh
+                            // attempt. Pending requests are intentionally NOT cleared here — they
+                            // must survive a transient connection failure and run once connected.
+                            controllerConnectionState = ControllerConnectionDecision.onConnectionFailed()
+                            Log.w(TAG, "MediaController connection failed; will retry on next demand", error)
+                        },
+                    )
                 }
             },
             ContextCompat.getMainExecutor(context),
         )
+    }
+
+    // Main thread only.
+    private fun onControllerConnected(controller: MediaController) {
+        mediaController = controller
+        controllerConnectionState = ControllerConnectionDecision.onConnected()
+        controller.addListener(playerListener)
+        controller.repeatMode = repeatMode.toPlayerRepeatMode()
+        controller.shuffleModeEnabled = false
+        drainPendingRequests(controller)
+    }
+
+    // Main thread only. Consumes any request captured while the controller was unavailable.
+    private fun drainPendingRequests(controller: MediaController) {
+        val playRequest = pendingPlaybackRequest
+        val preserveSearchRequest = pendingPreserveSearchRequest
+        val externalRequest = pendingExternalPlaybackRequest
+        val restorePos = pendingRestorePositionMs
+        pendingPlaybackRequest = null
+        pendingPreserveSearchRequest = null
+        pendingExternalPlaybackRequest = null
+        pendingRestorePositionMs = null
+        when {
+            externalRequest != null -> playExternalUri(
+                uri = externalRequest.uri,
+                displayName = externalRequest.displayName,
+            )
+            preserveSearchRequest != null -> playPreservedSearchPlan(
+                plan = preserveSearchRequest.plan,
+                startSong = preserveSearchRequest.startSong,
+            )
+            playRequest != null -> playFromQueueInternal(
+                queue = playRequest.queue,
+                startSong = playRequest.startSong,
+                preservePlaybackOrder = playRequest.preservePlaybackOrder,
+            )
+            restorePos != null && libraryQueue.isNotEmpty() -> {
+                // libraryQueue/playbackOrder/playbackQueue were set by
+                // restoreSessionIfNeeded; ExoPlayer was not ready at that time.
+                val startLibraryIndex = _nowPlayingState.value.song?.id
+                    ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
+                    ?.takeIf { it >= 0 } ?: 0
+                val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex)
+                    .takeIf { it >= 0 } ?: 0
+                controller.repeatMode = repeatMode.toPlayerRepeatMode()
+                controller.shuffleModeEnabled = false
+                // Load ExoPlayer with playbackQueue (shuffle order).
+                controller.setMeasuredMediaItems(
+                    operation = "deferred_restore",
+                    songs = playbackQueue,
+                    startIndex = startPlaybackIndex,
+                    positionMs = restorePos,
+                )
+                controller.prepare()
+                syncNowPlayingState()
+            }
+            else -> syncNowPlayingState()
+        }
+    }
+
+    /**
+     * Reacts to the session controller disconnecting (service killed / session released). Clears
+     * the dead controller and returns to a retry-eligible state so the next demand reconnects.
+     * This is not a reconnect daemon — nothing reconnects until something actually needs it.
+     */
+    private val controllerLifecycleListener = object : MediaController.Listener {
+        override fun onDisconnected(controller: MediaController) {
+            // Identity check preserved: a disconnect from a stale controller (e.g. one released by
+            // a superseded connection attempt) must never clear the current controller/state.
+            if (ControllerAttemptOwnership.shouldApplyDisconnect(mediaController === controller)) {
+                mediaController = null
+                controllerConnectionState = ControllerConnectionDecision.onDisconnected()
+                Log.w(TAG, "MediaController disconnected; will reconnect on next demand")
+            }
+        }
     }
 
     fun playSong(song: Song) {
@@ -1297,15 +1387,22 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
-    fun restoreSessionIfNeeded(availableSongs: List<Song>) {
-        scope.launch {
+    /**
+     * Startup entry point used by [PlaybackStartupCoordinator]. Returns the authoritative
+     * [PlayerHydrationResult] so the coordinator can distinguish terminal from transient outcomes
+     * and keep failures retryable. Runs on the main dispatcher because Media3 controller access
+     * (inside [ensurePlayerHydratedFromSession]) must happen on the application thread; the caller
+     * may invoke this from any dispatcher.
+     */
+    suspend fun restoreSessionIfNeeded(availableSongs: List<Song>): PlayerHydrationResult =
+        withContext(Dispatchers.Main.immediate) {
             val result = ensurePlayerHydratedFromSession(
                 availableSongs = availableSongs,
                 operation = "startup_restore",
             )
             if (BuildConfig.DEBUG) Log.d(RESUME_TAG, "restoreSessionIfNeeded: result=$result")
+            result
         }
-    }
 
     suspend fun ensurePlayerHydratedFromSession(
         availableSongs: List<Song>,
@@ -1744,6 +1841,10 @@ class PlayerController @Inject constructor(
      * especially on cold start (broadcast-receiver wakeup after process death).
      */
     private suspend fun awaitMediaController(timeoutMs: Long = 3_000L): MediaController? {
+        mediaController?.let { return it }
+        // Demand-driven retry: if a previous connection attempt failed (or the controller was
+        // disconnected), this starts a fresh build instead of waiting forever on a dead attempt.
+        ensureControllerConnection()
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val c = mediaController
@@ -1828,6 +1929,10 @@ class PlayerController @Inject constructor(
         mediaController?.removeListener(playerListener)
         mediaController?.release()
         mediaController = null
+        // Invalidate any in-flight buildAsync so a late completion cannot install a stale
+        // controller or mutate state after release.
+        ++controllerConnectionGeneration
+        controllerConnectionState = ControllerConnectionState.Disconnected
         mediaItemCache.clear()
     }
 

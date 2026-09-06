@@ -6,94 +6,139 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Verifies the idempotency rule for [PlaybackStartupCoordinator]: the coordinator
- * must never allow restore to be triggered more than once per process lifetime.
+ * Verifies the retryable startup-restore invariant enforced by [StartupRestoreGate] /
+ * [StartupRestoreDecision].
  *
- * [PlayerController] and [SongRepository] are Android-coupled concrete classes that
- * cannot be instantiated in a JVM unit test without a full Android environment.
- * The restore delegation is verified via an inline counter-based coordinator subclass
- * that overrides only the pure [restoreOnce] guard path.
+ * The old contract ("trigger exactly once per process no matter what") protected a defect: a
+ * transient startup failure permanently stranded playback until the process restarted. The correct
+ * contract is:
+ *  - duplicate concurrent restores are suppressed,
+ *  - successful / terminal outcomes are idempotent no-ops afterwards,
+ *  - transient failures remain eligible for a later attempt.
  *
- * [HasTriggeredCoordinator] extracts the idempotency decision into a pure, testable
- * helper so the logic can be verified independently of the Android/Room dependencies.
+ * [PlayerController] and [SongRepository] are Android-coupled and cannot be instantiated in a pure
+ * JVM test, so the decision logic is extracted into these pure helpers and verified directly.
  */
 class PlaybackStartupCoordinatorTest {
 
-    /**
-     * Thin pure extract of the "trigger once" decision logic from the coordinator.
-     * Mirrors exactly what [PlaybackStartupCoordinator.restoreOnce] does for the guard.
-     */
-    private class TriggerGuard {
-        private var hasTriggered = false
-        private var triggerCount = 0
+    // -----------------------------------------------------------------------
+    // Gate: begin / suppression / retry eligibility
+    // -----------------------------------------------------------------------
 
-        fun triggerOnce() {
-            if (hasTriggered) return
-            hasTriggered = true
-            triggerCount++
+    @Test
+    fun `first request is allowed`() {
+        val gate = StartupRestoreGate()
+        assertTrue(gate.beginAttempt())
+        assertEquals(StartupRestoreState.InFlight, gate.currentState())
+    }
+
+    @Test
+    fun `second request while in flight is suppressed`() {
+        val gate = StartupRestoreGate()
+        assertTrue(gate.beginAttempt())
+        assertFalse(gate.beginAttempt())
+        assertFalse(gate.beginAttempt())
+        assertEquals(StartupRestoreState.InFlight, gate.currentState())
+    }
+
+    @Test
+    fun `Hydrated marks terminal`() {
+        assertTerminalAfter(PlayerHydrationResult.Hydrated)
+    }
+
+    @Test
+    fun `AlreadyHydrated marks terminal`() {
+        assertTerminalAfter(PlayerHydrationResult.AlreadyHydrated)
+    }
+
+    @Test
+    fun `NoSavedSession marks terminal`() {
+        assertTerminalAfter(PlayerHydrationResult.NoSavedSession)
+    }
+
+    @Test
+    fun `FilteredBySettings marks terminal`() {
+        assertTerminalAfter(PlayerHydrationResult.FilteredBySettings)
+    }
+
+    @Test
+    fun `NoResolvableSong marks terminal`() {
+        // A saved song that is no longer in the library resolves identically on every retry.
+        assertTerminalAfter(PlayerHydrationResult.NoResolvableSong)
+    }
+
+    @Test
+    fun `SkippedActiveQueue marks terminal`() {
+        // Active playback already exists; retrying must not fight it.
+        assertTerminalAfter(PlayerHydrationResult.SkippedActiveQueue)
+    }
+
+    @Test
+    fun `ControllerUnavailable resets eligibility for retry`() {
+        assertRetryEligibleAfter(PlayerHydrationResult.ControllerUnavailable)
+    }
+
+    @Test
+    fun `MediaSetupFailed resets eligibility for retry`() {
+        assertRetryEligibleAfter(PlayerHydrationResult.MediaSetupFailed)
+    }
+
+    @Test
+    fun `after transient failure next request is allowed`() {
+        val gate = StartupRestoreGate()
+        assertTrue(gate.beginAttempt())
+        gate.completeAttempt(PlayerHydrationResult.ControllerUnavailable)
+        assertEquals(StartupRestoreState.NotStarted, gate.currentState())
+        assertTrue("transient failure must remain retry-eligible", gate.beginAttempt())
+    }
+
+    @Test
+    fun `thrown failure before a result remains retry-eligible`() {
+        val gate = StartupRestoreGate()
+        assertTrue(gate.beginAttempt())
+        gate.completeWithTransientFailure()
+        assertEquals(StartupRestoreState.NotStarted, gate.currentState())
+        assertTrue(gate.beginAttempt())
+    }
+
+    @Test
+    fun `after terminal result repeated requests remain no-op`() {
+        val gate = StartupRestoreGate()
+        assertTrue(gate.beginAttempt())
+        gate.completeAttempt(PlayerHydrationResult.Hydrated)
+        assertEquals(StartupRestoreState.Terminal, gate.currentState())
+        repeat(10) { assertFalse(gate.beginAttempt()) }
+        assertEquals(StartupRestoreState.Terminal, gate.currentState())
+    }
+
+    @Test
+    fun `every hydration result is classified exactly once`() {
+        // Guards against a new PlayerHydrationResult being added without a coordination policy.
+        PlayerHydrationResult.entries.forEach { result ->
+            val terminal = StartupRestoreDecision.isTerminal(result)
+            val expectedState = if (terminal) {
+                StartupRestoreState.Terminal
+            } else {
+                StartupRestoreState.NotStarted
+            }
+            assertEquals(expectedState, StartupRestoreDecision.nextState(result))
         }
-
-        val count: Int get() = triggerCount
-        val triggered: Boolean get() = hasTriggered
     }
 
-    // -----------------------------------------------------------------------
-    // Idempotency of the trigger guard
-    // -----------------------------------------------------------------------
-
-    @Test
-    fun `trigger guard fires exactly once on first call`() {
-        val guard = TriggerGuard()
-        guard.triggerOnce()
-        assertEquals(1, guard.count)
+    private fun assertTerminalAfter(result: PlayerHydrationResult) {
+        val gate = StartupRestoreGate()
+        assertTrue(gate.beginAttempt())
+        gate.completeAttempt(result)
+        assertEquals(StartupRestoreState.Terminal, gate.currentState())
+        assertFalse(gate.beginAttempt())
+        assertTrue(StartupRestoreDecision.isTerminal(result))
     }
 
-    @Test
-    fun `trigger guard called twice only fires once`() {
-        val guard = TriggerGuard()
-        guard.triggerOnce()
-        guard.triggerOnce()
-        assertEquals(1, guard.count)
-    }
-
-    @Test
-    fun `trigger guard called many times only fires once`() {
-        val guard = TriggerGuard()
-        repeat(50) { guard.triggerOnce() }
-        assertEquals(1, guard.count)
-    }
-
-    @Test
-    fun `trigger guard marks itself as triggered after first call`() {
-        val guard = TriggerGuard()
-        assertFalse(guard.triggered)
-        guard.triggerOnce()
-        assertTrue(guard.triggered)
-    }
-
-    @Test
-    fun `trigger guard stays triggered on subsequent calls`() {
-        val guard = TriggerGuard()
-        guard.triggerOnce()
-        guard.triggerOnce()
-        assertTrue(guard.triggered)
-    }
-
-    @Test
-    fun `two separate guard instances each trigger independently`() {
-        val g1 = TriggerGuard()
-        val g2 = TriggerGuard()
-        g1.triggerOnce()
-        g2.triggerOnce()
-        assertEquals(1, g1.count)
-        assertEquals(1, g2.count)
-    }
-
-    @Test
-    fun `guard does not count after being triggered`() {
-        val guard = TriggerGuard()
-        guard.triggerOnce()
-        repeat(10) { guard.triggerOnce() }
-        assertEquals(1, guard.count)
+    private fun assertRetryEligibleAfter(result: PlayerHydrationResult) {
+        val gate = StartupRestoreGate()
+        assertTrue(gate.beginAttempt())
+        gate.completeAttempt(result)
+        assertEquals(StartupRestoreState.NotStarted, gate.currentState())
+        assertFalse(StartupRestoreDecision.isTerminal(result))
     }
 }
