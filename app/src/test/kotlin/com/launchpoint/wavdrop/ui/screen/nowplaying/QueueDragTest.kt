@@ -289,4 +289,117 @@ class QueueDragTest {
         assertTrue(registry.isEmpty())
         assertEquals(2, resolveDraggedOccurrenceIndex(queue, session))
     }
+
+    // ── Phase B: progressive edge-scroll velocity ────────────────────────────────────────────────
+
+    private val viewport = 1000f
+    private val edgeZone = 96f
+    private val minSpeed = 200f
+    private val maxSpeed = 2200f
+
+    private fun velocity(pointerY: Float) =
+        edgeScrollVelocityPxPerSec(pointerY, viewport, edgeZone, minSpeed, maxSpeed)
+
+    // A. no edge (center) → zero velocity
+    @Test
+    fun `edge velocity is zero in the middle band`() {
+        assertEquals(0f, velocity(viewport / 2f), 0.0001f)
+        assertEquals(0f, velocity(edgeZone + 1f), 0.0001f)          // just past the top zone
+        assertEquals(0f, velocity(viewport - edgeZone - 1f), 0.0001f) // just before the bottom zone
+    }
+
+    // C. direction correct: top negative, bottom positive
+    @Test
+    fun `edge velocity direction is up at top and down at bottom`() {
+        assertTrue(velocity(10f) < 0f)
+        assertTrue(velocity(viewport - 10f) > 0f)
+    }
+
+    // B. deeper edge = faster; shallow ≈ min
+    @Test
+    fun `edge velocity accelerates with depth`() {
+        val shallowTop = velocity(edgeZone - 1f)   // depth ~0 → ~min (small)
+        val deepTop = velocity(0f)                  // depth 1 → max
+        assertTrue(kotlin.math.abs(shallowTop) < kotlin.math.abs(deepTop))
+        assertEquals(minSpeed, kotlin.math.abs(shallowTop), 5f) // shallow is about the minimum speed
+        assertEquals(maxSpeed, kotlin.math.abs(deepTop), 0.001f)
+
+        val shallowBottom = velocity(viewport - edgeZone + 1f)
+        val deepBottom = velocity(viewport)
+        assertTrue(shallowBottom < deepBottom)
+        assertEquals(minSpeed, shallowBottom, 5f)
+        assertEquals(maxSpeed, deepBottom, 0.001f)
+    }
+
+    // D. clamped at max even beyond the viewport edge
+    @Test
+    fun `edge velocity is clamped to max past the edge`() {
+        assertEquals(maxSpeed, kotlin.math.abs(velocity(-500f)), 0.001f)
+        assertEquals(maxSpeed, velocity(viewport + 500f), 0.001f)
+    }
+
+    @Test
+    fun `edge velocity is zero for a degenerate viewport`() {
+        assertEquals(0f, edgeScrollVelocityPxPerSec(50f, 0f, edgeZone, minSpeed, maxSpeed), 0.0001f)
+    }
+
+    // ── Phase B: insertion-marker semantics (must match move-to-index commit) ─────────────────────
+
+    // Moving DOWN: dragged item lands after the target row → Bottom edge on the target row only.
+    @Test
+    fun `insertion marker is on target bottom when moving down`() {
+        assertEquals(QueueInsertionEdge.Bottom, queueInsertionEdgeFor(rowPlaybackIndex = 20, sourcePlaybackIndex = 4, targetPlaybackIndex = 20))
+        assertNull(queueInsertionEdgeFor(rowPlaybackIndex = 19, sourcePlaybackIndex = 4, targetPlaybackIndex = 20)) // non-target row
+        assertNull(queueInsertionEdgeFor(rowPlaybackIndex = 4, sourcePlaybackIndex = 4, targetPlaybackIndex = 20))  // source row
+    }
+
+    // Moving UP: dragged item lands before the target row → Top edge on the target row only.
+    @Test
+    fun `insertion marker is on target top when moving up`() {
+        assertEquals(QueueInsertionEdge.Top, queueInsertionEdgeFor(rowPlaybackIndex = 5, sourcePlaybackIndex = 18, targetPlaybackIndex = 5))
+        assertNull(queueInsertionEdgeFor(rowPlaybackIndex = 6, sourcePlaybackIndex = 18, targetPlaybackIndex = 5))
+    }
+
+    // target == source → no marker anywhere (a no-op drop shows nothing).
+    @Test
+    fun `insertion marker absent when target equals source`() {
+        assertNull(queueInsertionEdgeFor(rowPlaybackIndex = 7, sourcePlaybackIndex = 7, targetPlaybackIndex = 7))
+    }
+
+    // The marker edge points at the row that will end up adjacent to the drop, matching planQueueDragEnd.
+    @Test
+    fun `insertion marker matches the committed landing position`() {
+        val queue = queueOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        val session = sessionFor(queue, startIndex = 2) // drag "2"
+        val target = 8
+        val decision = planQueueDragEnd(queue, currentIndex = 0, session, targetPlaybackIndex = target, cancelled = false)
+        assertEquals(QueueDragEndDecision.Commit(2, 8), decision)
+        // Down move → marker on the bottom of the target row (index 8), nowhere else.
+        assertEquals(QueueInsertionEdge.Bottom, queueInsertionEdgeFor(target, sourcePlaybackIndex = 2, targetPlaybackIndex = target))
+    }
+
+    // ── Phase B: long-distance position label ─────────────────────────────────────────────────────
+
+    @Test
+    fun `position label is 1-based within up next`() {
+        // upNext starts at playback index 1, 718 items.
+        assertEquals("1 of 718", queueMovePositionLabel(targetPlaybackIndex = 1, upNextStartIndex = 1, upNextCount = 718))
+        assertEquals("437 of 718", queueMovePositionLabel(targetPlaybackIndex = 437, upNextStartIndex = 1, upNextCount = 718))
+        assertEquals("718 of 718", queueMovePositionLabel(targetPlaybackIndex = 718, upNextStartIndex = 1, upNextCount = 718))
+    }
+
+    @Test
+    fun `position label is null outside up next`() {
+        assertNull(queueMovePositionLabel(targetPlaybackIndex = 0, upNextStartIndex = 1, upNextCount = 5)) // before up next
+        assertNull(queueMovePositionLabel(targetPlaybackIndex = 7, upNextStartIndex = 1, upNextCount = 5)) // past up next
+        assertNull(queueMovePositionLabel(targetPlaybackIndex = 3, upNextStartIndex = 1, upNextCount = 0)) // empty
+    }
+
+    // F. duplicate ids do not affect the target display (pure index math).
+    @Test
+    fun `position label independent of duplicate song ids`() {
+        // Two queues, same indices, different id multiplicities → identical label.
+        val label = queueMovePositionLabel(targetPlaybackIndex = 5, upNextStartIndex = 2, upNextCount = 10)
+        assertEquals("4 of 10", label)
+    }
 }

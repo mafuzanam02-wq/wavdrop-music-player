@@ -28,6 +28,78 @@ internal fun findDragHandleAt(
     position: Offset,
 ): QueueDragHandleTarget? = targets.firstOrNull { it.bounds.contains(position) }
 
+// ── Phase B: interaction-polish geometry (all pure, all unit-tested) ────────────────────────────
+
+/**
+ * Progressive edge-scroll velocity in **pixels per second** for a pointer at [pointerY] within a
+ * viewport of height [viewportHeightPx]. Zero in the middle band; ramps quadratically from
+ * [minSpeedPxPerSec] at the inner edge of the [edgeZonePx] band to [maxSpeedPxPerSec] at the very
+ * viewport edge. Negative near the top (scroll up), positive near the bottom (scroll down). The
+ * caller converts this to a per-frame delta using real elapsed time, so behaviour is frame-rate
+ * independent. The zone is clamped to half the viewport so the two bands never overlap on short
+ * viewports, and depth is clamped so a pointer dragged past the edge stays at [maxSpeedPxPerSec].
+ */
+internal fun edgeScrollVelocityPxPerSec(
+    pointerY: Float,
+    viewportHeightPx: Float,
+    edgeZonePx: Float,
+    minSpeedPxPerSec: Float,
+    maxSpeedPxPerSec: Float,
+): Float {
+    if (viewportHeightPx <= 0f || edgeZonePx <= 0f) return 0f
+    val zone = edgeZonePx.coerceAtMost(viewportHeightPx / 2f)
+    if (pointerY < zone) {
+        val depth = ((zone - pointerY) / zone).coerceIn(0f, 1f)
+        return -speedForEdgeDepth(depth, minSpeedPxPerSec, maxSpeedPxPerSec)
+    }
+    val bottomThreshold = viewportHeightPx - zone
+    if (pointerY > bottomThreshold) {
+        val depth = ((pointerY - bottomThreshold) / zone).coerceIn(0f, 1f)
+        return speedForEdgeDepth(depth, minSpeedPxPerSec, maxSpeedPxPerSec)
+    }
+    return 0f
+}
+
+private fun speedForEdgeDepth(depth: Float, minSpeed: Float, maxSpeed: Float): Float =
+    minSpeed + (maxSpeed - minSpeed) * depth * depth
+
+/** Which edge of a target row the drop-insertion marker sits on. */
+internal enum class QueueInsertionEdge { Top, Bottom }
+
+/**
+ * The insertion-marker edge to draw on the row at [rowPlaybackIndex], or null if that row is not the
+ * current drop target (or there is no move). This mirrors [planQueueDragEnd]'s move-to-index commit
+ * exactly (`removeAt(from); add(to)`):
+ * - moving **down** ([targetPlaybackIndex] > [sourcePlaybackIndex]) the dragged item lands just after
+ *   the row currently at the target → marker on that row's **bottom**;
+ * - moving **up** the item lands just before it → marker on the row's **top**.
+ * The marker never points at the source row (target == source is a no-op).
+ */
+internal fun queueInsertionEdgeFor(
+    rowPlaybackIndex: Int,
+    sourcePlaybackIndex: Int,
+    targetPlaybackIndex: Int,
+): QueueInsertionEdge? {
+    if (sourcePlaybackIndex == targetPlaybackIndex) return null
+    if (rowPlaybackIndex != targetPlaybackIndex) return null
+    return if (targetPlaybackIndex > sourcePlaybackIndex) QueueInsertionEdge.Bottom else QueueInsertionEdge.Top
+}
+
+/**
+ * Compact "N of M" label for the drop destination's 1-based position within Up Next, or null if the
+ * target is outside Up Next. Purely index arithmetic — duplicate song ids cannot affect it.
+ */
+internal fun queueMovePositionLabel(
+    targetPlaybackIndex: Int,
+    upNextStartIndex: Int,
+    upNextCount: Int,
+): String? {
+    if (upNextCount <= 0) return null
+    val position = targetPlaybackIndex - upNextStartIndex + 1
+    if (position < 1 || position > upNextCount) return null
+    return "$position of $upNextCount"
+}
+
 /**
  * Immutable identity of an in-progress queue drag. A playback index alone is not a stable identity
  * (the queue can mutate during a long drag), and a song id alone is ambiguous once duplicate song

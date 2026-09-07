@@ -1,5 +1,11 @@
 package com.launchpoint.wavdrop.ui.screen.nowplaying
 
+import android.provider.Settings
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -18,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
@@ -34,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -55,12 +63,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -181,6 +198,25 @@ private fun QueueSheetContent(
     val compact                 = LocalCompactMode.current
     val density                 = LocalDensity.current
     val rowHeightPx             = with(density) { if (compact) 56.dp.toPx() else 64.dp.toPx() }
+    val haptics                 = LocalHapticFeedback.current
+    // Honour the OS "remove animations" accessibility flag (same idiom as WrappedScreen): disable
+    // non-essential scale/spring/placement motion while keeping the insertion marker and position
+    // badge, which convey function rather than decoration.
+    val reduceMotion            = remember(context) {
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) < 0.1f
+    }
+    // Progressive edge-scroll tuning (Phase B). Velocity is computed in px/s by a pure helper and
+    // converted to a per-frame delta using measured elapsed time, so it is frame-rate independent.
+    val edgeZonePx              = with(density) { 96.dp.toPx() }
+    val minEdgeSpeedPxPerSec    = with(density) { 220.dp.toPx() }
+    val maxEdgeSpeedPxPerSec    = with(density) { 2200.dp.toPx() }
+    // Enlarged drag-handle hit width (from the row's left edge). The visible icon stays small; only
+    // the registered hit region grows, and it never reaches the artwork so artwork scroll is intact.
+    val handleHitWidthPx        = with(density) { 44.dp.toPx() }
 
     fun stopAutoScroll() {
         autoScrollJob?.cancel()
@@ -215,28 +251,25 @@ private fun QueueSheetContent(
         dragTargetPlaybackIndex = target.coerceIn(firstIdx, lastIdx)
     }
 
-    suspend fun runAutoScrollFrame(): Boolean {
+    suspend fun runAutoScrollFrame(dtSeconds: Float): Boolean {
         // Reads only stable MutableState (isDragActive/dragSession/pointerViewportY), never the
         // captured `state` param which is stale inside this long-lived coroutine. Structural
         // invalidation (overtake / queue mutation) is handled reactively below, not here.
         val pointerY = pointerViewportY
         if (!isDragActive || dragSession == null || pointerY == null) return false
 
-        val edgePx      = with(density) { 80.dp.toPx() }
-        val scrollSpeed = with(density) { 8.dp.toPx() }
         val viewport = listState.layoutInfo.viewportSize.height.toFloat()
-        val scrollAmount = if (viewport > 0f) {
-            when {
-                pointerY < edgePx            -> -scrollSpeed
-                pointerY > viewport - edgePx ->  scrollSpeed
-                else                         ->  0f
-            }
-        } else {
-            0f
-        }
+        // Progressive px/s velocity → per-frame px using real elapsed time (frame-rate independent).
+        val velocityPxPerSec = edgeScrollVelocityPxPerSec(
+            pointerY = pointerY,
+            viewportHeightPx = viewport,
+            edgeZonePx = edgeZonePx,
+            minSpeedPxPerSec = minEdgeSpeedPxPerSec,
+            maxSpeedPxPerSec = maxEdgeSpeedPxPerSec,
+        )
 
-        if (scrollAmount != 0f && isDragActive) {
-            listState.scrollBy(scrollAmount)
+        if (velocityPxPerSec != 0f && isDragActive) {
+            listState.scrollBy(velocityPxPerSec * dtSeconds)
             if (isDragActive) {
                 updateDragTarget(pointerY)
             }
@@ -247,9 +280,15 @@ private fun QueueSheetContent(
     fun startAutoScroll() {
         stopAutoScroll()
         autoScrollJob = autoScrollScope.launch {
+            var lastFrameNanos = System.nanoTime()
             while (isActive) {
-                if (!runAutoScrollFrame()) break
                 delay(16L)
+                val now = System.nanoTime()
+                // Clamp dt so a scheduler stall (or a returning-from-background pause) cannot produce
+                // one giant scroll jump.
+                val dtSeconds = ((now - lastFrameNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
+                lastFrameNanos = now
+                if (!runAutoScrollFrame(dtSeconds)) break
             }
         }
     }
@@ -276,6 +315,9 @@ private fun QueueSheetContent(
         pointerViewportY = if (viewport > 0f) pointerY.coerceIn(0f, viewport) else pointerY
         updateDragTarget(pointerViewportY ?: pointerY)
         isDragActive = true
+        // The single pickup haptic — fired only here, at vertical-slop crossing. Never on down, on
+        // row crossings, on target updates, or during auto-scroll.
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         startAutoScroll()
     }
 
@@ -512,44 +554,79 @@ private fun QueueSheetContent(
                 val isLastUpNext = index == upNextCount - 1
                 val isDragging = draggingPlaybackIndex == playbackIndex
                 val rowKey = "up-next-${song.id}-$playbackIndex"
-                SwipeableQueueItemRow(
-                    song = song,
-                    isFirstUpNext = isFirstUpNext,
-                    isLastUpNext = isLastUpNext,
-                    isDragging = isDragging,
-                    isDimmed = anyDragging && !isDragging,
-                    onJump = { onJumpToItem(playbackIndex) },
-                    onMoveUp = { onMoveUp(playbackIndex) },
-                    onMoveDown = { onMoveDown(playbackIndex) },
-                    onPlayNext = { onPlayNext(playbackIndex) },
-                    onRemove = {
-                        onRemoveItem(playbackIndex)
-                        showRemovedSnackbar()
-                    },
-                    onViewStats = { onViewStats(song.id) },
-                    onShare = { onShareSong(song) },
-                    // The handle is now only a hit-registration region: it reports its bounds (in the
-                    // viewport Box's coordinate space, via the shared viewportCoords) and unregisters
-                    // on disposal. It no longer owns the drag detector, so virtualising this row can
-                    // no longer cancel an in-progress drag.
-                    onHandlePositioned = { handleCoords ->
-                        val vp = viewportCoords
-                        if (vp != null && vp.isAttached && handleCoords.isAttached) {
-                            handleRegistry[rowKey] = QueueDragHandleTarget(
-                                playbackIndex = playbackIndex,
-                                songId = song.id,
-                                bounds = vp.localBoundingBoxOf(handleCoords),
+                // Insertion marker for this row (Top/Bottom/none), matching the move-to-index commit.
+                val dragSource = draggingPlaybackIndex
+                val dragTarget = dragTargetPlaybackIndex
+                val insertionEdge = if (isDragActive && dragSource != null && dragTarget != null) {
+                    queueInsertionEdgeFor(playbackIndex, dragSource, dragTarget)
+                } else {
+                    null
+                }
+                // Wrap row + divider so the whole entry animates into place on the final commit
+                // (placement only — the backing list is never locally reordered during the gesture).
+                Column(
+                    modifier = Modifier.animateItem(
+                        placementSpec = if (reduceMotion) {
+                            null
+                        } else {
+                            spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                visibilityThreshold = IntOffset.VisibilityThreshold,
                             )
-                        }
-                    },
-                    onHandleDisposed = { handleRegistry.remove(rowKey) },
-                )
-                if (!isLastUpNext) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        },
+                    ),
+                ) {
+                    SwipeableQueueItemRow(
+                        song = song,
+                        isFirstUpNext = isFirstUpNext,
+                        isLastUpNext = isLastUpNext,
+                        isDragging = isDragging,
+                        isDimmed = anyDragging && !isDragging,
+                        insertionEdge = insertionEdge,
+                        onJump = { onJumpToItem(playbackIndex) },
+                        onMoveUp = { onMoveUp(playbackIndex) },
+                        onMoveDown = { onMoveDown(playbackIndex) },
+                        onPlayNext = { onPlayNext(playbackIndex) },
+                        onRemove = {
+                            onRemoveItem(playbackIndex)
+                            showRemovedSnackbar()
+                        },
+                        onViewStats = { onViewStats(song.id) },
+                        onShare = { onShareSong(song) },
+                        // The handle is now only a hit-registration region: it reports its bounds (in
+                        // the viewport Box's coordinate space, via the shared viewportCoords) and
+                        // unregisters on disposal. It no longer owns the drag detector, so virtualising
+                        // this row can no longer cancel an in-progress drag.
+                        onHandlePositioned = { handleCoords ->
+                            val vp = viewportCoords
+                            if (vp != null && vp.isAttached && handleCoords.isAttached) {
+                                val raw = vp.localBoundingBoxOf(handleCoords)
+                                // Enlarge only the hit region: span from the row's left edge to ~44dp,
+                                // keeping the handle's vertical extent. This never reaches the artwork,
+                                // so touching artwork/title still scrolls the list normally, and
+                                // adjacent rows' regions do not overlap vertically.
+                                val hitBounds = Rect(
+                                    left = 0f,
+                                    top = raw.top,
+                                    right = maxOf(raw.right, handleHitWidthPx),
+                                    bottom = raw.bottom,
+                                )
+                                handleRegistry[rowKey] = QueueDragHandleTarget(
+                                    playbackIndex = playbackIndex,
+                                    songId = song.id,
+                                    bounds = hitBounds,
+                                )
+                            }
+                        },
+                        onHandleDisposed = { handleRegistry.remove(rowKey) },
                     )
+                    if (!isLastUpNext) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 56.dp),
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
+                    }
                 }
             }
         } else if (currentSong != null) {
@@ -565,11 +642,47 @@ private fun QueueSheetContent(
 
         item { Spacer(Modifier.height(24.dp)) }
                 }
+                // Edge fades: hint that more queue exists beyond the viewport. Purely decorative and
+                // short, so they never obscure text/artwork; they strengthen a little during a drag.
+                val fadeColor = MaterialTheme.colorScheme.surface
+                val baseFade = if (compact) 20.dp else 28.dp
+                val fadeHeight = if (anyDragging) baseFade + 8.dp else baseFade
+                if (listState.canScrollBackward) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(fadeHeight)
+                            .background(Brush.verticalGradient(listOf(fadeColor, Color.Transparent))),
+                    )
+                }
+                if (listState.canScrollForward) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(fadeHeight)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, fadeColor))),
+                    )
+                }
+
                 // Immutable captured Song: the preview never flips to a different track if the
                 // queue shifts under an active drag (the old index-based lookup could).
                 val previewSong = draggingSong
                 val previewY = pointerViewportY
                 if (anyDragging && previewSong != null && previewY != null) {
+                    // Subtle "lift": spring the preview up to a small scale on pickup (skipped under
+                    // reduced motion), plus a static elevation shadow. Keeps Wavdrop recognisable.
+                    var lifted by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) { lifted = true }
+                    val liftScale by animateFloatAsState(
+                        targetValue = if (lifted && !reduceMotion) 1.02f else 1f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                        ),
+                        label = "queueDragLift",
+                    )
                     QueueItemRow(
                         song = previewSong,
                         isFirstUpNext = false,
@@ -592,8 +705,44 @@ private fun QueueSheetContent(
                                     y = (previewY - rowHeightPx / 2f).roundToInt(),
                                 )
                             }
+                            .graphicsLayer {
+                                scaleX = liftScale
+                                scaleY = liftScale
+                            }
+                            .shadow(elevation = 8.dp, clip = false)
                             .zIndex(1f),
                     )
+
+                    // Long-distance position feedback: "N of M" for the drop destination within Up
+                    // Next. Follows the finger, sits just above the preview, and vanishes on end/cancel.
+                    val positionLabel = dragTargetPlaybackIndex?.let {
+                        queueMovePositionLabel(it, upNextStartIndex, upNextCount)
+                    }
+                    if (positionLabel != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            shape = RoundedCornerShape(50),
+                            tonalElevation = 3.dp,
+                            shadowElevation = 3.dp,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset {
+                                    IntOffset(
+                                        x = 0,
+                                        y = (previewY - rowHeightPx).coerceAtLeast(0f).roundToInt(),
+                                    )
+                                }
+                                .padding(end = 12.dp)
+                                .zIndex(2f),
+                        ) {
+                            Text(
+                                text = positionLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -804,6 +953,7 @@ private fun SwipeableQueueItemRow(
     isLastUpNext: Boolean,
     isDragging: Boolean,
     isDimmed: Boolean,
+    insertionEdge: QueueInsertionEdge?,
     onJump: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -857,6 +1007,7 @@ private fun SwipeableQueueItemRow(
             isDragging = isDragging,
             isDimmed = isDimmed,
             dragHandleEnabled = true,
+            insertionEdge = insertionEdge,
             onJump = onJump,
             onMoveUp = onMoveUp,
             onMoveDown = onMoveDown,
@@ -885,6 +1036,8 @@ private fun QueueItemRow(
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
     onShare: () -> Unit,
+    // Drop-target insertion marker for this row (Top/Bottom/none). Only real Up Next rows pass it.
+    insertionEdge: QueueInsertionEdge? = null,
     // Handle hit-registration callbacks. Only supplied for real Up Next rows; the floating preview
     // row (dragHandleEnabled = false) passes neither and never registers.
     onHandlePositioned: (LayoutCoordinates) -> Unit = {},
@@ -895,10 +1048,26 @@ private fun QueueItemRow(
     val compact = LocalCompactMode.current
     val verticalPadding = if (compact) 8.dp else 10.dp
     val artworkSize = if (compact) 40.dp else 44.dp
+    val insertionColor = MaterialTheme.colorScheme.primary
 
     Row(
         modifier = modifier
             .fillMaxWidth()
+            // Draw the insertion marker as a thin accent line on the target edge, over the row's
+            // content and divider so it is unambiguous at first/last positions and while scrolling.
+            .drawWithContent {
+                drawContent()
+                if (insertionEdge != null) {
+                    val stroke = 3.dp.toPx()
+                    val y = if (insertionEdge == QueueInsertionEdge.Top) stroke / 2f else size.height - stroke / 2f
+                    drawLine(
+                        color = insertionColor,
+                        start = Offset(0f, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = stroke,
+                    )
+                }
+            }
             .background(
                 if (isDragging) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surface,
