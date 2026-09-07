@@ -20,6 +20,7 @@ import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettings
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
+import com.launchpoint.wavdrop.data.settings.HomeSmartCollectionSelection
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
@@ -256,11 +257,25 @@ class HomeViewModel @Inject constructor(
             initialValue = null,
         )
 
+    // Home Smart Collections projection (WU-01): the already-computed collections are filtered
+    // and ordered by the user's configured selection. observeSmartCollections() still does all
+    // the expensive membership work exactly once; changing the selection only re-runs the cheap
+    // selectHomeSmartCollections sort/take. distinctUntilChanged on the ordered ids keeps
+    // unrelated Home-layout edits (e.g. toggling a section) from re-triggering this combine.
+    private val homeSmartCollections: Flow<List<SmartCollection>> = combine(
+        smartCollectionRepository.observeSmartCollections(),
+        homeLayoutRepository.settings
+            .map { it.homeSmartCollections }
+            .distinctUntilChanged(),
+    ) { collections, configuredOrder ->
+        selectHomeSmartCollections(collections, configuredOrder)
+    }
+
     val dashboardState: StateFlow<HomeDashboardUiState> = combine(
         allSongs,
         statsRepository.allTrackStatsEntities(),
         playlistRepository.observePlaylists(),
-        smartCollectionRepository.observeSmartCollections(),
+        homeSmartCollections,
         wrappedPreview,
     ) { songs, stats, playlists, smartCollections, latestWrapped ->
         val loadedSongs = songs.orEmpty()
@@ -278,7 +293,7 @@ class HomeViewModel @Inject constructor(
                 .mapNotNull { songsById[it.songId] }
                 .take(DASHBOARD_SONG_PREVIEW_LIMIT),
             playlists = playlists.take(DASHBOARD_COLLECTION_PREVIEW_LIMIT),
-            smartCollections = selectHomeSmartCollections(smartCollections),
+            smartCollections = smartCollections,
             wrapped = latestWrapped,
         )
     }.stateIn(
@@ -443,12 +458,20 @@ internal fun isFolderModeNeedsSelection(settings: LibraryScanSettings): Boolean 
     settings.scanMode == LibraryScanMode.SELECTED_FOLDERS &&
         settings.selectedFolderUris.isEmpty()
 
+// Home projection (WU-01): [configuredOrder] is the user's chosen top slots, in display order.
+// The remaining types (in the product fallback order below) trail it so that an empty configured
+// collection is still skipped and back-filled — preserving Home's long-standing "hide empty smart
+// collections, keep the row full" behavior. When configuredOrder is the default three the effective
+// priority is unchanged from before this feature.
 internal fun selectHomeSmartCollections(
     collections: List<SmartCollection>,
+    configuredOrder: List<SmartCollectionType> = HomeSmartCollectionSelection.DEFAULT,
     limit: Int = DASHBOARD_COLLECTION_PREVIEW_LIMIT,
 ): List<SmartCollection> {
     if (limit <= 0) return emptyList()
-    val priorityByType = HOME_SMART_COLLECTION_PRIORITY
+    val effectivePriority =
+        configuredOrder + HOME_SMART_COLLECTION_PRIORITY.filterNot { it in configuredOrder }
+    val priorityByType = effectivePriority
         .withIndex()
         .associate { (index, type) -> type to index }
     return collections

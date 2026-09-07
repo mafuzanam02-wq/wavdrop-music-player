@@ -38,6 +38,7 @@ import com.launchpoint.wavdrop.ui.screen.folders.FolderDetailsScreen
 import com.launchpoint.wavdrop.ui.screen.folders.FoldersScreen
 import com.launchpoint.wavdrop.ui.screen.home.HomeCustomizationScreen
 import com.launchpoint.wavdrop.ui.screen.home.HomeScreen
+import com.launchpoint.wavdrop.ui.screen.home.HomeSmartCollectionsScreen
 import com.launchpoint.wavdrop.ui.screen.library.LibraryScreen
 import com.launchpoint.wavdrop.ui.screen.nowplaying.NowPlayingScreen
 import com.launchpoint.wavdrop.ui.screen.onboarding.OnboardingScreen
@@ -88,6 +89,7 @@ sealed class Screen(val route: String) {
     data object SettingsAbout       : Screen("settings/about")
     data object SettingsDiagnostics : Screen("settings/about/diagnostics")
     data object HomeCustomization   : Screen("home_customization")
+    data object HomeSmartCollections : Screen("home_customization/smart_collections")
     data object Albums              : Screen("albums")
     data object Artists             : Screen("artists")
     data object Folders             : Screen("folders")
@@ -557,6 +559,14 @@ fun WavdropNavGraph(
         }
         composable(Screen.HomeCustomization.route) {
             HomeCustomizationScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onSmartCollectionsConfigClick = {
+                    navController.navigate(Screen.HomeSmartCollections.route)
+                },
+            )
+        }
+        composable(Screen.HomeSmartCollections.route) {
+            HomeSmartCollectionsScreen(
                 onNavigateBack = { navController.popBackStack() },
             )
         }

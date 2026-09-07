@@ -59,6 +59,50 @@ class HomeSmartCollectionSelectionTest {
     }
 
     @Test
+    fun `configured order drives home card order`() {
+        val collections = listOf(
+            collection(SmartCollectionType.FAVORITES),
+            collection(SmartCollectionType.MOST_PLAYED),
+            collection(SmartCollectionType.NEVER_PLAYED),
+        )
+
+        val configured = listOf(
+            SmartCollectionType.NEVER_PLAYED,
+            SmartCollectionType.FAVORITES,
+            SmartCollectionType.MOST_PLAYED,
+        )
+
+        assertEquals(
+            configured,
+            selectHomeSmartCollections(collections, configuredOrder = configured).map { it.type },
+        )
+    }
+
+    @Test
+    fun `empty configured collection is skipped and backfilled preserving existing behavior`() {
+        val configured = listOf(
+            SmartCollectionType.ALWAYS_FINISH,
+            SmartCollectionType.FORGOTTEN_GEMS,
+            SmartCollectionType.USUALLY_ABANDON,
+        )
+        val collections = listOf(
+            collection(SmartCollectionType.ALWAYS_FINISH, songCount = 0),
+            collection(SmartCollectionType.FORGOTTEN_GEMS),
+            collection(SmartCollectionType.USUALLY_ABANDON),
+            collection(SmartCollectionType.FAVORITES),
+        )
+
+        assertEquals(
+            listOf(
+                SmartCollectionType.FORGOTTEN_GEMS,
+                SmartCollectionType.USUALLY_ABANDON,
+                SmartCollectionType.FAVORITES,
+            ),
+            selectHomeSmartCollections(collections, configuredOrder = configured).map { it.type },
+        )
+    }
+
+    @Test
     fun `home priority inventory covers every implemented collection exactly once`() {
         assertEquals(SmartCollectionType.entries.toSet(), HOME_SMART_COLLECTION_PRIORITY.toSet())
         assertEquals(

@@ -7,9 +7,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,11 +33,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRules
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
+import com.launchpoint.wavdrop.data.smart.SmartCollectionBuilder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeCustomizationScreen(
     onNavigateBack: () -> Unit,
+    onSmartCollectionsConfigClick: () -> Unit = {},
     viewModel: HomeCustomizationViewModel = hiltViewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -85,6 +90,16 @@ fun HomeCustomizationScreen(
                         isToggleable = HomeLayoutSettingsRules.isToggleable(id),
                         onToggle    = { viewModel.setSectionVisible(id, it) },
                     )
+                    // The Home Collections picker lives directly under the Smart Collections
+                    // toggle. It stays accessible even when the section is hidden so the saved
+                    // selection is never lost — it just won't render on Home while hidden.
+                    if (id == HomeSectionId.SMART_COLLECTIONS) {
+                        HomeCollectionsConfigRow(
+                            selectionSummary = settings.homeSmartCollections
+                                .joinToString(", ") { SmartCollectionBuilder.titleFor(it) },
+                            onClick = onSmartCollectionsConfigClick,
+                        )
+                    }
                     HorizontalDivider(
                         color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                         thickness = 0.5.dp,
@@ -93,6 +108,41 @@ fun HomeCustomizationScreen(
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+}
+
+@Composable
+private fun HomeCollectionsConfigRow(
+    selectionSummary: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier          = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 32.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = "Home collections",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text  = selectionSummary.ifBlank { "Choose which 3 appear on Home" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+        Icon(
+            imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            modifier           = Modifier.size(20.dp),
+        )
     }
 }
 
