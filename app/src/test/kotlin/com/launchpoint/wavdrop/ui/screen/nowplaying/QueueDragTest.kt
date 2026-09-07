@@ -402,4 +402,92 @@ class QueueDragTest {
         val label = queueMovePositionLabel(targetPlaybackIndex = 5, upNextStartIndex = 2, upNextCount = 10)
         assertEquals("4 of 10", label)
     }
+
+    // ── Phase C: "Move to…" destination target math + move-decision reuse ─────────────────────────
+
+    // A. position 1 → currentIndex + 1
+    @Test
+    fun `position 1 maps to first up next slot`() {
+        assertEquals(21, upNextPositionToPlaybackIndex(position1Based = 1, currentIndex = 20, queueSize = 121))
+        assertEquals(45, upNextPositionToPlaybackIndex(position1Based = 25, currentIndex = 20, queueSize = 121))
+    }
+
+    // B. last valid position → queue.lastIndex
+    @Test
+    fun `last position maps to the last queue index`() {
+        // Up Next count = 121 - 21 = 100; position 100 → index 120 = lastIndex.
+        assertEquals(120, upNextPositionToPlaybackIndex(position1Based = 100, currentIndex = 20, queueSize = 121))
+        assertEquals(120, endOfQueuePlaybackIndex(queueSize = 121))
+    }
+
+    // C/D/E. zero, negative, and beyond Up Next are all invalid.
+    @Test
+    fun `invalid positions return null`() {
+        assertNull(upNextPositionToPlaybackIndex(position1Based = 0, currentIndex = 20, queueSize = 121))   // C
+        assertNull(upNextPositionToPlaybackIndex(position1Based = -3, currentIndex = 20, queueSize = 121))  // D
+        assertNull(upNextPositionToPlaybackIndex(position1Based = 101, currentIndex = 20, queueSize = 121)) // E (>100)
+    }
+
+    // F. no Up Next → invalid for any position.
+    @Test
+    fun `no up next means every position is invalid`() {
+        assertNull(upNextPositionToPlaybackIndex(position1Based = 1, currentIndex = 20, queueSize = 21)) // current is last
+    }
+
+    // H. top-of-Up-Next target math.
+    @Test
+    fun `top of up next is current plus one`() {
+        assertEquals(21, topOfUpNextPlaybackIndex(currentIndex = 20))
+        assertEquals(1, topOfUpNextPlaybackIndex(currentIndex = 0))
+    }
+
+    // I. end-of-queue target math.
+    @Test
+    fun `end of queue is last index`() {
+        assertEquals(9, endOfQueuePlaybackIndex(queueSize = 10))
+    }
+
+    // G. source already at target → NoOp (shared move-decision path with drag).
+    @Test
+    fun `move to same position is a no-op`() {
+        val queue = queueOf(0, 1, 2, 3, 4, 5)
+        val session = sessionFor(queue, startIndex = 3)
+        val target = topOfUpNextPlaybackIndex(currentIndex = 2) // = 3, the source itself
+        val decision = planQueueDragEnd(queue, currentIndex = 2, session, targetPlaybackIndex = target, cancelled = false)
+        assertEquals(QueueDragEndDecision.NoOp, decision)
+    }
+
+    // J. duplicate occurrence preserved: A,X,B,X,C — moving the SECOND X affects only the second X.
+    @Test
+    fun `move to preserves the invoked duplicate occurrence`() {
+        // ids: 0=current, then A=1, X=2, B=3, X=4, C=5 → two X (id 9) at indices 2 and 4.
+        val queue = queueOf(0, 1, 9, 3, 9, 5)
+        val secondX = 4
+        val session = sessionFor(queue, startIndex = secondX)
+        assertEquals(1, session.sourceOccurrenceOrdinal) // second occurrence
+        // Move second X to End of queue.
+        val target = endOfQueuePlaybackIndex(queue.size) // 5
+        val decision = planQueueDragEnd(queue, currentIndex = 0, session, targetPlaybackIndex = target, cancelled = false)
+        assertEquals(QueueDragEndDecision.Commit(4, 5), decision) // moves index 4 (second X), not index 2
+    }
+
+    // K. source becomes current/history while the dialog is open → reject (never move current/history).
+    @Test
+    fun `move to rejects when playback overtakes the source`() {
+        val queue = queueOf(9, 7, 8)
+        val session = sessionFor(queue, startIndex = 1) // drag "7"
+        // Dialog still open; playback advanced so current is now index 1 (the invoked item itself).
+        assertFalse(isDraggedOccurrenceStillValid(queue, currentIndex = 1, session))
+        val decision = planQueueDragEnd(queue, currentIndex = 1, session, targetPlaybackIndex = 2, cancelled = false)
+        assertEquals(QueueDragEndDecision.NoOp, decision)
+    }
+
+    // L. queue shrinks while dialog open → a now-out-of-range position is rejected.
+    @Test
+    fun `move to rejects a position that no longer fits a shrunken queue`() {
+        // Was valid at open: currentIndex 20, size 121 → position 80 → index 100.
+        assertEquals(100, upNextPositionToPlaybackIndex(position1Based = 80, currentIndex = 20, queueSize = 121))
+        // Queue shrank to size 60 (Up Next count now 39) → position 80 is invalid.
+        assertNull(upNextPositionToPlaybackIndex(position1Based = 80, currentIndex = 20, queueSize = 60))
+    }
 }

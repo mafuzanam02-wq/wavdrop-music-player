@@ -8,6 +8,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
@@ -39,12 +42,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -78,9 +83,12 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -192,6 +200,10 @@ private fun QueueSheetContent(
     // LayoutCoordinates of the queue viewport Box: the single coordinate space shared by the parent
     // pointerInput's pointer positions and every registered handle's bounds.
     var viewportCoords         by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // "Move to…" dialog identity. Reuses the drag session shape (song id + occurrence ordinal + start
+    // index) so the invoked occurrence is re-resolved against the live queue at execute time — the
+    // exact same duplicate-safe path as drag. Null when the dialog is closed.
+    var moveDialogSession      by remember { mutableStateOf<QueueDragSession?>(null) }
     // Live playback index of the grabbed occurrence in the current queue (null once invalidated).
     val draggingPlaybackIndex   = dragSession?.let { resolveDraggedOccurrenceIndex(state.queue, it) }
     val anyDragging             = isDragActive && draggingPlaybackIndex != null && pointerViewportY != null
@@ -362,6 +374,40 @@ private fun QueueSheetContent(
         clearDragState()
     }
 
+    // ── "Move to…" execution (Phase C) ──────────────────────────────────────────────────────────
+    // Both paths re-resolve the invoked occurrence against the FRESH queue and route through the same
+    // authoritative move as drag. They return true only when a genuine move is committed (so the
+    // caller can show feedback), and reject rather than move the wrong item if the queue changed.
+
+    fun runMoveToTarget(session: QueueDragSession, target: Int?): Boolean {
+        if (target == null) return false
+        val live = latestState.value
+        // planQueueDragEnd is the single source of truth: it re-resolves the occurrence, enforces
+        // source/target strictly in Up Next, and NoOps when target == source or is invalid.
+        val decision = planQueueDragEnd(
+            queue = live.queue,
+            currentIndex = live.currentIndex,
+            session = session,
+            targetPlaybackIndex = target,
+            cancelled = false,
+        )
+        return if (decision is QueueDragEndDecision.Commit) {
+            onMoveItemTo(decision.fromPlaybackIndex, decision.toPlaybackIndex)
+            true
+        } else {
+            false
+        }
+    }
+
+    fun runMovePlayNext(session: QueueDragSession): Boolean {
+        val live = latestState.value
+        val source = resolveDraggedOccurrenceIndex(live.queue, session) ?: return false
+        if (source <= live.currentIndex) return false
+        if (source == live.currentIndex + 1) return false // already immediate next → NoOp
+        onPlayNext(source) // reuses PlayerController.moveToPlayNext
+        return true
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             clearDragState()
@@ -371,6 +417,12 @@ private fun QueueSheetContent(
     fun showRemovedSnackbar() {
         scope.launch {
             snackbarHostState.showSnackbar("Removed from queue")
+        }
+    }
+
+    fun showMovedSnackbar() {
+        scope.launch {
+            snackbarHostState.showSnackbar("Moved in queue")
         }
     }
 
@@ -587,6 +639,18 @@ private fun QueueSheetContent(
                         onMoveUp = { onMoveUp(playbackIndex) },
                         onMoveDown = { onMoveDown(playbackIndex) },
                         onPlayNext = { onPlayNext(playbackIndex) },
+                        onMoveTo = {
+                            // Capture the exact invoked occurrence (duplicate-safe); the dialog
+                            // re-resolves it against the live queue when a destination is chosen.
+                            moveDialogSession = QueueDragSession(
+                                sourceSongId = song.id,
+                                sourceOccurrenceOrdinal = queueOccurrenceOrdinal(
+                                    latestState.value.queue,
+                                    playbackIndex,
+                                ),
+                                startSourcePlaybackIndex = playbackIndex,
+                            )
+                        },
                         onRemove = {
                             onRemoveItem(playbackIndex)
                             showRemovedSnackbar()
@@ -752,7 +816,139 @@ private fun QueueSheetContent(
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         )
+
+        // ── "Move to…" dialog (Phase C) ─────────────────────────────────────────
+        val activeMoveSession = moveDialogSession
+        if (activeMoveSession != null) {
+            // If the invoked occurrence stops being a valid Up Next item while the dialog is open
+            // (playback overtook it, or it was removed), close instead of risking the wrong move.
+            LaunchedEffect(state.queue, currentIndex) {
+                if (!isDraggedOccurrenceStillValid(state.queue, currentIndex, activeMoveSession)) {
+                    moveDialogSession = null
+                }
+            }
+            if (isDraggedOccurrenceStillValid(state.queue, currentIndex, activeMoveSession)) {
+                MoveToDialog(
+                    // Live Up Next count → validation range updates if the queue changes underneath.
+                    upNextCount = upNextCount,
+                    onDismiss = { moveDialogSession = null },
+                    onPlayNext = {
+                        if (runMovePlayNext(activeMoveSession)) showMovedSnackbar()
+                        moveDialogSession = null
+                    },
+                    onTopOfUpNext = {
+                        val target = topOfUpNextPlaybackIndex(latestState.value.currentIndex)
+                        if (runMoveToTarget(activeMoveSession, target)) showMovedSnackbar()
+                        moveDialogSession = null
+                    },
+                    onEndOfQueue = {
+                        val target = endOfQueuePlaybackIndex(latestState.value.queue.size)
+                        if (runMoveToTarget(activeMoveSession, target)) showMovedSnackbar()
+                        moveDialogSession = null
+                    },
+                    onMoveToPosition = { position ->
+                        val live = latestState.value
+                        val target = upNextPositionToPlaybackIndex(
+                            position1Based = position,
+                            currentIndex = live.currentIndex,
+                            queueSize = live.queue.size,
+                        )
+                        if (runMoveToTarget(activeMoveSession, target)) showMovedSnackbar()
+                        moveDialogSession = null
+                    },
+                )
+            }
+        }
     }
+}
+
+// ── "Move to…" dialog ─────────────────────────────────────────────────────────
+
+@Composable
+private fun MoveToDialog(
+    upNextCount: Int,
+    onDismiss: () -> Unit,
+    onPlayNext: () -> Unit,
+    onTopOfUpNext: () -> Unit,
+    onEndOfQueue: () -> Unit,
+    onMoveToPosition: (Int) -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            var positionMode by remember { mutableStateOf(false) }
+            var positionText by remember { mutableStateOf("") }
+            // The valid 1-based Up Next position, or null for blank/zero/negative/too-large/non-numeric.
+            val moveTarget = positionText.toIntOrNull()?.takeIf { it in 1..upNextCount }
+            val valid = moveTarget != null
+
+            Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
+                Text(
+                    text = if (positionMode) "Move to position" else "Move track",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Spacer(Modifier.height(16.dp))
+                if (!positionMode) {
+                    MoveDestinationRow(label = "Play next", onClick = onPlayNext)
+                    MoveDestinationRow(label = "Top of Up Next", onClick = onTopOfUpNext)
+                    MoveDestinationRow(label = "Position…", onClick = { positionMode = true })
+                    MoveDestinationRow(label = "End of queue", onClick = onEndOfQueue)
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = positionText,
+                        onValueChange = { new -> positionText = new.filter { it.isDigit() }.take(6) },
+                        label = { Text("Position in Up Next") },
+                        supportingText = { Text("1–$upNextCount") },
+                        isError = positionText.isNotEmpty() && !valid,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done,
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { moveTarget?.let(onMoveToPosition) },
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { positionMode = false }) { Text("Back") }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(
+                            onClick = { moveTarget?.let(onMoveToPosition) },
+                            enabled = valid,
+                        ) { Text("Move") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoveDestinationRow(label: String, onClick: () -> Unit) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+    )
 }
 
 // ── Section header ────────────────────────────────────────────────────────────
@@ -958,6 +1154,7 @@ private fun SwipeableQueueItemRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onPlayNext: () -> Unit,
+    onMoveTo: () -> Unit,
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
     onShare: () -> Unit,
@@ -1012,6 +1209,7 @@ private fun SwipeableQueueItemRow(
             onMoveUp = onMoveUp,
             onMoveDown = onMoveDown,
             onPlayNext = onPlayNext,
+            onMoveTo = onMoveTo,
             onRemove = onRemove,
             onViewStats = onViewStats,
             onShare = onShare,
@@ -1036,6 +1234,7 @@ private fun QueueItemRow(
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
     onShare: () -> Unit,
+    onMoveTo: () -> Unit = {},
     // Drop-target insertion marker for this row (Top/Bottom/none). Only real Up Next rows pass it.
     insertionEdge: QueueInsertionEdge? = null,
     // Handle hit-registration callbacks. Only supplied for real Up Next rows; the floating preview
@@ -1166,6 +1365,10 @@ private fun QueueItemRow(
                         onClick = { expanded = false; onPlayNext() },
                     )
                 }
+                DropdownMenuItem(
+                    text = { Text("Move to…") },
+                    onClick = { expanded = false; onMoveTo() },
+                )
                 DropdownMenuItem(
                     text = { Text("Remove from queue") },
                     onClick = { expanded = false; onRemove() },

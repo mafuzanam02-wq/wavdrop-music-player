@@ -100,6 +100,38 @@ internal fun queueMovePositionLabel(
     return "$position of $upNextCount"
 }
 
+// ── Phase C: "Move to…" destination target math (pure, unit-tested) ──────────────────────────────
+// All three return a *playback index* in the active playbackQueue for the caller to feed straight
+// into the same authoritative move path (planQueueDragEnd → onMoveItemTo → moveQueueItemTo). None of
+// them touch libraryQueue, song-id lookup, or shuffle. "Already there" and "target == source" become
+// a NoOp downstream in planQueueDragEnd / PlayerController, so they are not special-cased here.
+
+/**
+ * Converts a **1-based position within Up Next** to an absolute playback index, or null if the
+ * position is out of range (blank/zero/negative/too-large are all rejected by the caller producing
+ * an out-of-range Int, and an empty Up Next yields null). Up Next starts at `currentIndex + 1`.
+ *
+ * e.g. currentIndex=20, queueSize=121 (Up Next count 100): position 1 → 21, position 25 → 45,
+ * position 100 → 120 (the last item).
+ */
+internal fun upNextPositionToPlaybackIndex(
+    position1Based: Int,
+    currentIndex: Int,
+    queueSize: Int,
+): Int? {
+    val upNextStart = currentIndex + 1
+    val upNextCount = queueSize - upNextStart
+    if (upNextCount <= 0) return null
+    if (position1Based < 1 || position1Based > upNextCount) return null
+    return upNextStart + (position1Based - 1)
+}
+
+/** Playback index of the first Up Next slot (immediately after current). */
+internal fun topOfUpNextPlaybackIndex(currentIndex: Int): Int = currentIndex + 1
+
+/** Playback index of the last queue slot. */
+internal fun endOfQueuePlaybackIndex(queueSize: Int): Int = queueSize - 1
+
 /**
  * Immutable identity of an in-progress queue drag. A playback index alone is not a stable identity
  * (the queue can mutate during a long drag), and a song id alone is ambiguous once duplicate song
