@@ -1,8 +1,11 @@
 package com.launchpoint.wavdrop.ui.screen.home
 
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -90,7 +94,11 @@ import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.SongRow
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
+import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
+import com.launchpoint.wavdrop.ui.theme.WavdropMotion
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -501,6 +509,10 @@ private fun HomeDashboardContent(
     onLibrarySettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Drives restrained live-update motion (Smart Collection reorder/replace, section visibility)
+    // via LazyColumn item placement; disabled under the OS "remove animations" setting.
+    val reduceMotion = rememberReducedMotion()
+
     val resumeSessionEligible =
         HomeSectionId.CONTINUE_LISTENING in visibleSections &&
             shouldShowResumeSessionCard(nowPlaying)
@@ -642,6 +654,7 @@ private fun HomeDashboardContent(
                         PlaylistPreviewRow(
                             playlist = playlist,
                             onClick = { onPlaylistClick(playlist.id) },
+                            modifier = wavdropItemPlacement(reduceMotion),
                         )
                     }
                 }
@@ -658,13 +671,34 @@ private fun HomeDashboardContent(
                     item { DashboardEmptyText("Smart collections like Favorites and Recently Played will appear as you listen.") }
                 } else {
                     items(dashboard.smartCollections, key = { it.id }) { collection ->
-                        SmartCollectionPreviewRow(collection = collection, onClick = { onSmartCollectionClick(collection.type) })
+                        SmartCollectionPreviewRow(
+                            collection = collection,
+                            onClick = { onSmartCollectionClick(collection.type) },
+                            modifier = wavdropItemPlacement(reduceMotion),
+                        )
                     }
                 }
             }
         }
     }
 }
+
+/**
+ * Restrained placement + fade for keyed LazyColumn items so live changes (Smart Collection
+ * reorder/replace, section visibility toggles) settle instead of popping. Uses the shared
+ * [WavdropMotion.placementSpec]; returns a plain Modifier under reduced motion (same convention as
+ * QueueSheet's placement handling — the queue file itself is untouched).
+ */
+private fun LazyItemScope.wavdropItemPlacement(reduceMotion: Boolean): Modifier =
+    if (reduceMotion) {
+        Modifier
+    } else {
+        Modifier.animateItem(
+            fadeInSpec = tween(WavdropMotion.Durations.StandardStateChange),
+            placementSpec = WavdropMotion.placementSpec(),
+            fadeOutSpec = tween(WavdropMotion.Durations.StandardStateChange),
+        )
+    }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
     title: String,
@@ -731,10 +765,16 @@ private fun WrappedPreviewCard(
         else -> "${wrapped.totalPlayCount} plays"
     }
 
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            ),
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
         shape = MaterialTheme.shapes.small,
     ) {
@@ -799,10 +839,16 @@ private fun WrappedSeedCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            ),
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.07f),
         shape = MaterialTheme.shapes.small,
     ) {
@@ -966,10 +1012,16 @@ private fun ResumeSessionCard(
     val song = nowPlaying.song ?: return
     val queueLabel = resumeSessionQueueLabel(nowPlaying)
 
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpen),
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onOpen,
+            ),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         shape = MaterialTheme.shapes.small,
     ) {
@@ -1079,12 +1131,14 @@ private fun DashboardEmptyText(text: String) {
 private fun PlaylistPreviewRow(
     playlist: PlaylistSummary,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     DashboardPreviewRow(
         title = playlist.name,
         subtitle = "${playlist.songCount} songs",
         icon = Icons.AutoMirrored.Filled.QueueMusic,
         onClick = onClick,
+        modifier = modifier,
     )
 }
 
@@ -1092,12 +1146,14 @@ private fun PlaylistPreviewRow(
 private fun SmartCollectionPreviewRow(
     collection: SmartCollection,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     DashboardPreviewRow(
         title    = collection.title,
         subtitle = collection.description,
         icon     = smartCollectionIcon(collection.type),
         onClick  = onClick,
+        modifier = modifier,
     )
 }
 
@@ -1121,9 +1177,21 @@ private fun DashboardPreviewRow(
     subtitle: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
+    // Press feedback complements (does not replace) the default ripple; reduced motion drops the
+    // scale but keeps ripple. [modifier] carries the caller's LazyColumn item placement animation.
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1141,11 +1209,15 @@ private fun DashboardPreviewRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
+            // Fade-through small subtitle changes in place (e.g. a playlist's song count) — no-op
+            // under reduced motion, single small Text so it stays cheap.
+            WavdropFadeThrough(targetState = subtitle) { value ->
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
         }
     }
 }

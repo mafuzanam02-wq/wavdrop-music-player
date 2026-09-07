@@ -103,6 +103,18 @@ class HomeSmartCollectionSelectionTest {
     }
 
     @Test
+    fun `projected collections expose unique stable keys for item animation`() {
+        // Home renders these with key = { it.id } and animates placement (WU-03); duplicate or
+        // unstable keys would drop or mis-animate items. Guard that the projection keeps ids unique.
+        val collections = SmartCollectionType.entries.map(::collection)
+        val projected = selectHomeSmartCollections(collections)
+        val ids = projected.map { it.id }
+
+        assertEquals(ids.size, ids.toSet().size)
+        assertEquals(projected.map { it.type.name }, ids)
+    }
+
+    @Test
     fun `home priority inventory covers every implemented collection exactly once`() {
         assertEquals(SmartCollectionType.entries.toSet(), HOME_SMART_COLLECTION_PRIORITY.toSet())
         assertEquals(
