@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,12 +32,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,6 +49,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.smart.SmartCollectionBuilder
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
+import com.launchpoint.wavdrop.ui.components.motion.TransientHighlightState
+import com.launchpoint.wavdrop.ui.components.motion.rememberTransientHighlight
+import com.launchpoint.wavdrop.ui.components.motion.transientHighlight
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 import com.launchpoint.wavdrop.ui.screen.settings.SectionDivider
 import com.launchpoint.wavdrop.ui.screen.settings.SectionHeader
 import com.launchpoint.wavdrop.ui.screen.settings.SettingsMessageRow
@@ -57,9 +65,17 @@ fun HomeSmartCollectionsScreen(
 ) {
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val available by viewModel.available.collectAsStateWithLifecycle()
+    val lastReplaced by viewModel.lastReplaced.collectAsStateWithLifecycle()
 
     // Which selected collection a tapped "Other" collection would replace.
     var replacementFor by remember { mutableStateOf<SmartCollectionType?>(null) }
+
+    // WU-02 proof surface: one hoisted transient highlight, flashed on the row that was swapped in.
+    val highlight = rememberTransientHighlight()
+    val highlightColor = MaterialTheme.colorScheme.primary
+    LaunchedEffect(lastReplaced) {
+        if (lastReplaced != null) highlight.flash()
+    }
 
     Scaffold(
         topBar = {
@@ -103,6 +119,9 @@ fun HomeSmartCollectionsScreen(
                     canMoveDown = index < selection.lastIndex,
                     onMoveUp   = { viewModel.moveUp(index) },
                     onMoveDown = { viewModel.moveDown(index) },
+                    highlight  = highlight,
+                    highlightColor = highlightColor,
+                    highlighted = lastReplaced?.type == type,
                 )
             }
 
@@ -174,6 +193,9 @@ private fun SelectedCollectionRow(
     canMoveDown: Boolean,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    highlight: TransientHighlightState,
+    highlightColor: Color,
+    highlighted: Boolean,
 ) {
     val compact = LocalCompactMode.current
     val name = SmartCollectionBuilder.titleFor(type)
@@ -182,7 +204,8 @@ private fun SelectedCollectionRow(
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = if (compact) 3.dp else 5.dp),
+            .padding(horizontal = 16.dp, vertical = if (compact) 3.dp else 5.dp)
+            .transientHighlight(highlight, color = highlightColor, enabled = highlighted),
     ) {
         Row(
             modifier = Modifier
@@ -241,10 +264,17 @@ private fun AvailableCollectionRow(
 ) {
     val compact = LocalCompactMode.current
     val name = SmartCollectionBuilder.titleFor(type)
+    // WU-02 proof surface: press feedback complements the default ripple on this tappable row.
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickableRow(onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = if (compact) 10.dp else 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

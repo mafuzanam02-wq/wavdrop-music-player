@@ -7,8 +7,10 @@ import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeSmartCollectionSelection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,6 +33,15 @@ class HomeSmartCollectionsViewModel @Inject constructor(
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = HomeSmartCollectionSelection.DEFAULT,
         )
+
+    /**
+     * Emits the collection that was just swapped in via [replace], with a monotonic token so the UI
+     * can flash the same collection twice in a row (WU-02 transient-highlight proof). A membership
+     * change is a "significant" acknowledgement; plain reorders intentionally don't signal.
+     */
+    private val _lastReplaced = MutableStateFlow<ReplaceSignal?>(null)
+    val lastReplaced: StateFlow<ReplaceSignal?> = _lastReplaced.asStateFlow()
+    private var replaceToken = 0
 
     /** All collections not currently selected, offered under "Other collections". */
     val available: StateFlow<List<SmartCollectionType>> = selection
@@ -62,9 +73,13 @@ class HomeSmartCollectionsViewModel @Inject constructor(
         if (slot < 0 || replacement in current) return
         val updated = current.toMutableList().apply { this[slot] = replacement }
         persist(updated)
+        _lastReplaced.value = ReplaceSignal(replacement, ++replaceToken)
     }
 
     private fun persist(types: List<SmartCollectionType>) {
         viewModelScope.launch { repository.setHomeSmartCollections(types) }
     }
+
+    /** A membership change to acknowledge: [type] swapped in, [token] making repeats distinct. */
+    data class ReplaceSignal(val type: SmartCollectionType, val token: Int)
 }

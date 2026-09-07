@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -25,6 +27,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -34,6 +37,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRules
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
 import com.launchpoint.wavdrop.data.smart.SmartCollectionBuilder
+import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -117,10 +122,17 @@ private fun HomeCollectionsConfigRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // WU-02 proof surface: press feedback complements (does not replace) the default ripple.
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier          = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(start = 32.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -131,11 +143,14 @@ private fun HomeCollectionsConfigRow(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(2.dp))
-            Text(
-                text  = selectionSummary.ifBlank { "Choose which 3 appear on Home" },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
+            // WU-02 proof surface: fade-through the summary as the selection changes.
+            WavdropFadeThrough(targetState = selectionSummary.ifBlank { "Choose which 3 appear on Home" }) { summary ->
+                Text(
+                    text  = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
         }
         Icon(
             imageVector        = Icons.AutoMirrored.Filled.KeyboardArrowRight,
