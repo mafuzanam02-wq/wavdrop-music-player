@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.ui.screen.nowplaying
 
 import android.provider.Settings
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
@@ -59,6 +60,7 @@ import androidx.compose.runtime.getValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -204,6 +206,12 @@ private fun QueueSheetContent(
     // index) so the invoked occurrence is re-resolved against the live queue at execute time — the
     // exact same duplicate-safe path as drag. Null when the dialog is closed.
     var moveDialogSession      by remember { mutableStateOf<QueueDragSession?>(null) }
+    // Post-drop confirmation flash (Phase B.1). `pendingDrop` is the intent captured at commit time;
+    // `activeDrop` is the confirmation currently flashing (read by rows); `dropFlash` drives the
+    // fading tonal overlay. All ephemeral, UI-only, one at a time.
+    var pendingDrop            by remember { mutableStateOf<QueueDropConfirmation?>(null) }
+    var activeDrop             by remember { mutableStateOf<QueueDropConfirmation?>(null) }
+    val dropFlash              = remember { Animatable(0f) }
     // Live playback index of the grabbed occurrence in the current queue (null once invalidated).
     val draggingPlaybackIndex   = dragSession?.let { resolveDraggedOccurrenceIndex(state.queue, it) }
     val anyDragging             = isDragActive && draggingPlaybackIndex != null && pointerViewportY != null
@@ -364,6 +372,11 @@ private fun QueueSheetContent(
             )
             if (decision is QueueDragEndDecision.Commit) {
                 onMoveItemTo(decision.fromPlaybackIndex, decision.toPlaybackIndex)
+                // Schedule the post-drop flash for the landed occurrence at its new index.
+                pendingDrop = QueueDropConfirmation(
+                    songId = session.sourceSongId,
+                    expectedPlaybackIndex = decision.toPlaybackIndex,
+                )
             }
         }
         clearDragState()
@@ -393,6 +406,10 @@ private fun QueueSheetContent(
         )
         return if (decision is QueueDragEndDecision.Commit) {
             onMoveItemTo(decision.fromPlaybackIndex, decision.toPlaybackIndex)
+            pendingDrop = QueueDropConfirmation(
+                songId = session.sourceSongId,
+                expectedPlaybackIndex = decision.toPlaybackIndex,
+            )
             true
         } else {
             false
@@ -405,6 +422,11 @@ private fun QueueSheetContent(
         if (source <= live.currentIndex) return false
         if (source == live.currentIndex + 1) return false // already immediate next → NoOp
         onPlayNext(source) // reuses PlayerController.moveToPlayNext
+        // Play next lands the occurrence at currentIndex + 1 (the destination it verifies by id).
+        pendingDrop = QueueDropConfirmation(
+            songId = session.sourceSongId,
+            expectedPlaybackIndex = live.currentIndex + 1,
+        )
         return true
     }
 
@@ -451,6 +473,34 @@ private fun QueueSheetContent(
             !isDraggedOccurrenceStillValid(state.queue, currentIndex, session)
         ) {
             clearDragState()
+        }
+    }
+
+    // Post-drop confirmation flash (Phase B.1). The queue state updates asynchronously after
+    // onMoveItemTo, so wait (briefly) for the live queue to reflect the move before flashing the exact
+    // landed row. If it never resolves within the short window (e.g. an unrelated replacement), the
+    // confirmation is discarded — no stale indicator, and the viewport is never scrolled.
+    LaunchedEffect(pendingDrop) {
+        val pending = pendingDrop ?: return@LaunchedEffect
+        val resolved = withTimeoutOrNull(600L) {
+            while (!queueDropConfirmationMatches(latestState.value.queue, pending)) {
+                delay(16L)
+            }
+            true
+        } ?: false
+        pendingDrop = null
+        if (resolved) {
+            activeDrop = pending
+            val peakAlpha = 0.12f
+            dropFlash.snapTo(peakAlpha)
+            if (reduceMotion) {
+                // Completion state, not decoration: hold briefly, then clear (no animated movement).
+                delay(220L)
+                dropFlash.snapTo(0f)
+            } else {
+                dropFlash.animateTo(0f, animationSpec = tween(durationMillis = 220))
+            }
+            activeDrop = null
         }
     }
 
@@ -614,6 +664,12 @@ private fun QueueSheetContent(
                 } else {
                     null
                 }
+                // Post-drop confirmation flash: only the exact landed row reads the animated alpha.
+                val dropFlashAlpha = if (shouldFlashDroppedRow(activeDrop, playbackIndex, song.id)) {
+                    dropFlash.value
+                } else {
+                    0f
+                }
                 // Wrap row + divider so the whole entry animates into place on the final commit
                 // (placement only — the backing list is never locally reordered during the gesture).
                 Column(
@@ -635,6 +691,7 @@ private fun QueueSheetContent(
                         isDragging = isDragging,
                         isDimmed = anyDragging && !isDragging,
                         insertionEdge = insertionEdge,
+                        dropFlashAlpha = dropFlashAlpha,
                         onJump = { onJumpToItem(playbackIndex) },
                         onMoveUp = { onMoveUp(playbackIndex) },
                         onMoveDown = { onMoveDown(playbackIndex) },
@@ -1150,6 +1207,7 @@ private fun SwipeableQueueItemRow(
     isDragging: Boolean,
     isDimmed: Boolean,
     insertionEdge: QueueInsertionEdge?,
+    dropFlashAlpha: Float,
     onJump: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -1205,6 +1263,7 @@ private fun SwipeableQueueItemRow(
             isDimmed = isDimmed,
             dragHandleEnabled = true,
             insertionEdge = insertionEdge,
+            dropFlashAlpha = dropFlashAlpha,
             onJump = onJump,
             onMoveUp = onMoveUp,
             onMoveDown = onMoveDown,
@@ -1237,6 +1296,8 @@ private fun QueueItemRow(
     onMoveTo: () -> Unit = {},
     // Drop-target insertion marker for this row (Top/Bottom/none). Only real Up Next rows pass it.
     insertionEdge: QueueInsertionEdge? = null,
+    // Post-drop confirmation flash intensity (0 = none). Only the landed Up Next row passes > 0.
+    dropFlashAlpha: Float = 0f,
     // Handle hit-registration callbacks. Only supplied for real Up Next rows; the floating preview
     // row (dragHandleEnabled = false) passes neither and never registers.
     onHandlePositioned: (LayoutCoordinates) -> Unit = {},
@@ -1270,6 +1331,15 @@ private fun QueueItemRow(
             .background(
                 if (isDragging) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surface,
+            )
+            // Post-drop confirmation flash: a brief tonal overlay on the landed row, over the base
+            // background but behind content. Only present (nonzero) on the exact confirmed row.
+            .then(
+                if (dropFlashAlpha > 0f) {
+                    Modifier.background(insertionColor.copy(alpha = dropFlashAlpha))
+                } else {
+                    Modifier
+                },
             )
             .clickable(enabled = !(isDragging || isDimmed), onClick = onJump)
             .padding(start = 12.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),

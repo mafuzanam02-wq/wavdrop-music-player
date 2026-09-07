@@ -132,6 +132,42 @@ internal fun topOfUpNextPlaybackIndex(currentIndex: Int): Int = currentIndex + 1
 /** Playback index of the last queue slot. */
 internal fun endOfQueuePlaybackIndex(queueSize: Int): Int = queueSize - 1
 
+// ── Phase B.1: post-drop confirmation flash (pure, unit-tested) ──────────────────────────────────
+
+/**
+ * Short-lived token identifying the row to flash after a successful reorder. A move-to-index commit
+ * (`removeAt(from); add(to)`) places the moved item at *exactly* [expectedPlaybackIndex], which is a
+ * single list slot holding precisely that item — so index + [songId] uniquely identify the moved
+ * occurrence at its new position even when duplicates exist. [songId] is only a guard against a stale
+ * or not-yet-applied async queue state; it is never used to *search* for the row.
+ */
+internal data class QueueDropConfirmation(
+    val songId: Long,
+    val expectedPlaybackIndex: Int,
+)
+
+/**
+ * True once the live [queue] reflects the committed move: the destination slot now holds the moved
+ * song. Used to wait out the asynchronous queue-state update before flashing, and to discard a
+ * confirmation whose destination was overwritten by an unrelated mutation.
+ */
+internal fun queueDropConfirmationMatches(queue: List<Song>, confirmation: QueueDropConfirmation): Boolean =
+    queue.getOrNull(confirmation.expectedPlaybackIndex)?.id == confirmation.songId
+
+/**
+ * Whether the row at [rowPlaybackIndex] holding [rowSongId] is the confirmed drop target. Requires
+ * both the exact index and a matching song id, so a coincidental duplicate elsewhere never flashes
+ * and a stale index whose song changed is rejected.
+ */
+internal fun shouldFlashDroppedRow(
+    confirmation: QueueDropConfirmation?,
+    rowPlaybackIndex: Int,
+    rowSongId: Long,
+): Boolean =
+    confirmation != null &&
+        rowPlaybackIndex == confirmation.expectedPlaybackIndex &&
+        rowSongId == confirmation.songId
+
 /**
  * Immutable identity of an in-progress queue drag. A playback index alone is not a stable identity
  * (the queue can mutate during a long drag), and a song id alone is ambiguous once duplicate song

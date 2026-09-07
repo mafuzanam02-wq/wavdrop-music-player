@@ -490,4 +490,87 @@ class QueueDragTest {
         // Queue shrank to size 60 (Up Next count now 39) → position 80 is invalid.
         assertNull(upNextPositionToPlaybackIndex(position1Based = 80, currentIndex = 20, queueSize = 60))
     }
+
+    // ── Phase B.1: post-drop confirmation flash ───────────────────────────────────────────────────
+
+    /** Simulates the authoritative move-to-index commit (removeAt(from); add(to)). */
+    private fun applyMove(queue: List<Song>, from: Int, to: Int): List<Song> {
+        val m = queue.toMutableList()
+        val item = m.removeAt(from)
+        m.add(to, item)
+        return m
+    }
+
+    // A. unique song move → the new destination resolves and only that row flashes.
+    @Test
+    fun `unique drop confirmation resolves at the destination`() {
+        val moved = applyMove(queueOf(0, 1, 7, 2, 3, 4), from = 2, to = 4) // move "7" down to index 4
+        val conf = QueueDropConfirmation(songId = 7, expectedPlaybackIndex = 4)
+        assertTrue(queueDropConfirmationMatches(moved, conf))
+        assertTrue(shouldFlashDroppedRow(conf, rowPlaybackIndex = 4, rowSongId = 7))
+        assertFalse(shouldFlashDroppedRow(conf, rowPlaybackIndex = 3, rowSongId = 2))
+    }
+
+    // B. duplicate song move → only the moved occurrence's new slot flashes.
+    @Test
+    fun `duplicate drop confirmation flashes only the moved occurrence`() {
+        // ids: 0=current, X=9 at 1 and 4; move the SECOND X (index 4) to index 2.
+        val start = queueOf(0, 9, 2, 3, 9, 5)
+        val moved = applyMove(start, from = 4, to = 2)
+        val conf = QueueDropConfirmation(songId = 9, expectedPlaybackIndex = 2)
+        assertTrue(queueDropConfirmationMatches(moved, conf))
+        assertTrue(shouldFlashDroppedRow(conf, rowPlaybackIndex = 2, rowSongId = 9))
+        // The OTHER X (still present at some index) must not flash — different index.
+        val otherX = moved.indices.first { moved[it].id == 9L && it != 2 }
+        assertFalse(shouldFlashDroppedRow(conf, rowPlaybackIndex = otherX, rowSongId = 9))
+    }
+
+    // C. destination now holds a different song → no wrong flash.
+    @Test
+    fun `drop confirmation rejects when destination holds another song`() {
+        val queue = queueOf(0, 1, 5, 3) // index 2 holds song 5, not 9
+        val conf = QueueDropConfirmation(songId = 9, expectedPlaybackIndex = 2)
+        assertFalse(queueDropConfirmationMatches(queue, conf))
+        assertFalse(shouldFlashDroppedRow(conf, rowPlaybackIndex = 2, rowSongId = 5))
+    }
+
+    // D. stale confirmation after an unrelated queue replacement → discard.
+    @Test
+    fun `drop confirmation is stale after an unrelated queue replacement`() {
+        val replaced = queueOf(100, 101, 102) // entirely different tracks
+        val conf = QueueDropConfirmation(songId = 9, expectedPlaybackIndex = 2)
+        assertFalse(queueDropConfirmationMatches(replaced, conf))
+        // Out-of-range index also safely returns false.
+        assertFalse(queueDropConfirmationMatches(replaced, QueueDropConfirmation(9, 99)))
+    }
+
+    // E. no active confirmation (cancel / no-op drag never schedules one) → nothing flashes.
+    @Test
+    fun `no confirmation means no flash`() {
+        assertFalse(shouldFlashDroppedRow(null, rowPlaybackIndex = 4, rowSongId = 7))
+    }
+
+    // F. a successful commit's destination is exactly Commit.to, and resolves post-move.
+    @Test
+    fun `commit destination resolves to the committed index after the move`() {
+        val start = queueOf(0, 1, 2, 3, 4, 5, 6, 7, 8)
+        val session = sessionFor(start, startIndex = 2)
+        val decision = planQueueDragEnd(start, currentIndex = 0, session, targetPlaybackIndex = 7, cancelled = false)
+        assertEquals(QueueDragEndDecision.Commit(2, 7), decision)
+        val commit = decision as QueueDragEndDecision.Commit
+        val conf = QueueDropConfirmation(session.sourceSongId, commit.toPlaybackIndex)
+        val moved = applyMove(start, commit.fromPlaybackIndex, commit.toPlaybackIndex)
+        assertTrue(queueDropConfirmationMatches(moved, conf))
+        assertEquals(start[2].id, moved[7].id)
+    }
+
+    // G. confirmation identity is purely index + song id (no currentIndex/history coupling).
+    @Test
+    fun `drop confirmation does not depend on current or history`() {
+        val moved = applyMove(queueOf(0, 1, 2, 3), from = 1, to = 3)
+        val conf = QueueDropConfirmation(songId = 1, expectedPlaybackIndex = 3)
+        // Matches regardless of what "current" is — the helper takes no currentIndex.
+        assertTrue(queueDropConfirmationMatches(moved, conf))
+        assertTrue(shouldFlashDroppedRow(conf, rowPlaybackIndex = 3, rowSongId = 1))
+    }
 }
