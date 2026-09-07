@@ -1,6 +1,32 @@
 package com.launchpoint.wavdrop.ui.screen.nowplaying
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import com.launchpoint.wavdrop.data.model.Song
+
+/**
+ * Bounds of a currently-composed Up Next drag handle, reported by the row and consumed by the
+ * stable parent-level pointer detector. [bounds] is in the queue viewport Box's local coordinate
+ * space (the same space the parent pointerInput reports pointer positions in) — see the coordinate
+ * audit in QueueSheet. This is ephemeral UI-only state: it is never persisted to the ViewModel or
+ * PlayerController, and it does NOT participate in Phase A drag identity — once a [QueueDragSession]
+ * is created, the session survives this target being unregistered (LazyColumn virtualization).
+ */
+internal data class QueueDragHandleTarget(
+    val playbackIndex: Int,
+    val songId: Long,
+    val bounds: Rect,
+)
+
+/**
+ * Returns the handle whose bounds contain [position], or null if the pointer-down was not on any
+ * registered handle. Selection is purely by exact hit region, never by song id — so two rows sharing
+ * a song id resolve to the specific occurrence the user actually touched.
+ */
+internal fun findDragHandleAt(
+    targets: Collection<QueueDragHandleTarget>,
+    position: Offset,
+): QueueDragHandleTarget? = targets.firstOrNull { it.bounds.contains(position) }
 
 /**
  * Immutable identity of an in-progress queue drag. A playback index alone is not a stable identity

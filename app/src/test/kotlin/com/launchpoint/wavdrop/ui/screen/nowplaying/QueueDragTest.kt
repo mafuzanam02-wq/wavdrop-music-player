@@ -1,8 +1,11 @@
 package com.launchpoint.wavdrop.ui.screen.nowplaying
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -173,5 +176,117 @@ class QueueDragTest {
         assertEquals(1, session.sourceOccurrenceOrdinal)
         val mutated = queueOf(9, 8, 5) // only one "5" left → ordinal 1 no longer exists
         assertNull(resolveDraggedOccurrenceIndex(mutated, session))
+    }
+
+    // ── Phase A.1: parent-level handle hit-testing (virtualization-safe gesture ownership) ────────
+
+    private fun handle(playbackIndex: Int, songId: Long, top: Float, bottom: Float) =
+        QueueDragHandleTarget(
+            playbackIndex = playbackIndex,
+            songId = songId,
+            // A 20dp-ish handle column at the far left: x in [0,20], y in [top,bottom].
+            bounds = Rect(left = 0f, top = top, right = 20f, bottom = bottom),
+        )
+
+    // A. pointer-down inside a handle region → eligible; the exact handle is returned.
+    @Test
+    fun `down inside a handle region is eligible`() {
+        val targets = listOf(
+            handle(playbackIndex = 3, songId = 100, top = 0f, bottom = 56f),
+            handle(playbackIndex = 4, songId = 101, top = 56f, bottom = 112f),
+        )
+        val hit = findDragHandleAt(targets, Offset(x = 10f, y = 80f))
+        assertNotNull(hit)
+        assertEquals(4, hit!!.playbackIndex)
+        assertEquals(101L, hit.songId)
+    }
+
+    // B. pointer-down outside every handle (e.g. on artwork/title, x past the handle column) → null.
+    @Test
+    fun `down outside all handles is not eligible`() {
+        val targets = listOf(handle(playbackIndex = 3, songId = 100, top = 0f, bottom = 56f))
+        // Correct Y band but past the handle's right edge (on the row body, not the handle).
+        assertNull(findDragHandleAt(targets, Offset(x = 120f, y = 20f)))
+        // Correct X but below every registered handle.
+        assertNull(findDragHandleAt(targets, Offset(x = 10f, y = 500f)))
+    }
+
+    // C. duplicate song ids in separate handles → selection is by exact hit region, NOT song id.
+    @Test
+    fun `duplicate song ids resolve by hit region not by id`() {
+        val targets = listOf(
+            handle(playbackIndex = 2, songId = 5, top = 0f, bottom = 56f),   // first "5"
+            handle(playbackIndex = 7, songId = 5, top = 56f, bottom = 112f), // second "5"
+        )
+        val firstHit = findDragHandleAt(targets, Offset(x = 10f, y = 10f))
+        val secondHit = findDragHandleAt(targets, Offset(x = 10f, y = 100f))
+        assertEquals(2, firstHit!!.playbackIndex)
+        assertEquals(7, secondHit!!.playbackIndex)
+    }
+
+    // D. empty / stale registry → cannot start a drag.
+    @Test
+    fun `no registered handles cannot start a drag`() {
+        assertNull(findDragHandleAt(emptyList(), Offset(x = 10f, y = 10f)))
+    }
+
+    // E. CORE A.1 INVARIANT: unregistering the source handle AFTER the session is created (the row
+    // being virtualised off-screen) must NOT invalidate the drag. Session identity is independent of
+    // the ephemeral handle registry; it resolves purely against the live queue.
+    @Test
+    fun `unregistering the source handle after session start does not invalidate the drag`() {
+        val queue = queueOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        val startIndex = 3
+        // Registry as it is at drag start: the source handle is present and hit-tests.
+        val registry = linkedMapOf(
+            "up-next-2-2" to handle(playbackIndex = 2, songId = 2, top = 0f, bottom = 56f),
+            "up-next-3-3" to handle(playbackIndex = 3, songId = 3, top = 56f, bottom = 112f),
+        )
+        val hit = findDragHandleAt(registry.values, Offset(x = 10f, y = 80f))
+        assertEquals(startIndex, hit!!.playbackIndex)
+
+        // Session is created from the hit; this is the parent-owned drag identity.
+        val session = sessionFor(queue, startIndex)
+
+        // The source row scrolls far off-screen and is disposed → its handle is unregistered.
+        registry.remove("up-next-3-3")
+        assertNull(findDragHandleAt(registry.values, Offset(x = 10f, y = 80f)))
+
+        // The drag survives: the occurrence still resolves and a distant end still commits once.
+        assertNotNull(resolveDraggedOccurrenceIndex(queue, session))
+        assertTrue(isDraggedOccurrenceStillValid(queue, currentIndex = 0, session))
+        val decision = planQueueDragEnd(queue, currentIndex = 0, session, targetPlaybackIndex = 10, cancelled = false)
+        assertEquals(QueueDragEndDecision.Commit(3, 10), decision)
+    }
+
+    // F/G/H: structural invalidation still cancels even though virtualization does not — these reuse
+    // the Phase A helpers to prove A.1 did not weaken any Phase A invariant.
+    @Test
+    fun `structural removal still invalidates after the handle is gone`() {
+        val start = queueOf(9, 1, 2, 3, 4) // current=9 at 0; drag "3" at index 3
+        val session = sessionFor(start, startIndex = 3)
+        val mutated = queueOf(9, 1, 2, 4) // "3" removed from the queue itself (not just the handle)
+        assertFalse(isDraggedOccurrenceStillValid(mutated, currentIndex = 0, session))
+        assertEquals(
+            QueueDragEndDecision.NoOp,
+            planQueueDragEnd(mutated, currentIndex = 0, session, targetPlaybackIndex = 3, cancelled = false),
+        )
+    }
+
+    // The registry entry and the session are genuinely decoupled objects.
+    @Test
+    fun `handle target and session are independent objects`() {
+        val queue = queueOf(0, 1, 2, 3)
+        val target = handle(playbackIndex = 2, songId = 2, top = 0f, bottom = 56f)
+        val session = QueueDragSession(
+            sourceSongId = target.songId,
+            sourceOccurrenceOrdinal = queueOccurrenceOrdinal(queue, target.playbackIndex),
+            startSourcePlaybackIndex = target.playbackIndex,
+        )
+        // Forgetting the target collection cannot touch the session's ability to resolve.
+        val registry = mutableListOf(target)
+        registry.clear()
+        assertTrue(registry.isEmpty())
+        assertEquals(2, resolveDraggedOccurrenceIndex(queue, session))
     }
 }

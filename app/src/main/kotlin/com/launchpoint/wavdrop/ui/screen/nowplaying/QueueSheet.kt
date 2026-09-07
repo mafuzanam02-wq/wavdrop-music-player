@@ -4,9 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,6 +46,7 @@ import androidx.compose.runtime.getValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,13 +55,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
@@ -163,6 +166,15 @@ private fun QueueSheetContent(
     var pointerViewportY       by remember { mutableStateOf<Float?>(null) }
     var isDragActive           by remember { mutableStateOf(false) }
     var autoScrollJob          by remember { mutableStateOf<Job?>(null) }
+    // Ephemeral UI-only registry of the bounds of every currently-composed Up Next drag handle,
+    // keyed by the LazyColumn item key (stable per composed row). The stable parent-level pointer
+    // detector hit-tests pointer-down against these to decide whether a reorder may start. Handles
+    // register/update via onGloballyPositioned and unregister on disposal, so the registry always
+    // reflects only visible rows — but a drag that has already started does NOT depend on it.
+    val handleRegistry         = remember { mutableStateMapOf<String, QueueDragHandleTarget>() }
+    // LayoutCoordinates of the queue viewport Box: the single coordinate space shared by the parent
+    // pointerInput's pointer positions and every registered handle's bounds.
+    var viewportCoords         by remember { mutableStateOf<LayoutCoordinates?>(null) }
     // Live playback index of the grabbed occurrence in the current queue (null once invalidated).
     val draggingPlaybackIndex   = dragSession?.let { resolveDraggedOccurrenceIndex(state.queue, it) }
     val anyDragging             = isDragActive && draggingPlaybackIndex != null && pointerViewportY != null
@@ -242,6 +254,72 @@ private fun QueueSheetContent(
         }
     }
 
+    // ── Drag lifecycle, owned by the stable parent pointerInput (not by any LazyColumn row) ──────
+    // These read the FRESH queue via latestState (the pointerInput(Unit) lambda is captured once and
+    // never restarts, so the `state` param it closes over would be stale). They mutate the remembered
+    // MutableStates above, whose identities are stable across recomposition.
+
+    // [pointerY] is the actual pointer-down Y at slop crossing, in viewport-Box local space — no
+    // synthesised row-centre offset, so the floating preview sits under the finger without a jump.
+    fun beginDrag(handle: QueueDragHandleTarget, pointerY: Float) {
+        val liveQueue = latestState.value.queue
+        val playbackIndex = handle.playbackIndex
+        val song = liveQueue.getOrNull(playbackIndex) ?: return
+        dragSession = QueueDragSession(
+            sourceSongId = handle.songId,
+            sourceOccurrenceOrdinal = queueOccurrenceOrdinal(liveQueue, playbackIndex),
+            startSourcePlaybackIndex = playbackIndex,
+        )
+        draggingSong = song
+        dragTargetPlaybackIndex = playbackIndex
+        val viewport = listState.layoutInfo.viewportSize.height.toFloat()
+        pointerViewportY = if (viewport > 0f) pointerY.coerceIn(0f, viewport) else pointerY
+        updateDragTarget(pointerViewportY ?: pointerY)
+        isDragActive = true
+        startAutoScroll()
+    }
+
+    fun applyDragDelta(dy: Float) {
+        if (!isDragActive) return
+        val pointerY = pointerViewportY ?: return
+        val viewport = listState.layoutInfo.viewportSize.height.toFloat()
+        val nextPointerY = if (viewport > 0f) {
+            (pointerY + dy).coerceIn(0f, viewport)
+        } else {
+            pointerY + dy
+        }
+        pointerViewportY = nextPointerY
+        updateDragTarget(nextPointerY)
+    }
+
+    fun endDrag() {
+        stopAutoScroll()
+        isDragActive = false
+        val session = dragSession
+        // The single, final commit point — reached only for a valid, non-cancelled drop.
+        // planQueueDragEnd re-resolves the grabbed occurrence against the live queue and enforces the
+        // Up Next / overtake invariants, so it is the ONLY path that calls onMoveItemTo.
+        if (session != null) {
+            val liveState = latestState.value
+            val decision = planQueueDragEnd(
+                queue = liveState.queue,
+                currentIndex = liveState.currentIndex,
+                session = session,
+                targetPlaybackIndex = dragTargetPlaybackIndex,
+                cancelled = false,
+            )
+            if (decision is QueueDragEndDecision.Commit) {
+                onMoveItemTo(decision.fromPlaybackIndex, decision.toPlaybackIndex)
+            }
+        }
+        clearDragState()
+    }
+
+    // Cancel means cancel: never commit a reorder. Just tear down drag state.
+    fun cancelDrag() {
+        clearDragState()
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             clearDragState()
@@ -292,7 +370,79 @@ private fun QueueSheetContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f, fill = false),
+                    .weight(1f, fill = false)
+                    // Stable parent = the queue viewport Box. It defines the shared coordinate space
+                    // (pointer positions here == handle bounds via localBoundingBoxOf == pointerViewportY
+                    // == floating-preview offset) and OWNS the whole drag gesture for the sheet's
+                    // lifetime, so LazyColumn virtualising the source row cannot cancel it.
+                    .onGloballyPositioned { viewportCoords = it }
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            // Observe in the Initial pass so the parent can claim a handle-drag before
+                            // the child LazyColumn's scrollable (Main pass) consumes it.
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial,
+                            )
+                            // Only a pointer-down on a registered Up Next handle is eligible. Anything
+                            // else (rows, artwork, headers) is left untouched → normal scroll/tap/swipe.
+                            val handle = findDragHandleAt(handleRegistry.values, down.position)
+                                ?: return@awaitEachGesture
+                            val touchSlop = viewConfiguration.touchSlop
+                            var totalDx = 0f
+                            var totalDy = 0f
+                            var dragStarted = false
+                            try {
+                                // Slop phase: distinguish vertical reorder from horizontal swipe / tap.
+                                // Nothing is consumed until vertical slop is crossed, so a horizontal
+                                // swipe-to-remove or a tap still reaches the child untouched.
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: return@awaitEachGesture
+                                    if (!change.pressed) return@awaitEachGesture // released before slop → tap
+                                    val delta = change.positionChange()
+                                    totalDx += delta.x
+                                    totalDy += delta.y
+                                    if (abs(totalDx) > touchSlop && abs(totalDx) >= abs(totalDy)) {
+                                        // Horizontal intent → let swipe-to-remove / child handle it.
+                                        return@awaitEachGesture
+                                    }
+                                    if (abs(totalDy) > touchSlop) {
+                                        change.consume()
+                                        beginDrag(handle, change.position.y)
+                                        dragStarted = true
+                                        break
+                                    }
+                                }
+                                // Drag phase: the parent consumes every move so the list does not fight
+                                // the gesture. This loop survives the source row leaving composition —
+                                // its lifetime is the parent Box's, not the disposed row's.
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null) {
+                                        cancelDrag()
+                                        dragStarted = false
+                                        return@awaitEachGesture
+                                    }
+                                    if (!change.pressed) {
+                                        change.consume()
+                                        endDrag()
+                                        dragStarted = false
+                                        return@awaitEachGesture
+                                    }
+                                    val dy = change.positionChange().y
+                                    if (dy != 0f) applyDragDelta(dy)
+                                    change.consume()
+                                }
+                            } finally {
+                                // Safety net: if the coroutine is cancelled mid-drag (e.g. the whole
+                                // sheet is dismissed), tear down without committing.
+                                if (dragStarted) cancelDrag()
+                            }
+                        }
+                    },
             ) {
                 LazyColumn(
                     state = listState,
@@ -361,6 +511,7 @@ private fun QueueSheetContent(
                 val isFirstUpNext = index == 0
                 val isLastUpNext = index == upNextCount - 1
                 val isDragging = draggingPlaybackIndex == playbackIndex
+                val rowKey = "up-next-${song.id}-$playbackIndex"
                 SwipeableQueueItemRow(
                     song = song,
                     isFirstUpNext = isFirstUpNext,
@@ -377,66 +528,21 @@ private fun QueueSheetContent(
                     },
                     onViewStats = { onViewStats(song.id) },
                     onShare = { onShareSong(song) },
-                    onDragStart = {
-                        dragSession = QueueDragSession(
-                            sourceSongId = song.id,
-                            sourceOccurrenceOrdinal = queueOccurrenceOrdinal(latestState.value.queue, playbackIndex),
-                            startSourcePlaybackIndex = playbackIndex,
-                        )
-                        draggingSong = song
-                        dragTargetPlaybackIndex = playbackIndex
-                        val key = "up-next-${song.id}-$playbackIndex"
-                        val itemOffset = listState.layoutInfo.visibleItemsInfo
-                            .firstOrNull { it.key == key }?.offset ?: 0
-                        val viewport = listState.layoutInfo.viewportSize.height.toFloat()
-                        val startPointerY = itemOffset.toFloat() + rowHeightPx / 2
-                        pointerViewportY = if (viewport > 0f) {
-                            startPointerY.coerceIn(0f, viewport)
-                        } else {
-                            startPointerY
-                        }
-                        updateDragTarget(pointerViewportY ?: startPointerY)
-                        isDragActive = true
-                        startAutoScroll()
-                    },
-                    onDragDelta = onDragDelta@ { dy ->
-                        if (!isDragActive) return@onDragDelta
-                        val pointerY = pointerViewportY ?: return@onDragDelta
-                        val viewport = listState.layoutInfo.viewportSize.height.toFloat()
-                        val nextPointerY = if (viewport > 0f) {
-                            (pointerY + dy).coerceIn(0f, viewport)
-                        } else {
-                            pointerY + dy
-                        }
-                        pointerViewportY = nextPointerY
-                        updateDragTarget(nextPointerY)
-                    },
-                    onDragEnd   = {
-                        stopAutoScroll()
-                        isDragActive = false
-                        val session = dragSession
-                        // The single, final commit point — reached only for a valid, non-cancelled
-                        // drop. planQueueDragEnd re-resolves the grabbed occurrence against the live
-                        // queue and enforces the Up Next / overtake invariants.
-                        if (session != null) {
-                            val liveState = latestState.value
-                            val decision = planQueueDragEnd(
-                                queue = liveState.queue,
-                                currentIndex = liveState.currentIndex,
-                                session = session,
-                                targetPlaybackIndex = dragTargetPlaybackIndex,
-                                cancelled = false,
+                    // The handle is now only a hit-registration region: it reports its bounds (in the
+                    // viewport Box's coordinate space, via the shared viewportCoords) and unregisters
+                    // on disposal. It no longer owns the drag detector, so virtualising this row can
+                    // no longer cancel an in-progress drag.
+                    onHandlePositioned = { handleCoords ->
+                        val vp = viewportCoords
+                        if (vp != null && vp.isAttached && handleCoords.isAttached) {
+                            handleRegistry[rowKey] = QueueDragHandleTarget(
+                                playbackIndex = playbackIndex,
+                                songId = song.id,
+                                bounds = vp.localBoundingBoxOf(handleCoords),
                             )
-                            if (decision is QueueDragEndDecision.Commit) {
-                                onMoveItemTo(decision.fromPlaybackIndex, decision.toPlaybackIndex)
-                            }
                         }
-                        clearDragState()
                     },
-                    onDragCancel = {
-                        // Cancel means cancel: never commit a reorder. Just tear down drag state.
-                        clearDragState()
-                    },
+                    onHandleDisposed = { handleRegistry.remove(rowKey) },
                 )
                 if (!isLastUpNext) {
                     HorizontalDivider(
@@ -478,10 +584,6 @@ private fun QueueSheetContent(
                         onRemove = {},
                         onViewStats = {},
                         onShare = {},
-                        onDragStart = {},
-                        onDragDelta = {},
-                        onDragEnd = {},
-                        onDragCancel = {},
                         modifier = Modifier
                             .fillMaxWidth()
                             .offset {
@@ -709,10 +811,8 @@ private fun SwipeableQueueItemRow(
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
     onShare: () -> Unit,
-    onDragStart: () -> Unit,
-    onDragDelta: (Float) -> Unit,
-    onDragEnd: () -> Unit,
-    onDragCancel: () -> Unit,
+    onHandlePositioned: (LayoutCoordinates) -> Unit,
+    onHandleDisposed: () -> Unit,
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -764,10 +864,8 @@ private fun SwipeableQueueItemRow(
             onRemove = onRemove,
             onViewStats = onViewStats,
             onShare = onShare,
-            onDragStart = onDragStart,
-            onDragDelta = onDragDelta,
-            onDragEnd = onDragEnd,
-            onDragCancel = onDragCancel,
+            onHandlePositioned = onHandlePositioned,
+            onHandleDisposed = onHandleDisposed,
         )
     }
 }
@@ -787,10 +885,10 @@ private fun QueueItemRow(
     onRemove: () -> Unit,
     onViewStats: () -> Unit,
     onShare: () -> Unit,
-    onDragStart: () -> Unit,
-    onDragDelta: (Float) -> Unit,
-    onDragEnd: () -> Unit,
-    onDragCancel: () -> Unit,
+    // Handle hit-registration callbacks. Only supplied for real Up Next rows; the floating preview
+    // row (dragHandleEnabled = false) passes neither and never registers.
+    onHandlePositioned: (LayoutCoordinates) -> Unit = {},
+    onHandleDisposed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -809,41 +907,23 @@ private fun QueueItemRow(
             .padding(start = 12.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (dragHandleEnabled) {
+            // Unregister the handle when this row leaves composition (LazyColumn virtualisation).
+            // This only removes the hit region; it never cancels an in-progress drag, whose identity
+            // lives in the parent-owned QueueDragSession.
+            DisposableEffect(Unit) {
+                onDispose { onHandleDisposed() }
+            }
+        }
         Box(
             modifier = Modifier
                 .width(20.dp)
                 .height(artworkSize)
                 .then(
+                    // The handle reports its bounds (in the shared viewport coordinate space) so the
+                    // stable parent detector can hit-test pointer-down. It owns no gesture detector.
                     if (dragHandleEnabled) {
-                        Modifier.pointerInput(song.id) {
-                            awaitEachGesture {
-                                var dragStarted = false
-                                var dropCommitted = false
-                                try {
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    val touchSlopChange = awaitVerticalTouchSlopOrCancellation(down.id) { change, overSlop ->
-                                        change.consume()
-                                        onDragStart()
-                                        dragStarted = true
-                                        onDragDelta(overSlop)
-                                    }
-                                    if (touchSlopChange != null) {
-                                        verticalDrag(touchSlopChange.id) { change ->
-                                            onDragDelta(change.positionChange().y)
-                                            change.consume()
-                                        }
-                                        if (dragStarted) {
-                                            onDragEnd()
-                                            dropCommitted = true
-                                        }
-                                    }
-                                } finally {
-                                    if (dragStarted && !dropCommitted) {
-                                        onDragCancel()
-                                    }
-                                }
-                            }
-                        }
+                        Modifier.onGloballyPositioned { onHandlePositioned(it) }
                     } else {
                         Modifier
                     },
