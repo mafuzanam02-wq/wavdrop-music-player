@@ -5,9 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -111,6 +116,10 @@ import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.toShape
+import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
+import com.launchpoint.wavdrop.ui.theme.WavdropMotion
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -191,7 +200,12 @@ fun NowPlayingScreen(
                     if (song != null) {
                         val isExternalAudio = song.isExternalAudio()
                         val folderKey = song.validFolderKey()
-                        IconButton(onClick = { showQueueSheet = true }) {
+                        val queueInteraction = remember { MutableInteractionSource() }
+                        IconButton(
+                            onClick = { showQueueSheet = true },
+                            modifier = Modifier.wavdropPressFeedback(queueInteraction),
+                            interactionSource = queueInteraction,
+                        ) {
                             Icon(
                                 imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
                                 contentDescription = "Open queue",
@@ -207,12 +221,14 @@ fun NowPlayingScreen(
                                 )
                             }
                             IconButton(onClick = viewModel::toggleFavorite) {
-                                Icon(
-                                    imageVector        = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    contentDescription = if (isFavorite) "Unfavorite" else "Favorite",
-                                    tint               = if (isFavorite) MaterialTheme.colorScheme.primary
-                                                         else MaterialTheme.colorScheme.onSurface,
-                                )
+                                WavdropFadeThrough(targetState = isFavorite) { favorite ->
+                                    Icon(
+                                        imageVector        = if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = if (favorite) "Unfavorite" else "Favorite",
+                                        tint               = if (favorite) MaterialTheme.colorScheme.primary
+                                                             else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
                             }
                         }
                         IconButton(onClick = { showSleepTimerDialog = true }) {
@@ -786,41 +802,58 @@ private fun UpperNowPlayingContent(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Text(
-                text = song.displayTitle,
-                style = metrics.titleStyle,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            // Metadata fades through on track change (keyed by the displayed text); direct swap
+            // under reduced motion. No large slides, no layout-wide animation.
+            WavdropFadeThrough(
+                targetState = song.displayTitle,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickableIfNotNull(onOpenTrackDetails),
-            )
-            Text(
-                text = song.displayArtist,
-                style = metrics.artistStyle,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            ) { title ->
+                Text(
+                    text = title,
+                    style = metrics.titleStyle,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            WavdropFadeThrough(
+                targetState = song.displayArtist,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickableIfNotNull(onOpenArtist),
-            )
-            if (metrics.showAlbum && song.album.isNotBlank()) {
+            ) { artist ->
                 Text(
-                    text = song.album,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                    text = artist,
+                    style = metrics.artistStyle,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (metrics.showAlbum && song.album.isNotBlank()) {
+                WavdropFadeThrough(
+                    targetState = song.album,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickableIfNotNull(onOpenAlbum),
-                )
+                ) { album ->
+                    Text(
+                        text = album,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
             if (metrics.showQueuePosition && queuePosition.isNotBlank()) {
                 Text(
@@ -893,6 +926,27 @@ private fun PlaybackControlsRow(
     onNext: () -> Unit,
     onCycleRepeatMode: () -> Unit,
 ) {
+    val reducedMotion = rememberReducedMotion()
+    // One remembered InteractionSource per control: shared between press feedback (scale) and the
+    // IconButton's ripple so there is no double trigger and ripple stays as the primary affordance.
+    val shuffleInteraction  = remember { MutableInteractionSource() }
+    val previousInteraction = remember { MutableInteractionSource() }
+    val playInteraction     = remember { MutableInteractionSource() }
+    val nextInteraction     = remember { MutableInteractionSource() }
+    val repeatInteraction   = remember { MutableInteractionSource() }
+
+    val tintSpec = if (reducedMotion) {
+        snap<Color>()
+    } else {
+        tween<Color>(WavdropMotion.Durations.StandardStateChange, easing = WavdropMotion.Easings.Standard)
+    }
+    val shuffleTint by animateColorAsState(
+        targetValue = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
+                      else MaterialTheme.colorScheme.onSurface,
+        animationSpec = tintSpec,
+        label = "shuffleTint",
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -900,16 +954,23 @@ private fun PlaybackControlsRow(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onToggleShuffle, modifier = Modifier.size(42.dp)) {
+        IconButton(
+            onClick = onToggleShuffle,
+            modifier = Modifier.size(42.dp).wavdropPressFeedback(shuffleInteraction),
+            interactionSource = shuffleInteraction,
+        ) {
             Icon(
                 imageVector = Icons.Default.Shuffle,
                 contentDescription = if (state.shuffleEnabled) "Turn shuffle off" else "Turn shuffle on",
-                tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
-                       else MaterialTheme.colorScheme.onSurface,
+                tint = shuffleTint,
                 modifier = Modifier.size(22.dp),
             )
         }
-        IconButton(onClick = onPrevious, modifier = Modifier.size(44.dp)) {
+        IconButton(
+            onClick = onPrevious,
+            modifier = Modifier.size(44.dp).wavdropPressFeedback(previousInteraction),
+            interactionSource = previousInteraction,
+        ) {
             Icon(
                 imageVector = Icons.Default.SkipPrevious,
                 contentDescription = "Previous",
@@ -917,15 +978,25 @@ private fun PlaybackControlsRow(
                 modifier = Modifier.size(30.dp),
             )
         }
-        IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(58.dp)) {
-            Icon(
-                imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (state.isPlaying) "Pause" else "Play",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(42.dp),
-            )
+        IconButton(
+            onClick = onTogglePlayPause,
+            modifier = Modifier.size(58.dp).wavdropPressFeedback(playInteraction),
+            interactionSource = playInteraction,
+        ) {
+            WavdropFadeThrough(targetState = state.isPlaying) { playing ->
+                Icon(
+                    imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(42.dp),
+                )
+            }
         }
-        IconButton(onClick = onNext, modifier = Modifier.size(44.dp)) {
+        IconButton(
+            onClick = onNext,
+            modifier = Modifier.size(44.dp).wavdropPressFeedback(nextInteraction),
+            interactionSource = nextInteraction,
+        ) {
             Icon(
                 imageVector = Icons.Default.SkipNext,
                 contentDescription = "Next",
@@ -933,22 +1004,28 @@ private fun PlaybackControlsRow(
                 modifier = Modifier.size(30.dp),
             )
         }
-        IconButton(onClick = onCycleRepeatMode, modifier = Modifier.size(42.dp)) {
-            Icon(
-                imageVector = if (state.repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne
-                              else Icons.Default.Repeat,
-                contentDescription = when (state.repeatMode) {
-                    RepeatMode.OFF -> "Turn repeat all on"
-                    RepeatMode.ALL -> "Turn repeat one on"
-                    RepeatMode.ONE -> "Turn repeat off"
-                },
-                tint = if (state.repeatMode == RepeatMode.OFF) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                modifier = Modifier.size(22.dp),
-            )
+        IconButton(
+            onClick = onCycleRepeatMode,
+            modifier = Modifier.size(42.dp).wavdropPressFeedback(repeatInteraction),
+            interactionSource = repeatInteraction,
+        ) {
+            WavdropFadeThrough(targetState = state.repeatMode) { mode ->
+                Icon(
+                    imageVector = if (mode == RepeatMode.ONE) Icons.Default.RepeatOne
+                                  else Icons.Default.Repeat,
+                    contentDescription = when (mode) {
+                        RepeatMode.OFF -> "Turn repeat all on"
+                        RepeatMode.ALL -> "Turn repeat one on"
+                        RepeatMode.ONE -> "Turn repeat off"
+                    },
+                    tint = if (mode == RepeatMode.OFF) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
     }
 }
@@ -1117,6 +1194,9 @@ private fun ArtworkWithLyricsOverlay(
             contentDescription = "Album artwork for ${song.album}",
             placeholderIcon = Icons.Default.MusicNote,
             shape = artworkShape,
+            // Large, non-recycled surface: keep the current cover visible while the next track's
+            // artwork loads so track changes crossfade directly instead of flashing the placeholder.
+            retainPreviousOnLoad = true,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -1292,8 +1372,20 @@ private fun SeekBar(
     modifier: Modifier = Modifier,
 ) {
     val timeDisplayMode = LocalNowPlayingTimeDisplayMode.current
+    val reducedMotion = rememberReducedMotion()
     var isDragging by remember { mutableStateOf(false) }
     var dragPositionMs by remember { mutableStateOf(0L) }
+
+    // Restrained "grabbed" emphasis: the thumb grows slightly while scrubbing. Read in the draw
+    // phase inside Canvas, so it never adds recomposition on the frequent position updates.
+    val thumbScale by animateFloatAsState(
+        targetValue = if (isDragging && !reducedMotion) 1.5f else 1f,
+        animationSpec = tween(
+            durationMillis = WavdropMotion.Durations.FastStateChange,
+            easing = WavdropMotion.Easings.Standard,
+        ),
+        label = "seekThumbScale",
+    )
 
     val safeDurationMs = durationMs.coerceAtLeast(0L)
     val displayPositionMs = if (isDragging) dragPositionMs else positionMs
@@ -1372,7 +1464,7 @@ private fun SeekBar(
                 if (safeDurationMs > 0) {
                     drawCircle(
                         color = thumbColor,
-                        radius = 5.dp.toPx(),
+                        radius = 5.dp.toPx() * thumbScale,
                         center = Offset(activeEnd, centerY),
                     )
                 }
