@@ -35,6 +35,7 @@ import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
+import com.launchpoint.wavdrop.data.settings.WrappedVisualStyle
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -346,6 +347,13 @@ class SettingsViewModel @Inject constructor(
             initialValue = WrappedFallbackTheme.AUTO,
         )
 
+    val wrappedVisualStyle: StateFlow<WrappedVisualStyle> =
+        appSettingsRepository.wrappedVisualStyle.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = WrappedVisualStyle.DEFAULT,
+        )
+
     private val _libraryScanUiState =
         MutableStateFlow<LibraryScanUiState>(LibraryScanUiState.Idle)
     val libraryScanUiState: StateFlow<LibraryScanUiState> =
@@ -554,6 +562,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setWrappedFallbackTheme(theme: WrappedFallbackTheme) {
         viewModelScope.launch { appSettingsRepository.setWrappedFallbackTheme(theme) }
+    }
+
+    fun setWrappedVisualStyle(style: WrappedVisualStyle) {
+        viewModelScope.launch { appSettingsRepository.setWrappedVisualStyle(style) }
     }
 
     fun setAppIcon(choice: AppIconChoice) {

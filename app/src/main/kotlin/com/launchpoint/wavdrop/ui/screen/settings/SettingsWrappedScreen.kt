@@ -23,6 +23,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
+import com.launchpoint.wavdrop.data.settings.WrappedVisualStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,6 +32,7 @@ fun SettingsWrappedScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val showMilestoneCelebrations    by viewModel.showMilestoneCelebrations.collectAsStateWithLifecycle()
+    val wrappedVisualStyle           by viewModel.wrappedVisualStyle.collectAsStateWithLifecycle()
     val wrappedUseArtworkBackgrounds by viewModel.wrappedUseArtworkBackgrounds.collectAsStateWithLifecycle()
     val wrappedBackgroundIntensity   by viewModel.wrappedBackgroundIntensity.collectAsStateWithLifecycle()
     val wrappedFallbackTheme         by viewModel.wrappedFallbackTheme.collectAsStateWithLifecycle()
@@ -59,6 +61,23 @@ fun SettingsWrappedScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
         ) {
+            item { SectionHeader("Visual style") }
+            item {
+                SettingsMessageRow(
+                    message = "Choose the overall look for Wrapped recaps.",
+                )
+            }
+            WrappedVisualStyle.entries.forEach { style ->
+                item {
+                    ScanModeRow(
+                        title    = style.displayName,
+                        subtitle = style.description,
+                        selected = wrappedVisualStyle == style,
+                        onClick  = { viewModel.setWrappedVisualStyle(style) },
+                    )
+                }
+            }
+            item { SectionDivider() }
             item { SectionHeader("Appearance") }
             item {
                 ToggleSettingsRow(

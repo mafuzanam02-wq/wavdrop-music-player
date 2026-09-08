@@ -4,7 +4,9 @@ import android.app.Activity
 import android.graphics.Rect as AndroidRect
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +58,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -63,6 +66,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,6 +82,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -86,6 +91,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -110,6 +116,9 @@ import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
+import com.launchpoint.wavdrop.ui.theme.WavdropMotion
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.screen.statistics.StatisticsFormatters
 import java.time.DayOfWeek
@@ -337,7 +346,12 @@ fun WrappedScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onWrappedAppearanceClick) {
+                    val appearanceInteraction = remember { MutableInteractionSource() }
+                    IconButton(
+                        onClick = onWrappedAppearanceClick,
+                        modifier = Modifier.wavdropPressFeedback(appearanceInteraction),
+                        interactionSource = appearanceInteraction,
+                    ) {
                         Icon(
                             imageVector        = Icons.Default.Settings,
                             contentDescription = "Wrapped appearance settings",
@@ -358,7 +372,10 @@ fun WrappedScreen(
                 onNavigateToSongs = onNavigateToSongs,
                 modifier = Modifier.padding(innerPadding),
             )
-            is WrappedUiState.Content -> WrappedContent(
+            is WrappedUiState.Content -> CompositionLocalProvider(
+                LocalWrappedStyleTokens provides state.visualStyle.toStyleTokens(),
+            ) {
+                WrappedContent(
                 state = state,
                 viewModel = viewModel,
                 onSelectScope = viewModel::selectScope,
@@ -368,7 +385,8 @@ fun WrappedScreen(
                 onArtistClick = onArtistClick,
                 onAlbumClick = onAlbumClick,
                 modifier = Modifier.padding(innerPadding),
-            )
+                )
+            }
         }
     }
 }
@@ -1004,38 +1022,98 @@ private fun InsightCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
+    val tokens = LocalWrappedStyleTokens.current
+    val shape = RoundedCornerShape(tokens.cornerRadius)
+    val primary = MaterialTheme.colorScheme.primary
+    val isEditorial = tokens.cardTreatment == WrappedCardTreatment.EDITORIAL
+
+    // Structural fill: translucent+bordered (GLASS), opaque solid (EDITORIAL), gradient+halo (IMMERSIVE).
+    val fill: Modifier = when (tokens.cardTreatment) {
+        WrappedCardTreatment.GLASS ->
+            Modifier
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = tokens.containerAlpha))
+                .background(
+                    Brush.verticalGradient(
+                        0f to primary.copy(alpha = 0.12f),
+                        0.55f to Color.Transparent,
+                    ),
+                )
+                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = tokens.borderAlpha), shape)
+        WrappedCardTreatment.EDITORIAL ->
+            Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        WrappedCardTreatment.IMMERSIVE ->
+            Modifier.background(
+                Brush.verticalGradient(
+                    0f to primary.copy(alpha = tokens.containerAlpha),
+                    1f to MaterialTheme.colorScheme.surface.copy(alpha = 0.32f),
+                ),
+            )
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .wrappedCardReveal(tokens)
+            .clip(shape)
+            .then(fill),
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-            )
+            if (tokens.showAccentBar) {
+                Box(
+                    modifier = Modifier
+                        .width(tokens.accentBarWidth)
+                        .fillMaxHeight()
+                        .background(primary.copy(alpha = tokens.accentBarAlpha)),
+                )
+            }
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(start = 20.dp, end = 24.dp, top = 28.dp, bottom = 28.dp),
+                    .padding(
+                        start = if (tokens.showAccentBar) 20.dp else 24.dp,
+                        end = 24.dp,
+                        top = 28.dp,
+                        bottom = 28.dp,
+                    ),
             ) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (isEditorial) FontWeight.Bold else FontWeight.Medium,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                Spacer(Modifier.height(20.dp))
+                if (isEditorial) {
+                    // Editorial "magazine" structure: a crisp divider under the label.
+                    Spacer(Modifier.height(10.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f))
+                    Spacer(Modifier.height(14.dp))
+                } else {
+                    Spacer(Modifier.height(20.dp))
+                }
                 content()
             }
         }
+    }
+}
+
+/** One-shot, per-style entrance fade (+ rise for IMMERSIVE). Draw-phase; disabled under reduced motion. */
+@Composable
+private fun Modifier.wrappedCardReveal(tokens: WrappedStyleTokens): Modifier {
+    val reduceMotion = rememberReducedMotion()
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { appeared = true }
+    val progress by animateFloatAsState(
+        // Under reduced motion the target is 1f from the first frame, so there is no animation.
+        targetValue = if (appeared || reduceMotion) 1f else 0f,
+        animationSpec = tween(tokens.contentRevealMs, easing = WavdropMotion.Easings.Standard),
+        label = "wrappedCardReveal",
+    )
+    val risePx = with(LocalDensity.current) { tokens.contentRevealRise.toPx() }
+    return this.graphicsLayer {
+        alpha = if (reduceMotion) 1f else progress
+        translationY = if (reduceMotion) 0f else (1f - progress) * risePx
     }
 }
 
@@ -1052,13 +1130,15 @@ private fun WrappedArtworkCard(
 ) {
     val effectiveArtworkUri = artworkUri.takeIf { visualSettings.useArtworkBackgrounds }
     var artworkLoaded by remember(effectiveArtworkUri) { mutableStateOf(false) }
+    val tokens = LocalWrappedStyleTokens.current
     val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
     val fallbackPalette = visualSettings.fallbackTheme.toPalette(fallbackMotif, intensityStyle)
     Card(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .wrappedCardReveal(tokens),
+        shape = RoundedCornerShape(tokens.cornerRadius),
         colors = CardDefaults.cardColors(
             containerColor = if (effectiveArtworkUri != null) {
                 MaterialTheme.colorScheme.primaryContainer
@@ -1081,15 +1161,21 @@ private fun WrappedArtworkCard(
             }
             Crossfade(
                 targetState = artworkLoaded && effectiveArtworkUri != null,
-                animationSpec = tween(durationMillis = 400),
+                animationSpec = tween(durationMillis = tokens.artworkCrossfadeMs),
                 label = "artwork_crossfade",
             ) { showingArtwork ->
                 if (showingArtwork) {
                     Box(
                         Modifier.fillMaxSize().background(
                             Brush.verticalGradient(
-                                0f to Color.Black.copy(alpha = intensityStyle.artworkTopScrimAlpha),
-                                1f to Color.Black.copy(alpha = intensityStyle.artworkBottomScrimAlpha),
+                                0f to Color.Black.copy(
+                                    alpha = (intensityStyle.artworkTopScrimAlpha + tokens.artworkScrimBoost)
+                                        .coerceAtMost(0.92f),
+                                ),
+                                1f to Color.Black.copy(
+                                    alpha = (intensityStyle.artworkBottomScrimAlpha + tokens.artworkScrimBoost)
+                                        .coerceAtMost(0.92f),
+                                ),
                             )
                         )
                     )
@@ -1324,10 +1410,15 @@ private fun animatedWrappedCounter(
 
 @Composable
 private fun BigStat(value: String, label: String, modifier: Modifier = Modifier) {
+    val tokens = LocalWrappedStyleTokens.current
+    val valueStyle = when (tokens.statEmphasis) {
+        WrappedStatEmphasis.STRONG -> MaterialTheme.typography.headlineLarge
+        WrappedStatEmphasis.STANDARD -> MaterialTheme.typography.headlineMedium
+    }
     Column(modifier = modifier) {
         Text(
             text = value,
-            style = MaterialTheme.typography.headlineMedium,
+            style = valueStyle,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,

@@ -29,6 +29,7 @@ import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
+import com.launchpoint.wavdrop.data.settings.WrappedVisualStyle
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettings
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
@@ -230,6 +231,8 @@ class WavdropBackupRepository @Inject constructor(
                 .takeIf { it != WrappedBackgroundIntensity.MEDIUM }?.name,
             wrappedFallbackTheme = appSettingsRepository.wrappedFallbackTheme.first()
                 .takeIf { it != WrappedFallbackTheme.AUTO }?.name,
+            wrappedVisualStyle = appSettingsRepository.wrappedVisualStyle.first()
+                .takeIf { it != WrappedVisualStyle.DEFAULT }?.name,
         )
 
         val exportedAtMs = System.currentTimeMillis()

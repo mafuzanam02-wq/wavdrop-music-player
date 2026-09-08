@@ -178,5 +178,6 @@ object WavdropBackupExporter {
         prefs.wrappedUseArtworkBackgrounds?.let  { put("wrappedUseArtworkBackgrounds",  it) }
         prefs.wrappedBackgroundIntensity?.let    { put("wrappedBackgroundIntensity",    it) }
         prefs.wrappedFallbackTheme?.let          { put("wrappedFallbackTheme",          it) }
+        prefs.wrappedVisualStyle?.let            { put("wrappedVisualStyle",            it) }
     }
 }

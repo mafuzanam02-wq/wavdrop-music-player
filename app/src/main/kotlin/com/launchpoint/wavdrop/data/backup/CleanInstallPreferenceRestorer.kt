@@ -24,6 +24,7 @@ import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
+import com.launchpoint.wavdrop.data.settings.WrappedVisualStyle
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
@@ -94,6 +95,8 @@ class CleanInstallPreferenceRestorer @Inject constructor(
             ?.let { appSettings.setWrappedBackgroundIntensity(it) }
         preferences.wrappedFallbackTheme.enumValue<WrappedFallbackTheme>()
             ?.let { appSettings.setWrappedFallbackTheme(it) }
+        preferences.wrappedVisualStyle.enumValue<WrappedVisualStyle>()
+            ?.let { appSettings.setWrappedVisualStyle(it) }
 
         preferences.pauseOnAudioDisconnect?.let { resumeSettings.setPauseOnAudioDisconnect(it) }
         preferences.rememberLastTrack?.let { resumeSettings.setRememberLastTrack(it) }

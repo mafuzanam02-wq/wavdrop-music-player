@@ -446,6 +446,20 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    val wrappedVisualStyle: Flow<WrappedVisualStyle> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            WrappedVisualStyle.fromStorage(preferences[WRAPPED_VISUAL_STYLE_KEY])
+        }
+
+    suspend fun setWrappedVisualStyle(style: WrappedVisualStyle) {
+        dataStore.edit { preferences ->
+            preferences[WRAPPED_VISUAL_STYLE_KEY] = style.name
+        }
+    }
+
     val notificationControlsSetting: Flow<NotificationControlsSetting> = dataStore.data
         .catch { error ->
             if (error is IOException) emit(emptyPreferences()) else throw error
@@ -536,5 +550,6 @@ class AppSettingsRepository @Inject constructor(
         val WRAPPED_USE_ARTWORK_BACKGROUNDS_KEY     = booleanPreferencesKey("wrapped_use_artwork_backgrounds")
         val WRAPPED_BACKGROUND_INTENSITY_KEY         = stringPreferencesKey("wrapped_background_intensity")
         val WRAPPED_FALLBACK_THEME_KEY               = stringPreferencesKey("wrapped_fallback_theme")
+        val WRAPPED_VISUAL_STYLE_KEY                 = stringPreferencesKey("wrapped_visual_style")
     }
 }

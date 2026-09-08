@@ -104,6 +104,7 @@ object WavdropBackupIntegrity {
                 optionalRecord("prefWrappedUseArtworkBackgrounds", prefs.wrappedUseArtworkBackgrounds)
                 optionalRecord("prefWrappedBackgroundIntensity", prefs.wrappedBackgroundIntensity)
                 optionalRecord("prefWrappedFallbackTheme", prefs.wrappedFallbackTheme)
+                optionalRecord("prefWrappedVisualStyle", prefs.wrappedVisualStyle)
             } ?: record("prefs-none")
         }
         return sha256Hex(canonical)

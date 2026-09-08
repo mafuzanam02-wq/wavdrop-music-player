@@ -89,6 +89,7 @@ data class BackupPreferences(
     val wrappedUseArtworkBackgrounds: Boolean? = null,
     val wrappedBackgroundIntensity: String? = null,
     val wrappedFallbackTheme: String? = null,
+    val wrappedVisualStyle: String? = null,
 )
 
 data class BackupPlaylistSong(
@@ -232,6 +233,7 @@ data class BackupManifest(
             prefs.wrappedUseArtworkBackgrounds,
             prefs.wrappedBackgroundIntensity,
             prefs.wrappedFallbackTheme,
+            prefs.wrappedVisualStyle,
         ).size
     }
 }

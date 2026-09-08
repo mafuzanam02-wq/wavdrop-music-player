@@ -362,6 +362,7 @@ class WavdropBackupSettingsTest {
             wrappedUseArtworkBackgrounds = false,
             wrappedBackgroundIntensity   = "BOLD",
             wrappedFallbackTheme         = "OCEAN",
+            wrappedVisualStyle           = "NIGHT_PULSE",
         )
         val parsed = WavdropBackupParser
             .parse(WavdropBackupExporter.toJson(minimalBackup(prefs)))
@@ -372,6 +373,7 @@ class WavdropBackupSettingsTest {
         assertEquals(false, p.wrappedUseArtworkBackgrounds)
         assertEquals("BOLD", p.wrappedBackgroundIntensity)
         assertEquals("OCEAN", p.wrappedFallbackTheme)
+        assertEquals("NIGHT_PULSE", p.wrappedVisualStyle)
     }
 
     @Test
@@ -385,6 +387,7 @@ class WavdropBackupSettingsTest {
         assertNull(p.wrappedUseArtworkBackgrounds)
         assertNull(p.wrappedBackgroundIntensity)
         assertNull(p.wrappedFallbackTheme)
+        assertNull(p.wrappedVisualStyle)
     }
 
     @Test

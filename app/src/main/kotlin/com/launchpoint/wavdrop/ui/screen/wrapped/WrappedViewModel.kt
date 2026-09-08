@@ -13,6 +13,7 @@ import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
+import com.launchpoint.wavdrop.data.settings.WrappedVisualStyle
 import com.launchpoint.wavdrop.data.stats.WrappedBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -40,6 +41,7 @@ sealed interface WrappedUiState {
         val useArtworkBackgrounds: Boolean,
         val backgroundIntensity: WrappedBackgroundIntensity,
         val fallbackTheme: WrappedFallbackTheme,
+        val visualStyle: WrappedVisualStyle,
     ) : WrappedUiState
 }
 
@@ -108,11 +110,13 @@ class WrappedViewModel @Inject constructor(
         appSettingsRepository.wrappedUseArtworkBackgrounds,
         appSettingsRepository.wrappedBackgroundIntensity,
         appSettingsRepository.wrappedFallbackTheme,
-    ) { useArtworkBackgrounds, backgroundIntensity, fallbackTheme ->
+        appSettingsRepository.wrappedVisualStyle,
+    ) { useArtworkBackgrounds, backgroundIntensity, fallbackTheme, visualStyle ->
         WrappedVisualPreferences(
             useArtworkBackgrounds = useArtworkBackgrounds,
             backgroundIntensity = backgroundIntensity,
             fallbackTheme = fallbackTheme,
+            visualStyle = visualStyle,
         )
     }
     private val songData = combine(
@@ -145,6 +149,7 @@ class WrappedViewModel @Inject constructor(
                 useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
                 backgroundIntensity = visualPrefs.backgroundIntensity,
                 fallbackTheme = visualPrefs.fallbackTheme,
+                visualStyle = visualPrefs.visualStyle,
             )
         }
 
@@ -171,6 +176,7 @@ class WrappedViewModel @Inject constructor(
             useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
             backgroundIntensity = visualPrefs.backgroundIntensity,
             fallbackTheme = visualPrefs.fallbackTheme,
+            visualStyle = visualPrefs.visualStyle,
         )
     }
         .flowOn(Dispatchers.Default)
@@ -251,6 +257,7 @@ private data class WrappedVisualPreferences(
     val useArtworkBackgrounds: Boolean,
     val backgroundIntensity: WrappedBackgroundIntensity,
     val fallbackTheme: WrappedFallbackTheme,
+    val visualStyle: WrappedVisualStyle,
 )
 
 internal fun WrappedPeriod.toWrappedReportKey(): String = when (this) {

@@ -1,6 +1,8 @@
 package com.launchpoint.wavdrop.ui.screen.statistics
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +39,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,6 +54,10 @@ import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.model.StatsDashboardSummary
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
+import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropItemPlacement
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -306,14 +313,18 @@ private fun OverviewCard(
                 tint = MaterialTheme.colorScheme.primary,
             )
             Column {
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // Fade the value through when a refresh changes it (discrete change only);
+                // direct swap under reduced motion.
+                WavdropFadeThrough(targetState = value) { shownValue ->
+                    Text(
+                        text = shownValue,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelMedium,
@@ -340,16 +351,19 @@ private fun androidx.compose.foundation.lazy.LazyListScope.statsSection(
     // Prefix with sectionKey so the same song ID in multiple sections (e.g. Most Played +
     // Recently Played) doesn't produce duplicate LazyColumn keys and crash Compose.
     items(songs, key = { "${sectionKey}_${it.song.id}" }) { summary ->
-        SongStatsRow(
-            summary = summary,
-            metric = metric(summary),
-            onClick = { onTrackDetailsClick(summary.song.id) },
-        )
-        HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-            thickness = 0.5.dp,
-        )
+        val reducedMotion = rememberReducedMotion()
+        Column(modifier = wavdropItemPlacement(reducedMotion)) {
+            SongStatsRow(
+                summary = summary,
+                metric = metric(summary),
+                onClick = { onTrackDetailsClick(summary.song.id) },
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                thickness = 0.5.dp,
+            )
+        }
     }
 }
 
@@ -382,10 +396,16 @@ private fun SongStatsRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

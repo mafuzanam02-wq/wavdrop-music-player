@@ -534,6 +534,7 @@ private fun Map<*, *>.toBackupPreferences(): BackupPreferences = BackupPreferenc
     wrappedUseArtworkBackgrounds = this["wrappedUseArtworkBackgrounds"] as? Boolean,
     wrappedBackgroundIntensity  = this["wrappedBackgroundIntensity"] as? String,
     wrappedFallbackTheme        = this["wrappedFallbackTheme"] as? String,
+    wrappedVisualStyle          = this["wrappedVisualStyle"] as? String,
 )
 
 private fun Map<*, *>.parseDesktopOverlay(): BackupDesktopOverlay {
