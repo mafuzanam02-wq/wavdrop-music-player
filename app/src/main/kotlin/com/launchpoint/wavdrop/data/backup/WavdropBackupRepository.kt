@@ -75,11 +75,18 @@ class WavdropBackupRepository @Inject constructor(
      * Never overwritten from an imported backup.
      */
     private suspend fun getOrCreateInstallationId(): String {
-        val existing = dataStore.data.first()[installationIdKey]
-        if (existing != null) return existing
-        val newId = UUID.randomUUID().toString()
-        dataStore.edit { prefs -> prefs[installationIdKey] = newId }
-        return newId
+        // Fast path: already created — read without a write on every subsequent export.
+        dataStore.data.first()[installationIdKey]?.let { return it }
+        // First-ever call: create atomically. DataStore serialises edit transactions per
+        // instance, so two concurrent first exports resolve to the SAME id — the re-check
+        // inside edit observes the earlier writer's value instead of minting a divergent
+        // id via a read-then-write (TOCTOU) race. Never overwritten from an imported backup.
+        lateinit var id: String
+        dataStore.edit { prefs ->
+            id = prefs[installationIdKey]
+                ?: UUID.randomUUID().toString().also { prefs[installationIdKey] = it }
+        }
+        return id
     }
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
         val json = buildBackupJson()
