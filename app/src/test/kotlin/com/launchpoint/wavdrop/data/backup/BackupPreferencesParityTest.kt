@@ -76,6 +76,13 @@ class BackupPreferencesParityTest {
             trackStats = emptyList(),
             importBaselines = emptyList(),
             preferences = full,
+            // v2 export mandates these header fields (WavdropBackupExporterV2 requireNotNull-s them,
+            // just as WavdropBackupRepository always sets them for a real export). The fixture must
+            // supply them or toJson throws before the preference round-trip is ever exercised. They
+            // are v2-only and absent from v1 output, so v1 parity is unaffected.
+            backupId = "test-backup-id",
+            sourceInstallationId = "test-installation-id",
+            exportedAtMs = 1_717_236_000_000L,
         )
         val v1 = requireNotNull(WavdropBackupParser.parse(WavdropBackupExporter.toJson(backup)).backup?.preferences)
         val v2 = requireNotNull(WavdropBackupParser.parse(WavdropBackupExporterV2.toJson(backup)).backup?.preferences)

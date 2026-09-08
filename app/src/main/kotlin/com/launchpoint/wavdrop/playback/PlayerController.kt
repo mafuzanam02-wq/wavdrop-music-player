@@ -382,6 +382,14 @@ class PlayerController @Inject constructor(
     // Single bounded pending queue-jump (Recently Played tap deferred while the controller is
     // unavailable). Latest tap wins; drained on reconnect after the queue-replacing requests.
     private var pendingQueueJumpRequest: QueueJumpRequest? = null
+
+    // Bounded, latest-wins transport intents captured while the controller is unavailable (Phase 7).
+    // Each is a single O(1) slot — no unbounded command list. Drained once in drainPendingRequests
+    // (lowest precedence: a queue-replacing/restore/jump request supersedes them). See
+    // [PendingTransport] for the supersession/stale rules.
+    private var pendingPlayWhenReady: Boolean? = null       // STATE_INTENT: desired play(true)/pause(false)
+    private var pendingSeek: PendingSeek? = null            // latest seek, bound to its target song
+    private var pendingNavigation: NavigationIntent? = null // latest next/previous; recomputed on drain
     private val sessionHydrationMutex = Mutex()
     private val sessionPersistenceGate = PlaybackSessionPersistenceGate()
     private var isExternalPlayback = false
@@ -731,6 +739,15 @@ class PlayerController @Inject constructor(
         // while disconnected: the later replace supersedes the older jump (the queue it referred to
         // is gone). Cleared here so a superseded jump can never fire against a replacement queue.
         pendingQueueJumpRequest = null
+        // Transport intents (Phase 7) are lowest precedence — captured and cleared here so a
+        // queue-replacing/restore/jump branch below supersedes them (a fresh queue invalidates a
+        // stale play/pause/seek/navigation). They apply only in the no-queue-change (else) branch.
+        val navigation = pendingNavigation
+        val playWhenReady = pendingPlayWhenReady
+        val seek = pendingSeek
+        pendingNavigation = null
+        pendingPlayWhenReady = null
+        pendingSeek = null
         when {
             externalRequest != null -> playExternalUri(
                 uri = externalRequest.uri,
@@ -768,8 +785,78 @@ class PlayerController @Inject constructor(
             // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
             // against the (possibly mutated) queue so it never seeks a different song.
             jumpRequest != null -> executePendingQueueJump(controller, jumpRequest)
-            else -> syncNowPlayingState()
+            else -> {
+                // No queue-replacing/restore/jump request supersedes the dirty flag in this branch,
+                // so a warm reconnect after a shuffle change made while disconnected must push the
+                // app-owned order to the player once, BEFORE any pending transport command runs, so
+                // navigation/seek resolve against the synchronized queue rather than a stale one.
+                if (reconnectRequiresQueueSync(playerQueueNeedsSync, supersededByQueueRequest = false)) {
+                    synchronizePlayerQueueOnReconnect(controller)
+                }
+                drainPendingTransportCommands(controller, navigation, seek, playWhenReady)
+            }
         }
+    }
+
+    /**
+     * Main thread only. Pushes the app-owned queue/order to the live player exactly once on a warm
+     * reconnect after shuffle changed while the controller was unavailable.
+     *
+     * Preserves the current queue OCCURRENCE (`_nowPlayingState.currentIndex` is a position, so it is
+     * duplicate-safe and never jumps to an older duplicate) and the live playback position (read
+     * before the reload), so the current song is not restarted and playback is not reset to index 0.
+     * Reuses [syncPlayerQueueAt], which clears [playerQueueNeedsSync] after the push. If the current
+     * occurrence cannot be resolved, the queue is left dirty (the existing non-destructive fallback)
+     * so a later queue operation still synchronizes it.
+     */
+    private fun synchronizePlayerQueueOnReconnect(controller: MediaController) {
+        val occurrence = _nowPlayingState.value.currentIndex
+            .takeIf { it in playbackQueue.indices }
+            ?: currentPlaybackIndex()?.takeIf { it in playbackQueue.indices }
+            ?: return
+        val positionMs = controller.currentPosition.coerceAtLeast(0L)
+        syncPlayerQueueAt(
+            controller = controller,
+            playbackIndex = occurrence,
+            positionMs = positionMs,
+            playWhenReady = controller.isPlaying,
+        )
+        syncNowPlayingState()
+    }
+
+    /**
+     * Main thread only. Applies transport intents captured while disconnected, in an order that
+     * keeps them internally consistent and stale-safe. Runs only when no queue-replacing/restore/
+     * jump request superseded them.
+     *
+     *  1. Navigation — recomputed against the live queue (never a stale index).
+     *  2. Seek — applied only if its bound track is still current AFTER any navigation (so a seek
+     *     issued against the old track is dropped rather than applied to a different one).
+     *  3. Play/Pause — the latest desired state.
+     */
+    private fun drainPendingTransportCommands(
+        controller: MediaController,
+        navigation: NavigationIntent?,
+        seek: PendingSeek?,
+        playWhenReady: Boolean?,
+    ) {
+        if (navigation == null && seek == null && playWhenReady == null) {
+            syncNowPlayingState()
+            return
+        }
+        navigation?.let { navigate(controller, it) }
+        if (seek != null) {
+            val currentSongId = controller.currentMediaItem?.mediaId?.toLongOrNull()
+            if (PendingTransport.shouldApplySeek(seek, currentSongId)) {
+                val duration = controller.duration.takeIf { it > 0L }
+                controller.seekTo(if (duration != null) seek.positionMs.coerceIn(0L, duration) else seek.positionMs)
+            } else {
+                Log.w(TAG, "Discarding stale pending seek targetSongId=${seek.targetSongId}")
+            }
+        }
+        playWhenReady?.let { if (it) controller.play() else controller.pause() }
+        syncNowPlayingState()
+        saveSessionAsync()
     }
 
     /**
@@ -1191,8 +1278,19 @@ class PlayerController @Inject constructor(
     }
 
     fun jumpToQueueItem(playbackIndex: Int) {
-        val controller = mediaController ?: return
         if (playbackIndex !in playbackQueue.indices) return
+        val controller = mediaController
+        if (controller == null) {
+            // Defer through the same bounded, stale-safe machinery as jumpToSongById: bind to the
+            // song at this occurrence so executePendingQueueJump re-resolves it on reconnect
+            // (correcting a mutated index, never jumping to a different song). Latest jump wins.
+            pendingQueueJumpRequest = QueueJumpRequest(
+                songId = playbackQueue[playbackIndex].id,
+                resolvedPlaybackIndex = playbackIndex,
+            )
+            ensureControllerConnection()
+            return
+        }
         // playbackIndex is directly the ExoPlayer media item index since ExoPlayer holds playbackQueue.
         seekToPlaybackIndex(controller, playbackIndex)
     }
@@ -1424,7 +1522,20 @@ class PlayerController @Inject constructor(
     }
 
     fun togglePlayPause() {
-        val controller = mediaController ?: return
+        val controller = mediaController
+        if (controller == null) {
+            // No controller: derive the DESIRED play/pause state now (STATE_INTENT) and defer it —
+            // a raw toggle replayed later could be stale. Only meaningful when a song is loaded;
+            // otherwise there is nothing to play, so this is a genuine no-op. Latest intent wins
+            // (a later PAUSE overwrites an earlier PLAY). Superseded by any queue-replacing request.
+            val current = _nowPlayingState.value
+            if (current.song == null) return
+            val desiredPlay = PendingTransport.desiredPlayWhenReady(current.isPlaying)
+            pendingPlayWhenReady = desiredPlay
+            _nowPlayingState.update { it.copy(isPlaying = desiredPlay) } // optimistic; corrected on sync
+            ensureControllerConnection()
+            return
+        }
         if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] before: controller.isPlaying=${controller.isPlaying}")
         if (controller.isPlaying) controller.pause() else controller.play()
         syncNowPlayingState()
@@ -1473,33 +1584,59 @@ class PlayerController @Inject constructor(
     }
 
     fun skipToNext() {
-        val controller = mediaController ?: return
-        val currentPlaybackIndex = currentPlaybackIndex() ?: controller.currentMediaItemIndex
-        val nextPlaybackIndex = QueueNavigator.nextIndex(
-            queueSize = playbackQueue.size,
-            currentIndex = currentPlaybackIndex,
-            repeatMode = repeatMode,
-        ) ?: return
-        seekToPlaybackIndex(controller, nextPlaybackIndex)
+        val controller = mediaController
+        if (controller == null) {
+            // Defer a single latest-direction navigation intent (not an accumulated skip count).
+            // Recomputed against the live queue on reconnect, so a mutated queue never replays a
+            // stale skip. Superseded by any queue-replacing request.
+            pendingNavigation = NavigationIntent.NEXT
+            ensureControllerConnection()
+            return
+        }
+        navigate(controller, NavigationIntent.NEXT)
     }
 
     fun skipToPrevious() {
-        val controller = mediaController ?: return
+        val controller = mediaController
+        if (controller == null) {
+            pendingNavigation = NavigationIntent.PREVIOUS
+            ensureControllerConnection()
+            return
+        }
+        navigate(controller, NavigationIntent.PREVIOUS)
+    }
+
+    // Main thread only. Executes a next/previous navigation against the CURRENT queue state.
+    // Shared by the immediate path and the deferred-reconnect drain so both recompute identically
+    // (never replaying a stale index).
+    private fun navigate(controller: MediaController, intent: NavigationIntent) {
         val currentPlaybackIndex = currentPlaybackIndex() ?: controller.currentMediaItemIndex
-        when (val action = QueueNavigator.previousAction(
-            queueSize = playbackQueue.size,
-            currentIndex = currentPlaybackIndex,
-            currentPositionMs = controller.currentPosition,
-            repeatMode = repeatMode,
-            restartThresholdMs = previousButtonBehavior.previousRestartThresholdMs(),
-        )) {
-            is PreviousQueueAction.MoveTo -> seekToPlaybackIndex(controller, action.index)
-            PreviousQueueAction.RestartCurrent -> {
-                controller.seekTo(0L)
-                syncPosition()
-                saveSessionAsync()
+        when (intent) {
+            NavigationIntent.NEXT -> {
+                val nextPlaybackIndex = QueueNavigator.nextIndex(
+                    queueSize = playbackQueue.size,
+                    currentIndex = currentPlaybackIndex,
+                    repeatMode = repeatMode,
+                ) ?: return
+                seekToPlaybackIndex(controller, nextPlaybackIndex)
             }
-            null -> Unit
+            NavigationIntent.PREVIOUS -> {
+                when (val action = QueueNavigator.previousAction(
+                    queueSize = playbackQueue.size,
+                    currentIndex = currentPlaybackIndex,
+                    currentPositionMs = controller.currentPosition,
+                    repeatMode = repeatMode,
+                    restartThresholdMs = previousButtonBehavior.previousRestartThresholdMs(),
+                )) {
+                    is PreviousQueueAction.MoveTo -> seekToPlaybackIndex(controller, action.index)
+                    PreviousQueueAction.RestartCurrent -> {
+                        controller.seekTo(0L)
+                        syncPosition()
+                        saveSessionAsync()
+                    }
+                    null -> Unit
+                }
+            }
         }
     }
 
@@ -1522,7 +1659,16 @@ class PlayerController @Inject constructor(
         shuffleEnabled = newShuffleEnabled
         playbackOrder = toggleModel.playbackOrder
         playbackQueue = toggleModel.playbackQueue
-        playerQueueNeedsSync = controller != null && !toggleModel.requiresCurrentItemReplacement
+        // Record the app/player divergence independently of controller availability. When the
+        // controller is momentarily unavailable a WARM reconnect never reloads the player, so the
+        // dirty flag is the only thing that lets the next authoritative connection (or queue op)
+        // synchronize the stale traversal order. Toggling always changes only the upcoming order,
+        // never the current item, so this is a deferred sync — see [shuffleToggleRequiresQueueSync].
+        playerQueueNeedsSync = shuffleToggleRequiresQueueSync(toggleModel.requiresCurrentItemReplacement)
+        if (controller == null) {
+            // Demand-driven: bring the controller back so the reconnect drain can push the new order.
+            ensureControllerConnection()
+        }
 
         _nowPlayingState.update {
             it.copy(
@@ -1549,9 +1695,19 @@ class PlayerController @Inject constructor(
     }
 
     fun seekTo(positionMs: Long) {
-        val controller = mediaController ?: return
         val duration = _nowPlayingState.value.durationMs
         val clamped = positionMs.coerceIn(0L, if (duration > 0) duration else positionMs)
+        val controller = mediaController
+        if (controller == null) {
+            // Defer the latest seek, BOUND to the current song. On reconnect it is applied only if
+            // that song is still current (see drainPendingRequests) — a track change before
+            // reconnect drops it rather than seeking a different song to this position.
+            val songId = _nowPlayingState.value.song?.id ?: return
+            pendingSeek = PendingSeek(positionMs = clamped, targetSongId = songId) // latest wins
+            _nowPlayingState.update { it.copy(positionMs = clamped) } // optimistic; corrected on sync
+            ensureControllerConnection()
+            return
+        }
         controller.seekTo(clamped)
         syncPosition(positionOverrideMs = clamped)
         saveSessionAsync()
