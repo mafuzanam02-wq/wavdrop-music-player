@@ -22,6 +22,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
+import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,12 +71,15 @@ fun SearchTopAppBar(
             }
         },
         actions = {
-            if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(
-                        imageVector        = Icons.Default.Close,
-                        contentDescription = "Clear search",
-                    )
+            // Fade the clear affordance in/out as the field gains/loses text; snaps under reduced motion.
+            WavdropFadeThrough(targetState = query.isNotEmpty()) { hasText ->
+                if (hasText) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(
+                            imageVector        = Icons.Default.Close,
+                            contentDescription = "Clear search",
+                        )
+                    }
                 }
             }
         },

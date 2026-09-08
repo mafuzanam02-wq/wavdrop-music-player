@@ -1,6 +1,8 @@
 package com.launchpoint.wavdrop.ui.components
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +52,10 @@ import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.search.LibrarySearch
+import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropItemPlacement
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 
 private const val COLLAPSED_SEARCH_RESULT_LIMIT = 5
 private const val EXPANDED_SEARCH_RESULT_LIMIT  = 20
@@ -154,12 +160,13 @@ private fun GroupedSearchContentImpl(
     var playlistsExpanded       by remember(query) { mutableStateOf(false) }
     var smartCollectionsExpanded by remember(query) { mutableStateOf(false) }
     var foldersExpanded         by remember(query) { mutableStateOf(false) }
+    val reducedMotion = rememberReducedMotion()
 
     if (results.isEmpty) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             SearchEmptyState(
-                title = "No results",
-                message = "Try a song, artist, album, playlist, collection, or folder name.",
+                title = "No matches found",
+                message = "Try a different song, artist, album, playlist, collection, or folder name.",
             )
         }
         return
@@ -177,13 +184,15 @@ private fun GroupedSearchContentImpl(
                 SearchSectionHeader(title = "Songs", count = results.songs.size, isCapped = results.songsCapped)
             }
             items(displayedSongs, key = { "song_${it.id}" }) { song ->
-                SearchSongResultRow(
-                    song = song,
-                    query = query,
-                    actions = songActions,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                SearchDivider()
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    SearchSongResultRow(
+                        song = song,
+                        query = query,
+                        actions = songActions,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    SearchDivider()
+                }
             }
             if (results.songs.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
                 item(key = "songs_more") {
@@ -205,12 +214,14 @@ private fun GroupedSearchContentImpl(
                 SearchSectionHeader(title = "Artists", count = results.artists.size, isCapped = results.artistsCapped)
             }
             items(displayedArtists, key = { "artist_${it.artistKey}" }) { artist ->
-                SearchArtistRow(
-                    artist = artist,
-                    query = query,
-                    onClick = { onArtistClick(artist.artistKey) },
-                )
-                SearchDivider()
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    SearchArtistRow(
+                        artist = artist,
+                        query = query,
+                        onClick = { onArtistClick(artist.artistKey) },
+                    )
+                    SearchDivider()
+                }
             }
             if (results.artists.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
                 item(key = "artists_more") {
@@ -232,12 +243,14 @@ private fun GroupedSearchContentImpl(
                 SearchSectionHeader(title = "Albums", count = results.albums.size, isCapped = results.albumsCapped)
             }
             items(displayedAlbums, key = { "album_${it.albumKey}" }) { album ->
-                SearchAlbumRow(
-                    album = album,
-                    query = query,
-                    onClick = { onAlbumClick(album.albumKey) },
-                )
-                SearchDivider()
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    SearchAlbumRow(
+                        album = album,
+                        query = query,
+                        onClick = { onAlbumClick(album.albumKey) },
+                    )
+                    SearchDivider()
+                }
             }
             if (results.albums.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
                 item(key = "albums_more") {
@@ -259,12 +272,14 @@ private fun GroupedSearchContentImpl(
                 SearchSectionHeader(title = "Playlists", count = results.playlists.size, isCapped = results.playlistsCapped)
             }
             items(displayedPlaylists, key = { "playlist_${it.id}" }) { playlist ->
-                SearchPlaylistRow(
-                    playlist = playlist,
-                    query = query,
-                    onClick = { onPlaylistClick(playlist.id) },
-                )
-                SearchDivider()
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    SearchPlaylistRow(
+                        playlist = playlist,
+                        query = query,
+                        onClick = { onPlaylistClick(playlist.id) },
+                    )
+                    SearchDivider()
+                }
             }
             if (results.playlists.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
                 item(key = "playlists_more") {
@@ -286,12 +301,14 @@ private fun GroupedSearchContentImpl(
                 SearchSectionHeader(title = "Smart Collections", count = results.smartCollections.size, isCapped = results.smartCollectionsCapped)
             }
             items(displayedSmartCollections, key = { "smart_${it.type.name}" }) { collection ->
-                SearchSmartCollectionRow(
-                    collection = collection,
-                    query      = query,
-                    onClick    = { onSmartCollectionClick(collection.type) },
-                )
-                SearchDivider()
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    SearchSmartCollectionRow(
+                        collection = collection,
+                        query      = query,
+                        onClick    = { onSmartCollectionClick(collection.type) },
+                    )
+                    SearchDivider()
+                }
             }
             if (results.smartCollections.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
                 item(key = "smart_collections_more") {
@@ -313,12 +330,14 @@ private fun GroupedSearchContentImpl(
                 SearchSectionHeader(title = "Folders", count = results.folders.size, isCapped = results.foldersCapped)
             }
             items(displayedFolders, key = { "folder_${it.folderKey}" }) { folder ->
-                SearchFolderRow(
-                    folder = folder,
-                    query = query,
-                    onClick = { onFolderClick(folder.folderKey) },
-                )
-                SearchDivider()
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    SearchFolderRow(
+                        folder = folder,
+                        query = query,
+                        onClick = { onFolderClick(folder.folderKey) },
+                    )
+                    SearchDivider()
+                }
             }
             if (results.folders.size > COLLAPSED_SEARCH_RESULT_LIMIT) {
                 item(key = "folders_more") {
@@ -373,10 +392,16 @@ private fun SearchArtistRow(
     val verticalPadding = if (compact) 10.dp else 14.dp
     val artworkSize = if (compact) 40.dp else 44.dp
     val highlightStyle = searchHighlightStyle()
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -417,10 +442,16 @@ private fun SearchAlbumRow(
     val verticalPadding = if (compact) 10.dp else 14.dp
     val artworkSize = if (compact) 48.dp else 52.dp
     val highlightStyle = searchHighlightStyle()
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -468,10 +499,16 @@ private fun SearchPlaylistRow(
     val verticalPadding = if (compact) 10.dp else 14.dp
     val iconSize = if (compact) 36.dp else 40.dp
     val highlightStyle = searchHighlightStyle()
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -510,10 +547,16 @@ private fun SearchSmartCollectionRow(
     val verticalPadding = if (compact) 10.dp else 14.dp
     val iconSize = if (compact) 36.dp else 40.dp
     val highlightStyle = searchHighlightStyle()
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -559,10 +602,16 @@ private fun SearchFolderRow(
     val verticalPadding = if (compact) 10.dp else 14.dp
     val iconSize = if (compact) 36.dp else 40.dp
     val highlightStyle = searchHighlightStyle()
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -598,12 +647,17 @@ private fun SearchSectionHeader(
     modifier: Modifier = Modifier,
 ) {
     val countLabel = if (isCapped) "$count+" else "$count"
-    Text(
-        text = "$title ($countLabel)",
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
+    // Fade only when the count changes (title is fixed per section), so live result updates settle.
+    WavdropFadeThrough(
+        targetState = countLabel,
         modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 6.dp),
-    )
+    ) { label ->
+        Text(
+            text = "$title ($label)",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
 }
 
 @Composable

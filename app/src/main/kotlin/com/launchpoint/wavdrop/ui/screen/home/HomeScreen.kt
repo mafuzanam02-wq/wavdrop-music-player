@@ -1,6 +1,5 @@
 package com.launchpoint.wavdrop.ui.screen.home
 
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -96,9 +94,9 @@ import com.launchpoint.wavdrop.ui.components.SongRow
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
 import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
 import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropItemPlacement
 import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
-import com.launchpoint.wavdrop.ui.theme.WavdropMotion
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -682,23 +680,6 @@ private fun HomeDashboardContent(
         }
     }
 }
-
-/**
- * Restrained placement + fade for keyed LazyColumn items so live changes (Smart Collection
- * reorder/replace, section visibility toggles) settle instead of popping. Uses the shared
- * [WavdropMotion.placementSpec]; returns a plain Modifier under reduced motion (same convention as
- * QueueSheet's placement handling — the queue file itself is untouched).
- */
-private fun LazyItemScope.wavdropItemPlacement(reduceMotion: Boolean): Modifier =
-    if (reduceMotion) {
-        Modifier
-    } else {
-        Modifier.animateItem(
-            fadeInSpec = tween(WavdropMotion.Durations.StandardStateChange),
-            placementSpec = WavdropMotion.placementSpec(),
-            fadeOutSpec = tween(WavdropMotion.Durations.StandardStateChange),
-        )
-    }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
     title: String,

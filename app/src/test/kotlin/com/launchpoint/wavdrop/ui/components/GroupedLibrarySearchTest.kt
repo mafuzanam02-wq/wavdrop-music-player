@@ -43,6 +43,22 @@ class GroupedLibrarySearchTest {
         assertEquals(listOf(1L), results.songs.map { it.id })
     }
 
+    // Regression (WU-04): Global Search with a blank query must render the whole-library/default
+    // content — every song, in order, and a non-empty result — NOT an invite/empty state. This is
+    // the pre-Phase-4 contract; the Phase 4 polish must not alter it.
+    @Test
+    fun `blank query returns whole library so global search shows content`() {
+        val library = listOf(song(1, "Alpha"), song(2, "Beta"), song(3, "Gamma"))
+
+        val blank = buildGroupedSearchResults(songs = library, query = "")
+        val whitespace = buildGroupedSearchResults(songs = library, query = "   ")
+
+        assertFalse(blank.isEmpty)
+        assertEquals(listOf(1L, 2L, 3L), blank.songs.map { it.id })
+        assertFalse(whitespace.isEmpty)
+        assertEquals(listOf(1L, 2L, 3L), whitespace.songs.map { it.id })
+    }
+
     @Test
     fun `playlist results are capped at twenty`() {
         val results = buildGroupedSearchResults(

@@ -8,11 +8,13 @@ import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.search.LibrarySearch
 import com.launchpoint.wavdrop.data.text.MusicTextNormalizer
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -112,9 +114,13 @@ class AlbumsViewModel @Inject constructor(
             albums.isEmpty() -> AlbumsUiState.Empty
             else             -> AlbumsUiState.Ready(prepareAlbums(albums, query, sort))
         }
-    }.stateIn(
-        scope        = viewModelScope,
-        started      = SharingStarted.WhileSubscribed(5_000),
-        initialValue = AlbumsUiState.Loading,
-    )
+    }
+        // Filter + sort run off the Main thread on every keystroke; results are identical
+        // (see AlbumListSortingTest / LibrarySearchTest) — this only changes the dispatcher.
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = AlbumsUiState.Loading,
+        )
 }

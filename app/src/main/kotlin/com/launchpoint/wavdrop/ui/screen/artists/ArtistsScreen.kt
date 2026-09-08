@@ -1,8 +1,10 @@
 package com.launchpoint.wavdrop.ui.screen.artists
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +56,9 @@ import com.launchpoint.wavdrop.ui.components.EmptyStateText
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropItemPlacement
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import kotlinx.coroutines.launch
 
@@ -190,6 +195,7 @@ private fun ArtistListContent(
     }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val reducedMotion = rememberReducedMotion()
 
     // No header item — firstVisibleItemIndex maps directly to artists[index].
     val artistsRef = rememberUpdatedState(artists)
@@ -212,11 +218,13 @@ private fun ArtistListContent(
             contentPadding = PaddingValues(start = 0.dp, top = 4.dp, end = 32.dp, bottom = 4.dp),
         ) {
             items(artists, key = { it.artistKey }) { artist ->
-                ArtistRow(artist = artist, onClick = { onArtistClick(artist.artistKey) })
-                HorizontalDivider(
-                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    thickness = 0.5.dp,
-                )
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    ArtistRow(artist = artist, onClick = { onArtistClick(artist.artistKey) })
+                    HorizontalDivider(
+                        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        thickness = 0.5.dp,
+                    )
+                }
             }
         }
         if (showAlphabetIndex) {
@@ -244,10 +252,16 @@ private fun ArtistRow(
     val compact = LocalCompactMode.current
     val verticalPadding = if (compact) 10.dp else 14.dp
     val artworkSize = if (compact) 40.dp else 44.dp
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),

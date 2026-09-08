@@ -11,16 +11,21 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import coil.request.ImageRequest
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.theme.WavdropMotion
 
 @Composable
 fun ArtworkImage(
@@ -49,8 +54,18 @@ fun ArtworkImage(
                 modifier = Modifier.size(placeholderSize),
             )
         } else {
+            // Subtle crossfade so artwork settles in instead of snapping over the placeholder;
+            // disabled under reduced motion. Coil only animates on load, not on recomposition.
+            val context = LocalContext.current
+            val reducedMotion = rememberReducedMotion()
+            val model = remember(artworkUri, reducedMotion) {
+                ImageRequest.Builder(context)
+                    .data(artworkUri)
+                    .crossfade(if (reducedMotion) 0 else WavdropMotion.Durations.StandardStateChange)
+                    .build()
+            }
             SubcomposeAsyncImage(
-                model = artworkUri,
+                model = model,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

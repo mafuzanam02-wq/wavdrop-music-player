@@ -1,7 +1,9 @@
 package com.launchpoint.wavdrop.ui.screen.folders
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +51,9 @@ import com.launchpoint.wavdrop.ui.components.EmptyStateText
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropItemPlacement
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import kotlinx.coroutines.launch
 
@@ -191,6 +196,7 @@ private fun FolderListContent(
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val reducedMotion = rememberReducedMotion()
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(
@@ -199,11 +205,13 @@ private fun FolderListContent(
             contentPadding = PaddingValues(start = 0.dp, top = 4.dp, end = 32.dp, bottom = 4.dp),
         ) {
             items(folders, key = { it.folderKey }) { folder ->
-                FolderRow(folder = folder, onClick = { onFolderClick(folder.folderKey) })
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    thickness = 0.5.dp,
-                )
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    FolderRow(folder = folder, onClick = { onFolderClick(folder.folderKey) })
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        thickness = 0.5.dp,
+                    )
+                }
             }
         }
         if (sortMode == FolderSortMode.NAME) {
@@ -228,10 +236,16 @@ private fun FolderRow(
     val compact = LocalCompactMode.current
     val verticalPadding = if (compact) 10.dp else 14.dp
     val iconSize = if (compact) 36.dp else 40.dp
+    val interactionSource = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .wavdropPressFeedback(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+            )
             .padding(horizontal = 16.dp, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),

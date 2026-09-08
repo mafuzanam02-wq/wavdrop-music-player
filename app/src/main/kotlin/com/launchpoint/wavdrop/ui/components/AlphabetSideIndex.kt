@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,6 +33,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.theme.WavdropMotion
 
 /**
  * Vertical A-Z fast-scroll index shown on the trailing edge of long lists.
@@ -49,10 +53,19 @@ fun AlphabetSideIndex(
     modifier: Modifier = Modifier,
 ) {
     val letters = AlphabetLetters
+    val reducedMotion = rememberReducedMotion()
     var draggedLetter by remember { mutableStateOf<Char?>(null) }
     var visible by remember(autoHide) { mutableStateOf(true) }
     val alpha by animateFloatAsState(
         targetValue = if (!autoHide || visible || draggedLetter != null || keepVisible) 1f else 0f,
+        animationSpec = if (reducedMotion) {
+            snap()
+        } else {
+            tween(
+                durationMillis = WavdropMotion.Durations.StandardStateChange,
+                easing = WavdropMotion.Easings.Standard,
+            )
+        },
         label = "alphabetIndexAlpha",
     )
 

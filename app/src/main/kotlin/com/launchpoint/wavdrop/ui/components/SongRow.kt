@@ -1,8 +1,10 @@
 package com.launchpoint.wavdrop.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.settings.ArtworkCornerStyle
+import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -56,14 +60,20 @@ fun SongRow(
     val artworkSize      = if (compact) 44.dp else 48.dp
     val titleText        = song.displayTitle
     val artistText       = song.displayArtist
+    // Shared between press feedback and the click handler so the restrained scale tracks the same
+    // press the ripple does — no double trigger, ripple stays as the primary affordance.
+    val interactionSource = remember { MutableInteractionSource() }
 
     Row(
         modifier = modifier
+            .wavdropPressFeedback(interactionSource)
             .background(rowColor)
             .combinedClickable(
-                onClick       = onClick,
-                onDoubleClick = onToggleFavorite,
-                onLongClick   = onOpenDetails,
+                interactionSource = interactionSource,
+                indication        = LocalIndication.current,
+                onClick           = onClick,
+                onDoubleClick     = onToggleFavorite,
+                onLongClick       = onOpenDetails,
             )
             .padding(start = 16.dp, end = 4.dp, top = verticalPadding, bottom = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,

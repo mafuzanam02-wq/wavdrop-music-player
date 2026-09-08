@@ -77,6 +77,9 @@ import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
+import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
+import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
+import com.launchpoint.wavdrop.ui.components.motion.wavdropItemPlacement
 import com.launchpoint.wavdrop.ui.permission.AudioPermissionGate
 import com.launchpoint.wavdrop.ui.screen.home.HomeUiState
 import com.launchpoint.wavdrop.ui.screen.home.HomeViewModel
@@ -321,6 +324,7 @@ private fun SongListContent(
     }
     val listState      = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val reducedMotion  = rememberReducedMotion()
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
     val songsRef = rememberUpdatedState(songs)
@@ -368,12 +372,14 @@ private fun SongListContent(
                         contentAlignment = Alignment.CenterEnd,
                     ) {
                         TextButton(onClick = { sortMenuExpanded = true }) {
-                            Text(
-                                text = sortMode.label,
-                                style = MaterialTheme.typography.labelLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            WavdropFadeThrough(targetState = sortMode.label) { label ->
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             Icon(
                                 imageVector = Icons.Default.ArrowDropDown,
                                 contentDescription = null,
@@ -403,24 +409,26 @@ private fun SongListContent(
             }
             items(songs, key = { it.id }) { song ->
                 val isFavorite = song.id in favoriteSongIds
-                SongRowWithOverflow(
-                    song             = song,
-                    isCurrent        = song.id == currentSongId,
-                    isFavorite       = isFavorite,
-                    onPlay           = { onSongClick(song) },
-                    onPlayNext       = { onPlayNext(song) },
-                    onAddToQueue     = { onAddToQueue(song) },
-                    onToggleFavorite = { onToggleFavorite(song, isFavorite) },
-                    onAddToPlaylist  = { onAddToPlaylist(song) },
-                    onTrackDetails   = { onTrackDetailsClick(song.id) },
-                    onViewFolder     = song.validFolderKey()?.let { key -> { onFolderClick(key) } },
-                    onShare          = { onShare(song) },
-                    modifier         = Modifier.fillMaxWidth(),
-                )
-                HorizontalDivider(
-                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                    thickness = 0.5.dp,
-                )
+                Column(modifier = wavdropItemPlacement(reducedMotion)) {
+                    SongRowWithOverflow(
+                        song             = song,
+                        isCurrent        = song.id == currentSongId,
+                        isFavorite       = isFavorite,
+                        onPlay           = { onSongClick(song) },
+                        onPlayNext       = { onPlayNext(song) },
+                        onAddToQueue     = { onAddToQueue(song) },
+                        onToggleFavorite = { onToggleFavorite(song, isFavorite) },
+                        onAddToPlaylist  = { onAddToPlaylist(song) },
+                        onTrackDetails   = { onTrackDetailsClick(song.id) },
+                        onViewFolder     = song.validFolderKey()?.let { key -> { onFolderClick(key) } },
+                        onShare          = { onShare(song) },
+                        modifier         = Modifier.fillMaxWidth(),
+                    )
+                    HorizontalDivider(
+                        color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        thickness = 0.5.dp,
+                    )
+                }
             }
         }
         if (showAlphabetIndex) {
