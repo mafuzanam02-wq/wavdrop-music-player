@@ -103,6 +103,7 @@ import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.lyrics.LyricsResult
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
+import com.launchpoint.wavdrop.playback.PlaybackUserMessage
 import com.launchpoint.wavdrop.playback.RepeatMode
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
@@ -150,6 +151,20 @@ fun NowPlayingScreen(
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
     val context            = LocalContext.current
+
+    // Phase 8: surface one concise bad-media recovery message per episode via the existing snackbar.
+    // Technical detail (exception, URI, error code) stays in logs — never shown here.
+    LaunchedEffect(Unit) {
+        viewModel.playbackMessages.collect { message ->
+            val text = when (message) {
+                PlaybackUserMessage.BAD_TRACK_SKIPPED ->
+                    "Couldn't play that track — skipping to the next one."
+                PlaybackUserMessage.QUEUE_EXHAUSTED ->
+                    "Nothing else in the queue could be played."
+            }
+            snackbarHostState.showSnackbar(text)
+        }
+    }
     var showAddToPlaylist  by remember { mutableStateOf(false) }
     var showLyricsOverlay  by remember { mutableStateOf(false) }
     var showLyricsEditor   by remember { mutableStateOf(false) }

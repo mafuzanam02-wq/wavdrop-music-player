@@ -12,12 +12,14 @@ import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.playback.NowPlayingState
+import com.launchpoint.wavdrop.playback.PlaybackUserMessage
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +44,9 @@ class NowPlayingViewModel @Inject constructor(
 
     val nowPlayingState: StateFlow<NowPlayingState> = playerController.nowPlayingState
     val sleepTimerState: StateFlow<SleepTimerState> = playerController.sleepTimerState
+
+    /** Transient bad-media recovery messages (Phase 8); surfaced once per recovery episode. */
+    val playbackMessages: SharedFlow<PlaybackUserMessage> = playerController.userMessages
 
     private val _lyricsState = MutableStateFlow<LyricsResult>(LyricsResult.NotFound)
     val lyricsState: StateFlow<LyricsResult> = _lyricsState.asStateFlow()

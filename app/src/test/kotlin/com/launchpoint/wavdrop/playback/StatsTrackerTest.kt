@@ -387,6 +387,39 @@ class StatsTrackerTest {
         assertEquals(1L, fakeWriter.skips[0].songId)
     }
 
+    // ── Phase 8: bad-media bypass must not fabricate stats ────────────────────
+
+    @Test
+    fun `bad track bypassed without ever playing records no skip play or listen`() {
+        // Bad-media recovery path: an unplayable track becomes current (onSongSelected) but never
+        // reaches STATE_READY / isPlaying=true, so onPlaybackStarted is NEVER called for it. When
+        // recovery advances to the next track (onSongSelected), the bypassed track finalises with
+        // zero accumulated time — it must NOT count as a user skip, play, or listen.
+        tracker.onSongSelected(song(1))          // good song plays through
+        playFor(30_000L)
+        assertEquals(1, fakeWriter.plays.size)
+
+        tracker.onSongSelected(song(2))          // auto-transition to a BAD track — no playback starts
+        // (no onPlaybackStarted for song 2: it fails to load)
+        tracker.onSongSelected(song(3))          // recovery advances; finalises the bad song 2
+
+        assertEquals("no fabricated play for the bad track", 1, fakeWriter.plays.size)
+        assertTrue("no fabricated skip for the bad track", fakeWriter.skips.none { it.songId == 2L })
+        assertTrue("no fabricated listen for the bad track", fakeWriter.listenStarts.none { it.songId == 2L })
+    }
+
+    @Test
+    fun `consecutive bad tracks bypassed fabricate no skips`() {
+        // Three unplayable tracks in a row, none ever starts playback; recovery walks past each.
+        tracker.onSongSelected(song(10))
+        tracker.onSongSelected(song(11))
+        tracker.onSongSelected(song(12))
+        tracker.onSongSelected(song(13))         // finalises the last bad one
+
+        assertTrue(fakeWriter.skips.isEmpty())
+        assertTrue(fakeWriter.plays.isEmpty())
+    }
+
     // ── lastListenedAt / 5-second listen threshold ────────────────────────────
 
     @Test

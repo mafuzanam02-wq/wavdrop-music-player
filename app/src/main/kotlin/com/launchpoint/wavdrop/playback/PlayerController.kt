@@ -29,9 +29,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -423,6 +427,30 @@ class PlayerController @Inject constructor(
     private val _nowPlayingState = MutableStateFlow(NowPlayingState())
     val nowPlayingState: StateFlow<NowPlayingState> = _nowPlayingState.asStateFlow()
 
+    // Transient, fire-and-forget user-facing playback messages (Phase 8 bad-media recovery). A
+    // single-slot conflating buffer: recovery emits at most one message per episode, and a UI that
+    // is not currently collecting (e.g. Now Playing closed) simply misses it rather than backlogging
+    // a queue of stale toasts. Not a second global snackbar framework — just a message source the
+    // existing Now Playing snackbar consumes.
+    private val _userMessages = MutableSharedFlow<PlaybackUserMessage>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val userMessages: SharedFlow<PlaybackUserMessage> = _userMessages.asSharedFlow()
+
+    // Bad-media recovery episode state (Phase 8). null == no episode in progress. Bounded: the
+    // planner guarantees at most `playbackQueue.size` attempted occurrences per episode, so there
+    // is no infinite skip/retry loop. Reset on successful playback, queue replacement, explicit
+    // user selection/navigation, or a queue-generation change. Main-thread confined.
+    private var badMediaRecoveryEpisode: BadMediaRecoveryState? = null
+    private var badMediaRecoverySkipNotified = false
+    private var badMediaRecoveryExhaustionNotified = false
+
+    // Monotonic queue identity. Bumped whenever the queue is replaced or structurally mutated, so a
+    // recovery episode opened against an older generation is invalidated (occurrence indices are no
+    // longer meaningful). Occurrence identity is (queueGeneration, playbackIndex).
+    private var queueGeneration: Long = 0L
+
     private val _sleepTimerState = MutableStateFlow(SleepTimerState())
     val sleepTimerState: StateFlow<SleepTimerState> = _sleepTimerState.asStateFlow()
 
@@ -529,6 +557,11 @@ class PlayerController @Inject constructor(
             if (DEBUG_STATS) {
                 Log.d(TAG, "[playbackStateChanged] state=$playbackState songId=${_nowPlayingState.value.song?.id} repeatMode=$repeatMode")
             }
+            if (playbackState == Player.STATE_READY) {
+                // A valid item successfully loaded: the current bad-media recovery episode (if any)
+                // has succeeded, so end it. A later independent failure begins a fresh episode.
+                resetBadMediaRecoveryEpisode()
+            }
             if (playbackState == Player.STATE_ENDED &&
                 _sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG
             ) {
@@ -579,69 +612,135 @@ class PlayerController @Inject constructor(
     }
 
     /**
-     * Bypasses the current item after a Media3 [PlaybackException] (WB-01).
+     * Recovers from a Media3 [PlaybackException] on the current occurrence (Phase 8, extends WB-01).
      *
-     * Mirrors [handleCurrentSongDeleted]: advance to the next valid queue item if one exists,
-     * otherwise stop cleanly and clear the broken playing state. The difference is that the
-     * pipeline is in an error state here, so [MediaController.prepare] is issued first to clear
-     * the latched error before seeking — otherwise the next item would not start.
+     * Contract:
+     *  - **Bounded & occurrence-safe:** delegates the decision to the pure [BadMediaRecoveryPlanner],
+     *    which tracks attempted occurrences for this episode and inspects at most `queueSize`
+     *    occurrences. There is no infinite skip/retry loop under repeat-all, repeat-one, shuffle,
+     *    duplicate songs, or an entirely broken queue.
+     *  - **Queue preserved:** a bad occurrence is SKIPPED, never removed — the queue (and playlists)
+     *    stay intact so a temporarily unreadable file can play later.
+     *  - **Intent honoured:** playback resumes only if the user was actually playing when the first
+     *    failure of the episode occurred (captured via `playWhenReady`), never auto-starting a
+     *    paused user.
+     *  - **One concise message per episode:** a single "skipping" message on the first bypass and a
+     *    single "nothing playable" message on exhaustion — never one per broken file.
+     *  - **No fabricated stats:** the shared skip path credits nothing for a track that accumulated
+     *    no listening time (see [StatsTracker]).
      *
-     * No stats are touched beyond what the shared skip path ([seekToPlaybackIndex]) already does
-     * for a manual skip, and no identity or session corruption occurs.
-     *
-     * User-facing messaging ("Couldn't play this track…") is intentionally NOT shown: the playback
-     * layer has no existing transient-message channel, and inventing one is out of scope for this
-     * fix. Surfacing that message remains a documented follow-up.
+     * The pipeline is latched in STATE_IDLE with the error, so [MediaController.prepare] is issued
+     * before seeking to clear it — otherwise the next item would not start.
      */
     private fun recoverFromCurrentPlaybackError() {
         val controller = mediaController
         val failingIndex = currentPlaybackIndex()
 
-        // Can't reason about the queue position — stop cleanly rather than risk a bad seek.
+        // Can't reason about the queue position — halt cleanly rather than risk a bad seek. The
+        // queue is preserved (not cleared) so the user keeps their context.
         if (controller == null || failingIndex == null || failingIndex !in playbackQueue.indices) {
-            stopAndClearAfterPlaybackError(controller)
+            Log.w(TAG, "[badMedia] UNCLASSIFIED_PLAYBACK_ERROR: unresolved failing index; halting (queueSize=${playbackQueue.size})")
+            haltPlaybackAfterError(controller)
+            notifyBadMediaExhaustedOnce()
             return
         }
 
-        // Use nextIndex (not automaticNextIndex) so RepeatMode.ONE advances past the failing
-        // song instead of looping back onto it.
-        val nextIdx = QueueNavigator.nextIndex(
-            queueSize    = playbackQueue.size,
-            currentIndex = failingIndex,
-            repeatMode   = repeatMode,
+        // Original play intent: playWhenReady survives the transition to STATE_IDLE on error, so it
+        // is the truthful signal for "was the user playing" even though isPlaying is already false.
+        val wasPlaying = controller.playWhenReady || controller.isPlaying
+
+        val step = BadMediaRecoveryPlanner.onPlaybackError(
+            previous = badMediaRecoveryEpisode,
+            queueGeneration = queueGeneration,
+            queueSize = playbackQueue.size,
+            failingIndex = failingIndex,
+            repeatMode = repeatMode,
+            wasPlaying = wasPlaying,
         )
-
-        if (nextIdx == null || nextIdx == failingIndex) {
-            stopAndClearAfterPlaybackError(controller)
-            return
+        badMediaRecoveryEpisode = step.state
+        if (step.isNewEpisode) {
+            // A fresh episode: reset per-episode notification dedup so this episode may notify once.
+            badMediaRecoverySkipNotified = false
+            badMediaRecoveryExhaustionNotified = false
         }
 
-        // Clear the latched error so the pipeline can load and play the next item, then advance
-        // and drop the failing entry — same ordering as handleCurrentSongDeleted.
-        controller.prepare()
-        seekToPlaybackIndex(controller, nextIdx)
-        controller.play()
-        removeFromQueue(failingIndex)
+        when (step) {
+            is BadMediaRecoveryStep.Advance -> {
+                Log.w(
+                    TAG,
+                    "[badMedia] RECOVERED_BAD_MEDIA: queueSize=${playbackQueue.size} " +
+                        "failedIndex=$failingIndex targetIndex=${step.targetIndex} " +
+                        "attempted=${step.state.attemptedOccurrences.size} resume=${step.state.wasPlaying}",
+                )
+                // Clear the latched error, then advance WITHOUT forcing playback — honour the
+                // captured intent. The failing occurrence is left in the queue (skipped, not removed).
+                controller.prepare()
+                seekToPlaybackIndex(controller, step.targetIndex, forcePlay = step.state.wasPlaying)
+                notifyBadMediaSkippedOnce()
+            }
+            is BadMediaRecoveryStep.Exhausted -> {
+                Log.w(
+                    TAG,
+                    "[badMedia] BAD_MEDIA_EXHAUSTED: queueSize=${playbackQueue.size} " +
+                        "failedIndex=$failingIndex attempted=${step.state.attemptedOccurrences.size}",
+                )
+                haltPlaybackAfterError(controller)
+                notifyBadMediaExhaustedOnce()
+            }
+        }
     }
 
-    private fun stopAndClearAfterPlaybackError(controller: MediaController?) {
+    /**
+     * Stops playback after an unrecoverable error while PRESERVING the queue (Phase 8). Unlike the
+     * pre-Phase-8 behaviour, the library/playback queues and the current song are kept so the user
+     * retains their context and can retry later; only the transient playing/position state is
+     * cleared. The player's media items are left loaded (not cleared) so a manual retry works.
+     */
+    private fun haltPlaybackAfterError(controller: MediaController?) {
         controller?.pause()
-        controller?.clearMediaItems()
-        libraryQueue        = emptyList()
-        playbackOrder       = emptyList()
-        playbackQueue       = emptyList()
         lastKnownPositionMs = -1L
         _nowPlayingState.update {
             it.copy(
-                song         = null,
-                isPlaying    = false,
-                queue        = emptyList(),
-                currentIndex = 0,
-                positionMs   = 0L,
-                durationMs   = 0L,
+                isPlaying  = false,
+                positionMs = 0L,
             )
         }
         saveSessionAsync()
+    }
+
+    /** Emits the single "skipping past a bad track" message for the current recovery episode. */
+    private fun notifyBadMediaSkippedOnce() {
+        if (badMediaRecoverySkipNotified) return
+        badMediaRecoverySkipNotified = true
+        _userMessages.tryEmit(PlaybackUserMessage.BAD_TRACK_SKIPPED)
+    }
+
+    /** Emits the single "nothing else playable" message for the current recovery episode. */
+    private fun notifyBadMediaExhaustedOnce() {
+        if (badMediaRecoveryExhaustionNotified) return
+        badMediaRecoveryExhaustionNotified = true
+        _userMessages.tryEmit(PlaybackUserMessage.QUEUE_EXHAUSTED)
+    }
+
+    /**
+     * Ends the current bad-media recovery episode (Phase 8). Called when a valid item starts playing
+     * or when explicit user intent (new queue, jump, manual navigation) supersedes recovery, so a
+     * later independent failure begins a fresh, unbiased episode.
+     */
+    private fun resetBadMediaRecoveryEpisode() {
+        badMediaRecoveryEpisode = null
+        badMediaRecoverySkipNotified = false
+        badMediaRecoveryExhaustionNotified = false
+    }
+
+    /**
+     * Marks the queue identity as changed (Phase 8): bumps [queueGeneration] and ends any recovery
+     * episode. Called from every queue replacement / structural mutation so a stale episode's
+     * occurrence indices can never be reused.
+     */
+    private fun bumpQueueGeneration() {
+        queueGeneration++
+        resetBadMediaRecoveryEpisode()
     }
 
     init {
@@ -927,6 +1026,8 @@ class PlayerController @Inject constructor(
         startSong: Song,
     ) {
         isExternalPlayback = false
+        // Fresh queue supersedes any in-progress bad-media recovery episode.
+        bumpQueueGeneration()
         // Shuffle-truthfulness invariant: `plan.queue` is derived from the current visible
         // `playbackQueue` (see playSearchResultPreservingQueue), so when shuffle is ON it already
         // carries the active shuffled order. We adopt it verbatim as the new libraryQueue with an
@@ -992,6 +1093,8 @@ class PlayerController @Inject constructor(
         val song = uri.toExternalSong(displayName)
 
         isExternalPlayback = true
+        // Fresh queue supersedes any in-progress bad-media recovery episode.
+        bumpQueueGeneration()
         libraryQueue = listOf(song)
         playbackOrder = listOf(0)
         playbackQueue = libraryQueue
@@ -1045,6 +1148,8 @@ class PlayerController @Inject constructor(
         preservePlaybackOrder: Boolean,
     ) {
         isExternalPlayback = false
+        // Fresh queue supersedes any in-progress bad-media recovery episode.
+        bumpQueueGeneration()
         val normalizedQueue = queue.ifEmpty { listOf(startSong) }
         val originalStartIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
             .takeIf { it >= 0 } ?: 0
@@ -1129,6 +1234,7 @@ class PlayerController @Inject constructor(
 
         // Append the new song to the library queue and insert its index into playbackOrder
         // immediately after the current playback position.
+        bumpQueueGeneration()
         val newLibraryIndex = libraryQueue.size
         libraryQueue = libraryQueue + song
         val insertPlaybackIndex = currentPlaybackIndex + 1
@@ -1217,6 +1323,7 @@ class PlayerController @Inject constructor(
             appendAllPreservingQueue(songs)
             return
         }
+        bumpQueueGeneration()
         libraryQueue = result.libraryQueue
         playbackOrder = result.playbackOrder
         playbackQueue = result.playbackQueue
@@ -1248,6 +1355,7 @@ class PlayerController @Inject constructor(
      */
     private fun appendAllPreservingQueue(songs: List<Song>) {
         if (songs.isEmpty()) return
+        bumpQueueGeneration()
         val result = QueueMutation.appendAll(
             libraryQueue = libraryQueue,
             playbackOrder = playbackOrder,
@@ -1279,6 +1387,8 @@ class PlayerController @Inject constructor(
 
     fun jumpToQueueItem(playbackIndex: Int) {
         if (playbackIndex !in playbackQueue.indices) return
+        // Explicit user selection supersedes automatic bad-media recovery.
+        resetBadMediaRecoveryEpisode()
         val controller = mediaController
         if (controller == null) {
             // Defer through the same bounded, stale-safe machinery as jumpToSongById: bind to the
@@ -1367,6 +1477,7 @@ class PlayerController @Inject constructor(
         val removedLibraryIndex = playbackOrder.getOrNull(playbackIndex) ?: return
         if (removedLibraryIndex !in libraryQueue.indices) return
 
+        bumpQueueGeneration()
         // Remove from library queue and decrement any playback order entries above the gap.
         libraryQueue = libraryQueue.toMutableList().also { it.removeAt(removedLibraryIndex) }
         playbackOrder = playbackOrder
@@ -1470,6 +1581,7 @@ class PlayerController @Inject constructor(
         if (fromPlaybackIndex == toPlaybackIndex) return
         if (fromPlaybackIndex !in playbackOrder.indices || toPlaybackIndex !in playbackOrder.indices) return
 
+        bumpQueueGeneration()
         val newOrder = playbackOrder.toMutableList()
         val item = newOrder.removeAt(fromPlaybackIndex)
         newOrder.add(toPlaybackIndex, item)
@@ -1498,6 +1610,7 @@ class PlayerController @Inject constructor(
         if (playbackIndex == immediateNextIndex) return
         if (playbackIndex !in playbackOrder.indices) return
 
+        bumpQueueGeneration()
         // Lift the entry out of playbackOrder and re-insert right after current.
         val newOrder = playbackOrder.toMutableList()
         val libraryIndex = newOrder.removeAt(playbackIndex)
@@ -1584,6 +1697,8 @@ class PlayerController @Inject constructor(
     }
 
     fun skipToNext() {
+        // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
+        resetBadMediaRecoveryEpisode()
         val controller = mediaController
         if (controller == null) {
             // Defer a single latest-direction navigation intent (not an accumulated skip count).
@@ -1597,6 +1712,8 @@ class PlayerController @Inject constructor(
     }
 
     fun skipToPrevious() {
+        // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
+        resetBadMediaRecoveryEpisode()
         val controller = mediaController
         if (controller == null) {
             pendingNavigation = NavigationIntent.PREVIOUS
@@ -1656,6 +1773,8 @@ class PlayerController @Inject constructor(
             shuffleEnabled = newShuffleEnabled,
         ) ?: return
 
+        // Reorder changes occurrence identities; invalidate any in-progress recovery episode.
+        bumpQueueGeneration()
         shuffleEnabled = newShuffleEnabled
         playbackOrder = toggleModel.playbackOrder
         playbackQueue = toggleModel.playbackQueue
@@ -1766,6 +1885,8 @@ class PlayerController @Inject constructor(
             val previousLastKnownPositionMs = lastKnownPositionMs
             val previousState = _nowPlayingState.value
 
+            // A restored session is a fresh queue identity; end any stale recovery episode.
+            bumpQueueGeneration()
             libraryQueue = mappedQueue
             shuffleEnabled = snapshot.shuffleEnabled
             repeatMode = snapshot.repeatMode
@@ -2358,15 +2479,29 @@ class PlayerController @Inject constructor(
     }
 
     // Seek to a playback index (position in playbackQueue / ExoPlayer playlist).
-    private fun seekToPlaybackIndex(controller: MediaController, playbackIndex: Int) {
+    //
+    // [forcePlay] overrides the derived play intent (default null = keep whatever the controller is
+    // doing, i.e. the pre-Phase-8 behaviour). Bad-media recovery passes the episode's captured
+    // intent explicitly because at error time controller.isPlaying is already false in STATE_IDLE:
+    // true resumes the recovered track, false leaves it paused (never auto-starting a paused user).
+    private fun seekToPlaybackIndex(
+        controller: MediaController,
+        playbackIndex: Int,
+        forcePlay: Boolean? = null,
+    ) {
         lastKnownPositionMs = -1L
-        val shouldPlay = controller.isPlaying
+        val shouldPlay = forcePlay ?: controller.isPlaying
         if (playerQueueNeedsSync) {
             syncPlayerQueueAt(controller, playbackIndex, positionMs = 0L, playWhenReady = shouldPlay)
         } else {
             controller.seekTo(playbackIndex, 0L)
         }
-        if (shouldPlay) controller.play()
+        if (shouldPlay) {
+            controller.play()
+        } else if (forcePlay == false) {
+            // Explicit paused recovery intent: ensure the player does not auto-resume the new item.
+            controller.pause()
+        }
         syncNowPlayingState()
         saveSessionAsync()
     }
@@ -2449,6 +2584,7 @@ class PlayerController @Inject constructor(
         if (fromIndex <= currentPlaybackIndex || toIndex <= currentPlaybackIndex) return
         if (fromIndex !in playbackOrder.indices || toIndex !in playbackOrder.indices) return
 
+        bumpQueueGeneration()
         val newOrder = playbackOrder.toMutableList()
         val tmp = newOrder[fromIndex]
         newOrder[fromIndex] = newOrder[toIndex]
