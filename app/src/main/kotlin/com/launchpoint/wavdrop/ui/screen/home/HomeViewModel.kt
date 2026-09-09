@@ -14,7 +14,7 @@ import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.repository.localDayRefreshFlow
-import com.launchpoint.wavdrop.data.search.LibrarySearch
+import com.launchpoint.wavdrop.data.search.LibrarySearchIndex
 import com.launchpoint.wavdrop.data.search.SongSort
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
@@ -34,7 +34,7 @@ import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.launchpoint.wavdrop.ui.components.GroupedSearchResults
-import com.launchpoint.wavdrop.ui.components.buildGroupedSearchResults
+import com.launchpoint.wavdrop.ui.components.groupedSearchResults
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -118,19 +118,24 @@ class HomeViewModel @Inject constructor(
             initialValue = emptyList(),
         )
 
-    // WC-01: filtering runs off the Main thread with a short debounce, mirroring the
-    // songSearchResults pipeline below. Debouncing only the query (not allSongs) keeps
-    // Loading/Empty and library-change updates reactive — a new allSongs emission still
-    // recombines immediately — while keystrokes coalesce and cancel obsolete filter work.
-    // Search semantics (LibrarySearch.filterSongs, ordering, empty-state) are unchanged.
+    // WC-01 / Phase 9: filtering runs off the Main thread with a short debounce. The normalized
+    // search index is rebuilt only when the library changes (allSongs emits) — mapLatest cancels a
+    // stale rebuild during a rescan — so a keystroke only runs cheap substring matching, not a
+    // full re-normalization of the library. A null index preserves the Loading state; an empty
+    // library preserves Empty. Search semantics (matched fields, ordering, empty-state) are unchanged.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val librarySongIndex: Flow<LibrarySearchIndex?> = allSongs
+        .mapLatest { songs -> songs?.let { LibrarySearchIndex.from(it) } }
+        .flowOn(Dispatchers.Default)
+
     val uiState: StateFlow<HomeUiState> = combine(
-        allSongs,
+        librarySongIndex,
         _searchQuery.debounce(SEARCH_DEBOUNCE_MS),
-    ) { songs, query ->
+    ) { index, query ->
         when {
-            songs == null -> HomeUiState.Loading
-            songs.isEmpty() -> HomeUiState.Empty
-            else            -> HomeUiState.Songs(LibrarySearch.filterSongs(songs, query))
+            index == null -> HomeUiState.Loading
+            index.songs.isEmpty() -> HomeUiState.Empty
+            else            -> HomeUiState.Songs(index.filterSongs(query))
         }
     }
         .flowOn(Dispatchers.Default)
@@ -224,10 +229,18 @@ class HomeViewModel @Inject constructor(
         initialValue = HomeUiState.Loading,
     )
 
+    // Phase 9: the grouped search index is rebuilt only when the library changes (mapLatest cancels
+    // a stale rebuild during a rescan); each keystroke runs only cheap substring matching, and a
+    // newer query supersedes an in-flight search. Debounce (200 ms) and semantics are unchanged.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val songSearchIndex: Flow<LibrarySearchIndex> = librarySongs
+        .mapLatest { songs -> LibrarySearchIndex.from(songs) }
+        .flowOn(Dispatchers.Default)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     val songSearchResults: StateFlow<GroupedSearchResults> =
-        combine(_searchQuery.debounce(200), librarySongs) { query, songs ->
-            buildGroupedSearchResults(songs = songs, query = query)
-        }
+        combine(songSearchIndex, _searchQuery.debounce(200)) { index, query -> index to query }
+            .mapLatest { (index, query) -> groupedSearchResults(index = index, query = query) }
             .flowOn(Dispatchers.Default)
             .stateIn(
                 scope        = viewModelScope,

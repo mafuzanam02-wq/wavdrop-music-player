@@ -42,8 +42,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
-import com.launchpoint.wavdrop.data.grouping.AlbumGrouper
-import com.launchpoint.wavdrop.data.grouping.ArtistGrouper
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.model.ArtistSummary
@@ -51,7 +49,7 @@ import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
-import com.launchpoint.wavdrop.data.search.LibrarySearch
+import com.launchpoint.wavdrop.data.search.LibrarySearchIndex
 import com.launchpoint.wavdrop.ui.components.motion.WavdropFadeThrough
 import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
 import com.launchpoint.wavdrop.ui.components.motion.wavdropItemPlacement
@@ -728,11 +726,27 @@ internal fun buildGroupedSearchResults(
     query: String,
     playlists: List<PlaylistSummary> = emptyList(),
     smartCollections: List<SmartCollection> = emptyList(),
+): GroupedSearchResults =
+    groupedSearchResults(
+        index = LibrarySearchIndex.from(songs = songs, playlists = playlists, smartCollections = smartCollections),
+        query = query,
+    )
+
+/**
+ * Assembles grouped search results from a prebuilt [LibrarySearchIndex] (Phase 9). Callers that
+ * search a stable library across many queries (search view models) build the index once and reuse
+ * it here so per-keystroke work is only cheap substring matching. Behaviour is identical to the
+ * previous inline implementation — same matched fields, ordering, result caps, and blank-query
+ * shortcut (all songs, everything else empty).
+ */
+internal fun groupedSearchResults(
+    index: LibrarySearchIndex,
+    query: String,
 ): GroupedSearchResults {
     val trimmedQuery = query.trim()
     if (trimmedQuery.isEmpty()) {
         return GroupedSearchResults(
-            songs = songs,
+            songs = index.songs,
             artists = emptyList(),
             albums = emptyList(),
             playlists = emptyList(),
@@ -740,13 +754,12 @@ internal fun buildGroupedSearchResults(
             folders = emptyList(),
         )
     }
-    val allFolders               = FolderGrouper.groupSongsByFolder(songs)
-    val allMatchedSongs          = LibrarySearch.filterSongs(songs, trimmedQuery)
-    val allMatchedArtists        = LibrarySearch.filterArtists(ArtistGrouper.group(songs), songs, trimmedQuery)
-    val allMatchedAlbums         = LibrarySearch.filterAlbums(AlbumGrouper.group(songs), trimmedQuery)
-    val allMatchedPlaylists      = LibrarySearch.filterPlaylists(playlists, trimmedQuery)
-    val allMatchedSmartCollections = LibrarySearch.filterSmartCollections(smartCollections, trimmedQuery)
-    val allMatchedFolders        = LibrarySearch.filterFolders(allFolders, trimmedQuery)
+    val allMatchedSongs            = index.filterSongs(trimmedQuery)
+    val allMatchedArtists          = index.filterArtists(trimmedQuery)
+    val allMatchedAlbums           = index.filterAlbums(trimmedQuery)
+    val allMatchedPlaylists        = index.filterPlaylists(trimmedQuery)
+    val allMatchedSmartCollections = index.filterSmartCollections(trimmedQuery)
+    val allMatchedFolders          = index.filterFolders(trimmedQuery)
     return GroupedSearchResults(
         songs                  = allMatchedSongs.take(EXPANDED_SEARCH_RESULT_LIMIT),
         artists                = allMatchedArtists.take(EXPANDED_SEARCH_RESULT_LIMIT),

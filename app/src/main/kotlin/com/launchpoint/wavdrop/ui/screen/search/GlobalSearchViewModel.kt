@@ -9,14 +9,16 @@ import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
+import com.launchpoint.wavdrop.data.search.LibrarySearchIndex
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.ui.components.GroupedSearchResults
-import com.launchpoint.wavdrop.ui.components.buildGroupedSearchResults
+import com.launchpoint.wavdrop.ui.components.groupedSearchResults
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +32,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class GlobalSearchViewModel @Inject constructor(
     private val songRepository: SongRepository,
@@ -67,15 +70,26 @@ class GlobalSearchViewModel @Inject constructor(
             initialValue = emptyList(),
         )
 
-    val filteredResults: StateFlow<GroupedSearchResults> =
+    // Phase 9: the normalized search projection is rebuilt only when the library, playlists, or
+    // smart collections actually change — NOT on every keystroke. mapLatest cancels a stale rebuild
+    // if the library changes again mid-build (e.g. during a rescan).
+    private val searchIndex =
         combine(
-            _searchQuery.debounce(200),
             songRepository.songs,
             smartCollectionRepository.observeSmartCollections(),
             playlistRepository.observePlaylists(),
-        ) { query, songs, collections, lists ->
-            buildGroupedSearchResults(songs = songs, query = query, playlists = lists, smartCollections = collections)
-        }
+        ) { songs, collections, lists -> Triple(songs, lists, collections) }
+            .mapLatest { (songs, lists, collections) ->
+                LibrarySearchIndex.from(songs = songs, playlists = lists, smartCollections = collections)
+            }
+            .flowOn(Dispatchers.Default)
+
+    // Per-keystroke work is now only cheap substring matching against the precomputed index.
+    // mapLatest supersedes an in-flight search when a newer query (or index) arrives, so stale
+    // filter jobs do not stack. Debounce (200 ms) and result semantics/ordering are unchanged.
+    val filteredResults: StateFlow<GroupedSearchResults> =
+        combine(searchIndex, _searchQuery.debounce(200)) { index, query -> index to query }
+            .mapLatest { (index, query) -> groupedSearchResults(index = index, query = query) }
             .flowOn(Dispatchers.Default)
             .stateIn(
                 scope        = viewModelScope,
