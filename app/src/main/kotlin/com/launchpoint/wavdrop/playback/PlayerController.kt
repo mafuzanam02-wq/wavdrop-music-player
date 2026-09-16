@@ -110,6 +110,112 @@ internal fun shouldSkipStartupSessionRestore(
     hasMediaQueue: Boolean,
 ): Boolean = isExternalPlayback || hasLogicalQueue || hasMediaQueue
 
+internal fun resolveCurrentPlaybackIndex(
+    playbackQueue: List<Song>,
+    controllerIndex: Int?,
+    controllerSongId: Long?,
+    stateIndex: Int?,
+    stateSongId: Long?,
+    playerQueueNeedsSync: Boolean,
+): Int? {
+    if (playbackQueue.isEmpty()) return null
+
+    val controllerIndexMatchesSong = controllerIndex != null &&
+        controllerIndex in playbackQueue.indices &&
+        controllerSongId != null &&
+        playbackQueue[controllerIndex].id != controllerSongId
+
+    if (!playerQueueNeedsSync &&
+        controllerIndex != null &&
+        controllerIndex in playbackQueue.indices &&
+        !controllerIndexMatchesSong
+    ) {
+        return controllerIndex
+    }
+
+    if (stateIndex != null && stateIndex in playbackQueue.indices) {
+        if (stateSongId == null || playbackQueue[stateIndex].id == stateSongId) {
+            return stateIndex
+        }
+    }
+
+    if (controllerIndexMatchesSong) return null
+
+    return uniquePlaybackIndexForSongId(playbackQueue, controllerSongId)
+        ?: uniquePlaybackIndexForSongId(playbackQueue, stateSongId)
+}
+
+private fun uniquePlaybackIndexForSongId(playbackQueue: List<Song>, songId: Long?): Int? {
+    if (songId == null) return null
+    var match: Int? = null
+    playbackQueue.forEachIndexed { index, song ->
+        if (song.id == songId) {
+            if (match != null) return null
+            match = index
+        }
+    }
+    return match
+}
+
+internal enum class BatchQueuePlayerSyncAction {
+    NoOp,
+    ReplaceFutureSuffix,
+    FullQueueSync,
+    MarkDirty,
+}
+
+internal data class BatchQueuePlayerSyncPlan(
+    val action: BatchQueuePlayerSyncAction,
+    val futureStartIndex: Int,
+    val suffix: List<Song> = emptyList(),
+)
+
+internal fun planBatchQueuePlayerSync(
+    oldPlaybackQueue: List<Song>,
+    newPlaybackQueue: List<Song>,
+    currentPlaybackIndex: Int,
+    controllerAvailable: Boolean,
+    playerQueueNeedsSync: Boolean,
+    controllerCurrentIndex: Int?,
+    controllerSongId: Long?,
+    controllerMediaItemCount: Int?,
+): BatchQueuePlayerSyncPlan {
+    val futureStartIndex = currentPlaybackIndex + 1
+    if (!controllerAvailable) {
+        return BatchQueuePlayerSyncPlan(
+            action = BatchQueuePlayerSyncAction.MarkDirty,
+            futureStartIndex = futureStartIndex,
+        )
+    }
+    if (playerQueueNeedsSync ||
+        currentPlaybackIndex !in oldPlaybackQueue.indices ||
+        currentPlaybackIndex !in newPlaybackQueue.indices ||
+        controllerCurrentIndex != currentPlaybackIndex ||
+        controllerMediaItemCount != oldPlaybackQueue.size ||
+        (controllerSongId != null && newPlaybackQueue[currentPlaybackIndex].id != controllerSongId) ||
+        oldPlaybackQueue.take(futureStartIndex) != newPlaybackQueue.take(futureStartIndex)
+    ) {
+        return BatchQueuePlayerSyncPlan(
+            action = BatchQueuePlayerSyncAction.FullQueueSync,
+            futureStartIndex = futureStartIndex,
+        )
+    }
+
+    val suffix = newPlaybackQueue.drop(futureStartIndex)
+    return if (oldPlaybackQueue.drop(futureStartIndex) == suffix) {
+        BatchQueuePlayerSyncPlan(
+            action = BatchQueuePlayerSyncAction.NoOp,
+            futureStartIndex = futureStartIndex,
+        )
+    } else {
+        BatchQueuePlayerSyncPlan(
+            action = BatchQueuePlayerSyncAction.ReplaceFutureSuffix,
+            futureStartIndex = futureStartIndex,
+            suffix = suffix,
+        )
+    }
+}
+
 enum class PlayerHydrationResult {
     AlreadyHydrated,
     Hydrated,
@@ -1306,6 +1412,11 @@ class PlayerController @Inject constructor(
 
     private fun insertAllAfterCurrent(songs: List<Song>) {
         if (songs.isEmpty()) return
+        val oldPlaybackQueue = playbackQueue
+        val controller = mediaController
+        val controllerCurrentIndex = controller?.currentMediaItemIndex
+        val controllerSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
+        val wasPlayerQueueNeedsSync = playerQueueNeedsSync
         val currentPlaybackIndex = currentPlaybackIndex()
         val result = currentPlaybackIndex?.let {
             QueueMutation.insertAllAfterCurrent(
@@ -1328,16 +1439,42 @@ class PlayerController @Inject constructor(
         playbackOrder = result.playbackOrder
         playbackQueue = result.playbackQueue
 
-        val controller = mediaController
-        if (controller != null) {
-            syncPlayerQueueAt(
-                controller = controller,
-                playbackIndex = currentPlaybackIndex,
-                positionMs = controller.currentPosition.coerceAtLeast(0L),
-                playWhenReady = controller.isPlaying,
-            )
-        } else {
-            playerQueueNeedsSync = true
+        val syncPlan = planBatchQueuePlayerSync(
+            oldPlaybackQueue = oldPlaybackQueue,
+            newPlaybackQueue = playbackQueue,
+            currentPlaybackIndex = currentPlaybackIndex,
+            controllerAvailable = controller != null,
+            playerQueueNeedsSync = wasPlayerQueueNeedsSync,
+            controllerCurrentIndex = controllerCurrentIndex,
+            controllerSongId = controllerSongId,
+            controllerMediaItemCount = controller?.mediaItemCount,
+        )
+        when (syncPlan.action) {
+            BatchQueuePlayerSyncAction.NoOp -> Unit
+            BatchQueuePlayerSyncAction.ReplaceFutureSuffix -> {
+                controller?.replaceMeasuredFutureMediaItems(
+                    operation = "play_all_next_future_suffix",
+                    fromIndex = syncPlan.futureStartIndex,
+                    songs = syncPlan.suffix,
+                ) ?: run {
+                    playerQueueNeedsSync = true
+                }
+            }
+            BatchQueuePlayerSyncAction.FullQueueSync -> {
+                if (controller != null) {
+                    syncPlayerQueueAt(
+                        controller = controller,
+                        playbackIndex = currentPlaybackIndex,
+                        positionMs = controller.currentPosition.coerceAtLeast(0L),
+                        playWhenReady = controller.isPlaying,
+                    )
+                } else {
+                    playerQueueNeedsSync = true
+                }
+            }
+            BatchQueuePlayerSyncAction.MarkDirty -> {
+                playerQueueNeedsSync = true
+            }
         }
 
         _nowPlayingState.update {
@@ -2724,21 +2861,31 @@ class PlayerController @Inject constructor(
     }
 
     private fun currentPlaybackIndex(): Int? {
-        mediaController?.currentMediaItem?.mediaId?.toLongOrNull()
-            ?.let { id -> playbackQueue.indexOfFirst { it.id == id } }
-            ?.takeIf { it >= 0 }
-            ?.let { return it }
-
-        mediaController?.currentMediaItemIndex
-            ?.takeIf { it in playbackQueue.indices }
-            ?.let { return it }
-
-        _nowPlayingState.value.currentIndex
-            .takeIf { it in playbackQueue.indices }
-            ?.let { return it }
-
-        val currentSongId = _nowPlayingState.value.song?.id ?: return null
-        return playbackQueue.indexOfFirst { it.id == currentSongId }.takeIf { it >= 0 }
+        val controller = mediaController
+        val controllerIndex = controller?.currentMediaItemIndex
+        val controllerSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
+        if (
+            BuildConfig.DEBUG &&
+            !playerQueueNeedsSync &&
+            controllerIndex != null &&
+            controllerIndex in playbackQueue.indices &&
+            controllerSongId != null &&
+            playbackQueue[controllerIndex].id != controllerSongId
+        ) {
+            Log.d(
+                SEARCH_TAG,
+                "currentPlaybackIndex: controller index/mediaId mismatch at index $controllerIndex",
+            )
+        }
+        val state = _nowPlayingState.value
+        return resolveCurrentPlaybackIndex(
+            playbackQueue = playbackQueue,
+            controllerIndex = controllerIndex,
+            controllerSongId = controllerSongId,
+            stateIndex = state.currentIndex,
+            stateSongId = state.song?.id,
+            playerQueueNeedsSync = playerQueueNeedsSync,
+        )
     }
 
     private fun MediaController.setMeasuredMediaItems(
@@ -2822,6 +2969,36 @@ class PlayerController @Inject constructor(
             inputQueueSize = songs.size,
             mediaItemCount = materialization.mediaItems.size,
             currentIndex = index,
+            materializationElapsedMs = materializationElapsedMs,
+            mutationElapsedMs = mutationElapsedMs,
+            totalElapsedMs = SystemClock.elapsedRealtime() - totalStartedAtMs,
+            cacheHits = materialization.cacheHits,
+            cacheMisses = materialization.cacheMisses,
+            cacheSize = mediaItemCache.size,
+        )
+    }
+
+    private fun MediaController.replaceMeasuredFutureMediaItems(
+        operation: String,
+        fromIndex: Int,
+        songs: List<Song>,
+    ) {
+        if (!BuildConfig.DEBUG) {
+            replaceMediaItems(fromIndex, mediaItemCount, materializeMediaItems(songs).mediaItems)
+            return
+        }
+        val totalStartedAtMs = SystemClock.elapsedRealtime()
+        val materializationStartedAtMs = SystemClock.elapsedRealtime()
+        val materialization = materializeMediaItems(songs)
+        val materializationElapsedMs = SystemClock.elapsedRealtime() - materializationStartedAtMs
+        val mutationStartedAtMs = SystemClock.elapsedRealtime()
+        replaceMediaItems(fromIndex, mediaItemCount, materialization.mediaItems)
+        val mutationElapsedMs = SystemClock.elapsedRealtime() - mutationStartedAtMs
+        logQueuePerf(
+            operation = operation,
+            inputQueueSize = songs.size,
+            mediaItemCount = materialization.mediaItems.size,
+            currentIndex = fromIndex,
             materializationElapsedMs = materializationElapsedMs,
             mutationElapsedMs = mutationElapsedMs,
             totalElapsedMs = SystemClock.elapsedRealtime() - totalStartedAtMs,
