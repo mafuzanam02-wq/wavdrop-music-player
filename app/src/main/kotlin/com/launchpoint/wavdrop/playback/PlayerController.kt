@@ -1328,12 +1328,16 @@ class PlayerController @Inject constructor(
         playbackOrder = result.playbackOrder
         playbackQueue = result.playbackQueue
 
-        if (!playerQueueNeedsSync) {
-            mediaController?.addMeasuredMediaItems(
-                operation = "play_all_next",
-                index = currentPlaybackIndex + 1,
-                songs = songs,
+        val controller = mediaController
+        if (controller != null) {
+            syncPlayerQueueAt(
+                controller = controller,
+                playbackIndex = currentPlaybackIndex,
+                positionMs = controller.currentPosition.coerceAtLeast(0L),
+                playWhenReady = controller.isPlaying,
             )
+        } else {
+            playerQueueNeedsSync = true
         }
 
         _nowPlayingState.update {

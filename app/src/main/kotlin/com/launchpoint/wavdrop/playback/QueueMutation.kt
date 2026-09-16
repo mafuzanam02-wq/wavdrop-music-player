@@ -146,13 +146,39 @@ internal object QueueMutation {
                 playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) },
             )
         }
-        val firstNewLibraryIndex = libraryQueue.size
-        val newLibraryQueue = libraryQueue + songs
-        val newLibraryIndexes = (firstNewLibraryIndex until newLibraryQueue.size).toList()
-        val insertPlaybackIndex = (currentPlaybackIndex + 1).coerceAtMost(playbackOrder.size)
-        val newPlaybackOrder = playbackOrder.toMutableList().also {
-            it.addAll(insertPlaybackIndex, newLibraryIndexes)
+
+        val currentLibraryIndex = playbackOrder[currentPlaybackIndex]
+        val currentSongId = libraryQueue.getOrNull(currentLibraryIndex)?.id
+        val historyAndCurrent = playbackOrder.take(currentPlaybackIndex + 1)
+        val futurePlaybackOrder = playbackOrder.drop(currentPlaybackIndex + 1)
+        val reusableFutureBySongId = LinkedHashMap<Long, ArrayDeque<Int>>()
+        futurePlaybackOrder.forEach { libraryIndex ->
+            val songId = libraryQueue.getOrNull(libraryIndex)?.id ?: return@forEach
+            reusableFutureBySongId.getOrPut(songId) { ArrayDeque() }.addLast(libraryIndex)
         }
+        val requestedBlock = ArrayList<Int>(songs.size)
+        val reusedFutureIndexes = HashSet<Int>()
+        val newLibraryQueue = libraryQueue.toMutableList()
+        var currentOccurrenceConsumed = false
+
+        songs.forEach { song ->
+            if (!currentOccurrenceConsumed && song.id == currentSongId) {
+                currentOccurrenceConsumed = true
+                return@forEach
+            }
+
+            val reusableIndex = reusableFutureBySongId[song.id]?.removeFirstOrNull()
+            if (reusableIndex != null) {
+                requestedBlock += reusableIndex
+                reusedFutureIndexes += reusableIndex
+            } else {
+                requestedBlock += newLibraryQueue.size
+                newLibraryQueue += song
+            }
+        }
+
+        val untouchedFuture = futurePlaybackOrder.filterNot { it in reusedFutureIndexes }
+        val newPlaybackOrder = historyAndCurrent + requestedBlock + untouchedFuture
         return BatchInsertResult(
             libraryQueue = newLibraryQueue,
             playbackOrder = newPlaybackOrder,

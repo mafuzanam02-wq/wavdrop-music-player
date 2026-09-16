@@ -199,6 +199,270 @@ class QueueMutationTest {
     }
 
     @Test
+    fun `batch play next does not duplicate current requested occurrence`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c),
+            playbackOrder = listOf(0, 1, 2),
+            currentPlaybackIndex = 1,
+            songs = listOf(b, d),
+        )!!
+
+        assertEquals(listOf(1L, 2L, 4L, 3L), result.playbackQueue.map { it.id })
+    }
+
+    @Test
+    fun `batch play next reuses existing future song`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c, d, e),
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            currentPlaybackIndex = 1,
+            songs = listOf(d),
+        )!!
+
+        assertEquals(listOf(1L, 2L, 4L, 3L, 5L), result.playbackQueue.map { it.id })
+        assertEquals(5, result.libraryQueue.size)
+    }
+
+    @Test
+    fun `batch play next reuses overlap and adds only missing songs`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, song(99), d, e),
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            currentPlaybackIndex = 0,
+            songs = listOf(b, c, d),
+        )!!
+
+        assertEquals(listOf(1L, 2L, 3L, 4L, 99L, 5L), result.playbackQueue.map { it.id })
+        assertEquals(listOf(1L, 2L, 99L, 4L, 5L, 3L), result.libraryQueue.map { it.id })
+    }
+
+    @Test
+    fun `repeated identical batch play next is idempotent`() {
+        val first = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c, d),
+            playbackOrder = listOf(0, 1, 2, 3),
+            currentPlaybackIndex = 0,
+            songs = listOf(b, c, d),
+        )!!
+        val second = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = first.libraryQueue,
+            playbackOrder = first.playbackOrder,
+            currentPlaybackIndex = 0,
+            songs = listOf(b, c, d),
+        )!!
+
+        assertEquals(listOf(1L, 2L, 3L, 4L), second.playbackQueue.map { it.id })
+        assertEquals(4, second.libraryQueue.size)
+    }
+
+    @Test
+    fun `batch play next keeps unrelated future items in relative order`() {
+        val x = song(99)
+        val y = song(100)
+        val z = song(101)
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, x, b, y, c, z),
+            playbackOrder = listOf(0, 1, 2, 3, 4, 5),
+            currentPlaybackIndex = 0,
+            songs = listOf(b, c),
+        )!!
+
+        assertEquals(listOf(1L, 2L, 3L, 99L, 100L, 101L), result.playbackQueue.map { it.id })
+    }
+
+    @Test
+    fun `batch play next does not reuse historical occurrence`() {
+        val x = song(99)
+        val y = song(100)
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, d, b, x, d, y),
+            playbackOrder = listOf(0, 1, 2, 3, 4, 5),
+            currentPlaybackIndex = 2,
+            songs = listOf(d),
+        )!!
+
+        assertEquals(listOf(1L, 4L, 2L, 4L, 99L, 100L), result.playbackQueue.map { it.id })
+        assertEquals(6, result.libraryQueue.size)
+    }
+
+    @Test
+    fun `batch play next preserves duplicate requested multiplicity`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b),
+            playbackOrder = listOf(0, 1),
+            currentPlaybackIndex = 0,
+            songs = listOf(d, d, e),
+        )!!
+
+        assertEquals(listOf(1L, 4L, 4L, 5L, 2L), result.playbackQueue.map { it.id })
+        assertEquals(listOf(1L, 2L, 4L, 4L, 5L), result.libraryQueue.map { it.id })
+    }
+
+    @Test
+    fun `two existing future duplicates satisfy two requested duplicates`() {
+        val d2 = song(4)
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, d, b, d2, c),
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            currentPlaybackIndex = 0,
+            songs = listOf(d, d),
+        )!!
+
+        assertEquals(listOf(1L, 4L, 4L, 2L, 3L), result.playbackQueue.map { it.id })
+        assertEquals(5, result.libraryQueue.size)
+    }
+
+    @Test
+    fun `one existing duplicate and two requested duplicates creates one new occurrence`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, d, b),
+            playbackOrder = listOf(0, 1, 2),
+            currentPlaybackIndex = 0,
+            songs = listOf(d, d),
+        )!!
+
+        assertEquals(listOf(1L, 4L, 4L, 2L), result.playbackQueue.map { it.id })
+        assertEquals(listOf(1L, 4L, 2L, 4L), result.libraryQueue.map { it.id })
+    }
+
+    @Test
+    fun `current song requested once consumes current occurrence`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, a, c),
+            playbackOrder = listOf(0, 1, 2, 3),
+            currentPlaybackIndex = 0,
+            songs = listOf(a),
+        )!!
+
+        assertEquals(listOf(1L, 2L, 1L, 3L), result.playbackQueue.map { it.id })
+        assertEquals(4, result.libraryQueue.size)
+    }
+
+    @Test
+    fun `current song requested twice reuses one additional future occurrence`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, a, c),
+            playbackOrder = listOf(0, 1, 2, 3),
+            currentPlaybackIndex = 0,
+            songs = listOf(a, a),
+        )!!
+
+        assertEquals(listOf(1L, 1L, 2L, 3L), result.playbackQueue.map { it.id })
+        assertEquals(4, result.libraryQueue.size)
+    }
+
+    @Test
+    fun `batch play next empty batch is no-op`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c),
+            playbackOrder = listOf(0, 1, 2),
+            currentPlaybackIndex = 1,
+            songs = emptyList(),
+        )!!
+
+        assertEquals(listOf(a, b, c), result.libraryQueue)
+        assertEquals(listOf(0, 1, 2), result.playbackOrder)
+        assertEquals(listOf(a, b, c), result.playbackQueue)
+    }
+
+    @Test
+    fun `single-song batch reuses matching future occurrence`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c),
+            playbackOrder = listOf(0, 1, 2),
+            currentPlaybackIndex = 0,
+            songs = listOf(c),
+        )!!
+
+        assertEquals(listOf(1L, 3L, 2L), result.playbackQueue.map { it.id })
+    }
+
+    @Test
+    fun `batch play next works against shuffled playback sequence`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c, d, e),
+            playbackOrder = listOf(2, 4, 1, 0, 3),
+            currentPlaybackIndex = 1,
+            songs = listOf(d, b),
+        )!!
+
+        assertEquals(listOf(3L, 5L, 4L, 2L, 1L), result.playbackQueue.map { it.id })
+        assertEquals(listOf(2, 4, 3, 1, 0), result.playbackOrder)
+    }
+
+    @Test
+    fun `batch play next keeps current playback index unchanged`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c, d),
+            playbackOrder = listOf(0, 1, 2, 3),
+            currentPlaybackIndex = 1,
+            songs = listOf(d),
+        )!!
+
+        assertEquals(b, result.playbackQueue[1])
+    }
+
+    @Test
+    fun `batch play next result playback order indexes remain valid`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c),
+            playbackOrder = listOf(0, 1, 2),
+            currentPlaybackIndex = 0,
+            songs = listOf(c, d, e),
+        )!!
+
+        assert(result.playbackOrder.all { it in result.libraryQueue.indices })
+    }
+
+    @Test
+    fun `batch play next playback queue is derived from playback order`() {
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(a, b, c),
+            playbackOrder = listOf(0, 1, 2),
+            currentPlaybackIndex = 0,
+            songs = listOf(c, d),
+        )!!
+
+        assertEquals(result.playbackOrder.map { result.libraryQueue[it] }, result.playbackQueue)
+    }
+
+    @Test
+    fun `batch play next does not mutate inputs`() {
+        val library = mutableListOf(a, b, c)
+        val order = mutableListOf(0, 1, 2)
+        val requested = mutableListOf(c, d)
+
+        QueueMutation.insertAllAfterCurrent(
+            libraryQueue = library,
+            playbackOrder = order,
+            currentPlaybackIndex = 0,
+            songs = requested,
+        )!!
+
+        assertEquals(listOf(a, b, c), library)
+        assertEquals(listOf(0, 1, 2), order)
+        assertEquals(listOf(c, d), requested)
+    }
+
+    @Test
+    fun `artist catalogue regression reuses upcoming and does not duplicate current`() {
+        val cigarette = song(10)
+        val twentyThree = song(23)
+        val other = song(99)
+        val hereComesTheFall = song(30)
+        val longRoad = song(40)
+        val result = QueueMutation.insertAllAfterCurrent(
+            libraryQueue = listOf(cigarette, twentyThree, other, cigarette, hereComesTheFall),
+            playbackOrder = listOf(0, 1, 2, 3, 4),
+            currentPlaybackIndex = 0,
+            songs = listOf(twentyThree, cigarette, hereComesTheFall, longRoad),
+        )!!
+
+        assertEquals(listOf(10L, 23L, 30L, 40L, 99L, 10L), result.playbackQueue.map { it.id })
+        assertEquals(6, result.libraryQueue.size)
+    }
+
+    @Test
     fun `searchPreserveQueue inserts searched song after current while preserving next`() {
         val x = song(99)
 
