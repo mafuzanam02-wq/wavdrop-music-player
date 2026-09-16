@@ -105,6 +105,41 @@ import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.toShape
 import kotlinx.coroutines.launch
 
+internal data class QueueSheetSections(
+    val earlierQueueCount: Int,
+    val earlierQueueHeader: String?,
+    val currentItemIndex: Int?,
+    val upNextStartIndex: Int,
+    val upNextCount: Int,
+)
+
+internal fun queueSheetSections(
+    currentIndex: Int,
+    queueSize: Int,
+): QueueSheetSections {
+    val earlierQueueCount = if (currentIndex > 0) {
+        currentIndex.coerceAtMost(queueSize)
+    } else {
+        0
+    }
+    val upNextStartIndex = if (currentIndex >= 0) {
+        (currentIndex + 1).coerceAtMost(queueSize)
+    } else {
+        queueSize
+    }
+    return QueueSheetSections(
+        earlierQueueCount = earlierQueueCount,
+        earlierQueueHeader = if (earlierQueueCount > 0) {
+            "Earlier in queue · $earlierQueueCount"
+        } else {
+            null
+        },
+        currentItemIndex = currentIndex.takeIf { it in 0 until queueSize },
+        upNextStartIndex = upNextStartIndex,
+        upNextCount = queueSize - upNextStartIndex,
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueueSheet(
@@ -157,18 +192,11 @@ private fun QueueSheetContent(
     onViewStats: (Long) -> Unit,
 ) {
     val currentIndex = state.currentIndex
-    val previousCount = if (currentIndex > 0) {
-        currentIndex.coerceAtMost(state.queue.size)
-    } else {
-        0
-    }
+    val sections = queueSheetSections(currentIndex = currentIndex, queueSize = state.queue.size)
+    val earlierQueueCount = sections.earlierQueueCount
     val currentSong = state.queue.getOrNull(currentIndex)
-    val upNextStartIndex = if (currentIndex >= 0) {
-        (currentIndex + 1).coerceAtMost(state.queue.size)
-    } else {
-        state.queue.size
-    }
-    val upNextCount = state.queue.size - upNextStartIndex
+    val upNextStartIndex = sections.upNextStartIndex
+    val upNextCount = sections.upNextCount
 
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -450,8 +478,8 @@ private fun QueueSheetContent(
 
     // Scroll to the "Playing now" section header on open and when the current track changes.
     // LazyColumn item layout (0-based):
-    //   0           "Previously played" header   } only when currentIndex > 0
-    //   1..ci       previous song rows           }
+    //   0           "Earlier in queue" header    } only when currentIndex > 0
+    //   1..ci       earlier queue rows           }
     //   ci+1 or 0   "Playing now" header         <- scroll target
     //   ci+2 or 1   QueueNowPlayingRow
     LaunchedEffect(currentIndex) {
@@ -592,18 +620,18 @@ private fun QueueSheetContent(
                     state = listState,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-        // ── Previously played ─────────────────────────────────────────────────
-        if (previousCount > 0) {
+        // ── Earlier in queue ─────────────────────────────────────────────────
+        if (earlierQueueCount > 0) {
             item {
-                QueueSectionHeader(label = "Previously played · $previousCount")
+                QueueSectionHeader(label = sections.earlierQueueHeader.orEmpty())
             }
             items(
-                count = previousCount,
+                count = earlierQueueCount,
                 // key = absolute queue index (0..currentIndex-1), always unique
-                key = { index -> "previous-${state.queue[index].id}-$index" },
+                key = { index -> "earlier-${state.queue[index].id}-$index" },
             ) { index ->
                 val song = state.queue[index]
-                QueuePreviousItemRow(
+                QueueEarlierItemRow(
                     song = song,
                     onJump = { onJumpToItem(index) },
                     onPlayNext = { onPlaySongNext(song) },
@@ -611,7 +639,7 @@ private fun QueueSheetContent(
                     onViewStats = { onViewStats(song.id) },
                     onShare = { onShareSong(song) },
                 )
-                if (index < previousCount - 1) {
+                if (index < earlierQueueCount - 1) {
                     HorizontalDivider(
                         modifier = Modifier.padding(start = 56.dp),
                         thickness = 0.5.dp,
@@ -626,7 +654,7 @@ private fun QueueSheetContent(
             item {
                 QueueSectionHeader(
                     label = "Playing now",
-                    modifier = Modifier.padding(top = if (previousCount > 0) 8.dp else 0.dp),
+                    modifier = Modifier.padding(top = if (earlierQueueCount > 0) 8.dp else 0.dp),
                 )
             }
             item {
@@ -1106,10 +1134,10 @@ private fun QueueNowPlayingRow(song: Song) {
     }
 }
 
-// ── Previously-played row (dimmed, limited actions) ───────────────────────────
+// ── Earlier-in-queue row (dimmed, limited actions) ───────────────────────────
 
 @Composable
-private fun QueuePreviousItemRow(
+private fun QueueEarlierItemRow(
     song: Song,
     onJump: () -> Unit,
     onPlayNext: () -> Unit,
@@ -1164,7 +1192,7 @@ private fun QueuePreviousItemRow(
             IconButton(onClick = { expanded = true }) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Previous item actions",
+                    contentDescription = "Earlier queue item actions",
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 )
             }
