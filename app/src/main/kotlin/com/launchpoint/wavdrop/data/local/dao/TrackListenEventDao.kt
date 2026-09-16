@@ -40,6 +40,13 @@ interface TrackListenEventDao {
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     fun observeAll(): Flow<List<TrackListenEventEntity>>
 
+    /** Latest PLAY/SKIP timestamp for analytics previews; ignores unsupported future event types. */
+    @Query("""
+        SELECT MAX(occurredAt) FROM track_listen_events
+        WHERE eventType IN ('PLAY', 'SKIP')
+    """)
+    fun observeLatestAnalyticsEventAt(): Flow<Long?>
+
     /** Events in an inclusive time range, most recent first. */
     @Query("""
         SELECT * FROM track_listen_events

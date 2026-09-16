@@ -104,6 +104,9 @@ class StatsRepository @Inject constructor(
     /** All listen events (PLAY + SKIP), most recent first. Used by Monthly Reports / analytics. */
     fun allListenEvents(): Flow<List<TrackListenEventEntity>> = listenEventDao.observeAll()
 
+    /** Latest PLAY/SKIP event timestamp used to select the bounded Home Wrapped preview year. */
+    fun latestAnalyticsEventAt(): Flow<Long?> = listenEventDao.observeLatestAnalyticsEventAt()
+
     /**
      * Listen events within an inclusive [fromMs]..[toMs] window. Lets callers that only need a
      * bounded slice (e.g. current-month Most Played sorting) avoid observing the full event table

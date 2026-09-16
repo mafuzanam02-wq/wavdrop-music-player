@@ -7,6 +7,7 @@ import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+import com.launchpoint.wavdrop.data.model.ListeningPeriodRange
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
@@ -252,17 +253,28 @@ class HomeViewModel @Inject constructor(
             )
 
     // Wrapped preview only depends on songs + events; isolated so that playlist/stats
-    // changes don't trigger a full WrappedBuilder run on every play or skip.
-    private val wrappedPreview: StateFlow<WrappedSummary?> = combine(
-        allSongs,
-        statsRepository.allListenEvents(),
-    ) { songs, events ->
-        val loadedSongs = songs.orEmpty()
-        WrappedBuilder.availableYears(events)
-            .firstOrNull()
-            ?.let { year -> WrappedBuilder.buildYear(year = year, songs = loadedSongs, events = events) }
-            ?.takeIf { it.hasActivity && !it.emptyState.isEmpty }
-    }
+    // changes don't trigger a full WrappedBuilder run. Home observes one scalar latest PLAY/SKIP
+    // timestamp, then only the latest activity year's event slice; distinctUntilChanged suppresses
+    // Room's table-level invalidation when out-of-year inserts leave that slice unchanged.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val wrappedPreview: StateFlow<WrappedSummary?> = statsRepository.latestAnalyticsEventAt()
+        .distinctUntilChanged()
+        .flatMapLatest { latestAt ->
+            val selection = homeWrappedYearSelection(latestAt) ?: return@flatMapLatest flowOf(null)
+            combine(
+                allSongs,
+                statsRepository
+                    .listenEventsInRange(selection.range.fromMs, selection.range.toMs)
+                    .distinctUntilChanged(),
+            ) { songs, events ->
+                buildHomeWrappedPreview(
+                    year = selection.year,
+                    songs = songs.orEmpty(),
+                    events = events,
+                    zone = selection.range.zone,
+                )
+            }
+        }
         .flowOn(Dispatchers.Default)
         .stateIn(
             scope        = viewModelScope,
@@ -511,3 +523,38 @@ internal val HOME_SMART_COLLECTION_PRIORITY = listOf(
 )
 
 private const val SEARCH_TAG = "WavdropSearchPlayback"
+
+internal data class HomeWrappedYearSelection(
+    val year: Int,
+    val range: ListeningPeriodRange,
+)
+
+internal fun latestAnalyticsEventAt(events: List<TrackListenEventEntity>): Long? =
+    events
+        .asSequence()
+        .filter {
+            it.eventType == TrackListenEventEntity.TYPE_PLAY ||
+                it.eventType == TrackListenEventEntity.TYPE_SKIP
+        }
+        .maxOfOrNull { it.occurredAt }
+
+internal fun homeWrappedYearSelection(
+    latestAt: Long?,
+    zone: ZoneId = ZoneId.systemDefault(),
+): HomeWrappedYearSelection? {
+    latestAt ?: return null
+    val year = Instant.ofEpochMilli(latestAt).atZone(zone).year
+    return HomeWrappedYearSelection(
+        year = year,
+        range = ListeningPeriodRange.year(year, zone),
+    )
+}
+
+internal fun buildHomeWrappedPreview(
+    year: Int,
+    songs: List<Song>,
+    events: List<TrackListenEventEntity>,
+    zone: ZoneId = ZoneId.systemDefault(),
+): WrappedSummary? =
+    WrappedBuilder.buildYear(year = year, songs = songs, events = events, zone = zone)
+        .takeIf { it.hasActivity && !it.emptyState.isEmpty }
