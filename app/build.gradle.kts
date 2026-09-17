@@ -190,6 +190,7 @@ dependencies {
     kapt(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.androidx.hilt.work)
+    kapt(libs.androidx.room.compiler.processing)
     kapt(libs.androidx.hilt.compiler)
 
     implementation(libs.androidx.work.runtime.ktx)
@@ -197,6 +198,7 @@ dependencies {
     implementation(libs.coil.compose)
 
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.16.1")
     // Real org.json for JVM unit tests: the Android stubs return null/0 under
     // isReturnDefaultValues, which would silently break exporter round-trip tests.
     testImplementation("org.json:json:20240303")

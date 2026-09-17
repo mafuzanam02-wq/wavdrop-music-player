@@ -349,16 +349,7 @@ class PlaybackService : MediaSessionService() {
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,
-    ): MediaSession.ConnectionResult {
-        val defaultResult = super.onConnect(session, controller)
-        val enrichedCommands = defaultResult.availableSessionCommands.buildUpon()
-            .add(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
-            .add(SessionCommand(CMD_CYCLE_REPEAT, Bundle.EMPTY))
-            .build()
-        return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-            .setAvailableSessionCommands(enrichedCommands)
-            .build()
-    }
+    ): MediaSession.ConnectionResult = withWavdropCommands(session, controller)
 
     override fun onCustomCommand(
         session: MediaSession,
@@ -389,33 +380,31 @@ class PlaybackService : MediaSessionService() {
         val buttons = mutableListOf<CommandButton>()
 
         if (setting.includeShuffle) {
-            val iconRes = if (shuffleEnabled) {
-                androidx.media3.session.R.drawable.media3_icon_shuffle_on
+            val icon = if (shuffleEnabled) {
+                CommandButton.ICON_SHUFFLE_ON
             } else {
-                androidx.media3.session.R.drawable.media3_icon_shuffle_off
+                CommandButton.ICON_SHUFFLE_OFF
             }
-            buttons += CommandButton.Builder()
+            buttons += CommandButton.Builder(icon)
                 .setDisplayName(if (shuffleEnabled) "Shuffle on" else "Shuffle off")
                 .setSessionCommand(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
-                .setIconResId(iconRes)
                 .build()
         }
 
         if (setting.includeRepeat) {
-            val iconRes = when (repeatMode) {
-                RepeatMode.OFF -> androidx.media3.session.R.drawable.media3_icon_repeat_off
-                RepeatMode.ALL -> androidx.media3.session.R.drawable.media3_icon_repeat_all
-                RepeatMode.ONE -> androidx.media3.session.R.drawable.media3_icon_repeat_one
+            val icon = when (repeatMode) {
+                RepeatMode.OFF -> CommandButton.ICON_REPEAT_OFF
+                RepeatMode.ALL -> CommandButton.ICON_REPEAT_ALL
+                RepeatMode.ONE -> CommandButton.ICON_REPEAT_ONE
             }
             val name = when (repeatMode) {
                 RepeatMode.OFF -> "Repeat off"
                 RepeatMode.ALL -> "Repeat all"
                 RepeatMode.ONE -> "Repeat one"
             }
-            buttons += CommandButton.Builder()
+            buttons += CommandButton.Builder(icon)
                 .setDisplayName(name)
                 .setSessionCommand(SessionCommand(CMD_CYCLE_REPEAT, Bundle.EMPTY))
-                .setIconResId(iconRes)
                 .build()
         }
 
@@ -483,6 +472,21 @@ class PlaybackService : MediaSessionService() {
         const val OUTPUT_WIRED = "wired"
         private const val CMD_TOGGLE_SHUFFLE = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
         private const val CMD_CYCLE_REPEAT = "com.launchpoint.wavdrop.CYCLE_REPEAT"
+        @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+        internal fun withWavdropCommands(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val defaultResult = MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller).build()
+            val enrichedCommands = defaultResult.availableSessionCommands.buildUpon()
+                .add(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .add(SessionCommand(CMD_CYCLE_REPEAT, Bundle.EMPTY))
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+                .setAvailableSessionCommands(enrichedCommands)
+                .build()
+        }
+
         private const val RESUME_TAG = "WavdropResume"
         private const val WIDGET_TAG = "WavdropWidget"
         private const val AUDIO_SESSION_TAG = "WavdropAudioSession"
