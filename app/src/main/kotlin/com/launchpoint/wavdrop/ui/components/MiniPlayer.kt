@@ -28,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.compose.state.rememberProgressStateWithTickInterval
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.RepeatMode
@@ -61,17 +63,7 @@ fun MiniPlayer(
             modifier = columnModifier
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            if (nowPlaying.durationMs > 0) {
-                LinearProgressIndicator(
-                    progress  = { (nowPlaying.positionMs.toFloat() / nowPlaying.durationMs).coerceIn(0f, 1f) },
-                    modifier  = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .padding(bottom = 6.dp),
-                    color      = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f),
-                )
-            }
+            MiniPlayerProgress()
             Row(
                 modifier          = Modifier
                     .fillMaxWidth()
@@ -158,5 +150,30 @@ fun MiniPlayer(
                 }
             }
         }
+    }
+}
+
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+@Composable
+private fun MiniPlayerProgress() {
+    val progress = rememberProgressStateWithTickInterval(
+        player = LocalProgressPlayer.current,
+        tickIntervalMs = 0L,
+    )
+    if (progress.durationMs > 0L) {
+        LinearProgressIndicator(
+            progress = {
+                playbackProgressPresentation(
+                    progress.currentPositionMs,
+                    progress.durationMs,
+                ).fraction
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .padding(bottom = 6.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f),
+        )
     }
 }

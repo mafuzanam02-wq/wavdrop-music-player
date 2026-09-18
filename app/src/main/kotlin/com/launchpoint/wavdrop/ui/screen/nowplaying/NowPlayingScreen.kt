@@ -67,6 +67,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -96,6 +97,8 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.compose.state.rememberProgressStateWithTickInterval
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.grouping.AlbumGrouper
 import com.launchpoint.wavdrop.data.grouping.ArtistGrouper
@@ -113,6 +116,8 @@ import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
 import com.launchpoint.wavdrop.ui.components.LocalNowPlayingBackground
 import com.launchpoint.wavdrop.ui.components.LocalNowPlayingTimeDisplayMode
+import com.launchpoint.wavdrop.ui.components.LocalProgressPlayer
+import com.launchpoint.wavdrop.ui.components.playbackProgressPresentation
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
@@ -900,12 +905,12 @@ private fun BottomPlaybackPanel(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(metrics.bottomPanelSpacing),
     ) {
-        SeekBar(
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
-            isSeekable = state.isSeekable,
-            onSeek = onSeek,
-        )
+        key(state.song?.id, state.currentIndex) {
+            SeekBar(
+                isSeekable = state.isSeekable,
+                onSeek = onSeek,
+            )
+        }
         if (sleepTimerLabel != null) {
             Text(
                 text = sleepTimerLabel,
@@ -1378,14 +1383,16 @@ private fun String.hasKnownMetadata(unknownLabel: String): Boolean {
         !value.equals("<unknown>", ignoreCase = true)
 }
 
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 private fun SeekBar(
-    positionMs: Long,
-    durationMs: Long,
     isSeekable: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val player = LocalProgressPlayer.current
+    val textProgress = rememberProgressStateWithTickInterval(player, tickIntervalMs = 1_000L)
+    val trackProgress = rememberProgressStateWithTickInterval(player, tickIntervalMs = 0L)
     val timeDisplayMode = LocalNowPlayingTimeDisplayMode.current
     val reducedMotion = rememberReducedMotion()
     var isDragging by remember { mutableStateOf(false) }
@@ -1402,19 +1409,12 @@ private fun SeekBar(
         label = "seekThumbScale",
     )
 
-    val safeDurationMs = durationMs.coerceAtLeast(0L)
-    val displayPositionMs = if (isDragging) dragPositionMs else positionMs
-    val safeDisplayPositionMs = displayPositionMs.coerceForDisplay(safeDurationMs)
-    val remainingMs = if (safeDurationMs > 0) {
-        (safeDurationMs - safeDisplayPositionMs).coerceAtLeast(0L)
-    } else {
-        0L
-    }
-    val sliderValue = if (safeDurationMs > 0) {
-        (safeDisplayPositionMs.toFloat() / safeDurationMs).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
+    val textPresentation = playbackProgressPresentation(
+        textProgress.currentPositionMs,
+        textProgress.durationMs,
+        dragPositionMs.takeIf { isDragging },
+    )
+    val safeDurationMs = textPresentation.durationMs
     var trackWidthPx by remember { mutableStateOf(0) }
 
     fun seekToOffset(x: Float) {
@@ -1460,8 +1460,13 @@ private fun SeekBar(
             val inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
             val thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
             Canvas(modifier = Modifier.fillMaxSize()) {
+                val trackPresentation = playbackProgressPresentation(
+                    trackProgress.currentPositionMs,
+                    trackProgress.durationMs,
+                    dragPositionMs.takeIf { isDragging },
+                )
                 val centerY = size.height / 2f
-                val activeEnd = size.width * sliderValue
+                val activeEnd = size.width * trackPresentation.fraction
                 drawLine(
                     color = inactiveColor,
                     start = Offset(0f, centerY),
@@ -1476,7 +1481,7 @@ private fun SeekBar(
                     strokeWidth = 4.dp.toPx(),
                     cap = StrokeCap.Round,
                 )
-                if (safeDurationMs > 0) {
+                if (trackPresentation.durationMs > 0L) {
                     drawCircle(
                         color = thumbColor,
                         radius = 5.dp.toPx() * thumbScale,
@@ -1492,15 +1497,15 @@ private fun SeekBar(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = formatMs(safeDisplayPositionMs),
+                text = formatSeconds(textPresentation.displayElapsedSeconds),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
             )
             Text(
                 text = when {
                     safeDurationMs <= 0 -> "--:--"
-                    timeDisplayMode == NowPlayingTimeDisplayMode.REMAINING -> "-${formatMs(remainingMs)}"
-                    else -> formatMs(safeDurationMs)
+                    timeDisplayMode == NowPlayingTimeDisplayMode.REMAINING -> "-${formatSeconds(textPresentation.displayRemainingSeconds)}"
+                    else -> formatSeconds(textPresentation.displayDurationSeconds)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
@@ -1509,15 +1514,12 @@ private fun SeekBar(
     }
 }
 
-private fun formatMs(ms: Long): String {
-    val total = (ms / 1000).coerceAtLeast(0L)
+private fun formatSeconds(seconds: Long): String {
+    val total = seconds.coerceAtLeast(0L)
     val m = total / 60
     val s = total % 60
     return "%d:%02d".format(m, s)
 }
-
-private fun Long.coerceForDisplay(durationMs: Long): Long =
-    if (durationMs > 0L) coerceIn(0L, durationMs) else coerceAtLeast(0L)
 
 private fun searchLyricsOnline(context: Context, song: Song) {
     val query = buildString {

@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.AccentColor
@@ -16,6 +17,7 @@ import com.launchpoint.wavdrop.data.settings.ThemeMode
 import com.launchpoint.wavdrop.playback.PlaybackStartupCoordinator
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.ui.navigation.WavdropNavGraph
+import com.launchpoint.wavdrop.ui.components.LocalProgressPlayer
 import com.launchpoint.wavdrop.ui.theme.WavdropTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -37,8 +39,11 @@ class MainActivity : ComponentActivity() {
                 .collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
             val accentColor by appSettingsRepository.accentColor
                 .collectAsStateWithLifecycle(initialValue = AccentColor.MIDNIGHT_VIOLET)
+            val progressPlayer by playerController.progressPlayer.collectAsStateWithLifecycle()
             WavdropTheme(themeMode = themeMode, accentColor = accentColor) {
-                WavdropNavGraph()
+                CompositionLocalProvider(LocalProgressPlayer provides progressPlayer) {
+                    WavdropNavGraph()
+                }
             }
         }
     }

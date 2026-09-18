@@ -469,6 +469,8 @@ class PlayerController @Inject constructor(
     }
 
     private var mediaController: MediaController? = null
+    private val _progressPlayer = MutableStateFlow<Player?>(null)
+    val progressPlayer: StateFlow<Player?> = _progressPlayer.asStateFlow()
 
     // Connection lifecycle for [mediaController]. Mutated only on the application main thread
     // (init, the buildAsync completion listener, and MediaController.Listener callbacks all run
@@ -927,6 +929,7 @@ class PlayerController @Inject constructor(
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         drainPendingRequests(controller)
+        _progressPlayer.value = controller
     }
 
     // Main thread only. Consumes any request captured while the controller was unavailable.
@@ -1075,6 +1078,7 @@ class PlayerController @Inject constructor(
             // a superseded connection attempt) must never clear the current controller/state.
             if (ControllerAttemptOwnership.shouldApplyDisconnect(mediaController === controller)) {
                 mediaController = null
+                _progressPlayer.value = null
                 controllerConnectionState = ControllerConnectionDecision.onDisconnected()
                 Log.w(TAG, "MediaController disconnected; will reconnect on next demand")
             }
@@ -2517,6 +2521,7 @@ class PlayerController @Inject constructor(
         mediaController?.removeListener(playerListener)
         mediaController?.release()
         mediaController = null
+        _progressPlayer.value = null
         // Invalidate any in-flight buildAsync so a late completion cannot install a stale
         // controller or mutate state after release.
         ++controllerConnectionGeneration
