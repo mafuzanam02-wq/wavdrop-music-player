@@ -62,6 +62,22 @@ internal fun playbackSessionPersistenceAction(
     else               -> PlaybackSessionPersistenceAction.SAVE
 }
 
+internal data class PlaybackRequest(
+    val queue: List<Song>,
+    val startIndex: Int,
+    val preservePlaybackOrder: Boolean = false,
+)
+
+internal data class QueueStart(
+    val queue: List<Song>,
+    val startIndex: Int,
+) {
+    val startSong: Song get() = queue[startIndex]
+}
+
+internal fun resolveQueueStart(queue: List<Song>, startIndex: Int): QueueStart? =
+    startIndex.takeIf { it in queue.indices }?.let { QueueStart(queue, it) }
+
 internal fun resolveSessionCurrentLibraryIndex(
     libraryQueue: List<Song>,
     playbackOrder: List<Int>,
@@ -991,7 +1007,7 @@ class PlayerController @Inject constructor(
             )
             playRequest != null -> playFromQueueInternal(
                 queue = playRequest.queue,
-                startSong = playRequest.startSong,
+                startIndex = playRequest.startIndex,
                 preservePlaybackOrder = playRequest.preservePlaybackOrder,
             )
             // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
@@ -1249,24 +1265,47 @@ class PlayerController @Inject constructor(
     }
 
     fun playFromQueue(queue: List<Song>, startSong: Song) {
-        playFromQueueInternal(queue = queue, startSong = startSong, preservePlaybackOrder = false)
+        val normalizedQueue = queue.ifEmpty { listOf(startSong) }
+        val startIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
+            .takeIf { it >= 0 } ?: 0
+        playFromQueueInternal(
+            queue = normalizedQueue,
+            startIndex = startIndex,
+            preservePlaybackOrder = false,
+        )
+    }
+
+    fun playFromQueue(queue: List<Song>, startIndex: Int) {
+        playFromQueueInternal(
+            queue = queue,
+            startIndex = startIndex,
+            preservePlaybackOrder = false,
+        )
     }
 
     private fun playFromQueuePreservingPlaybackOrder(queue: List<Song>, startSong: Song) {
-        playFromQueueInternal(queue = queue, startSong = startSong, preservePlaybackOrder = true)
+        val normalizedQueue = queue.ifEmpty { listOf(startSong) }
+        val startIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
+            .takeIf { it >= 0 } ?: 0
+        playFromQueueInternal(
+            queue = normalizedQueue,
+            startIndex = startIndex,
+            preservePlaybackOrder = true,
+        )
     }
 
     private fun playFromQueueInternal(
         queue: List<Song>,
-        startSong: Song,
+        startIndex: Int,
         preservePlaybackOrder: Boolean,
     ) {
+        val start = resolveQueueStart(queue, startIndex) ?: return
+        val normalizedQueue = start.queue
+        val originalStartIndex = start.startIndex
+        val startSong = start.startSong
         isExternalPlayback = false
         // Fresh queue supersedes any in-progress bad-media recovery episode.
         bumpQueueGeneration()
-        val normalizedQueue = queue.ifEmpty { listOf(startSong) }
-        val originalStartIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
-            .takeIf { it >= 0 } ?: 0
 
         libraryQueue = normalizedQueue
         if (preservePlaybackOrder) {
@@ -1300,7 +1339,7 @@ class PlayerController @Inject constructor(
         if (controller == null) {
             pendingPlaybackRequest = PlaybackRequest(
                 queue = normalizedQueue,
-                startSong = startSong,
+                startIndex = originalStartIndex,
                 preservePlaybackOrder = preservePlaybackOrder,
             )
             return
@@ -1325,7 +1364,7 @@ class PlayerController @Inject constructor(
         shuffleEnabled = true
         playFromQueue(
             queue = normalizedQueue,
-            startSong = normalizedQueue.random(),
+            startIndex = normalizedQueue.indices.random(),
         )
     }
 
@@ -3143,12 +3182,6 @@ class PlayerController @Inject constructor(
         RepeatMode.ALL -> Player.REPEAT_MODE_ALL
         RepeatMode.ONE -> Player.REPEAT_MODE_ONE
     }
-
-    private data class PlaybackRequest(
-        val queue: List<Song>,
-        val startSong: Song,
-        val preservePlaybackOrder: Boolean = false,
-    )
 
     private data class PreserveSearchRequest(
         val plan: SearchPlaybackPlan,

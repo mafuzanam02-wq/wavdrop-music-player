@@ -7,9 +7,9 @@ import org.junit.Test
 
 class PlaylistQueueActionsTest {
 
-    private fun song(id: Long) = Song(
+    private fun song(id: Long, title: String = "Song $id") = Song(
         id = id,
-        title = "Song $id",
+        title = title,
         artist = "Artist",
         album = "Album",
         albumId = 0L,
@@ -20,11 +20,11 @@ class PlaylistQueueActionsTest {
         year = 2020,
     )
 
-    private fun entry(id: Long, position: Int) = PlaylistSongItem(
+    private fun entry(id: Long, position: Int, title: String = "Song $id") = PlaylistSongItem(
         playlistId = 1L,
         songId = id,
         position = position,
-        song = song(id),
+        song = song(id, title),
     )
 
     @Test
@@ -62,5 +62,53 @@ class PlaylistQueueActionsTest {
             listOf(1L, 3L),
             playlistQueueSongs(filteredVisibleEntries).map { it.id },
         )
+    }
+
+    @Test
+    fun `second duplicate resolves to its visible playback index`() {
+        val entries = listOf(entry(1, 0), entry(2, 1), entry(1, 2), entry(3, 3))
+
+        assertEquals(2, playlistPlaybackStartIndex(entries, entries[2]))
+    }
+
+    @Test
+    fun `middle of three duplicates resolves positionally`() {
+        val entries = listOf(entry(1, 0), entry(1, 1), entry(1, 2))
+
+        assertEquals(1, playlistPlaybackStartIndex(entries, entries[1]))
+    }
+
+    @Test
+    fun `filtered duplicate resolves within visible queue rather than persisted position`() {
+        val visibleEntries = listOf(entry(1, 0), entry(1, 2), entry(1, 4))
+
+        assertEquals(2, playlistPlaybackStartIndex(visibleEntries, visibleEntries[2]))
+    }
+
+    @Test
+    fun `single first and last occurrences retain their visible indexes`() {
+        val entries = listOf(entry(1, 4), entry(2, 8), entry(3, 12))
+
+        assertEquals(0, playlistPlaybackStartIndex(entries, entries.first()))
+        assertEquals(1, playlistPlaybackStartIndex(entries, entries[1]))
+        assertEquals(2, playlistPlaybackStartIndex(entries, entries.last()))
+    }
+
+    @Test
+    fun `selection outside visible queue is rejected`() {
+        val visibleEntries = listOf(entry(1, 0), entry(2, 1))
+
+        assertEquals(null, playlistPlaybackStartIndex(visibleEntries, entry(1, 7)))
+    }
+
+    @Test
+    fun `same song id with different metadata remains position based`() {
+        val entries = listOf(
+            entry(1, 0, title = "Earlier metadata"),
+            entry(1, 1, title = "Selected metadata"),
+        )
+
+        assertEquals(1, playlistPlaybackStartIndex(entries, entries[1]))
+        assertEquals("Selected metadata", playlistQueueSongs(entries)[1].title)
     }
 }

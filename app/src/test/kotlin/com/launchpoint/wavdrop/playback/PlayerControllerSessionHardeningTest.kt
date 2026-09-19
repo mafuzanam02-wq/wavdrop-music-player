@@ -258,4 +258,60 @@ class PlayerControllerSessionHardeningTest {
             ),
         )
     }
+
+    @Test
+    fun `duplicate queue starts exact requested occurrence`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+
+        val start = resolveQueueStart(queue, startIndex = 2)!!
+
+        assertEquals(2, start.startIndex)
+        assertEquals(queue[2], start.startSong)
+    }
+
+    @Test
+    fun `middle duplicate starts at index one`() {
+        val queue = listOf(song(1), song(1), song(1))
+
+        assertEquals(1, resolveQueueStart(queue, startIndex = 1)?.startIndex)
+    }
+
+    @Test
+    fun `first single and last starts are unchanged`() {
+        val queue = listOf(song(1), song(2), song(3))
+
+        assertEquals(0, resolveQueueStart(queue, startIndex = 0)?.startIndex)
+        assertEquals(1, resolveQueueStart(queue, startIndex = 1)?.startIndex)
+        assertEquals(2, resolveQueueStart(queue, startIndex = 2)?.startIndex)
+    }
+
+    @Test
+    fun `invalid start indexes are rejected`() {
+        val queue = listOf(song(1), song(2))
+
+        assertEquals(null, resolveQueueStart(queue, startIndex = -1))
+        assertEquals(null, resolveQueueStart(queue, startIndex = 2))
+        assertEquals(null, resolveQueueStart(emptyList(), startIndex = 0))
+    }
+
+    @Test
+    fun `same id objects retain selected occurrence metadata`() {
+        val queue = listOf(
+            song(1).copy(title = "First metadata"),
+            song(1).copy(title = "Second metadata"),
+        )
+
+        assertEquals("Second metadata", resolveQueueStart(queue, startIndex = 1)?.startSong?.title)
+    }
+
+    @Test
+    fun `pending request retains exact duplicate occurrence`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        val request = PlaybackRequest(queue = queue, startIndex = 2)
+
+        val resumed = resolveQueueStart(request.queue, request.startIndex)!!
+
+        assertEquals(2, resumed.startIndex)
+        assertEquals(queue[2], resumed.startSong)
+    }
 }

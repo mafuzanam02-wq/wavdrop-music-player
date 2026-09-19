@@ -50,6 +50,15 @@ data class PlaylistDetailsUiState(
 internal fun playlistQueueSongs(entries: List<PlaylistSongItem>): List<Song> =
     entries.map { it.song }
 
+internal fun playlistPlaybackStartIndex(
+    visibleEntries: List<PlaylistSongItem>,
+    selectedEntry: PlaylistSongItem,
+): Int? = visibleEntries.indexOfFirst { entry ->
+    entry.playlistId == selectedEntry.playlistId &&
+        entry.position == selectedEntry.position &&
+        entry.songId == selectedEntry.songId
+}.takeIf { it >= 0 }
+
 @HiltViewModel
 class PlaylistDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -159,12 +168,14 @@ class PlaylistDetailsViewModel @Inject constructor(
     }
 
     fun playEntry(entry: PlaylistSongItem, shuffle: Boolean = false) {
-        val songs = uiState.value.visibleEntries.map { it.song }
+        val visibleEntries = uiState.value.visibleEntries
+        val songs = playlistQueueSongs(visibleEntries)
         if (songs.isEmpty()) return
         if (shuffle) {
             playerController.playFromQueueShuffled(queue = songs)
         } else {
-            playerController.playFromQueue(queue = songs, startSong = entry.song)
+            val startIndex = playlistPlaybackStartIndex(visibleEntries, entry) ?: return
+            playerController.playFromQueue(queue = songs, startIndex = startIndex)
         }
     }
 
