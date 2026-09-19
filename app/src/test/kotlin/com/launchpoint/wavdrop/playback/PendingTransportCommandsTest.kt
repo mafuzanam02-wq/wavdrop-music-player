@@ -93,14 +93,16 @@ class PendingTransportCommandsTest {
         // OFF -> ON
         val on = QueueMutation.shuffleToggleModel(
             libraryQueue = queue,
-            currentSongId = 3L,
+            currentPlaybackOrder = queue.indices.toList(),
+            currentPlaybackIndex = 2,
             shuffleEnabled = true,
             random = Random(7),
         )!!
         // ON -> OFF (second toggle, threading the current song through)
         val off = QueueMutation.shuffleToggleModel(
             libraryQueue = queue,
-            currentSongId = on.currentSong.id,
+            currentPlaybackOrder = on.playbackOrder,
+            currentPlaybackIndex = on.currentPlaybackIndex,
             shuffleEnabled = false,
             random = Random(7),
         )!!

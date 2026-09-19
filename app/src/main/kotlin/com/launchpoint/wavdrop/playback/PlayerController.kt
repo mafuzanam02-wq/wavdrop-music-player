@@ -1904,9 +1904,7 @@ class PlayerController @Inject constructor(
 
     fun toggleShuffle() {
         val controller = mediaController
-        val currentSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
-            ?: _nowPlayingState.value.song?.id
-            ?: return
+        val currentIndex = currentPlaybackIndex() ?: return
         val positionMs = controller?.currentPosition?.coerceAtLeast(0L)
             ?: _nowPlayingState.value.positionMs.coerceAtLeast(0L)
         val isPlaying = controller?.isPlaying ?: _nowPlayingState.value.isPlaying
@@ -1914,7 +1912,8 @@ class PlayerController @Inject constructor(
         val newShuffleEnabled = !shuffleEnabled
         val toggleModel = QueueMutation.shuffleToggleModel(
             libraryQueue = libraryQueue,
-            currentSongId = currentSongId,
+            currentPlaybackOrder = playbackOrder,
+            currentPlaybackIndex = currentIndex,
             shuffleEnabled = newShuffleEnabled,
         ) ?: return
 
@@ -2756,23 +2755,12 @@ class PlayerController @Inject constructor(
     private fun syncNowPlayingState(fromTransition: Boolean = false, notifyStats: Boolean = true) {
         val controller = mediaController
         val preservePlan = pendingPreserveSearchPlanForSync(controller, fromTransition)
-        val syncedCurrentSongId = if (playerQueueNeedsSync) {
-            controller?.currentMediaItem?.mediaId?.toLongOrNull() ?: _nowPlayingState.value.song?.id
-        } else {
-            null
-        }
         val currentPlaybackIndex = preservePlan?.currentIndex?.takeIf { it in playbackQueue.indices }
-            ?: syncedCurrentSongId
-                ?.let { id -> playbackQueue.indexOfFirst { it.id == id } }
-                ?.takeIf { it >= 0 }
+            ?: (if (playerQueueNeedsSync) currentPlaybackIndex() else null)
             ?: controller?.currentMediaItemIndex?.takeIf { it in playbackQueue.indices }
             ?: _nowPlayingState.value.currentIndex.takeIf { it in playbackQueue.indices }
             ?: 0
-        val currentSong = preservePlan?.currentSongId
-            ?.let { id -> playbackQueue.firstOrNull { it.id == id } }
-            ?: syncedCurrentSongId
-                ?.let { id -> libraryQueue.firstOrNull { it.id == id } }
-            ?: playbackQueue.getOrNull(currentPlaybackIndex)
+        val currentSong = playbackQueue.getOrNull(currentPlaybackIndex)
 
         val songChanged = currentSong != null && currentSong.id != _nowPlayingState.value.song?.id
         if (DEBUG_STATS && (fromTransition || songChanged)) {

@@ -24,15 +24,19 @@ internal object QueueMutation {
         val playbackQueue: List<Song>,
     )
 
+    /** Resolves the current queue occurrence through the old playback order, never by song ID. */
     fun shuffleToggleModel(
         libraryQueue: List<Song>,
-        currentSongId: Long,
+        currentPlaybackOrder: List<Int>,
+        currentPlaybackIndex: Int,
         shuffleEnabled: Boolean,
         random: kotlin.random.Random = kotlin.random.Random.Default,
     ): ShuffleToggleResult? {
-        val currentSourceIndex = libraryQueue.indexOfFirst { it.id == currentSongId }
-            .takeIf { it >= 0 }
-            ?: return null
+        if (currentPlaybackOrder.size != libraryQueue.size ||
+            currentPlaybackOrder.toSet().size != libraryQueue.size ||
+            currentPlaybackOrder.any { it !in libraryQueue.indices }
+        ) return null
+        val currentSourceIndex = currentPlaybackOrder.getOrNull(currentPlaybackIndex) ?: return null
         val playbackOrder = QueueNavigator.buildPlaybackOrder(
             queueSize = libraryQueue.size,
             currentIndex = currentSourceIndex,

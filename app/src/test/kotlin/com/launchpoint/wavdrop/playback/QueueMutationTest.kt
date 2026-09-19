@@ -26,7 +26,8 @@ class QueueMutationTest {
     fun `shuffle toggle model preserves current song identity`() {
         val result = QueueMutation.shuffleToggleModel(
             libraryQueue = queue,
-            currentSongId = c.id,
+            currentPlaybackOrder = queue.indices.toList(),
+            currentPlaybackIndex = 2,
             shuffleEnabled = true,
             random = Random(7),
         )!!
@@ -39,7 +40,8 @@ class QueueMutationTest {
     fun `shuffle toggle model does not require replacing current item`() {
         val result = QueueMutation.shuffleToggleModel(
             libraryQueue = queue,
-            currentSongId = c.id,
+            currentPlaybackOrder = queue.indices.toList(),
+            currentPlaybackIndex = 2,
             shuffleEnabled = true,
             random = Random(7),
         )!!
@@ -51,7 +53,8 @@ class QueueMutationTest {
     fun `next after shuffle follows shuffled order`() {
         val result = QueueMutation.shuffleToggleModel(
             libraryQueue = queue,
-            currentSongId = c.id,
+            currentPlaybackOrder = queue.indices.toList(),
+            currentPlaybackIndex = 2,
             shuffleEnabled = true,
             random = Random(7),
         )!!
@@ -69,7 +72,8 @@ class QueueMutationTest {
     fun `next after shuffle off follows source order`() {
         val result = QueueMutation.shuffleToggleModel(
             libraryQueue = queue,
-            currentSongId = c.id,
+            currentPlaybackOrder = queue.indices.toList(),
+            currentPlaybackIndex = 2,
             shuffleEnabled = false,
             random = Random(7),
         )!!
@@ -81,6 +85,87 @@ class QueueMutationTest {
 
         assertEquals(listOf(a, b, c, d, e), result.playbackQueue)
         assertEquals(d, result.playbackQueue[nextPlaybackIndex])
+    }
+
+    @Test
+    fun `shuffle on preserves second duplicate occurrence`() {
+        val library = listOf(a, b, a, c)
+        val result = QueueMutation.shuffleToggleModel(
+            library, library.indices.toList(), 2, true, Random(7),
+        )!!
+
+        assertEquals(2, result.playbackOrder[result.currentPlaybackIndex])
+        assertEquals(0, result.currentPlaybackIndex)
+        assertEquals(library[2], result.currentSong)
+    }
+
+    @Test
+    fun `shuffle off maps second duplicate back to source position`() {
+        val library = listOf(a, b, a, c)
+        val on = QueueMutation.shuffleToggleModel(
+            library, library.indices.toList(), 2, true, Random(7),
+        )!!
+        val off = QueueMutation.shuffleToggleModel(
+            library, on.playbackOrder, on.currentPlaybackIndex, false,
+        )!!
+
+        assertEquals(library.indices.toList(), off.playbackOrder)
+        assertEquals(2, off.currentPlaybackIndex)
+        assertEquals(2, off.playbackOrder[off.currentPlaybackIndex])
+    }
+
+    @Test
+    fun `three duplicates retain middle and last occurrences`() {
+        val library = listOf(a, a, b, a)
+        for (sourceIndex in listOf(1, 3)) {
+            val result = QueueMutation.shuffleToggleModel(
+                library, library.indices.toList(), sourceIndex, true, Random(7),
+            )!!
+            assertEquals(sourceIndex, result.playbackOrder[result.currentPlaybackIndex])
+        }
+    }
+
+    @Test
+    fun `duplicates on both sides of current do not collapse`() {
+        val library = listOf(a, b, a, c, a)
+        val result = QueueMutation.shuffleToggleModel(
+            library, library.indices.toList(), 2, true, Random(7),
+        )!!
+
+        assertEquals(2, result.playbackOrder[result.currentPlaybackIndex])
+        assertEquals(library.indices.toSet(), result.playbackOrder.toSet())
+    }
+
+    @Test
+    fun `already shuffled playback order maps current through source index`() {
+        val library = listOf(a, b, a, c)
+        val shuffledOrder = listOf(3, 2, 0, 1)
+        val result = QueueMutation.shuffleToggleModel(
+            library, shuffledOrder, 1, false,
+        )!!
+
+        assertEquals(2, result.currentPlaybackIndex)
+        assertEquals(2, result.playbackOrder[result.currentPlaybackIndex])
+    }
+
+    @Test
+    fun `equal ids with different metadata preserve selected occurrence`() {
+        val laterA = a.copy(title = "Later occurrence", duration = 240_000L)
+        val library = listOf(a, b, laterA, c)
+        val result = QueueMutation.shuffleToggleModel(
+            library, library.indices.toList(), 2, true, Random(7),
+        )!!
+
+        assertEquals(laterA, result.currentSong)
+        assertEquals(laterA, result.playbackQueue[result.currentPlaybackIndex])
+    }
+
+    @Test
+    fun `invalid current playback index is rejected without id guessing`() {
+        val library = listOf(a, b, a, c)
+        assertNull(QueueMutation.shuffleToggleModel(library, library.indices.toList(), -1, true))
+        assertNull(QueueMutation.shuffleToggleModel(library, library.indices.toList(), 4, true))
+        assertNull(QueueMutation.shuffleToggleModel(library, listOf(0, 1, 1, 3), 2, true))
     }
 
     // ── remove ──────────────────────────────────────────────────────────────────

@@ -90,6 +90,22 @@ class PlayerControllerCurrentIndexResolverTest {
     }
 
     @Test
+    fun `dirty player queue retains later duplicate occurrence`() {
+        val queue = listOf(a, b, a, c)
+
+        val result = resolveCurrentPlaybackIndex(
+            playbackQueue = queue,
+            controllerIndex = 0,
+            controllerSongId = a.id,
+            stateIndex = 2,
+            stateSongId = a.id,
+            playerQueueNeedsSync = true,
+        )
+
+        assertEquals(2, result)
+    }
+
+    @Test
     fun `unique controller id fallback is allowed when controller index is unusable`() {
         val queue = listOf(a, b, c)
 
