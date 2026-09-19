@@ -26,6 +26,15 @@ internal object PlaybackSessionRules {
         return playbackOrder
     }
 
+    fun mapSavedQueue(
+        queueSongIds: List<Long>,
+        availableSongs: List<Song>,
+    ): List<Song>? {
+        if (queueSongIds.isEmpty()) return null
+        val songsById = availableSongs.associateBy { it.id }
+        return queueSongIds.map { songId -> songsById[songId] ?: return null }
+    }
+
     fun restorePlaybackOrder(
         savedPlaybackOrder: List<Int>?,
         queueSize: Int,
@@ -75,11 +84,14 @@ internal object PlaybackSessionRules {
         var adjusted = snapshot
 
         if (!settings.restoreQueue) {
-            val singleId = adjusted.currentSongId
-                ?: adjusted.queueSongIds.getOrNull(adjusted.currentIndex)
-            if (singleId != null) {
+            val startIndex = resolveStartIndex(
+                sessionSongId = adjusted.currentSongId,
+                sessionIndex = adjusted.currentIndex,
+                queueSongIds = adjusted.queueSongIds,
+            )
+            if (startIndex != null) {
                 adjusted = adjusted.copy(
-                    queueSongIds = listOf(singleId),
+                    queueSongIds = listOf(adjusted.queueSongIds[startIndex]),
                     playbackOrder = null,
                     currentIndex = 0,
                 )
@@ -93,16 +105,30 @@ internal object PlaybackSessionRules {
         return adjusted
     }
 
-    fun resolveStartSong(
+    fun resolveStartLibraryIndex(
         sessionSongId: Long?,
         sessionIndex: Int,
         mappedQueue: List<Song>,
-    ): Song? {
-        if (mappedQueue.isEmpty()) return null
-        if (sessionSongId != null) {
-            val byId = mappedQueue.firstOrNull { it.id == sessionSongId }
-            if (byId != null) return byId
+    ): Int? = resolveStartIndex(
+        sessionSongId = sessionSongId,
+        sessionIndex = sessionIndex,
+        queueSongIds = mappedQueue.map { it.id },
+    )
+
+    private fun resolveStartIndex(
+        sessionSongId: Long?,
+        sessionIndex: Int,
+        queueSongIds: List<Long>,
+    ): Int? {
+        if (sessionIndex in queueSongIds.indices &&
+            (sessionSongId == null || queueSongIds[sessionIndex] == sessionSongId)
+        ) {
+            return sessionIndex
         }
-        return mappedQueue.getOrNull(clampIndex(sessionIndex, mappedQueue.size))
+
+        if (sessionSongId == null) return null
+        return queueSongIds.indices
+            .filter { queueSongIds[it] == sessionSongId }
+            .singleOrNull()
     }
 }

@@ -180,50 +180,135 @@ class PlaybackSessionRulesTest {
         assertEquals(RepeatMode.OFF, PlaybackSessionRules.parseRepeatMode(null))
     }
 
-    // ── resolveStartSong ──────────────────────────────────────────────────────
+    // ── resolveStartLibraryIndex ──────────────────────────────────────────────
 
     @Test
-    fun `resolveStartSong matches by id`() {
-        val queue = listOf(song(1), song(2), song(3))
-        val result = PlaybackSessionRules.resolveStartSong(
-            sessionSongId = 2L,
-            sessionIndex  = 0,
-            mappedQueue   = queue,
+    fun `saved index restores second duplicate occurrence`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        val result = PlaybackSessionRules.resolveStartLibraryIndex(
+            sessionSongId = 1L,
+            sessionIndex = 2,
+            mappedQueue = queue,
         )
-        assertEquals(2L, result?.id)
+        assertEquals(2, result)
     }
 
     @Test
-    fun `resolveStartSong id not found falls back to index`() {
+    fun `saved index restores middle of three duplicate occurrences`() {
+        val queue = listOf(song(1), song(1), song(1))
+        val result = PlaybackSessionRules.resolveStartLibraryIndex(
+            sessionSongId = 1L,
+            sessionIndex = 1,
+            mappedQueue = queue,
+        )
+        assertEquals(1, result)
+    }
+
+    @Test
+    fun `valid saved position wins`() {
         val queue = listOf(song(1), song(2), song(3))
-        val result = PlaybackSessionRules.resolveStartSong(
-            sessionSongId = 99L,
+        val result = PlaybackSessionRules.resolveStartLibraryIndex(
+            sessionSongId = 2L,
             sessionIndex  = 1,
             mappedQueue   = queue,
         )
-        assertEquals(2L, result?.id)
+        assertEquals(1, result)
     }
 
     @Test
-    fun `resolveStartSong null id uses index`() {
+    fun `invalid saved index falls back to unique song id`() {
+        val queue = listOf(song(1), song(2), song(3))
+        val result = PlaybackSessionRules.resolveStartLibraryIndex(
+            sessionSongId = 2L,
+            sessionIndex  = 99,
+            mappedQueue   = queue,
+        )
+        assertEquals(1, result)
+    }
+
+    @Test
+    fun `valid saved index works without song id`() {
         val queue = listOf(song(10), song(20))
-        val result = PlaybackSessionRules.resolveStartSong(
+        val result = PlaybackSessionRules.resolveStartLibraryIndex(
             sessionSongId = null,
             sessionIndex  = 1,
             mappedQueue   = queue,
         )
-        assertEquals(20L, result?.id)
+        assertEquals(1, result)
     }
 
     @Test
-    fun `resolveStartSong empty queue returns null`() {
+    fun `invalid saved index with duplicate song id is rejected`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
         assertNull(
-            PlaybackSessionRules.resolveStartSong(
+            PlaybackSessionRules.resolveStartLibraryIndex(
+                sessionSongId = 1L,
+                sessionIndex = 99,
+                mappedQueue = queue,
+            )
+        )
+    }
+
+    @Test
+    fun `inconsistent saved index uses only unambiguous id recovery`() {
+        val queue = listOf(song(1), song(2), song(3))
+        assertEquals(
+            1,
+            PlaybackSessionRules.resolveStartLibraryIndex(
+                sessionSongId = 2L,
+                sessionIndex = 0,
+                mappedQueue = queue,
+            ),
+        )
+    }
+
+    @Test
+    fun `inconsistent saved index with duplicate id is rejected`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        assertNull(
+            PlaybackSessionRules.resolveStartLibraryIndex(
+                sessionSongId = 1L,
+                sessionIndex = 1,
+                mappedQueue = queue,
+            )
+        )
+    }
+
+    @Test
+    fun `empty queue has no resolvable occurrence`() {
+        assertNull(
+            PlaybackSessionRules.resolveStartLibraryIndex(
                 sessionSongId = 1L,
                 sessionIndex  = 0,
                 mappedQueue   = emptyList(),
             )
         )
+    }
+
+    @Test
+    fun `shuffled order maps saved library occurrence to playback index`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        val libraryIndex = PlaybackSessionRules.resolveStartLibraryIndex(1L, 2, queue)!!
+        val order = PlaybackSessionRules.restorePlaybackOrder(
+            savedPlaybackOrder = listOf(2, 3, 0, 1),
+            queueSize = queue.size,
+            currentQueueIndex = libraryIndex,
+            shuffleEnabled = true,
+        )
+        assertEquals(0, order.indexOf(libraryIndex))
+    }
+
+    @Test
+    fun `saved queue mapping preserves duplicate positions`() {
+        val available = listOf(song(1), song(2), song(3))
+        val mapped = PlaybackSessionRules.mapSavedQueue(listOf(1, 2, 1, 3), available)
+        assertEquals(listOf(1L, 2L, 1L, 3L), mapped?.map { it.id })
+    }
+
+    @Test
+    fun `changed library rejects incomplete saved queue`() {
+        val available = listOf(song(1), song(3))
+        assertNull(PlaybackSessionRules.mapSavedQueue(listOf(1, 2, 3), available))
     }
 
     // ── applyResumeBehavior ───────────────────────────────────────────────────

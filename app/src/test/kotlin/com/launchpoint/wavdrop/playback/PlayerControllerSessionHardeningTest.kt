@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.playback
 
+import com.launchpoint.wavdrop.data.model.Song
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +12,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlayerControllerSessionHardeningTest {
+
+    private fun song(id: Long) = Song(
+        id = id, title = "T$id", artist = "A", album = "B",
+        albumId = 0L, duration = 180_000L, uri = "content://media/$id",
+        dateAdded = 0L, trackNumber = 0, year = 2020,
+    )
 
     @Test
     fun `empty logical queue clears persisted session`() {
@@ -43,6 +50,42 @@ class PlayerControllerSessionHardeningTest {
                 queueIsEmpty = false,
             ),
         )
+    }
+
+    @Test
+    fun `session save resolves second duplicate from playback position`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        assertEquals(2, resolveSessionCurrentLibraryIndex(queue, queue.indices.toList(), 2, null, 1L))
+    }
+
+    @Test
+    fun `session save resolves middle of three duplicates`() {
+        val queue = listOf(song(1), song(1), song(1))
+        assertEquals(1, resolveSessionCurrentLibraryIndex(queue, queue.indices.toList(), 1, null, 1L))
+    }
+
+    @Test
+    fun `session save maps shuffled playback position to library occurrence`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        assertEquals(2, resolveSessionCurrentLibraryIndex(queue, listOf(2, 3, 0, 1), 0, null, 1L))
+    }
+
+    @Test
+    fun `session save rejects invalid position with ambiguous duplicate id`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        assertEquals(null, resolveSessionCurrentLibraryIndex(queue, queue.indices.toList(), 99, null, 1L))
+    }
+
+    @Test
+    fun `session save permits unique song id fallback`() {
+        val queue = listOf(song(1), song(2), song(3))
+        assertEquals(1, resolveSessionCurrentLibraryIndex(queue, queue.indices.toList(), 99, null, 2L))
+    }
+
+    @Test
+    fun `session save uses exact library index before song id fallback`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        assertEquals(2, resolveSessionCurrentLibraryIndex(queue, emptyList(), null, 2, 1L))
     }
 
     @Test

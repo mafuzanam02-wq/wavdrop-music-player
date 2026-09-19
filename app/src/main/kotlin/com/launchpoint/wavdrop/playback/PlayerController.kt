@@ -62,6 +62,33 @@ internal fun playbackSessionPersistenceAction(
     else               -> PlaybackSessionPersistenceAction.SAVE
 }
 
+internal fun resolveSessionCurrentLibraryIndex(
+    libraryQueue: List<Song>,
+    playbackOrder: List<Int>,
+    currentPlaybackIndex: Int?,
+    exactCurrentLibraryIndex: Int?,
+    currentSongId: Long?,
+): Int? {
+    val validatedOrder = PlaybackSessionRules.validatePlaybackOrder(
+        playbackOrder = playbackOrder,
+        queueSize = libraryQueue.size,
+    )
+    if (validatedOrder != null) {
+        currentPlaybackIndex
+            ?.takeIf { it in validatedOrder.indices }
+            ?.let { return validatedOrder[it] }
+    }
+
+    exactCurrentLibraryIndex
+        ?.takeIf { it in libraryQueue.indices }
+        ?.let { return it }
+
+    if (currentSongId == null) return null
+    return libraryQueue.indices
+        .filter { libraryQueue[it].id == currentSongId }
+        .singleOrNull()
+}
+
 internal class PlaybackSessionPersistenceGate {
     private val mutex = Mutex()
     private val revisionLock = Any()
@@ -489,7 +516,6 @@ class PlayerController @Inject constructor(
     private var pendingPlaybackRequest: PlaybackRequest? = null
     private var pendingPreserveSearchRequest: PreserveSearchRequest? = null
     private var pendingExternalPlaybackRequest: ExternalPlaybackRequest? = null
-    private var pendingRestorePositionMs: Long? = null
     private var pendingPreserveSearchPlan: SearchPlaybackPlan? = null
     // Single bounded pending queue-jump (Recently Played tap deferred while the controller is
     // unavailable). Latest tap wins; drained on reconnect after the queue-replacing requests.
@@ -937,18 +963,16 @@ class PlayerController @Inject constructor(
         val playRequest = pendingPlaybackRequest
         val preserveSearchRequest = pendingPreserveSearchRequest
         val externalRequest = pendingExternalPlaybackRequest
-        val restorePos = pendingRestorePositionMs
         val jumpRequest = pendingQueueJumpRequest
         pendingPlaybackRequest = null
         pendingPreserveSearchRequest = null
         pendingExternalPlaybackRequest = null
-        pendingRestorePositionMs = null
-        // A queue jump is subordinate to any queue-replacing/restore request that also accumulated
+        // A queue jump is subordinate to any queue-replacing request that also accumulated
         // while disconnected: the later replace supersedes the older jump (the queue it referred to
         // is gone). Cleared here so a superseded jump can never fire against a replacement queue.
         pendingQueueJumpRequest = null
         // Transport intents (Phase 7) are lowest precedence — captured and cleared here so a
-        // queue-replacing/restore/jump branch below supersedes them (a fresh queue invalidates a
+        // queue-replacing/jump branch below supersedes them (a fresh queue invalidates a
         // stale play/pause/seek/navigation). They apply only in the no-queue-change (else) branch.
         val navigation = pendingNavigation
         val playWhenReady = pendingPlayWhenReady
@@ -970,26 +994,6 @@ class PlayerController @Inject constructor(
                 startSong = playRequest.startSong,
                 preservePlaybackOrder = playRequest.preservePlaybackOrder,
             )
-            restorePos != null && libraryQueue.isNotEmpty() -> {
-                // libraryQueue/playbackOrder/playbackQueue were set by
-                // restoreSessionIfNeeded; ExoPlayer was not ready at that time.
-                val startLibraryIndex = _nowPlayingState.value.song?.id
-                    ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
-                    ?.takeIf { it >= 0 } ?: 0
-                val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex)
-                    .takeIf { it >= 0 } ?: 0
-                controller.repeatMode = repeatMode.toPlayerRepeatMode()
-                controller.shuffleModeEnabled = false
-                // Load ExoPlayer with playbackQueue (shuffle order).
-                controller.setMeasuredMediaItems(
-                    operation = "deferred_restore",
-                    songs = playbackQueue,
-                    startIndex = startPlaybackIndex,
-                    positionMs = restorePos,
-                )
-                controller.prepare()
-                syncNowPlayingState()
-            }
             // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
             // against the (possibly mutated) queue so it never seeks a different song.
             jumpRequest != null -> executePendingQueueJump(controller, jumpRequest)
@@ -2010,13 +2014,16 @@ class PlayerController @Inject constructor(
             val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, resumeSettings)
                 ?: return@withLock PlayerHydrationResult.FilteredBySettings
 
-            val idSet = availableSongs.associateBy { it.id }
-            val mappedQueue = snapshot.queueSongIds.mapNotNull { idSet[it] }
-            val startSong = PlaybackSessionRules.resolveStartSong(
+            val mappedQueue = PlaybackSessionRules.mapSavedQueue(
+                queueSongIds = snapshot.queueSongIds,
+                availableSongs = availableSongs,
+            ) ?: return@withLock PlayerHydrationResult.NoResolvableSong
+            val startLibraryIndex = PlaybackSessionRules.resolveStartLibraryIndex(
                 sessionSongId = snapshot.currentSongId,
-                sessionIndex = PlaybackSessionRules.clampIndex(snapshot.currentIndex, mappedQueue.size),
+                sessionIndex = snapshot.currentIndex,
                 mappedQueue = mappedQueue,
             ) ?: return@withLock PlayerHydrationResult.NoResolvableSong
+            val startSong = mappedQueue[startLibraryIndex]
 
             if (hasActivePlaybackQueue()) return@withLock PlayerHydrationResult.SkippedActiveQueue
 
@@ -2034,7 +2041,6 @@ class PlayerController @Inject constructor(
             libraryQueue = mappedQueue
             shuffleEnabled = snapshot.shuffleEnabled
             repeatMode = snapshot.repeatMode
-            val startLibraryIndex = mappedQueue.indexOf(startSong).coerceAtLeast(0)
             restorePlaybackQueue(
                 currentQueueIndex = startLibraryIndex,
                 savedPlaybackOrder = snapshot.playbackOrder,
@@ -2475,17 +2481,19 @@ class PlayerController @Inject constructor(
         lastPositionCheckpointMs = positionMs
         val preservePlan = pendingPreserveSearchPlan
 
-        val currentLibraryIndex = preservePlan?.currentIndex?.takeIf { it in libraryQueue.indices }
-            ?: controller?.currentMediaItem?.mediaId?.toLongOrNull()
-                ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
-                ?.takeIf { it >= 0 }
-            ?: libraryQueue.indexOfFirst { it.id == state.song?.id }.takeIf { it >= 0 }
-            ?: 0
+        val currentLibraryIndex = resolveSessionCurrentLibraryIndex(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            currentPlaybackIndex = preservePlan?.currentIndex ?: currentPlaybackIndex(),
+            exactCurrentLibraryIndex = preservePlan?.currentIndex,
+            currentSongId = preservePlan?.currentSongId ?: state.song?.id,
+        ) ?: return
+        val currentSongId = libraryQueue[currentLibraryIndex].id
 
         val snapshot = PlaybackSessionSnapshot(
             queueSongIds   = libraryQueue.map { it.id },
             playbackOrder  = playbackOrder.takeIf { it.size == libraryQueue.size },
-            currentSongId  = preservePlan?.currentSongId ?: state.song?.id,
+            currentSongId  = currentSongId,
             currentIndex   = currentLibraryIndex,
             positionMs     = positionMs,
             repeatMode     = repeatMode,
