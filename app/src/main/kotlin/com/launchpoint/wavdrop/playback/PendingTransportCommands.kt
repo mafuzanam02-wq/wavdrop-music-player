@@ -1,5 +1,7 @@
 package com.launchpoint.wavdrop.playback
 
+import com.launchpoint.wavdrop.data.model.Song
+
 /**
  * Typed, bounded model for user transport commands captured while the [MediaController] is
  * temporarily unavailable (Phase 7 — controller-null hardening).
@@ -11,8 +13,8 @@ package com.launchpoint.wavdrop.playback
  * Supersession rules (mirrored in PlayerController and covered by PendingTransportCommandsTest):
  *  - Play/Pause  — latest DESIRED state wins (a later PAUSE replaces an earlier PLAY). Derived from
  *    authoritative playback state at tap time; a raw toggle is never replayed.
- *  - Seek        — latest position wins, BOUND to the track it was issued against; dropped if the
- *    current track changed before reconnect (never seeks a different song to an old position).
+ *  - Seek        — latest position wins, BOUND to its queue occurrence; dropped if generation,
+ *    index, indexed song, or the current occurrence changes before reconnect.
  *  - Navigation  — at most one pending next/previous intent, latest direction wins; recomputed
  *    against the live queue at execution so a mutated queue cannot replay a stale skip.
  *  - Any queue-replacing/restore/jump request captured while disconnected supersedes all of the
@@ -20,19 +22,52 @@ package com.launchpoint.wavdrop.playback
  */
 internal enum class NavigationIntent { NEXT, PREVIOUS }
 
-internal data class PendingSeek(val positionMs: Long, val targetSongId: Long)
+internal data class PendingSeek(
+    val queueGeneration: Long,
+    val playbackIndex: Int,
+    val targetSongId: Long,
+    val positionMs: Long,
+)
+
+internal sealed interface PendingSeekResolution {
+    data class Apply(val positionMs: Long) : PendingSeekResolution
+    data object Discard : PendingSeekResolution
+}
+
+internal fun capturePendingSeek(
+    queueGeneration: Long,
+    playbackQueue: List<Song>,
+    currentPlaybackIndex: Int?,
+    positionMs: Long,
+): PendingSeek? {
+    val playbackIndex = currentPlaybackIndex?.takeIf { it in playbackQueue.indices } ?: return null
+    return PendingSeek(
+        queueGeneration = queueGeneration,
+        playbackIndex = playbackIndex,
+        targetSongId = playbackQueue[playbackIndex].id,
+        positionMs = positionMs,
+    )
+}
 
 internal object PendingTransport {
 
     /** Desired play/pause state derived at tap time (STATE_INTENT) — not a raw toggle to replay. */
     fun desiredPlayWhenReady(currentlyPlaying: Boolean): Boolean = !currentlyPlaying
 
-    /**
-     * A deferred seek applies only when its captured track is still current on reconnect; otherwise
-     * it is stale and must be dropped so it never seeks a different song to an old position.
-     */
-    fun shouldApplySeek(seek: PendingSeek, currentSongId: Long?): Boolean =
-        currentSongId != null && currentSongId == seek.targetSongId
+    fun resolveSeek(
+        seek: PendingSeek,
+        currentQueueGeneration: Long,
+        playbackQueue: List<Song>,
+        currentPlaybackIndex: Int?,
+    ): PendingSeekResolution {
+        if (seek.queueGeneration != currentQueueGeneration) return PendingSeekResolution.Discard
+        if (seek.playbackIndex !in playbackQueue.indices) return PendingSeekResolution.Discard
+        if (playbackQueue[seek.playbackIndex].id != seek.targetSongId) {
+            return PendingSeekResolution.Discard
+        }
+        if (currentPlaybackIndex != seek.playbackIndex) return PendingSeekResolution.Discard
+        return PendingSeekResolution.Apply(seek.positionMs)
+    }
 }
 
 /**

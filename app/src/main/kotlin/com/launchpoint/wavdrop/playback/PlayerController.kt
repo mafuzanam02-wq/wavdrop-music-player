@@ -542,7 +542,7 @@ class PlayerController @Inject constructor(
     // (lowest precedence: a queue-replacing/restore/jump request supersedes them). See
     // [PendingTransport] for the supersession/stale rules.
     private var pendingPlayWhenReady: Boolean? = null       // STATE_INTENT: desired play(true)/pause(false)
-    private var pendingSeek: PendingSeek? = null            // latest seek, bound to its target song
+    private var pendingSeek: PendingSeek? = null            // latest seek, bound to its queue occurrence
     private var pendingNavigation: NavigationIntent? = null // latest next/previous; recomputed on drain
     private val sessionHydrationMutex = Mutex()
     private val sessionPersistenceGate = PlaybackSessionPersistenceGate()
@@ -1074,12 +1074,24 @@ class PlayerController @Inject constructor(
         }
         navigation?.let { navigate(controller, it) }
         if (seek != null) {
-            val currentSongId = controller.currentMediaItem?.mediaId?.toLongOrNull()
-            if (PendingTransport.shouldApplySeek(seek, currentSongId)) {
-                val duration = controller.duration.takeIf { it > 0L }
-                controller.seekTo(if (duration != null) seek.positionMs.coerceIn(0L, duration) else seek.positionMs)
-            } else {
-                Log.w(TAG, "Discarding stale pending seek targetSongId=${seek.targetSongId}")
+            when (val resolution = PendingTransport.resolveSeek(
+                seek = seek,
+                currentQueueGeneration = queueGeneration,
+                playbackQueue = playbackQueue,
+                currentPlaybackIndex = currentPlaybackIndex(),
+            )) {
+                is PendingSeekResolution.Apply -> {
+                    val duration = controller.duration.takeIf { it > 0L }
+                    controller.seekTo(
+                        if (duration != null) resolution.positionMs.coerceIn(0L, duration)
+                        else resolution.positionMs,
+                    )
+                }
+                PendingSeekResolution.Discard -> Log.w(
+                    TAG,
+                    "Discarding stale pending seek generation=${seek.queueGeneration} " +
+                        "index=${seek.playbackIndex} songId=${seek.targetSongId}",
+                )
             }
         }
         playWhenReady?.let { if (it) controller.play() else controller.pause() }
@@ -2005,11 +2017,14 @@ class PlayerController @Inject constructor(
         val clamped = positionMs.coerceIn(0L, if (duration > 0) duration else positionMs)
         val controller = mediaController
         if (controller == null) {
-            // Defer the latest seek, BOUND to the current song. On reconnect it is applied only if
-            // that song is still current (see drainPendingRequests) — a track change before
-            // reconnect drops it rather than seeking a different song to this position.
-            val songId = _nowPlayingState.value.song?.id ?: return
-            pendingSeek = PendingSeek(positionMs = clamped, targetSongId = songId) // latest wins
+            // Defer only when the exact app-owned occurrence is known. A song-ID fallback would
+            // collapse duplicate occurrences and could seek the wrong copy after reconnect.
+            pendingSeek = capturePendingSeek(
+                queueGeneration = queueGeneration,
+                playbackQueue = playbackQueue,
+                currentPlaybackIndex = currentPlaybackIndex(),
+                positionMs = clamped,
+            ) ?: return // Conservative no-op when occurrence identity cannot be established.
             _nowPlayingState.update { it.copy(positionMs = clamped) } // optimistic; corrected on sync
             ensureControllerConnection()
             return

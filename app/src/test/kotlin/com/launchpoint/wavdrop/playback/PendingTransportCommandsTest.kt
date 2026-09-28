@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.playback
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -20,22 +21,135 @@ class PendingTransportCommandsTest {
     // ── Seek: bound to the track it was issued against ──────────────────────────
 
     @Test
-    fun `deferred seek applies when the target track is still current`() {
-        val seek = PendingSeek(positionMs = 42_000L, targetSongId = 7L)
-        assertTrue(PendingTransport.shouldApplySeek(seek, currentSongId = 7L))
+    fun `A same occurrence and generation applies`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        val seek = capturePendingSeek(10L, queue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Apply(42_000L),
+            PendingTransport.resolveSeek(seek, 10L, queue, 2),
+        )
     }
 
     @Test
-    fun `deferred seek is dropped when the current track changed`() {
-        val seek = PendingSeek(positionMs = 42_000L, targetSongId = 7L)
-        // Queue advanced to a different song before reconnect — must NOT seek the wrong track.
-        assertFalse(PendingTransport.shouldApplySeek(seek, currentSongId = 8L))
+    fun `B duplicate song at another occurrence is discarded`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        val seek = capturePendingSeek(10L, queue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 10L, queue, 0),
+        )
     }
 
     @Test
-    fun `deferred seek is dropped when there is no current track`() {
-        val seek = PendingSeek(positionMs = 42_000L, targetSongId = 7L)
-        assertFalse(PendingTransport.shouldApplySeek(seek, currentSongId = null))
+    fun `C generation change with same song is discarded`() {
+        val oldQueue = listOf(song(1), song(2), song(1))
+        val replacement = listOf(song(4), song(1), song(5))
+        val seek = capturePendingSeek(10L, oldQueue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 11L, replacement, 1),
+        )
+    }
+
+    @Test
+    fun `D generation change with same index and song is discarded`() {
+        val queue = listOf(song(1), song(2), song(1))
+        val seek = capturePendingSeek(10L, queue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 11L, queue, 2),
+        )
+    }
+
+    @Test
+    fun `E captured index outside current queue is discarded`() {
+        val oldQueue = listOf(song(1), song(2), song(3))
+        val seek = capturePendingSeek(10L, oldQueue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 10L, oldQueue.take(2), 1),
+        )
+    }
+
+    @Test
+    fun `F captured index now holding another song is discarded`() {
+        val oldQueue = listOf(song(1), song(2), song(3))
+        val changedQueue = listOf(song(1), song(2), song(4))
+        val seek = capturePendingSeek(10L, oldQueue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 10L, changedQueue, 2),
+        )
+    }
+
+    @Test
+    fun `G normal non duplicate reconnect applies`() {
+        val queue = listOf(song(1), song(2), song(3))
+        val seek = capturePendingSeek(10L, queue, 1, 30_000L)!!
+        assertEquals(
+            PendingSeekResolution.Apply(30_000L),
+            PendingTransport.resolveSeek(seek, 10L, queue, 1),
+        )
+    }
+
+    @Test
+    fun `H navigation to another occurrence discards stale seek`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        val seek = capturePendingSeek(10L, queue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 10L, queue, 3),
+        )
+    }
+
+    @Test
+    fun `I pending queue jump to another occurrence discards stale seek`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        val seek = capturePendingSeek(10L, queue, 2, 42_000L)!!
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 10L, queue, 0),
+        )
+    }
+
+    @Test
+    fun `J queue replacement before reconnect discards seek`() {
+        val queue = listOf(song(1), song(2), song(1))
+        val seek = capturePendingSeek(10L, queue, 2, 45_000L)!!
+        val replacement = listOf(song(4), song(5), song(1))
+        assertEquals(
+            PendingSeekResolution.Discard,
+            PendingTransport.resolveSeek(seek, 11L, replacement, 2),
+        )
+    }
+
+    @Test
+    fun `K latest seek on same occurrence replaces older position`() {
+        val queue = listOf(song(1), song(2), song(3))
+        var pending = capturePendingSeek(10L, queue, 1, 10_000L)
+        pending = capturePendingSeek(10L, queue, 1, 30_000L)
+        assertEquals(
+            PendingSeekResolution.Apply(30_000L),
+            PendingTransport.resolveSeek(pending!!, 10L, queue, 1),
+        )
+    }
+
+    @Test
+    fun `L latest seek on new occurrence replaces older occurrence intent`() {
+        val queue = listOf(song(1), song(2), song(1), song(3))
+        var pending = capturePendingSeek(10L, queue, 2, 10_000L)
+        pending = capturePendingSeek(10L, queue, 0, 25_000L)
+        assertEquals(
+            PendingSeekResolution.Apply(25_000L),
+            PendingTransport.resolveSeek(pending!!, 10L, queue, 0),
+        )
+    }
+
+    @Test
+    fun `unresolved occurrence is not captured`() {
+        val queue = listOf(song(1), song(2), song(3))
+        assertNull(capturePendingSeek(10L, queue, null, 30_000L))
+        assertNull(capturePendingSeek(10L, queue, 4, 30_000L))
     }
 
     // ── Bounded model shape (single latest-wins slots, not command lists) ───────
