@@ -23,9 +23,11 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.MainActivity
 import com.launchpoint.wavdrop.R
+import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.AudioEnhancementsRepository
@@ -56,6 +58,7 @@ import kotlinx.coroutines.launch
 class PlaybackService : MediaSessionService() {
 
     @Inject lateinit var resumeBehaviorRepository: ResumeBehaviorSettingsRepository
+    @Inject lateinit var sessionRepository: PlaybackSessionRepository
     @Inject lateinit var appSettingsRepository: AppSettingsRepository
     @Inject lateinit var audioEnhancementsRepository: AudioEnhancementsRepository
     @Inject lateinit var playerController: PlayerController
@@ -362,6 +365,57 @@ class PlaybackService : MediaSessionService() {
             CMD_CYCLE_REPEAT -> playerController.cycleRepeatMode()
         }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+    }
+
+    @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+    override fun onPlaybackResumption(
+        mediaSession: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        isForPlayback: Boolean,
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+        logResume("onPlaybackResumption invoked isForPlayback=$isForPlayback")
+        serviceScope.launch {
+            runCatching {
+                PlaybackResumptionMapper.map(
+                    snapshot = sessionRepository.load(),
+                    settings = resumeBehaviorRepository.settings.first(),
+                    availableSongs = songRepository.songs.first(),
+                )
+            }.fold(
+                onSuccess = { result ->
+                    when (result) {
+                        is PlaybackResumptionResult.Ready -> {
+                            val plan = result.plan
+                            if (isForPlayback) {
+                                playerController.adoptPlaybackResumption(plan)
+                                mediaSession.player.repeatMode = plan.repeatMode.toPlayerRepeatMode()
+                                mediaSession.player.shuffleModeEnabled = false
+                            }
+                            logResume(
+                                "onPlaybackResumption ready queueSize=${plan.mediaItems.size} " +
+                                    "startIndex=${plan.startPlaybackIndex} " +
+                                    "startPositionMs=${plan.startPositionMs}",
+                            )
+                            future.set(plan.toMedia3Resumption())
+                        }
+                        is PlaybackResumptionResult.Unavailable -> {
+                            logResume("onPlaybackResumption unavailable reason=${result.reason}")
+                            future.setException(
+                                IllegalStateException("Playback resumption unavailable: ${result.reason}"),
+                            )
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    logResume(
+                        "onPlaybackResumption failed: ${error::class.simpleName} ${error.message}",
+                    )
+                    future.setException(error)
+                },
+            )
+        }
+        return future
     }
 }
 

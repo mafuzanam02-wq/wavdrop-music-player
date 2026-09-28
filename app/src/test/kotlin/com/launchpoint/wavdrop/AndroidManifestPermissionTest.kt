@@ -80,4 +80,30 @@ class AndroidManifestPermissionTest {
         assertTrue("Media3 session service action must stay declared", hasMediaSessionAction)
         assertFalse("Private reconnect action must not be exported in the service filter", hasPrivateReconnectAction)
     }
+
+    @Test
+    fun `official Media3 media button receiver is exported for system delivery`() {
+        val manifest = listOf(
+            File("src/main/AndroidManifest.xml"),
+            File("app/src/main/AndroidManifest.xml"),
+        ).first { it.exists() }
+        val document = DocumentBuilderFactory
+            .newInstance()
+            .newDocumentBuilder()
+            .parse(manifest)
+
+        val receivers = document.getElementsByTagName("receiver")
+        var found = false
+        for (index in 0 until receivers.length) {
+            val receiver = receivers.item(index)
+            val name = receiver.attributes?.getNamedItem("android:name")?.nodeValue
+            if (name != "androidx.media3.session.MediaButtonReceiver") continue
+            found = true
+            assertTrue(
+                "MediaButtonReceiver must be exported for system media-button delivery",
+                receiver.attributes?.getNamedItem("android:exported")?.nodeValue == "true",
+            )
+        }
+        assertTrue("Official Media3 MediaButtonReceiver must be declared", found)
+    }
 }

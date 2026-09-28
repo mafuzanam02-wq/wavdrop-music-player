@@ -3,12 +3,10 @@ package com.launchpoint.wavdrop.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
-import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -127,6 +125,12 @@ internal fun repeatModeFromPlayerMode(playerRepeatMode: Int): RepeatMode = when 
     Player.REPEAT_MODE_ALL -> RepeatMode.ALL
     Player.REPEAT_MODE_ONE -> RepeatMode.ONE
     else                   -> RepeatMode.OFF
+}
+
+internal fun RepeatMode.toPlayerRepeatMode(): Int = when (this) {
+    RepeatMode.OFF -> Player.REPEAT_MODE_OFF
+    RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+    RepeatMode.ONE -> Player.REPEAT_MODE_ONE
 }
 
 /**
@@ -2146,6 +2150,34 @@ class PlayerController @Inject constructor(
         }
     }
 
+    /** Mirrors a service-owned Media3 resumption without connecting back to the same session. */
+    internal fun adoptPlaybackResumption(plan: PlaybackResumptionPlan) {
+        bumpQueueGeneration()
+        isExternalPlayback = false
+        libraryQueue = plan.libraryQueue
+        playbackOrder = plan.playbackOrder
+        playbackQueue = plan.playbackQueue
+        shuffleEnabled = plan.shuffleEnabled
+        repeatMode = plan.repeatMode
+        playerQueueNeedsSync = false
+        lastKnownPositionMs = -1L
+        val startSong = playbackQueue[plan.startPlaybackIndex]
+        _nowPlayingState.update {
+            it.copy(
+                song = startSong,
+                isPlaying = false,
+                queue = playbackQueue,
+                currentIndex = plan.startPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+                positionMs = plan.startPositionMs,
+                durationMs = startSong.duration.coerceAtLeast(0L),
+                bufferedPositionMs = 0L,
+                isSeekable = false,
+            )
+        }
+    }
+
     /**
      * Called by PlaybackService when a Bluetooth audio device is removed.
      * Records whether playback was active at that moment so [resumeForBluetooth] can
@@ -3123,7 +3155,7 @@ class PlayerController @Inject constructor(
                 mediaItems += cached
             } else {
                 cacheMisses += 1
-                val mediaItem = song.toMediaItem(key)
+                val mediaItem = song.toPlaybackMediaItem()
                 pendingCacheWrites[key] = mediaItem
                 mediaItems += mediaItem
             }
@@ -3152,20 +3184,6 @@ class PlayerController @Inject constructor(
             albumId = albumId,
         )
 
-    private fun Song.toMediaItem(key: MediaItemCacheKey): MediaItem =
-        MediaItem.Builder()
-            .setUri(key.uri)
-            .setMediaId(key.id.toString())
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(key.title)
-                    .setArtist(key.artist)
-                    .setAlbumTitle(key.album)
-                    .setExtras(Bundle().apply { putLong("wavdrop_album_id", key.albumId) })
-                    .build()
-            )
-            .build()
-
     private fun Uri.toExternalSong(displayName: String?): Song {
         val title = displayName
             ?.substringBeforeLast('.', missingDelimiterValue = displayName)
@@ -3190,12 +3208,6 @@ class PlayerController @Inject constructor(
             folderPath = null,
             folderName = null,
         )
-    }
-
-    private fun RepeatMode.toPlayerRepeatMode(): Int = when (this) {
-        RepeatMode.OFF -> Player.REPEAT_MODE_OFF
-        RepeatMode.ALL -> Player.REPEAT_MODE_ALL
-        RepeatMode.ONE -> Player.REPEAT_MODE_ONE
     }
 
     private data class PreserveSearchRequest(
