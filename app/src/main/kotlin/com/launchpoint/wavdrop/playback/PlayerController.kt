@@ -172,11 +172,8 @@ internal fun resolveCurrentPlaybackIndex(
         controllerSongId != null &&
         playbackQueue[controllerIndex].id != controllerSongId
 
-    if (!playerQueueNeedsSync &&
-        controllerIndex != null &&
-        controllerIndex in playbackQueue.indices &&
-        !controllerIndexMatchesSong
-    ) {
+    if (!playerQueueNeedsSync && controllerIndex != null && controllerIndex in playbackQueue.indices) {
+        if (controllerIndexMatchesSong) return null
         return controllerIndex
     }
 
@@ -185,8 +182,6 @@ internal fun resolveCurrentPlaybackIndex(
             return stateIndex
         }
     }
-
-    if (controllerIndexMatchesSong) return null
 
     return uniquePlaybackIndexForSongId(playbackQueue, controllerSongId)
         ?: uniquePlaybackIndexForSongId(playbackQueue, stateSongId)
@@ -2848,11 +2843,8 @@ class PlayerController @Inject constructor(
         val controller = mediaController
         val preservePlan = pendingPreserveSearchPlanForSync(controller, fromTransition)
         val currentPlaybackIndex = preservePlan?.currentIndex?.takeIf { it in playbackQueue.indices }
-            ?: (if (playerQueueNeedsSync) currentPlaybackIndex() else null)
-            ?: controller?.currentMediaItemIndex?.takeIf { it in playbackQueue.indices }
-            ?: _nowPlayingState.value.currentIndex.takeIf { it in playbackQueue.indices }
-            ?: 0
-        val currentSong = playbackQueue.getOrNull(currentPlaybackIndex)
+            ?: currentPlaybackIndex()
+        val currentSong = currentPlaybackIndex?.let(playbackQueue::getOrNull)
 
         val songChanged = currentSong != null && currentSong.id != _nowPlayingState.value.song?.id
         if (DEBUG_STATS && (fromTransition || songChanged)) {
@@ -2873,7 +2865,7 @@ class PlayerController @Inject constructor(
                 song               = currentSong ?: it.song,
                 isPlaying          = controller?.isPlaying ?: it.isPlaying,
                 queue              = playbackQueue,
-                currentIndex       = currentPlaybackIndex,
+                currentIndex       = currentPlaybackIndex ?: -1,
                 shuffleEnabled     = shuffleEnabled,
                 repeatMode         = repeatMode,
                 positionMs         = positionMs,
@@ -2927,22 +2919,6 @@ class PlayerController @Inject constructor(
         }
         val current = currentSongId?.let { " current=$it" }.orEmpty()
         return "queue(size=$size $samples$current)"
-    }
-
-    // Returns the library index of the current song.
-    // controller.currentMediaItemIndex is a playback index; map via playbackOrder.
-    private fun currentQueueIndex(): Int? {
-        mediaController?.currentMediaItem?.mediaId?.toLongOrNull()
-            ?.let { id -> libraryQueue.indexOfFirst { it.id == id } }
-            ?.takeIf { it >= 0 }
-            ?.let { return it }
-
-        val playbackIdx = mediaController?.currentMediaItemIndex
-            ?.takeIf { it in playbackOrder.indices }
-        if (playbackIdx != null) return playbackOrder.getOrNull(playbackIdx)
-
-        val currentSongId = _nowPlayingState.value.song?.id ?: return null
-        return libraryQueue.indexOfFirst { it.id == currentSongId }.takeIf { it >= 0 }
     }
 
     private fun currentPlaybackIndex(): Int? {

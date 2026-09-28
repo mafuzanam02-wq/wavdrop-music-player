@@ -58,6 +58,22 @@ class PlayerControllerCurrentIndexResolverTest {
     }
 
     @Test
+    fun `synchronized controller index resolves middle of three duplicates`() {
+        val queue = listOf(a, a, a)
+
+        val result = resolveCurrentPlaybackIndex(
+            playbackQueue = queue,
+            controllerIndex = 1,
+            controllerSongId = a.id,
+            stateIndex = 0,
+            stateSongId = a.id,
+            playerQueueNeedsSync = false,
+        )
+
+        assertEquals(1, result)
+    }
+
+    @Test
     fun `controller absent uses valid state current index`() {
         val queue = listOf(a, b, a, c)
 
@@ -147,6 +163,38 @@ class PlayerControllerCurrentIndexResolverTest {
             controllerSongId = c.id,
             stateIndex = null,
             stateSongId = null,
+            playerQueueNeedsSync = false,
+        )
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `synchronized controller mismatch rejects otherwise valid state index`() {
+        val queue = listOf(a, b, c, d)
+
+        val result = resolveCurrentPlaybackIndex(
+            playbackQueue = queue,
+            controllerIndex = 1,
+            controllerSongId = c.id,
+            stateIndex = 2,
+            stateSongId = c.id,
+            playerQueueNeedsSync = false,
+        )
+
+        assertNull(result)
+    }
+
+    @Test
+    fun `unresolved now playing inputs do not default to index zero`() {
+        val queue = listOf(a, b, a, c)
+
+        val result = resolveCurrentPlaybackIndex(
+            playbackQueue = queue,
+            controllerIndex = null,
+            controllerSongId = a.id,
+            stateIndex = null,
+            stateSongId = a.id,
             playerQueueNeedsSync = false,
         )
 
