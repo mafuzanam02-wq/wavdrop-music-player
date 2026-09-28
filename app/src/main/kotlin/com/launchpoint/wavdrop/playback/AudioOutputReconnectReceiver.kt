@@ -1,8 +1,12 @@
 package com.launchpoint.wavdrop.playback
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.launchpoint.wavdrop.BuildConfig
@@ -42,9 +46,16 @@ class AudioOutputReconnectReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                if (shouldStartPlaybackService(outputKind)) {
-                    startPlaybackService(context)
-                    resumeForOutput(outputKind)
+                if (shouldStartPlaybackService(context, outputKind)) {
+                    val routeReady = outputKind != PlaybackService.OUTPUT_BLUETOOTH ||
+                        BluetoothRouteReadiness.awaitOutput(
+                            audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager,
+                            timeoutMs = BLUETOOTH_ROUTE_TIMEOUT_MS,
+                        )
+                    logResume("Receiver route readiness outputKind=$outputKind ready=$routeReady")
+                    if (routeReady && startPlaybackService(context)) {
+                        resumeForOutput(outputKind)
+                    }
                 } else {
                     logResume("Receiver ignored $outputKind reconnect")
                 }
@@ -54,37 +65,40 @@ class AudioOutputReconnectReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun shouldStartPlaybackService(outputKind: String): Boolean {
+    private suspend fun shouldStartPlaybackService(context: Context, outputKind: String): Boolean {
         val settings = resumeBehaviorRepository.settings.first()
         val mode = settings.resumeMode(outputKind)
         val pendingInterrupted = hasInterruptedResumePending(outputKind)
         val hasSavedSession = sessionRepository.load() != null
+        val permissionGranted = outputKind != PlaybackService.OUTPUT_BLUETOOTH ||
+            hasBluetoothConnectPermission(context)
         logResume(
             "Receiver eligibility outputKind=$outputKind mode=$mode " +
                 "rememberLastTrack=${settings.rememberLastTrack} " +
-                "pendingInterrupted=$pendingInterrupted hasSavedSession=$hasSavedSession",
+                "pendingInterrupted=$pendingInterrupted hasSavedSession=$hasSavedSession " +
+                "bluetoothConnectGranted=$permissionGranted",
         )
-        if (!settings.rememberLastTrack) return false
-
-        return when (mode) {
-            HeadphoneResumeMode.OFF -> false
-            HeadphoneResumeMode.RESUME_IF_INTERRUPTED -> pendingInterrupted
-            HeadphoneResumeMode.ALWAYS_RESUME -> hasSavedSession
-        }
+        return permissionGranted && ConnectionResumePolicy.shouldAttempt(
+            rememberLastTrack = settings.rememberLastTrack,
+            mode = mode,
+            interruptedPending = pendingInterrupted,
+            hasSavedSession = hasSavedSession,
+        )
     }
 
-    private fun startPlaybackService(context: Context) {
+    private fun startPlaybackService(context: Context): Boolean {
         val serviceIntent = Intent(context, PlaybackService::class.java)
-        runCatching {
+        return runCatching {
             logResume("Receiver attempting PlaybackService start for reconnect")
             ContextCompat.startForegroundService(context, serviceIntent)
-            logResume("Receiver started PlaybackService for reconnect")
+            logResume("Receiver PlaybackService start accepted for reconnect")
+            true
         }.onFailure { error ->
             logResume(
-                "Receiver could not start PlaybackService for reconnect: " +
+                "Receiver PlaybackService start rejected for reconnect: " +
                     "${error.javaClass.simpleName}: ${error.message}",
             )
-        }
+        }.getOrDefault(false)
     }
 
     private suspend fun resumeForOutput(outputKind: String) {
@@ -123,11 +137,19 @@ class AudioOutputReconnectReceiver : BroadcastReceiver() {
             else -> false
         }
 
+    private fun hasBluetoothConnectPermission(context: Context): Boolean =
+        !BluetoothReconnectPermissionPolicy.requiresBluetoothConnect(Build.VERSION.SDK_INT) ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            ) == PackageManager.PERMISSION_GRANTED
+
     private fun logResume(message: String) {
         if (BuildConfig.DEBUG) Log.d(RESUME_TAG, message)
     }
 
     private companion object {
         const val RESUME_TAG = "WavdropResume"
+        const val BLUETOOTH_ROUTE_TIMEOUT_MS = 1_500L
     }
 }

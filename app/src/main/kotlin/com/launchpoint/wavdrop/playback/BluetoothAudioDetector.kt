@@ -9,12 +9,16 @@ package com.launchpoint.wavdrop.playback
 internal object BluetoothAudioDetector {
     private const val TYPE_BLUETOOTH_SCO  = 7   // classic BT headset / hands-free
     private const val TYPE_BLUETOOTH_A2DP = 8   // classic BT stereo audio
+    private const val TYPE_HEARING_AID    = 23  // classic Android hearing-aid output (API 28+)
     private const val TYPE_BLE_HEADSET    = 26  // BLE audio headset (API 31+)
     private const val TYPE_BLE_SPEAKER    = 27  // BLE audio speaker (API 31+)
+    private const val TYPE_BLE_BROADCAST  = 30  // BLE broadcast audio group (API 33+)
 
     fun isBluetoothAudioType(deviceType: Int): Boolean =
         deviceType == TYPE_BLUETOOTH_SCO  ||
         deviceType == TYPE_BLUETOOTH_A2DP ||
+        deviceType == TYPE_HEARING_AID    ||
         deviceType == TYPE_BLE_HEADSET    ||
-        deviceType == TYPE_BLE_SPEAKER
+        deviceType == TYPE_BLE_SPEAKER    ||
+        deviceType == TYPE_BLE_BROADCAST
 }

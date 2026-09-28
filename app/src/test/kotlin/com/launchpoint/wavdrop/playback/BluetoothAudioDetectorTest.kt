@@ -19,6 +19,11 @@ class BluetoothAudioDetectorTest {
     }
 
     @Test
+    fun `TYPE_HEARING_AID (23) is bluetooth audio`() {
+        assertTrue(BluetoothAudioDetector.isBluetoothAudioType(23))
+    }
+
+    @Test
     fun `TYPE_BLE_HEADSET (26) is bluetooth audio`() {
         assertTrue(BluetoothAudioDetector.isBluetoothAudioType(26))
     }
@@ -26,6 +31,11 @@ class BluetoothAudioDetectorTest {
     @Test
     fun `TYPE_BLE_SPEAKER (27) is bluetooth audio`() {
         assertTrue(BluetoothAudioDetector.isBluetoothAudioType(27))
+    }
+
+    @Test
+    fun `TYPE_BLE_BROADCAST (30) is bluetooth audio`() {
+        assertTrue(BluetoothAudioDetector.isBluetoothAudioType(30))
     }
 
     // ── Non-Bluetooth types ──────────────────────────────────────────────────────

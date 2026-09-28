@@ -9,6 +9,37 @@ import org.junit.Test
 class AndroidManifestPermissionTest {
 
     @Test
+    fun `Bluetooth reconnect uses connect permission without scan permission`() {
+        val manifest = listOf(
+            File("src/main/AndroidManifest.xml"),
+            File("app/src/main/AndroidManifest.xml"),
+        ).first { it.exists() }
+        val document = DocumentBuilderFactory
+            .newInstance()
+            .newDocumentBuilder()
+            .parse(manifest)
+
+        val permissions = document.getElementsByTagName("uses-permission")
+        val requestedPermissions = buildSet {
+            for (index in 0 until permissions.length) {
+                permissions.item(index).attributes
+                    ?.getNamedItem("android:name")
+                    ?.nodeValue
+                    ?.let(::add)
+            }
+        }
+
+        assertTrue(
+            "BLUETOOTH_CONNECT is required for Android 12+ profile broadcasts",
+            "android.permission.BLUETOOTH_CONNECT" in requestedPermissions,
+        )
+        assertFalse(
+            "Wavdrop does not scan or discover Bluetooth devices",
+            "android.permission.BLUETOOTH_SCAN" in requestedPermissions,
+        )
+    }
+
+    @Test
     fun `app does not request internet permission`() {
         val manifest = listOf(
             File("src/main/AndroidManifest.xml"),
@@ -105,5 +136,40 @@ class AndroidManifestPermissionTest {
             )
         }
         assertTrue("Official Media3 MediaButtonReceiver must be declared", found)
+    }
+
+    @Test
+    fun `audio reconnect receiver declares classic hearing aid and LE Audio actions`() {
+        val manifest = listOf(
+            File("src/main/AndroidManifest.xml"),
+            File("app/src/main/AndroidManifest.xml"),
+        ).first { it.exists() }
+        val document = DocumentBuilderFactory
+            .newInstance()
+            .newDocumentBuilder()
+            .parse(manifest)
+
+        val receivers = document.getElementsByTagName("receiver")
+        val actions = mutableSetOf<String>()
+        for (index in 0 until receivers.length) {
+            val receiver = receivers.item(index)
+            val name = receiver.attributes?.getNamedItem("android:name")?.nodeValue
+            if (name != ".playback.AudioOutputReconnectReceiver") continue
+            val descendants = receiver.childNodes
+            for (childIndex in 0 until descendants.length) {
+                val actionNodes = descendants.item(childIndex).childNodes
+                for (actionIndex in 0 until actionNodes.length) {
+                    actionNodes.item(actionIndex).attributes
+                        ?.getNamedItem("android:name")
+                        ?.nodeValue
+                        ?.let(actions::add)
+                }
+            }
+        }
+
+        assertTrue("A2DP reconnect action missing", "android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" in actions)
+        assertTrue("HFP reconnect action missing", "android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" in actions)
+        assertTrue("Hearing Aid reconnect action missing", "android.bluetooth.hearingaid.profile.action.CONNECTION_STATE_CHANGED" in actions)
+        assertTrue("LE Audio reconnect action missing", "android.bluetooth.action.LE_AUDIO_CONNECTION_STATE_CHANGED" in actions)
     }
 }

@@ -8,14 +8,21 @@ import org.junit.Test
 class AudioOutputReconnectClassifierTest {
 
     @Test
-    fun `connected bluetooth profile event maps to bluetooth reconnect`() {
-        assertEquals(
-            PlaybackService.OUTPUT_BLUETOOTH,
-            AudioOutputReconnectClassifier.connectedOutputKind(
-                action = AudioOutputReconnectClassifier.ACTION_A2DP_CONNECTION_STATE_CHANGED,
-                bluetoothProfileState = AudioOutputReconnectClassifier.CONNECTED,
-            ),
-        )
+    fun `all connected bluetooth audio profiles map to bluetooth reconnect`() {
+        listOf(
+            AudioOutputReconnectClassifier.ACTION_A2DP_CONNECTION_STATE_CHANGED,
+            AudioOutputReconnectClassifier.ACTION_HEADSET_CONNECTION_STATE_CHANGED,
+            AudioOutputReconnectClassifier.ACTION_HEARING_AID_CONNECTION_STATE_CHANGED,
+            AudioOutputReconnectClassifier.ACTION_LE_AUDIO_CONNECTION_STATE_CHANGED,
+        ).forEach { action ->
+            assertEquals(
+                PlaybackService.OUTPUT_BLUETOOTH,
+                AudioOutputReconnectClassifier.connectedOutputKind(
+                    action = action,
+                    bluetoothProfileState = AudioOutputReconnectClassifier.CONNECTED,
+                ),
+            )
+        }
     }
 
     @Test
@@ -30,13 +37,24 @@ class AudioOutputReconnectClassifierTest {
     }
 
     @Test
-    fun `disconnected and unknown events are ignored`() {
-        assertNull(
-            AudioOutputReconnectClassifier.connectedOutputKind(
-                action = AudioOutputReconnectClassifier.ACTION_HEADSET_CONNECTION_STATE_CHANGED,
-                bluetoothProfileState = AudioOutputReconnectClassifier.DISCONNECTED,
-            ),
-        )
+    fun `non-connected states are ignored for classic and LE profiles`() {
+        listOf(0, 1, 3).forEach { state ->
+            listOf(
+                AudioOutputReconnectClassifier.ACTION_A2DP_CONNECTION_STATE_CHANGED,
+                AudioOutputReconnectClassifier.ACTION_LE_AUDIO_CONNECTION_STATE_CHANGED,
+            ).forEach { action ->
+                assertNull(
+                    AudioOutputReconnectClassifier.connectedOutputKind(
+                        action = action,
+                        bluetoothProfileState = state,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `unrelated action is ignored`() {
         assertNull(
             AudioOutputReconnectClassifier.connectedOutputKind(
                 action = "com.example.UNTRUSTED",

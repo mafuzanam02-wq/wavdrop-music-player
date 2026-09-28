@@ -2212,9 +2212,15 @@ class PlayerController @Inject constructor(
      * Debounces duplicate events (some devices fire A2DP + headset + hearing-aid
      * connection events within milliseconds of each other).
      */
+    @Synchronized
     fun resumeForBluetooth(availableSongs: List<Song>) {
         val nowMs = System.currentTimeMillis()
-        if (nowMs - lastBluetoothResumeAttemptAtMs < BLUETOOTH_RESUME_DEBOUNCE_MS) {
+        if (!BluetoothResumeDebounce.shouldAttempt(
+                lastAttemptAtMs = lastBluetoothResumeAttemptAtMs,
+                nowMs = nowMs,
+                windowMs = BLUETOOTH_RESUME_DEBOUNCE_MS,
+            )
+        ) {
             logResume(
                 "resumeForBluetooth: debounced " +
                     "(${nowMs - lastBluetoothResumeAttemptAtMs}ms < ${BLUETOOTH_RESUME_DEBOUNCE_MS}ms since last attempt)",
@@ -2291,14 +2297,6 @@ class PlayerController @Inject constructor(
         if (controller.isPlaying) {
             if (persistedInterrupted) resumeBehaviorRepository.setBluetoothInterruptedResumePending(false)
             logResume("attemptBluetoothResume: already playing before delay, nothing to do")
-            return ResumeAttemptResult.ALREADY_PLAYING
-        }
-
-        delay(1_000L)
-
-        if (controller.isPlaying) {
-            if (persistedInterrupted) resumeBehaviorRepository.setBluetoothInterruptedResumePending(false)
-            logResume("attemptBluetoothResume: already playing after delay, nothing to do")
             return ResumeAttemptResult.ALREADY_PLAYING
         }
 

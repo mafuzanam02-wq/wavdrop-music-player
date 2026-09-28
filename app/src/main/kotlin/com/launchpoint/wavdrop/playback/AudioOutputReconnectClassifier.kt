@@ -7,6 +7,8 @@ object AudioOutputReconnectClassifier {
         "android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED"
     const val ACTION_HEARING_AID_CONNECTION_STATE_CHANGED =
         "android.bluetooth.hearingaid.profile.action.CONNECTION_STATE_CHANGED"
+    const val ACTION_LE_AUDIO_CONNECTION_STATE_CHANGED =
+        "android.bluetooth.action.LE_AUDIO_CONNECTION_STATE_CHANGED"
     const val EXTRA_BLUETOOTH_PROFILE_STATE = "android.bluetooth.profile.extra.STATE"
     const val EXTRA_HEADSET_STATE = "state"
     const val CONNECTED = 2
@@ -24,7 +26,8 @@ object AudioOutputReconnectClassifier {
             }
             ACTION_A2DP_CONNECTION_STATE_CHANGED,
             ACTION_HEADSET_CONNECTION_STATE_CHANGED,
-            ACTION_HEARING_AID_CONNECTION_STATE_CHANGED -> {
+            ACTION_HEARING_AID_CONNECTION_STATE_CHANGED,
+            ACTION_LE_AUDIO_CONNECTION_STATE_CHANGED -> {
                 if (bluetoothProfileState == CONNECTED) PlaybackService.OUTPUT_BLUETOOTH else null
             }
             else -> null

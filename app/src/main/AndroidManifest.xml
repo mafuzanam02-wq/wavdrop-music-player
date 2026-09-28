@@ -15,6 +15,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
+    <!-- Bluetooth profile reconnect broadcasts. No scan/discovery is performed. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <application
         android:name=".WavdropApp"
         android:allowBackup="false"
@@ -184,6 +190,7 @@
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.hearingaid.profile.action.CONNECTION_STATE_CHANGED" />
+                <action android:name="android.bluetooth.action.LE_AUDIO_CONNECTION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 

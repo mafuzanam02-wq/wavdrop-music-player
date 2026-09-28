@@ -1,8 +1,11 @@
 package com.launchpoint.wavdrop.ui.screen.settings
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -28,12 +31,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
+import com.launchpoint.wavdrop.playback.BluetoothReconnectPermissionPolicy
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,6 +53,25 @@ fun SettingsBluetoothScreen(
     var isIgnoringBatteryOptimizations by remember {
         mutableStateOf(powerManager.isIgnoringBatteryOptimizations(context.packageName))
     }
+    fun hasBluetoothConnectPermission(): Boolean =
+        !BluetoothReconnectPermissionPolicy.requiresBluetoothConnect(Build.VERSION.SDK_INT) ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            ) == PackageManager.PERMISSION_GRANTED
+
+    var bluetoothConnectGranted by remember { mutableStateOf(hasBluetoothConnectPermission()) }
+    var pendingBluetoothMode by remember { mutableStateOf<HeadphoneResumeMode?>(null) }
+
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        bluetoothConnectGranted = granted
+        if (granted) {
+            pendingBluetoothMode?.let(viewModel::setBluetoothResumeMode)
+        }
+        pendingBluetoothMode = null
+    }
 
     // Refresh the battery-optimization status whenever the user returns from system settings.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -56,6 +80,7 @@ fun SettingsBluetoothScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 isIgnoringBatteryOptimizations =
                     powerManager.isIgnoringBatteryOptimizations(context.packageName)
+                bluetoothConnectGranted = hasBluetoothConnectPermission()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -105,7 +130,38 @@ fun SettingsBluetoothScreen(
                         title    = mode.displayName,
                         subtitle = mode.description,
                         selected = resumeBehavior.bluetoothResumeMode == mode,
-                        onClick  = { viewModel.setBluetoothResumeMode(mode) },
+                        onClick  = {
+                            if (BluetoothReconnectPermissionPolicy.shouldRequest(
+                                    sdkInt = Build.VERSION.SDK_INT,
+                                    permissionGranted = bluetoothConnectGranted,
+                                    requestedMode = mode,
+                                )
+                            ) {
+                                pendingBluetoothMode = mode
+                                bluetoothPermissionLauncher.launch(
+                                    Manifest.permission.BLUETOOTH_CONNECT,
+                                )
+                            } else {
+                                viewModel.setBluetoothResumeMode(mode)
+                            }
+                        },
+                    )
+                }
+            }
+            if (BluetoothReconnectPermissionPolicy.requiresBluetoothConnect(Build.VERSION.SDK_INT) &&
+                !bluetoothConnectGranted
+            ) {
+                item {
+                    ClickableSettingsRow(
+                        title = "Nearby devices access required",
+                        subtitle = "Required for cold Bluetooth reconnect detection. " +
+                            "Media buttons and wired resume remain available.",
+                        onClick = {
+                            pendingBluetoothMode = null
+                            bluetoothPermissionLauncher.launch(
+                                Manifest.permission.BLUETOOTH_CONNECT,
+                            )
+                        },
                     )
                 }
             }
