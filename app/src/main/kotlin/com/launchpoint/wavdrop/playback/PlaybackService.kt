@@ -324,6 +324,20 @@ class PlaybackService : MediaSessionService() {
         return super.onStartCommand(intent, flags, startId)
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val player = mediaSession?.player
+        val keep = player != null && TaskRemovalPlaybackPolicy.shouldKeepSession(
+            mediaItemCount = player.mediaItemCount,
+            hasCurrentMediaItem = player.currentMediaItem != null,
+        )
+        logResume("onTaskRemoved: keepSession=$keep isPlaying=${player?.isPlaying}")
+        // Playing sessions already survive via Media3's default; a paused session with a real
+        // Media3 queue must too, so PLAY can still target Wavdrop. Empty sessions use the default
+        // (pause + stopSelf). onDestroy cleanup is untouched and runs whenever the service ends.
+        if (keep) return
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
