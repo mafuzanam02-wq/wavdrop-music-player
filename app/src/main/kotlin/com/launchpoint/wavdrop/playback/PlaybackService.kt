@@ -125,6 +125,7 @@ class PlaybackService : MediaSessionService() {
             playerController = playerController,
             songsProvider = { songRepository.songs.first() },
             logResume = ::logResume,
+            sessionProvider = { mediaSession },
         )
 
         if (BuildConfig.DEBUG) {
@@ -477,11 +478,32 @@ class PlaybackService : MediaSessionService() {
         private val playerController: PlayerController,
         private val songsProvider: suspend () -> List<com.launchpoint.wavdrop.data.model.Song>,
         private val logResume: (String) -> Unit,
+        private val sessionProvider: () -> MediaSession?,
     ) : ForwardingPlayer(player) {
 
         override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
 
+        // Explicit external transport (notification, lock screen, media keys, widget, system
+        // controllers) reaches the player here. Tied to the actual play()/pause() call.
+        private fun noteExternalTransport() {
+            val controller = sessionProvider()?.controllerForCurrentRequest
+            if (ExternalTransportPolicy.isExternalUserController(
+                    hasController = controller != null,
+                    isAppController = controller?.connectionHints
+                        ?.getBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, false) == true,
+                )
+            ) {
+                playerController.onExplicitExternalTransport()
+            }
+        }
+
+        override fun pause() {
+            noteExternalTransport()
+            super.pause()
+        }
+
         override fun play() {
+            noteExternalTransport()
             if (currentMediaItem != null || mediaItemCount > 0) {
                 playForwarded()
                 return

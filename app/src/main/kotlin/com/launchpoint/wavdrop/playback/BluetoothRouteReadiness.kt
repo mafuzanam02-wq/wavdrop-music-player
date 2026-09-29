@@ -55,8 +55,13 @@ internal object BluetoothRouteReadiness {
         } ?: false
     }
 
-    private fun AudioManager.hasBluetoothOutput(): Boolean =
-        getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { device ->
+    private fun AudioManager.hasBluetoothOutput(): Boolean = BluetoothOutputQuery.isConnected(this)
+}
+
+/** Single current-route query, shared by bounded readiness and the pre-play revalidation. */
+internal object BluetoothOutputQuery {
+    fun isConnected(audioManager: AudioManager): Boolean =
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { device ->
             device.isSink && BluetoothAudioDetector.isBluetoothAudioType(device.type)
         }
 }
