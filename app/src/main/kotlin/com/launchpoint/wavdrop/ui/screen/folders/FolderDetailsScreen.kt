@@ -61,6 +61,8 @@ import kotlinx.coroutines.launch
 fun FolderDetailsScreen(
     onNavigateBack: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onNowPlayingClick: () -> Unit = {},
     viewModel: FolderDetailsViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
@@ -193,6 +195,8 @@ fun FolderDetailsScreen(
                         },
                         onAddToPlaylist  = { addToPlaylistSong = song },
                         onTrackDetails   = { onTrackDetailsClick(song.id) },
+                        onAlbumClick     = onAlbumClick,
+                        onArtistClick    = onArtistClick,
                         onShare          = {
                             shareSong(context, song) {
                                 coroutineScope.launch {

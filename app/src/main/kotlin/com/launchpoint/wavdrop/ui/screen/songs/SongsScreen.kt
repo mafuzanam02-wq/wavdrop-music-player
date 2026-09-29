@@ -214,6 +214,8 @@ fun SongsScreen(
                             },
                             onAddToPlaylist = { song -> addToPlaylistSong = song },
                             onTrackDetailsClick = onTrackDetailsClick,
+                            onAlbumClick = onAlbumClick,
+                            onArtistClick = onArtistClick,
                             onFolderClick = onFolderClick,
                             onShare = { song ->
                                 shareSong(context, song) {
@@ -253,6 +255,8 @@ fun SongsScreen(
                                     }
                                 },
                                 onAddToPlaylist   = { song -> addToPlaylistSong = song },
+                                onAlbumClick      = onAlbumClick,
+                                onArtistClick     = onArtistClick,
                                 onTrackDetailsClick = onTrackDetailsClick,
                                 onFolderClick     = onFolderClick,
                                 onShare           = { song ->
@@ -308,6 +312,8 @@ private fun SongListContent(
     onAddToQueue: (Song) -> Unit,
     onToggleFavorite: (Song, Boolean) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
     onFolderClick: (String) -> Unit,
     onShare: (Song) -> Unit,
@@ -420,6 +426,8 @@ private fun SongListContent(
                         onToggleFavorite = { onToggleFavorite(song, isFavorite) },
                         onAddToPlaylist  = { onAddToPlaylist(song) },
                         onTrackDetails   = { onTrackDetailsClick(song.id) },
+                        onAlbumClick     = onAlbumClick,
+                        onArtistClick    = onArtistClick,
                         onViewFolder     = song.validFolderKey()?.let { key -> { onFolderClick(key) } },
                         onShare          = { onShare(song) },
                         modifier         = Modifier.fillMaxWidth(),

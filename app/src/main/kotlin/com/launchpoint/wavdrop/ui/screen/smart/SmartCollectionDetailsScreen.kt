@@ -70,6 +70,7 @@ import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.SongRowWithOverflow
+import com.launchpoint.wavdrop.ui.components.metadataNavigationKey
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.launch
@@ -79,6 +80,8 @@ import kotlinx.coroutines.launch
 fun SmartCollectionDetailsScreen(
     onNavigateBack: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onNowPlayingClick: () -> Unit = {},
     viewModel: SmartCollectionDetailsViewModel = hiltViewModel(),
     playbackVm: PlaybackControlsViewModel = hiltViewModel(),
@@ -186,6 +189,8 @@ fun SmartCollectionDetailsScreen(
                 },
                 onAddToPlaylist     = { song -> addToPlaylistSong = song },
                 onTrackDetailsClick = onTrackDetailsClick,
+                onAlbumClick        = onAlbumClick,
+                onArtistClick       = onArtistClick,
                 onShare             = { song ->
                     shareSong(context, song) {
                         coroutineScope.launch {
@@ -235,6 +240,8 @@ fun SmartCollectionDetailsScreen(
                         },
                         onAddToPlaylist  = { addToPlaylistSong = song },
                         onTrackDetails   = { onTrackDetailsClick(song.id) },
+                        onAlbumClick     = onAlbumClick,
+                        onArtistClick    = onArtistClick,
                         onShare          = {
                             shareSong(context, song) {
                                 coroutineScope.launch {
@@ -306,6 +313,8 @@ private fun MostPlayedContent(
     onToggleFavorite: (Long, Boolean) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onShare: (Song) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -357,6 +366,8 @@ private fun MostPlayedContent(
                     onToggleFavorite = { onToggleFavorite(summary.song.id, isFavorite) },
                     onAddToPlaylist  = { onAddToPlaylist(summary.song) },
                     onOpenDetails    = { onTrackDetailsClick(summary.song.id) },
+                    onAlbumClick     = onAlbumClick,
+                    onArtistClick    = onArtistClick,
                     onShare          = { onShare(summary.song) },
                     modifier         = Modifier.fillMaxWidth(),
                 )
@@ -497,12 +508,16 @@ private fun MostPlayedSongRow(
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onOpenDetails: () -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onShare: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val rowColor    = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
     var menuExpanded by remember { mutableStateOf(false) }
+    val albumKey = metadataNavigationKey(summary.song.album, "Unknown Album")
+    val artistKey = metadataNavigationKey(summary.song.artist, "Unknown Artist")
     val compact = LocalCompactMode.current
     val verticalPadding = if (compact) 8.dp else 12.dp
     val artworkSize = if (compact) 44.dp else 48.dp
@@ -592,6 +607,18 @@ private fun MostPlayedSongRow(
                     text    = { Text(if (isFavorite) "Remove from Favorites" else "Add to Favorites") },
                     onClick = { menuExpanded = false; onToggleFavorite() },
                 )
+                if (artistKey != null) {
+                    DropdownMenuItem(
+                        text = { Text("Go to artist") },
+                        onClick = { menuExpanded = false; onArtistClick(artistKey) },
+                    )
+                }
+                if (albumKey != null) {
+                    DropdownMenuItem(
+                        text = { Text("Go to album") },
+                        onClick = { menuExpanded = false; onAlbumClick(albumKey) },
+                    )
+                }
                 DropdownMenuItem(text = { Text("Track details") },    onClick = { menuExpanded = false; onOpenDetails() })
                 DropdownMenuItem(text = { Text("Share") },            onClick = { menuExpanded = false; onShare() })
             }

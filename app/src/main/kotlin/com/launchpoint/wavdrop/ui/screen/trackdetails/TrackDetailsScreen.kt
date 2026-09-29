@@ -5,9 +5,11 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.SkipNext
@@ -52,6 +55,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +71,7 @@ import com.launchpoint.wavdrop.data.stats.ListeningTimeRules
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
+import com.launchpoint.wavdrop.ui.components.metadataNavigationKey
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.screen.lyrics.LyricsViewModel
 import kotlinx.coroutines.launch
@@ -74,6 +80,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun TrackDetailsScreen(
     onNavigateBack: () -> Unit,
+    onArtistClick: (String) -> Unit = {},
+    onAlbumClick: (String) -> Unit = {},
     viewModel: TrackDetailsViewModel = hiltViewModel(),
     lyricsViewModel: LyricsViewModel = hiltViewModel(),
 ) {
@@ -150,6 +158,8 @@ fun TrackDetailsScreen(
                     coroutineScope.launch { snackbarHostState.showSnackbar("Added to queue") }
                 },
                 onAddToPlaylist   = { showAddToPlaylist = true },
+                onArtistClick     = onArtistClick,
+                onAlbumClick      = onAlbumClick,
                 onShare           = {
                     shareSong(context, state.song) {
                         coroutineScope.launch {
@@ -274,6 +284,8 @@ private fun ReadyContent(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onArtistClick: (String) -> Unit,
+    onAlbumClick: (String) -> Unit,
     onShare: () -> Unit,
     onDeleteFromDevice: (() -> Unit)? = null,
     onEditLyrics: () -> Unit,
@@ -289,9 +301,21 @@ private fun ReadyContent(
         // ── Track section ────────────────────────────────────────────────────
         SectionHeader("Track")
 
-        DetailRow("Title",    song.title)
-        DetailRow("Artist",   song.artist.ifBlank { "Unknown" })
-        DetailRow("Album",    song.album.ifBlank { "Unknown" })
+        val artistKey = metadataNavigationKey(song.artist, "Unknown Artist")
+        val albumKey = metadataNavigationKey(song.album, "Unknown Album")
+        DetailRow("Title", song.title)
+        DetailRow(
+            label = "Artist",
+            value = song.artist.ifBlank { "Unknown" },
+            onClick = artistKey?.let { key -> { onArtistClick(key) } },
+            navigationDescription = artistKey?.let { "Artist: $it, opens artist" },
+        )
+        DetailRow(
+            label = "Album",
+            value = song.album.ifBlank { "Unknown" },
+            onClick = albumKey?.let { key -> { onAlbumClick(key) } },
+            navigationDescription = albumKey?.let { "Album: $it, opens album" },
+        )
         DetailRow("Duration", TrackDetailsFormatters.formatDuration(song.duration))
         if (song.year > 0) DetailRow("Year", song.year.toString())
 
@@ -559,12 +583,28 @@ private fun SectionDivider() {
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
+private fun DetailRow(
+    label: String,
+    value: String,
+    onClick: (() -> Unit)? = null,
+    navigationDescription: String? = null,
+) {
+    val interactionModifier = if (onClick != null && navigationDescription != null) {
+        Modifier
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = navigationDescription
+            }
+    } else {
+        Modifier
+    }
     Row(
         modifier          = Modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
+            .then(interactionModifier)
             .padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text     = label,
@@ -579,6 +619,14 @@ private fun DetailRow(label: String, value: String) {
             color      = MaterialTheme.colorScheme.onSurface,
             modifier   = Modifier.weight(0.62f),
         )
+        if (onClick != null) {
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

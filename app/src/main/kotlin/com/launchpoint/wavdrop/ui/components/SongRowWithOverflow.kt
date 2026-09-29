@@ -2,8 +2,23 @@ package com.launchpoint.wavdrop.ui.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,8 +56,8 @@ fun SongRowWithOverflow(
     highlightedArtist: AnnotatedString? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val albumKey = song.album.knownMetadataKey("Unknown Album")
-    val artistKey = song.artist.knownMetadataKey("Unknown Artist")
+    val albumKey = metadataNavigationKey(song.album, "Unknown Album")
+    val artistKey = metadataNavigationKey(song.artist, "Unknown Artist")
 
     Box(modifier = modifier) {
         SongRow(
@@ -65,64 +80,76 @@ fun SongRowWithOverflow(
             DropdownMenuItem(
                 text    = { Text("Play") },
                 onClick = { expanded = false; onPlay() },
+                leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
             )
             DropdownMenuItem(
                 text    = { Text("Play next") },
                 onClick = { expanded = false; onPlayNext() },
+                leadingIcon = { Icon(Icons.Default.SkipNext, contentDescription = null) },
             )
             DropdownMenuItem(
                 text    = { Text("Add to queue") },
                 onClick = { expanded = false; onAddToQueue() },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
             )
+            HorizontalDivider()
             DropdownMenuItem(
                 text    = { Text("Add to playlist") },
                 onClick = { expanded = false; onAddToPlaylist() },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
             )
             DropdownMenuItem(
                 text    = { Text(if (isFavorite) "Remove from Favorites" else "Add to Favorites") },
                 onClick = { expanded = false; onToggleFavorite() },
+                leadingIcon = {
+                    Icon(
+                        if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = null,
+                    )
+                },
             )
+            HorizontalDivider()
+            if (onArtistClick != null && artistKey != null) {
+                DropdownMenuItem(
+                    text    = { Text("Go to artist") },
+                    onClick = { expanded = false; onArtistClick(artistKey) },
+                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                )
+            }
+            if (onAlbumClick != null && albumKey != null) {
+                DropdownMenuItem(
+                    text    = { Text("Go to album") },
+                    onClick = { expanded = false; onAlbumClick(albumKey) },
+                    leadingIcon = { Icon(Icons.Default.Album, contentDescription = null) },
+                )
+            }
             DropdownMenuItem(
                 text    = { Text("Track details") },
                 onClick = { expanded = false; onTrackDetails() },
+                leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
             )
-            if (onAlbumClick != null && albumKey != null) {
-                DropdownMenuItem(
-                    text    = { Text("View album") },
-                    onClick = { expanded = false; onAlbumClick(albumKey) },
-                )
-            }
-            if (onArtistClick != null && artistKey != null) {
-                DropdownMenuItem(
-                    text    = { Text("View artist") },
-                    onClick = { expanded = false; onArtistClick(artistKey) },
-                )
-            }
+            if (onShare != null || onViewFolder != null || onRemove != null) HorizontalDivider()
             if (onShare != null) {
                 DropdownMenuItem(
                     text    = { Text("Share") },
                     onClick = { expanded = false; onShare() },
-                )
-            }
-            if (onRemove != null) {
-                DropdownMenuItem(
-                    text    = { Text("Remove") },
-                    onClick = { expanded = false; onRemove() },
+                    leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                 )
             }
             if (onViewFolder != null) {
                 DropdownMenuItem(
                     text    = { Text("View folder") },
                     onClick = { expanded = false; onViewFolder() },
+                    leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                )
+            }
+            if (onRemove != null) {
+                DropdownMenuItem(
+                    text    = { Text("Remove") },
+                    onClick = { expanded = false; onRemove() },
+                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                 )
             }
         }
     }
 }
-
-private fun String.knownMetadataKey(unknownLabel: String): String? =
-    trim().takeIf { value ->
-        value.isNotBlank() &&
-            !value.equals(unknownLabel, ignoreCase = true) &&
-            !value.equals("<unknown>", ignoreCase = true)
-    }

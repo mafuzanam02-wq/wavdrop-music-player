@@ -226,6 +226,7 @@ fun ArtistDetailsScreen(
                         },
                         onAddToPlaylist  = { addToPlaylistSong = song },
                         onTrackDetails   = { onTrackDetailsClick(song.id) },
+                        onAlbumClick     = onAlbumClick,
                         onShare          = {
                             shareSong(context, song) {
                                 coroutineScope.launch {

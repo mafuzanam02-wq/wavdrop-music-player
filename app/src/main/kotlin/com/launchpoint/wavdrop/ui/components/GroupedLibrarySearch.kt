@@ -72,6 +72,8 @@ data class SongSearchActions(
     val onToggleFavorite: (Song, Boolean) -> Unit,
     val onAddToPlaylist: (Song) -> Unit,
     val onTrackDetailsClick: (Long) -> Unit,
+    val onAlbumClick: (String) -> Unit,
+    val onArtistClick: (String) -> Unit,
     val onFolderClick: (String) -> Unit,
     val onShare: (Song) -> Unit,
 )
@@ -371,6 +373,8 @@ private fun SearchSongResultRow(
         onToggleFavorite = { actions.onToggleFavorite(song, isFavorite) },
         onAddToPlaylist  = { actions.onAddToPlaylist(song) },
         onTrackDetails   = { actions.onTrackDetailsClick(song.id) },
+        onAlbumClick     = actions.onAlbumClick,
+        onArtistClick    = actions.onArtistClick,
         onViewFolder     = song.searchFolderKey()?.let { key -> { actions.onFolderClick(key) } },
         onShare          = { actions.onShare(song) },
         modifier         = modifier,

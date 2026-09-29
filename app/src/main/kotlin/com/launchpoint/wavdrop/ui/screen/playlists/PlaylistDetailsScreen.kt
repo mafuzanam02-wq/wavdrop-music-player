@@ -90,6 +90,7 @@ import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PlaylistArtworkCollage
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
+import com.launchpoint.wavdrop.ui.components.metadataNavigationKey
 import com.launchpoint.wavdrop.ui.viewmodel.PlaybackControlsViewModel
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.delay
@@ -107,6 +108,8 @@ fun PlaylistDetailsScreen(
     onNavigateBack: () -> Unit,
     onAddSongsClick: () -> Unit,
     onTrackDetailsClick: (Long) -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onNowPlayingClick: () -> Unit = {},
     pendingMessage: String? = null,
     onMessageConsumed: () -> Unit = {},
@@ -414,6 +417,8 @@ fun PlaylistDetailsScreen(
                                 }
                             },
                             onOpenDetails    = { onTrackDetailsClick(entry.songId) },
+                            onAlbumClick     = onAlbumClick,
+                            onArtistClick    = onArtistClick,
                             onPlayNext       = { viewModel.playNext(entry.song) },
                             onAddToQueue     = { viewModel.addToQueue(entry.song) },
                             onAddToPlaylist  = { addToPlaylistSong = entry.song },
@@ -520,6 +525,8 @@ fun PlaylistDetailsScreen(
                         onClick = {},
                         onToggleFavorite = {},
                         onOpenDetails = {},
+                        onAlbumClick = {},
+                        onArtistClick = {},
                         onPlayNext = {},
                         onAddToQueue = {},
                         onAddToPlaylist = {},
@@ -874,6 +881,8 @@ private fun PlaylistSongRow(
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenDetails: () -> Unit,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -895,6 +904,8 @@ private fun PlaylistSongRow(
     }
     val accentColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Transparent
     var menuExpanded by remember { mutableStateOf(false) }
+    val albumKey = metadataNavigationKey(song.album, "Unknown Album")
+    val artistKey = metadataNavigationKey(song.artist, "Unknown Artist")
     val compact = LocalCompactMode.current
     val verticalPadding = if (compact) 8.dp else 12.dp
     val artworkSize = if (compact) 44.dp else 48.dp
@@ -1018,6 +1029,18 @@ private fun PlaylistSongRow(
                     text    = { Text("Add to playlist") },
                     onClick = { menuExpanded = false; onAddToPlaylist() },
                 )
+                if (artistKey != null) {
+                    DropdownMenuItem(
+                        text = { Text("Go to artist") },
+                        onClick = { menuExpanded = false; onArtistClick(artistKey) },
+                    )
+                }
+                if (albumKey != null) {
+                    DropdownMenuItem(
+                        text = { Text("Go to album") },
+                        onClick = { menuExpanded = false; onAlbumClick(albumKey) },
+                    )
+                }
                 DropdownMenuItem(
                     text    = { Text("Track details") },
                     onClick = { menuExpanded = false; onOpenDetails() },

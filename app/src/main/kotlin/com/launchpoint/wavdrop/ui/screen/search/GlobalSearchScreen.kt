@@ -83,6 +83,8 @@ fun GlobalSearchRoute(
                 },
                 onAddToPlaylist  = { song -> addToPlaylistSong = song },
                 onTrackDetailsClick = onTrackDetailsClick,
+                onAlbumClick     = onAlbumClick,
+                onArtistClick    = onArtistClick,
                 onFolderClick    = onFolderClick,
                 onShare          = { song ->
                     shareSong(context, song) {
