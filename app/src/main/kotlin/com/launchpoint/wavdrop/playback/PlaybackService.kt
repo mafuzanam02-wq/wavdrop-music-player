@@ -18,9 +18,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
@@ -55,7 +57,7 @@ import kotlinx.coroutines.launch
  * Clients connect via MediaController (see PlayerController).
  */
 @AndroidEntryPoint
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
 
     @Inject lateinit var resumeBehaviorRepository: ResumeBehaviorSettingsRepository
     @Inject lateinit var sessionRepository: PlaybackSessionRepository
@@ -65,7 +67,7 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var songRepository: SongRepository
     @Inject lateinit var widgetStateStore: WidgetStateStore
 
-    private var mediaSession: MediaSession? = null
+    private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
     private var previousRestartThresholdMs: Long =
@@ -268,8 +270,7 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        mediaSession = MediaSession.Builder(this, sessionPlayer)
-            .setCallback(WavdropSessionCallback())
+        mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, WavdropSessionCallback())
             .setSessionActivity(openAppIntent)
             .build()
 
@@ -290,7 +291,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaSession
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -362,12 +363,68 @@ class PlaybackService : MediaSessionService() {
     // can invoke them. Called once per controller connection (including the system notification
     // controller). The custom layout (setCustomLayout) controls visibility; this controls
     // availability.
-    private inner class WavdropSessionCallback : MediaSession.Callback {
+    private inner class WavdropSessionCallback : MediaLibrarySession.Callback {
     @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,
     ): MediaSession.ConnectionResult = withWavdropCommands(session, controller)
+
+    override fun onGetLibraryRoot(
+        session: MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        params: LibraryParams?,
+    ): ListenableFuture<LibraryResult<MediaItem>> {
+        // Cheap and synchronous: no library scan. A "recent" request (System UI resumption) gets the
+        // dedicated recent root, whose immediate children are the playable resumable item.
+        val root = WavdropMediaLibrary.rootFor(isRecent = params?.isRecent == true)
+        return Futures.immediateFuture(LibraryResult.ofItem(root, params))
+    }
+
+    override fun onGetItem(
+        session: MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        mediaId: String,
+    ): ListenableFuture<LibraryResult<MediaItem>> {
+        if (WavdropMediaLibrary.isBrowseNode(mediaId)) {
+            return Futures.immediateFuture(
+                LibraryResult.ofItem(checkNotNull(WavdropMediaLibrary.item(mediaId, emptyList())), null),
+            )
+        }
+        return libraryFuture {
+            val item = WavdropMediaLibrary.item(mediaId, songRepository.songs.first())
+            if (item != null) LibraryResult.ofItem(item, null)
+            else LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+        }
+    }
+
+    override fun onGetChildren(
+        session: MediaLibrarySession,
+        browser: MediaSession.ControllerInfo,
+        parentId: String,
+        page: Int,
+        pageSize: Int,
+        params: LibraryParams?,
+    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = when (parentId) {
+        WavdropLibraryIds.ROOT -> Futures.immediateFuture(
+            LibraryResult.ofItemList(WavdropMediaLibrary.page(WavdropMediaLibrary.rootChildren(), page, pageSize), params),
+        )
+        WavdropLibraryIds.SONGS -> libraryFuture {
+            LibraryResult.ofItemList(
+                WavdropMediaLibrary.songChildren(songRepository.songs.first(), page, pageSize),
+                params,
+            )
+        }
+        WavdropLibraryIds.RECENT, WavdropLibraryIds.RECENT_ROOT -> libraryFuture {
+            val items = WavdropMediaLibrary.recentChildren(
+                snapshot = sessionRepository.load(),
+                settings = resumeBehaviorRepository.settings.first(),
+                songs = songRepository.songs.first(),
+            )
+            LibraryResult.ofItemList(WavdropMediaLibrary.page(items, page, pageSize), params)
+        }
+        else -> Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+    }
 
     override fun onCustomCommand(
         session: MediaSession,
@@ -478,6 +535,19 @@ class PlaybackService : MediaSessionService() {
         }
 
         return buttons
+    }
+
+    private fun <T : Any> libraryFuture(block: suspend () -> LibraryResult<T>): ListenableFuture<LibraryResult<T>> {
+        val future = SettableFuture.create<LibraryResult<T>>()
+        serviceScope.launch {
+            future.set(
+                runCatching { block() }.getOrElse { error ->
+                    logResume("library query failed: ${error::class.simpleName} ${error.message}")
+                    LibraryResult.ofError(LibraryResult.RESULT_ERROR_IO)
+                },
+            )
+        }
+        return future
     }
 
     private fun logResume(message: String) {

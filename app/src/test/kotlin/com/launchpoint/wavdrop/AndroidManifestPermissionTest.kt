@@ -172,4 +172,118 @@ class AndroidManifestPermissionTest {
         assertTrue("Hearing Aid reconnect action missing", "android.bluetooth.hearingaid.profile.action.CONNECTION_STATE_CHANGED" in actions)
         assertTrue("LE Audio reconnect action missing", "android.bluetooth.action.LE_AUDIO_CONNECTION_STATE_CHANGED" in actions)
     }
+
+    @Test
+    fun `playback service declares media library and browser actions without lifecycle machinery`() {
+        val manifest = listOf(
+            File("src/main/AndroidManifest.xml"),
+            File("app/src/main/AndroidManifest.xml"),
+        ).first { it.exists() }
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(manifest)
+
+        val actions = buildSet {
+            val services = document.getElementsByTagName("service")
+            for (index in 0 until services.length) {
+                val service = services.item(index)
+                if (service.attributes?.getNamedItem("android:name")?.nodeValue != ".playback.PlaybackService") continue
+                val filters = service.childNodes
+                for (i in 0 until filters.length) {
+                    val actionNodes = filters.item(i).childNodes
+                    for (j in 0 until actionNodes.length) {
+                        actionNodes.item(j).attributes?.getNamedItem("android:name")?.nodeValue?.let(::add)
+                    }
+                }
+            }
+        }
+        assertTrue("androidx.media3.session.MediaLibraryService" in actions)
+        assertTrue("android.media.browse.MediaBrowserService" in actions)
+
+        // Strip XML comments so explanatory text cannot trip the lifecycle-machinery check.
+        val text = manifest.readText().replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
+        listOf("BOOT_COMPLETED", "AppKilledReceiver", "AlarmManager", "stopWithTask").forEach {
+            assertFalse("$it must not appear in the manifest", text.contains(it))
+        }
+        assertTrue("No second playback service", document.getElementsByTagName("service").length == 1)
+    }
+
+    @Test
+    fun `every launcher alias has separate modern and legacy music filters with enablement preserved`() {
+        val manifest = listOf(
+            File("src/main/AndroidManifest.xml"),
+            File("app/src/main/AndroidManifest.xml"),
+        ).first { it.exists() }
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(manifest)
+
+        val aliases = document.getElementsByTagName("activity-alias")
+        assertTrue("Expected the six launcher aliases", aliases.length == 6)
+        val enabledByName = mutableMapOf<String, String?>()
+
+        for (index in 0 until aliases.length) {
+            val alias = aliases.item(index)
+            val name = alias.attributes.getNamedItem("android:name").nodeValue
+            assertTrue(
+                "$name must target MainActivity",
+                alias.attributes.getNamedItem("android:targetActivity")?.nodeValue == ".MainActivity",
+            )
+            enabledByName[name] = alias.attributes.getNamedItem("android:enabled")?.nodeValue
+
+            // Each intent-filter as (actions, categories).
+            val filters = mutableListOf<Pair<Set<String>, Set<String>>>()
+            val children = alias.childNodes
+            for (i in 0 until children.length) {
+                val filter = children.item(i)
+                if (filter.nodeName != "intent-filter") continue
+                val actions = mutableSetOf<String>()
+                val categories = mutableSetOf<String>()
+                val parts = filter.childNodes
+                for (j in 0 until parts.length) {
+                    val part = parts.item(j)
+                    val value = part.attributes?.getNamedItem("android:name")?.nodeValue ?: continue
+                    if (part.nodeName == "action") actions += value
+                    if (part.nodeName == "category") categories += value
+                }
+                filters += actions to categories
+            }
+
+            val modern = filters.filter { "android.intent.action.MAIN" in it.first }
+            assertTrue("$name needs exactly one MAIN filter", modern.size == 1)
+            val modernCategories = modern.single().second
+            listOf("DEFAULT", "LAUNCHER", "APP_MUSIC").forEach {
+                assertTrue("$name modern filter needs $it", "android.intent.category.$it" in modernCategories)
+            }
+            assertFalse(
+                "$name must not merge MUSIC_PLAYER into the launcher filter",
+                "android.intent.action.MUSIC_PLAYER" in modern.single().first,
+            )
+
+            val legacy = filters.filter { "android.intent.action.MUSIC_PLAYER" in it.first }
+            assertTrue("$name needs exactly one MUSIC_PLAYER filter", legacy.size == 1)
+            assertTrue(
+                "$name legacy filter is only MUSIC_PLAYER + DEFAULT",
+                legacy.single().first == setOf("android.intent.action.MUSIC_PLAYER") &&
+                    legacy.single().second == setOf("android.intent.category.DEFAULT"),
+            )
+        }
+
+        assertTrue(enabledByName[".MainActivityAliasObsidianBlack"] == "true")
+        listOf(
+            ".MainActivityAliasMidnightViolet",
+            ".MainActivityAliasCleanPurple",
+            ".MainActivityAliasDeepTeal",
+            ".MainActivityAliasOceanBlue",
+            ".MainActivityAliasSunsetOrange",
+        ).forEach { assertTrue("$it stays disabled", enabledByName[it] == "false") }
+
+        // MainActivity itself must not gain the legacy action.
+        val activities = document.getElementsByTagName("activity")
+        for (index in 0 until activities.length) {
+            val actionNodes = (activities.item(index) as org.w3c.dom.Element).getElementsByTagName("action")
+            for (i in 0 until actionNodes.length) {
+                assertFalse(
+                    actionNodes.item(i).attributes.getNamedItem("android:name").nodeValue ==
+                        "android.intent.action.MUSIC_PLAYER",
+                )
+            }
+        }
+    }
 }
