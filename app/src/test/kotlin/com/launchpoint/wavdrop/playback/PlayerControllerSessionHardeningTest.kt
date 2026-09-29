@@ -152,39 +152,6 @@ class PlayerControllerSessionHardeningTest {
     }
 
     @Test
-    fun `startup restore skips active logical queue`() {
-        assertTrue(
-            shouldSkipStartupSessionRestore(
-                isExternalPlayback = false,
-                hasLogicalQueue = true,
-                hasMediaQueue = false,
-            ),
-        )
-    }
-
-    @Test
-    fun `startup restore skips paused prepared media queue`() {
-        assertTrue(
-            shouldSkipStartupSessionRestore(
-                isExternalPlayback = false,
-                hasLogicalQueue = false,
-                hasMediaQueue = true,
-            ),
-        )
-    }
-
-    @Test
-    fun `normal cold-start restore remains eligible`() {
-        assertFalse(
-            shouldSkipStartupSessionRestore(
-                isExternalPlayback = false,
-                hasLogicalQueue = false,
-                hasMediaQueue = false,
-            ),
-        )
-    }
-
-    @Test
     fun `continuous playback checkpoint becomes eligible after interval`() {
         assertTrue(
             shouldCheckpointPlaybackPosition(

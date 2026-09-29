@@ -153,12 +153,6 @@ internal fun externalRepeatModeUpdate(current: RepeatMode, incoming: RepeatMode)
  */
 internal fun shouldReassertMediaShuffleOff(shuffleModeEnabled: Boolean): Boolean = shuffleModeEnabled
 
-internal fun shouldSkipStartupSessionRestore(
-    isExternalPlayback: Boolean,
-    hasLogicalQueue: Boolean,
-    hasMediaQueue: Boolean,
-): Boolean = isExternalPlayback || hasLogicalQueue || hasMediaQueue
-
 internal fun resolveCurrentPlaybackIndex(
     playbackQueue: List<Song>,
     controllerIndex: Int?,
@@ -2081,13 +2075,34 @@ class PlayerController @Inject constructor(
         availableSongs: List<Song>,
         operation: String = "session_hydration",
     ): PlayerHydrationResult {
-        if (hasActivePlaybackQueue()) return PlayerHydrationResult.AlreadyHydrated
+        // Fast path: external playback, or a connected controller that physically holds media.
+        // A missing controller proves nothing about Media3 state, so it falls through to the
+        // locked path, which obtains one (ControllerUnavailable stays retryable).
+        if (isExternalPlayback) {
+            logHydrationDecision(operation, "pre_lock", mediaController, HydrationDecision.SKIP_EXTERNAL)
+            return PlayerHydrationResult.AlreadyHydrated
+        }
+        mediaController?.let { connected ->
+            val decision = hydrationDecisionFor(connected)
+            if (decision != HydrationDecision.NEEDS_HYDRATION) {
+                logHydrationDecision(operation, "pre_lock", connected, decision)
+                return PlayerHydrationResult.AlreadyHydrated
+            }
+        }
 
         return sessionHydrationMutex.withLock {
-            if (hasActivePlaybackQueue()) return@withLock PlayerHydrationResult.AlreadyHydrated
+            if (isExternalPlayback) {
+                logHydrationDecision(operation, "in_lock", mediaController, HydrationDecision.SKIP_EXTERNAL)
+                return@withLock PlayerHydrationResult.AlreadyHydrated
+            }
 
             val controller = awaitMediaController()
                 ?: return@withLock PlayerHydrationResult.ControllerUnavailable
+            val lockedDecision = hydrationDecisionFor(controller)
+            logHydrationDecision(operation, "in_lock", controller, lockedDecision)
+            if (lockedDecision != HydrationDecision.NEEDS_HYDRATION) {
+                return@withLock PlayerHydrationResult.AlreadyHydrated
+            }
             val rawSnapshot = sessionRepository.load()
                 ?: return@withLock PlayerHydrationResult.NoSavedSession
             val resumeSettings = resumeBehaviorRepository.settings.first()
@@ -2105,7 +2120,14 @@ class PlayerController @Inject constructor(
             ) ?: return@withLock PlayerHydrationResult.NoResolvableSong
             val startSong = mappedQueue[startLibraryIndex]
 
-            if (hasActivePlaybackQueue()) return@withLock PlayerHydrationResult.SkippedActiveQueue
+            // Re-check the PHYSICAL player after all suspending work: if playback started meanwhile
+            // (or external playback took over) the persisted snapshot must not overwrite it.
+            // One decision drives both the log and the branch, so the diagnostic cannot diverge.
+            val preApplyDecision = hydrationDecisionFor(controller)
+            logHydrationDecision(operation, "pre_apply", controller, preApplyDecision)
+            if (preApplyDecision != HydrationDecision.NEEDS_HYDRATION) {
+                return@withLock PlayerHydrationResult.SkippedActiveQueue
+            }
 
             val previousLibraryQueue = libraryQueue
             val previousPlaybackOrder = playbackOrder
@@ -2722,18 +2744,30 @@ class PlayerController @Inject constructor(
         }
     }
 
-    private fun hasActiveSessionForStartupRestore(): Boolean {
-        val controller = mediaController
-        return shouldSkipStartupSessionRestore(
+    private fun hydrationDecisionFor(controller: MediaController): HydrationDecision =
+        HydrationAuthority.decide(
             isExternalPlayback = isExternalPlayback,
-            hasLogicalQueue = libraryQueue.isNotEmpty() || playbackQueue.isNotEmpty(),
-            hasMediaQueue = controller?.mediaItemCount?.let { it > 0 } == true ||
-                controller?.currentMediaItem != null,
+            mediaQueuePresent = HydrationAuthority.mediaQueuePresent(
+                mediaItemCount = controller.mediaItemCount,
+                hasCurrentMediaItem = controller.currentMediaItem != null,
+            ),
+        )
+
+    private fun logHydrationDecision(
+        operation: String,
+        stage: String,
+        controller: MediaController?,
+        decision: HydrationDecision,
+    ) {
+        if (!BuildConfig.DEBUG) return
+        Log.d(
+            RESUME_TAG,
+            "hydration[$operation/$stage]: logicalQueue=${libraryQueue.isNotEmpty() || playbackQueue.isNotEmpty()} " +
+                "mediaItemCount=${controller?.mediaItemCount} " +
+                "hasCurrentMediaItem=${controller?.currentMediaItem != null} " +
+                "externalPlayback=$isExternalPlayback decision=$decision",
         )
     }
-
-    private fun hasActivePlaybackQueue(): Boolean =
-        hasActiveSessionForStartupRestore()
 
     fun release() {
         stopPositionTicker()
