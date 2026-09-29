@@ -13,4 +13,5 @@ data class NowPlayingState(
     val durationMs: Long = 0L,
     val bufferedPositionMs: Long = 0L,
     val isSeekable: Boolean = false,
+    val queueSource: PlaybackQueueSource = PlaybackQueueSource.Other,
 )

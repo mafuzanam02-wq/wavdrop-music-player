@@ -11,6 +11,7 @@ import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.search.LibrarySearch
+import com.launchpoint.wavdrop.playback.PlaybackQueueSource
 import com.launchpoint.wavdrop.playback.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +39,8 @@ data class PlaylistDetailsUiState(
     val searchQuery: String,
     val artworkUris: List<String>,
     val favoriteSongIds: Set<Long>,
-    val currentSongId: Long?,
+    /** Exact playlist row (entry position) that is playing, or null when not provable. */
+    val currentPlaylistPosition: Int?,
     val totalDurationMs: Long,
     val totalPlayCount: Int,
     val mostPlayedSongTitle: String?,
@@ -58,6 +60,33 @@ internal fun playlistPlaybackStartIndex(
         entry.position == selectedEntry.position &&
         entry.songId == selectedEntry.songId
 }.takeIf { it >= 0 }
+
+/**
+ * Exact playlist row that is playing, or null when it cannot be proven.
+ *
+ * A playlist row is an occurrence (playlistId + position + songId), never just a songId, and an
+ * equal song-ID sequence does not prove the queue came from this playlist. So the playback queue
+ * must be explicitly sourced from THIS playlist, [currentIndex] must be valid, and the whole
+ * visible sequence must correspond positionally (by song id) to the playback queue; then
+ * `visibleEntries[currentIndex]` is the playing occurrence. Any failure (other or unknown
+ * source, another playlist, reordered/shuffled queue, changed filter) yields null, never a guess.
+ */
+internal fun resolveCurrentPlaylistPosition(
+    playlistId: Long,
+    playbackSource: PlaybackQueueSource,
+    visibleEntries: List<PlaylistSongItem>,
+    playbackQueue: List<Song>,
+    currentIndex: Int,
+): Int? {
+    if (playbackSource != PlaybackQueueSource.Playlist(playlistId)) return null
+    if (visibleEntries.isEmpty() || playbackQueue.isEmpty()) return null
+    if (currentIndex !in playbackQueue.indices) return null
+    if (visibleEntries.size != playbackQueue.size) return null
+    for (i in visibleEntries.indices) {
+        if (visibleEntries[i].songId != playbackQueue[i].id) return null
+    }
+    return visibleEntries[currentIndex].position
+}
 
 @HiltViewModel
 class PlaylistDetailsViewModel @Inject constructor(
@@ -103,6 +132,11 @@ class PlaylistDetailsViewModel @Inject constructor(
     ) { summary, entries, query, favorites, nowPlaying ->
         val visibleSongs = LibrarySearch.filterSongs(entries.map { it.song }, query)
         val visibleSongIds = visibleSongs.mapTo(mutableSetOf()) { it.id }
+        val visibleEntries = if (query.isBlank()) {
+            entries
+        } else {
+            entries.filter { it.songId in visibleSongIds }
+        }
         val totalPlayCount = entries.sumOf { it.playCount }
         val mostPlayedSongTitle = entries
             .filter { it.playCount > 0 }
@@ -113,15 +147,17 @@ class PlaylistDetailsViewModel @Inject constructor(
             isLoading     = false,
             playlist       = summary,
             entries        = entries,
-            visibleEntries = if (query.isBlank()) {
-                entries
-            } else {
-                entries.filter { it.songId in visibleSongIds }
-            },
+            visibleEntries = visibleEntries,
             searchQuery    = query,
             artworkUris    = PlaylistArtworkBuilder.buildArtworkUris(entries.map { it.song }),
             favoriteSongIds = favorites,
-            currentSongId  = nowPlaying.song?.id,
+            currentPlaylistPosition = resolveCurrentPlaylistPosition(
+                playlistId     = playlistId,
+                playbackSource = nowPlaying.queueSource,
+                visibleEntries = visibleEntries,
+                playbackQueue  = nowPlaying.queue,
+                currentIndex   = nowPlaying.currentIndex,
+            ),
             totalDurationMs = entries.sumOf { it.song.duration },
             totalPlayCount = totalPlayCount,
             mostPlayedSongTitle = mostPlayedSongTitle,
@@ -137,7 +173,7 @@ class PlaylistDetailsViewModel @Inject constructor(
             searchQuery    = "",
             artworkUris    = emptyList(),
             favoriteSongIds = emptySet(),
-            currentSongId  = null,
+            currentPlaylistPosition = null,
             totalDurationMs = 0L,
             totalPlayCount = 0,
             mostPlayedSongTitle = null,
@@ -172,34 +208,36 @@ class PlaylistDetailsViewModel @Inject constructor(
         val songs = playlistQueueSongs(visibleEntries)
         if (songs.isEmpty()) return
         if (shuffle) {
-            playerController.playFromQueueShuffled(queue = songs)
+            playerController.playFromQueueShuffled(queue = songs, source = PlaybackQueueSource.Playlist(playlistId))
         } else {
             val startIndex = playlistPlaybackStartIndex(visibleEntries, entry) ?: return
-            playerController.playFromQueue(queue = songs, startIndex = startIndex)
+            playerController.playFromQueue(
+                queue = songs,
+                startIndex = startIndex,
+                source = PlaybackQueueSource.Playlist(playlistId),
+            )
         }
     }
 
     fun playAll() {
         val songs = uiState.value.visibleEntries.map { it.song }
         val first = songs.firstOrNull() ?: return
-        playerController.playFromQueue(queue = songs, startSong = first)
+        playerController.playFromQueue(
+            queue = songs,
+            startSong = first,
+            source = PlaybackQueueSource.Playlist(playlistId),
+        )
     }
 
     fun shufflePlay() {
         val songs = uiState.value.visibleEntries.map { it.song }
         if (songs.isEmpty()) return
-        playerController.playFromQueueShuffled(queue = songs)
+        playerController.playFromQueueShuffled(queue = songs, source = PlaybackQueueSource.Playlist(playlistId))
     }
 
     fun toggleFavorite(songId: Long) {
         val song = uiState.value.songs.firstOrNull { it.id == songId } ?: return
         viewModelScope.launch { statsRepository.toggleFavorite(songId, song.uri) }
-    }
-
-    fun removeSong(songId: Long) {
-        viewModelScope.launch {
-            playlistRepository.removeSongFromPlaylist(songId = songId, playlistId = playlistId)
-        }
     }
 
     fun removeEntry(position: Int) {

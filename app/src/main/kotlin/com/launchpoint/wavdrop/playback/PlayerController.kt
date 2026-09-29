@@ -66,6 +66,7 @@ internal data class PlaybackRequest(
     val queue: List<Song>,
     val startIndex: Int,
     val preservePlaybackOrder: Boolean = false,
+    val source: PlaybackQueueSource = PlaybackQueueSource.Other,
 )
 
 internal data class QueueStart(
@@ -1012,6 +1013,7 @@ class PlayerController @Inject constructor(
                 queue = playRequest.queue,
                 startIndex = playRequest.startIndex,
                 preservePlaybackOrder = playRequest.preservePlaybackOrder,
+                source = playRequest.source,
             )
             // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
             // against the (possibly mutated) queue so it never seeks a different song.
@@ -1201,6 +1203,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = startSong,
                 queue = playbackQueue,
+                queueSource = PlaybackQueueSource.Other,
                 currentIndex = playbackStartIndex,
                 shuffleEnabled = shuffleEnabled,
                 repeatMode = repeatMode,
@@ -1254,6 +1257,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = song,
                 queue = playbackQueue,
+                queueSource = PlaybackQueueSource.Other,
                 currentIndex = 0,
                 shuffleEnabled = false,
                 repeatMode = repeatMode,
@@ -1283,7 +1287,11 @@ class PlayerController @Inject constructor(
         controller.play()
     }
 
-    fun playFromQueue(queue: List<Song>, startSong: Song) {
+    fun playFromQueue(
+        queue: List<Song>,
+        startSong: Song,
+        source: PlaybackQueueSource = PlaybackQueueSource.Other,
+    ) {
         val normalizedQueue = queue.ifEmpty { listOf(startSong) }
         val startIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
             .takeIf { it >= 0 } ?: 0
@@ -1291,14 +1299,20 @@ class PlayerController @Inject constructor(
             queue = normalizedQueue,
             startIndex = startIndex,
             preservePlaybackOrder = false,
+            source = source,
         )
     }
 
-    fun playFromQueue(queue: List<Song>, startIndex: Int) {
+    fun playFromQueue(
+        queue: List<Song>,
+        startIndex: Int,
+        source: PlaybackQueueSource = PlaybackQueueSource.Other,
+    ) {
         playFromQueueInternal(
             queue = queue,
             startIndex = startIndex,
             preservePlaybackOrder = false,
+            source = source,
         )
     }
 
@@ -1317,6 +1331,7 @@ class PlayerController @Inject constructor(
         queue: List<Song>,
         startIndex: Int,
         preservePlaybackOrder: Boolean,
+        source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
         val start = resolveQueueStart(queue, startIndex) ?: return
         val normalizedQueue = start.queue
@@ -1346,6 +1361,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = startSong,
                 queue = playbackQueue,
+                queueSource = source,
                 currentIndex = playbackStartIndex,
                 shuffleEnabled = shuffleEnabled,
                 repeatMode = repeatMode,
@@ -1362,6 +1378,7 @@ class PlayerController @Inject constructor(
                 queue = normalizedQueue,
                 startIndex = originalStartIndex,
                 preservePlaybackOrder = preservePlaybackOrder,
+                source = source,
             )
             return
         }
@@ -1380,12 +1397,16 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
-    fun playFromQueueShuffled(queue: List<Song>) {
+    fun playFromQueueShuffled(
+        queue: List<Song>,
+        source: PlaybackQueueSource = PlaybackQueueSource.Other,
+    ) {
         val normalizedQueue = queue.ifEmpty { return }
         shuffleEnabled = true
         playFromQueue(
             queue = normalizedQueue,
             startIndex = normalizedQueue.indices.random(),
+            source = source,
         )
     }
 
@@ -2155,6 +2176,7 @@ class PlayerController @Inject constructor(
                 it.copy(
                     song = startSong,
                     queue = playbackQueue,
+                    queueSource = PlaybackQueueSource.Other,
                     currentIndex = startPlaybackIndex,
                     shuffleEnabled = shuffleEnabled,
                     repeatMode = repeatMode,
@@ -2211,6 +2233,7 @@ class PlayerController @Inject constructor(
                 song = startSong,
                 isPlaying = false,
                 queue = playbackQueue,
+                queueSource = PlaybackQueueSource.Other,
                 currentIndex = plan.startPlaybackIndex,
                 shuffleEnabled = shuffleEnabled,
                 repeatMode = repeatMode,

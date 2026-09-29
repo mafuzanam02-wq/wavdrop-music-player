@@ -120,22 +120,6 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
-    suspend fun removeSongFromPlaylist(songId: Long, playlistId: Long) {
-        db.withTransaction {
-            val position = dao.getSongsForPlaylistSnapshot(playlistId)
-                .firstOrNull { it.songId == songId }
-                ?.position
-                ?: return@withTransaction
-            replacePlaylistSongs(
-                playlistId = playlistId,
-                entries    = PlaylistPositionRules.removeAtPosition(
-                    current  = playlistEntries(playlistId),
-                    position = position,
-                ),
-            )
-        }
-    }
-
     suspend fun removePlaylistEntry(playlistId: Long, position: Int) {
         db.withTransaction {
             replacePlaylistSongs(
