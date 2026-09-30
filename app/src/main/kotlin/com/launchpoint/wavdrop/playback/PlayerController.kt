@@ -489,6 +489,7 @@ class PlayerController @Inject constructor(
     private companion object {
         const val TAG = "WavStats-PC"
         const val SEARCH_TAG = "WavdropSearchPlayback"
+        const val GAPLESS_TAG = "WavdropGapless"
         const val RESUME_TAG = "WavdropResume"
         const val QUEUE_PERF_TAG = "WavdropQueuePerf"
         const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
@@ -2059,17 +2060,48 @@ class PlayerController @Inject constructor(
             shuffleEnabled = newShuffleEnabled,
         ) ?: return
 
+        // Captured while the player queue is still in its pre-toggle state, to decide whether the
+        // physical playlist can be reordered live (G-1).
+        val oldPlaybackQueue = playbackQueue
+        val wasPlayerQueueNeedsSync = playerQueueNeedsSync
+        val controllerIndexBeforeToggle = controller?.currentMediaItemIndex
+        val controllerCountBeforeToggle = controller?.mediaItemCount
+        val syncPlan = planShufflePhysicalSync(
+            oldPlaybackQueue = oldPlaybackQueue,
+            newPlaybackQueue = toggleModel.playbackQueue,
+            oldCurrentPlaybackIndex = currentIndex,
+            newCurrentPlaybackIndex = toggleModel.currentPlaybackIndex,
+            controllerAvailable = controller != null,
+            controllerCurrentIndex = controllerIndexBeforeToggle,
+            controllerMediaItemCount = controllerCountBeforeToggle,
+            playerQueueNeedsSync = wasPlayerQueueNeedsSync,
+        )
+
+        // Dirty BEFORE the logical queue changes, so there is never an observable moment where the
+        // logical queue is the new order while the flag says the player is aligned. Live
+        // replacement and every fallback start dirty; only a proven NoOp stays clean. Anything not
+        // provably aligned keeps the deferred path: the dirty flag records the app/player
+        // divergence independently of controller availability (a WARM reconnect never reloads the
+        // player), and [handlePendingAutomaticTransition] / the reconnect drain resolve it later —
+        // see [planShufflePhysicalSync] and [playerQueueNeedsSync].
+        playerQueueNeedsSync = syncPlan.playerQueueNeedsSync(ShuffleLiveSyncProgress.BeforeMutation)
+
         // Reorder changes occurrence identities; invalidate any in-progress recovery episode.
         bumpQueueGeneration()
         shuffleEnabled = newShuffleEnabled
         playbackOrder = toggleModel.playbackOrder
         playbackQueue = toggleModel.playbackQueue
-        // Record the app/player divergence independently of controller availability. When the
-        // controller is momentarily unavailable a WARM reconnect never reloads the player, so the
-        // dirty flag is the only thing that lets the next authoritative connection (or queue op)
-        // synchronize the stale traversal order. Toggling always changes only the upcoming order,
-        // never the current item, so this is a deferred sync — see [shuffleToggleRequiresQueueSync].
-        playerQueueNeedsSync = shuffleToggleRequiresQueueSync(toggleModel.requiresCurrentItemReplacement)
+        if (syncPlan is ShufflePhysicalSyncPlan.ReplaceAroundCurrent && controller != null) {
+            // Aligned player + controller: reorder the physical playlist around the untouched
+            // current item right now, so the next natural boundary is a pure Media3 AUTO
+            // transition. The queue stays marked dirty during the live Media3 mutation because
+            // playlist callbacks can observe intermediate physical state; it is cleared only after
+            // BOTH replacements succeed, and stays dirty (deferred recovery) if either throws.
+            val succeeded = applyShuffleAroundCurrent(controller, syncPlan)
+            playerQueueNeedsSync = syncPlan.playerQueueNeedsSync(
+                if (succeeded) ShuffleLiveSyncProgress.Succeeded else ShuffleLiveSyncProgress.Failed,
+            )
+        }
         if (controller == null) {
             // Demand-driven: bring the controller back so the reconnect drain can push the new order.
             ensureControllerConnection()
@@ -2087,6 +2119,46 @@ class PlayerController @Inject constructor(
         }
         saveSessionAsync()
     }
+
+    /**
+     * Reorders the physical Media3 playlist around the current item using playlist mutations only:
+     * no setMediaItems / prepare / play / pause / seek, and the current item is in neither replaced
+     * range, so playback position and play state are untouched. Returns true only if both
+     * mutations were issued; on any failure the caller leaves the queue marked dirty.
+     */
+    private fun applyShuffleAroundCurrent(
+        controller: MediaController,
+        plan: ShufflePhysicalSyncPlan.ReplaceAroundCurrent,
+    ): Boolean = runCatching {
+        val suffixStart = plan.oldCurrentPhysicalIndex + 1
+        // Suffix first: its indexes are unaffected by the prefix edit that follows.
+        if (plan.desiredSuffix.isNotEmpty() || suffixStart < controller.mediaItemCount) {
+            controller.replaceMediaItems(
+                suffixStart,
+                controller.mediaItemCount,
+                materializeMediaItems(plan.desiredSuffix).mediaItems,
+            )
+        }
+        // Prefix strictly before the current item; afterwards the current item sits at
+        // newCurrentPhysicalIndex.
+        if (plan.desiredPrefix.isNotEmpty() || plan.oldCurrentPhysicalIndex > 0) {
+            controller.replaceMediaItems(
+                0,
+                plan.oldCurrentPhysicalIndex,
+                materializeMediaItems(plan.desiredPrefix).mediaItems,
+            )
+        }
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                GAPLESS_TAG,
+                "shuffle queue synchronized around current oldIndex=${plan.oldCurrentPhysicalIndex}" +
+                    " newIndex=${plan.newCurrentPhysicalIndex} prefix=${plan.desiredPrefix.size}" +
+                    " suffix=${plan.desiredSuffix.size}",
+            )
+        }
+    }.onFailure { error ->
+        Log.w(TAG, "[shuffleSync] live physical sync failed, deferring: ${error.message}")
+    }.isSuccess
 
     fun cycleRepeatMode() {
         repeatMode = when (repeatMode) {
@@ -2977,9 +3049,22 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    /**
+     * The only place the app touches the player at a natural track boundary. Media3 has already
+     * advanced natively; when the player playlist is in step with the logical queue (the normal
+     * case) this returns false and WavDrop merely follows state, preserving native gapless
+     * playback (see [MediaItemTransitionKind]). It intervenes — a full re-push of the queue, which
+     * is NOT gapless — only while [playerQueueNeedsSync] says the player's order is stale (e.g. a
+     * deferred shuffle reorder, or a queue op that could not reach the player).
+     */
     private fun handlePendingAutomaticTransition(): Boolean {
-        if (!playerQueueNeedsSync) return false
+        if (!naturalTransitionRequiresQueueResync(MediaItemTransitionKind.Auto, playerQueueNeedsSync)) {
+            return false
+        }
         val controller = mediaController ?: return false
+        if (BuildConfig.DEBUG) {
+            Log.d(GAPLESS_TAG, "natural boundary requires queue resync (playerQueueNeedsSync): full queue re-push, not native gapless")
+        }
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
             .takeIf { it in playbackQueue.indices }
             ?: return false

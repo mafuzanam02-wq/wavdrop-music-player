@@ -159,47 +159,17 @@ class PendingTransportCommandsTest {
         assertTrue(NavigationIntent.entries.toSet() == setOf(NavigationIntent.NEXT, NavigationIntent.PREVIOUS))
     }
 
-    // ── Warm-reconnect shuffle-queue synchronization policy ─────────────────────
+    // ── Warm-reconnect queue synchronization policy ─────────────────────────────
     //
-    // Regression for the Phase 7 correction: a shuffle change made while the MediaController is
-    // unavailable updates the app-owned playbackQueue/playbackOrder, but the PRE-FIX dirty flag was
-    // `controller != null && !requiresCurrentItemReplacement` — so with no controller it stayed
-    // false and a WARM reconnect (session alive, player never reloaded as it would be on a COLD
-    // start) left the live player's traversal order stale with nothing pending to sync it.
+    // Whether a shuffle toggle reaches the player live or is deferred is decided by
+    // planShufflePhysicalSync (see ShuffleQueueSyncPlannerTest). What remains here is the
+    // reconnect-side policy for a queue left dirty, and the shuffle model round trip.
 
     private fun song(id: Long) = Song(
         id = id, title = "Song $id", artist = "Artist", album = "Album",
         albumId = 0L, duration = 180_000L, uri = "content://media/$id",
         dateAdded = 0L, trackNumber = 0, year = 2020,
     )
-
-    @Test
-    fun `A shuffle OFF to ON while controller absent marks the queue as needing sync`() {
-        // requiresCurrentItemReplacement is false for the reorder model → dirty flag must be set,
-        // independently of controller availability (the pre-fix `controller != null` guard was the
-        // bug). A warm reconnect then sees a dirty queue and synchronizes.
-        assertTrue(shuffleToggleRequiresQueueSync(requiresCurrentItemReplacement = false))
-        assertTrue(reconnectRequiresQueueSync(playerQueueNeedsSync = true, supersededByQueueRequest = false))
-    }
-
-    @Test
-    fun `B shuffle ON to OFF while controller absent also marks the queue as needing sync`() {
-        // The pure decision does not depend on shuffle direction: turning shuffle OFF while
-        // disconnected diverges the app-owned (unshuffled) order from the stale player just the same.
-        assertTrue(shuffleToggleRequiresQueueSync(requiresCurrentItemReplacement = false))
-        assertTrue(reconnectRequiresQueueSync(playerQueueNeedsSync = true, supersededByQueueRequest = false))
-    }
-
-    @Test
-    fun `C shuffle change is marked dirty identically whether or not a controller is present`() {
-        // The fix removed controller availability from the decision. The controller-present path
-        // (existing immediate behavior) still marks the queue dirty for the deferred-sync machinery,
-        // exactly as before — so nothing about the connected case regresses.
-        val withoutController = shuffleToggleRequiresQueueSync(requiresCurrentItemReplacement = false)
-        val withController = shuffleToggleRequiresQueueSync(requiresCurrentItemReplacement = false)
-        assertEquals(withController, withoutController)
-        assertTrue(withController)
-    }
 
     @Test
     fun `D final app-owned order wins after two shuffle changes while disconnected`() {
@@ -224,7 +194,6 @@ class PendingTransportCommandsTest {
         // app-owned order a warm reconnect must push — not the intermediate shuffled order.
         assertEquals(queue.indices.toList(), off.playbackOrder)
         assertEquals(queue, off.playbackQueue)
-        assertTrue(shuffleToggleRequiresQueueSync(off.requiresCurrentItemReplacement))
     }
 
     @Test

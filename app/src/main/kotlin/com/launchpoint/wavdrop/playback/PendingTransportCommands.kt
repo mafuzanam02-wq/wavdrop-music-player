@@ -71,26 +71,6 @@ internal object PendingTransport {
 }
 
 /**
- * Whether toggling shuffle must mark the app-owned queue as diverged from the live player
- * (`PlayerController.playerQueueNeedsSync`).
- *
- * The pre-fix implementation ANDed this with controller availability
- * (`controller != null && !requiresCurrentItemReplacement`), so a toggle performed while the
- * controller was momentarily unavailable never recorded the divergence. On a WARM reconnect
- * (PlaybackService/session still alive, so the player is never reloaded from the persisted session
- * as it is on a COLD start) the player's internal traversal order was left stale with nothing
- * pending to synchronize it — the app-owned playbackQueue/playbackOrder disagreed with the live
- * player's order until some later queue operation happened to trigger a sync.
- *
- * Controller availability is therefore irrelevant to whether a sync is required: the app-owned
- * order is authoritative and any change to it must be recorded. [requiresCurrentItemReplacement]
- * stays honoured for parity with [QueueMutation.ShuffleToggleResult]: a model that swaps the current
- * item would reload the player outright rather than mark it dirty for deferred synchronization.
- */
-internal fun shuffleToggleRequiresQueueSync(requiresCurrentItemReplacement: Boolean): Boolean =
-    !requiresCurrentItemReplacement
-
-/**
  * Whether an authoritative controller reconnection must actively synchronize the live player queue
  * to the app-owned queue/order exactly once.
  *

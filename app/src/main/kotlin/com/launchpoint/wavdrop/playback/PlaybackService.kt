@@ -7,6 +7,7 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -140,6 +141,9 @@ class PlaybackService : MediaLibraryService() {
         // and widget action intents — all paths that previously bypassed PlayerController.
         player.addListener(object : Player.Listener {
 
+            // DEBUG-only: previous media item index, for the WavdropGapless transition line.
+            private var lastGaplessIndex = player.currentMediaItemIndex
+
             private fun buildSnapshot(isPlaying: Boolean): WidgetPlaybackSnapshot {
                 val item = player.currentMediaItem
                 return WidgetPlaybackSnapshot(
@@ -189,6 +193,19 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (BuildConfig.DEBUG) {
+                    // One concise line per transition for physical gapless validation (no position ticks,
+                    // no file names): reason, indexes, player state and audio session.
+                    val newIndex = player.currentMediaItemIndex
+                    Log.d(
+                        GAPLESS_TAG,
+                        "transition reason=${classifyMediaItemTransition(reason)} oldIndex=$lastGaplessIndex" +
+                            " newIndex=$newIndex state=${player.playbackState}" +
+                            " playWhenReady=${player.playWhenReady} isPlaying=${player.isPlaying}" +
+                            " sessionId=${player.audioSessionId} ts=${SystemClock.elapsedRealtime()}",
+                    )
+                    lastGaplessIndex = newIndex
+                }
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onMediaItemTransition reason=$reason sessionId=${player.audioSessionId} title=${mediaItem?.mediaMetadata?.title} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition reason=$reason title=${mediaItem?.mediaMetadata?.title}")
                 serviceScope.launch {
@@ -650,6 +667,7 @@ class PlaybackService : MediaLibraryService() {
         private const val RESUME_TAG = "WavdropResume"
         private const val WIDGET_TAG = "WavdropWidget"
         private const val AUDIO_SESSION_TAG = "WavdropAudioSession"
+        private const val GAPLESS_TAG = "WavdropGapless"
         private const val AUDIO_EFFECTS_TAG = "WavdropAudioEffects"
         // Debug-only ADB triggers for EQ round-trip validation — never exposed in release builds.
         private const val ACTION_DEBUG_EQ_ENABLE  = "com.launchpoint.wavdrop.DEBUG_EQ_ENABLE"
