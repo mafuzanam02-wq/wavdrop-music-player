@@ -32,11 +32,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -45,7 +41,6 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -220,47 +215,6 @@ fun NowPlayingScreen(
                     if (song != null) {
                         val isExternalAudio = song.isExternalAudio()
                         val folderKey = song.validFolderKey()
-                        val queueInteraction = remember { MutableInteractionSource() }
-                        IconButton(
-                            onClick = { showQueueSheet = true },
-                            modifier = Modifier.wavdropPressFeedback(queueInteraction),
-                            interactionSource = queueInteraction,
-                        ) {
-                            Icon(
-                                imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
-                                contentDescription = "Open queue",
-                                tint               = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        if (!isExternalAudio) {
-                            IconButton(onClick = { showAddToPlaylist = true }) {
-                                Icon(
-                                    imageVector        = Icons.AutoMirrored.Filled.PlaylistAdd,
-                                    contentDescription = "Add to playlist",
-                                    tint               = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                            IconButton(onClick = viewModel::toggleFavorite) {
-                                WavdropFadeThrough(targetState = isFavorite) { favorite ->
-                                    Icon(
-                                        imageVector        = if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = if (favorite) "Unfavorite" else "Favorite",
-                                        tint               = if (favorite) MaterialTheme.colorScheme.primary
-                                                             else MaterialTheme.colorScheme.onSurface,
-                                    )
-                                }
-                            }
-                        }
-                        IconButton(onClick = { showSleepTimerDialog = true }) {
-                            Icon(
-                                imageVector        = Icons.Default.Timer,
-                                contentDescription = if (sleepTimerState.isActive) "Sleep Timer active"
-                                                     else "Sleep Timer",
-                                tint               = if (sleepTimerState.isActive)
-                                                         MaterialTheme.colorScheme.primary
-                                                     else MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
                         Box {
                             IconButton(onClick = { showMoreActions = true }) {
                                 Icon(
@@ -273,17 +227,6 @@ fun NowPlayingScreen(
                                 expanded = showMoreActions,
                                 onDismissRequest = { showMoreActions = false },
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Share") },
-                                    onClick = {
-                                        showMoreActions = false
-                                        shareSong(context, song) {
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Could not share this track")
-                                            }
-                                        }
-                                    },
-                                )
                                 if (folderKey != null) {
                                     DropdownMenuItem(
                                         text = { Text("Folder") },
@@ -366,6 +309,26 @@ fun NowPlayingScreen(
                 onOpenArtist       = onOpenArtist,
                 onOpenQueue       = { showQueueSheet = true },
                 sleepTimerLabel   = sleepTimerLabel,
+                quickActions      = nowPlayingQuickActions(
+                    hasSong          = true,
+                    isExternalAudio  = state.song?.isExternalAudio() == true,
+                    isFavorite       = isFavorite,
+                    sleepTimerActive = sleepTimerState.isActive,
+                ),
+                onQuickAction     = { type ->
+                    when (type) {
+                        NowPlayingQuickActionType.Favorite -> viewModel.toggleFavorite()
+                        NowPlayingQuickActionType.Playlist -> showAddToPlaylist = true
+                        NowPlayingQuickActionType.Timer    -> showSleepTimerDialog = true
+                        NowPlayingQuickActionType.Share    -> state.song?.let { song ->
+                            shareSong(context, song) {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("Could not share this track")
+                                }
+                            }
+                        }
+                    }
+                },
                 modifier          = Modifier.padding(innerPadding),
             )
         }
@@ -471,6 +434,8 @@ private fun NowPlayingContent(
     onOpenArtist: (String) -> Unit,
     onOpenQueue: () -> Unit,
     sleepTimerLabel: String? = null,
+    quickActions: List<NowPlayingQuickAction> = emptyList(),
+    onQuickAction: (NowPlayingQuickActionType) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val song = state.song ?: return
@@ -536,6 +501,8 @@ private fun NowPlayingContent(
             onOpenQueue = onOpenQueue,
             sleepTimerLabel = sleepTimerLabel,
             upNextLabel = upNextLabel,
+            quickActions = quickActions,
+            onQuickAction = onQuickAction,
         )
     }
 }
@@ -638,7 +605,7 @@ private fun NowPlayingLayoutMetrics.withUpperAreaSizing(
 
     // Minimum sizes prevent artwork from becoming unusably small on very short screens.
     val minArtwork = when (profile) {
-        NowPlayingLayoutProfile.Compact  -> 96.dp
+        NowPlayingLayoutProfile.Compact  -> 104.dp
         NowPlayingLayoutProfile.Medium   -> 140.dp
         NowPlayingLayoutProfile.Expanded -> 160.dp
     }
@@ -699,6 +666,8 @@ private fun FixedBottomNowPlayingLayout(
     onOpenQueue: () -> Unit,
     sleepTimerLabel: String?,
     upNextLabel: String,
+    quickActions: List<NowPlayingQuickAction>,
+    onQuickAction: (NowPlayingQuickActionType) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -734,6 +703,13 @@ private fun FixedBottomNowPlayingLayout(
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenArtist = onOpenArtist,
                 onOpenAlbum = onOpenAlbum,
+                quickActions = quickActions,
+                onQuickAction = onQuickAction,
+                cornerInset = when (profile) {
+                    NowPlayingLayoutProfile.Compact  -> 2.dp
+                    NowPlayingLayoutProfile.Medium   -> 4.dp
+                    NowPlayingLayoutProfile.Expanded -> 6.dp
+                },
             )
         }
 
@@ -768,6 +744,9 @@ private fun UpperNowPlayingContent(
     onOpenTrackDetails: (() -> Unit)?,
     onOpenArtist: (() -> Unit)?,
     onOpenAlbum: (() -> Unit)?,
+    quickActions: List<NowPlayingQuickAction>,
+    onQuickAction: (NowPlayingQuickActionType) -> Unit,
+    cornerInset: Dp,
 ) {
     val scrollState = rememberScrollState()
     Box(
@@ -808,6 +787,9 @@ private fun UpperNowPlayingContent(
                     onNext = onNext,
                     onEditLyrics = onEditLyrics,
                     onPasteLyrics = onPasteLyrics,
+                    quickActions = quickActions,
+                    onQuickAction = onQuickAction,
+                    cornerInset = cornerInset,
                     modifier = Modifier.size(metrics.artworkSize),
                 )
                 Text(
@@ -1142,6 +1124,9 @@ private fun ArtworkWithLyricsOverlay(
     onEditLyrics: () -> Unit,
     onPasteLyrics: ((String) -> Unit)? = null,
     compactLyricsOverlay: Boolean = false,
+    quickActions: List<NowPlayingQuickAction> = emptyList(),
+    onQuickAction: (NowPlayingQuickActionType) -> Unit = {},
+    cornerInset: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val context              = LocalContext.current
@@ -1158,102 +1143,115 @@ private fun ArtworkWithLyricsOverlay(
         null
     }
 
-    Box(
-        modifier = modifier
-            .pointerInput(song.id) {
-                detectTapGestures(
-                    onDoubleTap = { currentToggleLyrics() },
-                    onLongPress = { currentEdit() },
-                )
-            }
-            .pointerInput(song.id, showLyricsOverlay, swipeThresholdPx) {
-                if (showLyricsOverlay) return@pointerInput
-                var dragDistance = Offset.Zero
-                detectDragGestures(
-                    onDragStart  = { dragDistance = Offset.Zero },
-                    onDrag       = { change, dragAmount ->
-                        dragDistance += dragAmount
-                        val horizontal = abs(dragDistance.x)
-                        val vertical   = abs(dragDistance.y)
-                        if (horizontal >= swipeThresholdPx && horizontal > vertical * 1.25f) {
-                            change.consume()
-                        }
-                    },
-                    onDragEnd    = {
-                        val horizontal = abs(dragDistance.x)
-                        val vertical   = abs(dragDistance.y)
-                        if (horizontal >= swipeThresholdPx && horizontal > vertical * 1.25f) {
-                            if (dragDistance.x < 0f) currentNext() else currentPrevious()
-                        }
-                        dragDistance = Offset.Zero
-                    },
-                    onDragCancel = { dragDistance = Offset.Zero },
-                )
-            }
-            .semantics(mergeDescendants = true) {
-                customActions = listOf(
-                    CustomAccessibilityAction(
-                        label = if (showLyricsOverlay) "Hide lyrics" else "Show lyrics",
-                        action = {
-                            currentToggleLyrics()
-                            true
-                        },
-                    ),
-                    CustomAccessibilityAction(
-                        label = "Edit lyrics",
-                        action = {
-                            currentEdit()
-                            true
-                        },
-                    ),
-                )
-            },
-    ) {
-        ArtworkImage(
-            artworkUri = effectiveArtworkUri,
-            contentDescription = "Album artwork for ${song.album}",
-            placeholderIcon = Icons.Default.MusicNote,
-            shape = artworkShape,
-            // Large, non-recycled surface: keep the current cover visible while the next track's
-            // artwork loads so track changes crossfade directly instead of flashing the placeholder.
-            retainPreviousOnLoad = true,
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        if (showLyricsOverlay) {
-            val scrimAlpha = if (compactLyricsOverlay) 0.78f else 0.68f
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = scrimAlpha)),
-            ) {
-                LyricsOverlayContent(
-                    lyrics = lyrics,
-                    onSearchOnline = { searchLyricsOnline(context, song) },
-                    onPasteLyrics = onPasteLyrics,
-                    compact = compactLyricsOverlay,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(
-                            start = if (compactLyricsOverlay) 16.dp else 22.dp,
-                            end = if (compactLyricsOverlay) 16.dp else 22.dp,
-                            top = if (compactLyricsOverlay) 16.dp else 22.dp,
-                            bottom = if (compactLyricsOverlay) 16.dp else 52.dp,
-                        ),
-                )
-                if (!compactLyricsOverlay) {
-                    Text(
-                        text = "Double-tap to close · Long-press to edit",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.62f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 16.dp),
+    // Corner controls are siblings of the gesture surface (not descendants), so they stay outside
+    // its merged semantics node and only take taps inside their own targets.
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(song.id) {
+                    detectTapGestures(
+                        onDoubleTap = { currentToggleLyrics() },
+                        onLongPress = { currentEdit() },
                     )
                 }
+                .pointerInput(song.id, showLyricsOverlay, swipeThresholdPx) {
+                    if (showLyricsOverlay) return@pointerInput
+                    var dragDistance = Offset.Zero
+                    detectDragGestures(
+                        onDragStart  = { dragDistance = Offset.Zero },
+                        onDrag       = { change, dragAmount ->
+                            dragDistance += dragAmount
+                            val horizontal = abs(dragDistance.x)
+                            val vertical   = abs(dragDistance.y)
+                            if (horizontal >= swipeThresholdPx && horizontal > vertical * 1.25f) {
+                                change.consume()
+                            }
+                        },
+                        onDragEnd    = {
+                            val horizontal = abs(dragDistance.x)
+                            val vertical   = abs(dragDistance.y)
+                            if (horizontal >= swipeThresholdPx && horizontal > vertical * 1.25f) {
+                                if (dragDistance.x < 0f) currentNext() else currentPrevious()
+                            }
+                            dragDistance = Offset.Zero
+                        },
+                        onDragCancel = { dragDistance = Offset.Zero },
+                    )
+                }
+                .semantics(mergeDescendants = true) {
+                    customActions = listOf(
+                        CustomAccessibilityAction(
+                            label = if (showLyricsOverlay) "Hide lyrics" else "Show lyrics",
+                            action = {
+                                currentToggleLyrics()
+                                true
+                            },
+                        ),
+                        CustomAccessibilityAction(
+                            label = "Edit lyrics",
+                            action = {
+                                currentEdit()
+                                true
+                            },
+                        ),
+                    )
+                },
+        ) {
+            ArtworkImage(
+                artworkUri = effectiveArtworkUri,
+                contentDescription = "Album artwork for ${song.album}",
+                placeholderIcon = Icons.Default.MusicNote,
+                shape = artworkShape,
+                // Large, non-recycled surface: keep the current cover visible while the next track's
+                // artwork loads so track changes crossfade directly instead of flashing the placeholder.
+                retainPreviousOnLoad = true,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            if (showLyricsOverlay) {
+                val scrimAlpha = if (compactLyricsOverlay) 0.78f else 0.68f
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = scrimAlpha)),
+                ) {
+                    LyricsOverlayContent(
+                        lyrics = lyrics,
+                        onSearchOnline = { searchLyricsOnline(context, song) },
+                        onPasteLyrics = onPasteLyrics,
+                        compact = compactLyricsOverlay,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(
+                                start = if (compactLyricsOverlay) 16.dp else 22.dp,
+                                end = if (compactLyricsOverlay) 16.dp else 22.dp,
+                                top = if (compactLyricsOverlay) 16.dp else 22.dp,
+                                bottom = if (compactLyricsOverlay) 16.dp else 52.dp,
+                            ),
+                    )
+                    if (!compactLyricsOverlay) {
+                        Text(
+                            text = "Double-tap to close · Long-press to edit",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.62f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                        )
+                    }
+                }
             }
+        }
+        // Hidden while lyrics cover the artwork so they never sit on top of lyric text.
+        if (!showLyricsOverlay) {
+            NowPlayingArtworkCornerControls(
+                actions = quickActions,
+                inset = cornerInset,
+                onAction = onQuickAction,
+            )
         }
     }
 }
