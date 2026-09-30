@@ -93,12 +93,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.compose.state.ProgressStateWithTickInterval
 import androidx.media3.ui.compose.state.rememberProgressStateWithTickInterval
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.grouping.AlbumGrouper
 import com.launchpoint.wavdrop.data.grouping.ArtistGrouper
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.lyrics.LyricsResult
+import com.launchpoint.wavdrop.data.lyrics.staticText
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlaybackUserMessage
@@ -644,6 +646,7 @@ private fun NowPlayingLayoutMetrics.withUpperAreaSizing(
     )
 }
 
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 private fun FixedBottomNowPlayingLayout(
     state: NowPlayingState,
@@ -671,6 +674,13 @@ private fun FixedBottomNowPlayingLayout(
     quickActions: List<NowPlayingQuickAction>,
     onQuickAction: (NowPlayingQuickActionType) -> Unit,
 ) {
+    // The single continuous Media3 progress state. Only the holder is created here (no position read),
+    // so this layout does not recompose per frame; the seek track draws from it and the synced
+    // lyrics overlay derives its active line from it.
+    val trackProgress = rememberProgressStateWithTickInterval(
+        LocalProgressPlayer.current,
+        tickIntervalMs = 0L,
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -705,6 +715,7 @@ private fun FixedBottomNowPlayingLayout(
                 onOpenTrackDetails = onOpenTrackDetails,
                 onOpenArtist = onOpenArtist,
                 onOpenAlbum = onOpenAlbum,
+                trackProgress = trackProgress,
                 quickActions = quickActions,
                 onQuickAction = onQuickAction,
                 cornerInset = when (profile) {
@@ -718,6 +729,7 @@ private fun FixedBottomNowPlayingLayout(
         BottomPlaybackPanel(
             state = state,
             metrics = metrics,
+            trackProgress = trackProgress,
             onToggleShuffle = onToggleShuffle,
             onPrevious = onPrevious,
             onTogglePlayPause = onTogglePlayPause,
@@ -746,6 +758,7 @@ private fun UpperNowPlayingContent(
     onOpenTrackDetails: (() -> Unit)?,
     onOpenArtist: (() -> Unit)?,
     onOpenAlbum: (() -> Unit)?,
+    trackProgress: ProgressStateWithTickInterval,
     quickActions: List<NowPlayingQuickAction>,
     onQuickAction: (NowPlayingQuickActionType) -> Unit,
     cornerInset: Dp,
@@ -775,6 +788,7 @@ private fun UpperNowPlayingContent(
                     onEditLyrics = onEditLyrics,
                     onPasteLyrics = onPasteLyrics,
                     compactLyricsOverlay = !metrics.showLyricsHint,
+                    trackProgress = trackProgress,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(metrics.lyricsPanelHeight),
@@ -789,6 +803,7 @@ private fun UpperNowPlayingContent(
                     onNext = onNext,
                     onEditLyrics = onEditLyrics,
                     onPasteLyrics = onPasteLyrics,
+                    trackProgress = trackProgress,
                     quickActions = quickActions,
                     onQuickAction = onQuickAction,
                     cornerInset = cornerInset,
@@ -874,6 +889,7 @@ private fun UpperNowPlayingContent(
 private fun BottomPlaybackPanel(
     state: NowPlayingState,
     metrics: NowPlayingLayoutMetrics,
+    trackProgress: ProgressStateWithTickInterval,
     onToggleShuffle: () -> Unit,
     onPrevious: () -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -892,6 +908,7 @@ private fun BottomPlaybackPanel(
         key(state.song?.id, state.currentIndex) {
             SeekBar(
                 isSeekable = state.isSeekable,
+                trackProgress = trackProgress,
                 onSeek = onSeek,
             )
         }
@@ -1045,7 +1062,7 @@ private fun LyricsEditorDialog(
     // Initialize once — no reactive key so an in-flight lyricsState update
     // cannot reset text the user is actively editing.
     var text by remember {
-        mutableStateOf((lyrics as? LyricsResult.Available)?.text.orEmpty())
+        mutableStateOf(lyrics.staticText.orEmpty())
     }
     var showClearConfirm by remember { mutableStateOf(false) }
     val canSave = text.isNotBlank()
@@ -1126,6 +1143,7 @@ private fun ArtworkWithLyricsOverlay(
     onEditLyrics: () -> Unit,
     onPasteLyrics: ((String) -> Unit)? = null,
     compactLyricsOverlay: Boolean = false,
+    trackProgress: ProgressStateWithTickInterval,
     quickActions: List<NowPlayingQuickAction> = emptyList(),
     onQuickAction: (NowPlayingQuickActionType) -> Unit = {},
     cornerInset: Dp = 0.dp,
@@ -1223,6 +1241,7 @@ private fun ArtworkWithLyricsOverlay(
                         onSearchOnline = { searchLyricsOnline(context, song) },
                         onPasteLyrics = onPasteLyrics,
                         compact = compactLyricsOverlay,
+                        trackProgress = trackProgress,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(
@@ -1264,6 +1283,7 @@ private fun LyricsOverlayContent(
     onSearchOnline: (() -> Unit)?,
     onPasteLyrics: ((String) -> Unit)? = null,
     compact: Boolean,
+    trackProgress: ProgressStateWithTickInterval,
     modifier: Modifier = Modifier,
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -1285,6 +1305,14 @@ private fun LyricsOverlayContent(
                 color = Color.White,
                 textAlign = TextAlign.Start,
                 modifier = modifier.verticalScroll(rememberScrollState()),
+            )
+        }
+        is LyricsResult.Synced -> {
+            SyncedLyricsOverlayList(
+                lines = lyrics.lines,
+                compact = compact,
+                trackProgress = trackProgress,
+                modifier = modifier,
             )
         }
         LyricsResult.NotFound,
@@ -1387,12 +1415,12 @@ private fun String.hasKnownMetadata(unknownLabel: String): Boolean {
 @Composable
 private fun SeekBar(
     isSeekable: Boolean,
+    trackProgress: ProgressStateWithTickInterval,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val player = LocalProgressPlayer.current
     val textProgress = rememberProgressStateWithTickInterval(player, tickIntervalMs = 1_000L)
-    val trackProgress = rememberProgressStateWithTickInterval(player, tickIntervalMs = 0L)
     val timeDisplayMode = LocalNowPlayingTimeDisplayMode.current
     val reducedMotion = rememberReducedMotion()
     var isDragging by remember { mutableStateOf(false) }

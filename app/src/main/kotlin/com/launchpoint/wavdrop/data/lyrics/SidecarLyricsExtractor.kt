@@ -40,7 +40,8 @@ class MediaStoreSidecarLyricsExtractor @Inject constructor(
         var txtStatus = LyricsLookupStatus.NOT_FOUND
         for (displayName in candidateFilenames) {
             when (val result = readSidecar(folderPath, displayName)) {
-                is LyricsResult.Available -> {
+                is LyricsResult.Available,
+                is LyricsResult.Synced -> {
                     if (displayName.isLrcFilename()) lrcStatus = LyricsLookupStatus.FOUND
                     if (displayName.isTxtFilename()) txtStatus = LyricsLookupStatus.FOUND
                     return SidecarLyricsLookup(
@@ -117,13 +118,11 @@ class MediaStoreSidecarLyricsExtractor @Inject constructor(
         return runCatching {
             context.contentResolver.openInputStream(sidecarUri)?.use { input ->
                 input.bufferedReader().use { reader ->
-                    LyricsTextCleaner.clean(reader.readText())
+                    SidecarLyricsContent.resolve(displayName, reader.readText())
                 }
             }
         }.fold(
-            onSuccess = { cleaned ->
-                if (cleaned == null) LyricsResult.NotFound else LyricsResult.Available(cleaned)
-            },
+            onSuccess = { result -> result ?: LyricsResult.NotFound },
             onFailure = { error ->
                 LyricsResult.Error(error.message ?: "Could not read sidecar lyrics")
             },
@@ -239,5 +238,21 @@ internal object SidecarLyricsCandidates {
         val name = substringAfterLast('/').substringAfterLast('\\').trim()
         val extensionIndex = name.lastIndexOf('.')
         return if (extensionIndex > 0) name.substring(0, extensionIndex) else name
+    }
+}
+
+/** Pure raw-text → result decision for a sidecar file, separated from MediaStore I/O. */
+internal object SidecarLyricsContent {
+    /**
+     * `.lrc` with usable timestamps → [LyricsResult.Synced]; an untimed/unusable `.lrc` and every
+     * `.txt` → existing cleaned plain text. Null when there is no lyric text at all.
+     */
+    fun resolve(displayName: String, raw: String): LyricsResult? {
+        if (displayName.endsWith(".lrc", ignoreCase = true)) {
+            LrcParser.parse(raw)?.let { parsed ->
+                return LyricsResult.Synced(lines = parsed.lines, plainText = parsed.plainText)
+            }
+        }
+        return LyricsTextCleaner.clean(raw)?.let { LyricsResult.Available(it) }
     }
 }

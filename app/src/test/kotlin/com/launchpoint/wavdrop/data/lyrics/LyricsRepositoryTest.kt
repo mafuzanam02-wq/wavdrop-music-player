@@ -552,4 +552,64 @@ class LyricsRepositoryTest {
         assertEquals(1, fake.callCount)
         assertEquals(1, sidecar.callCount)
     }
+
+    // ── LRC-1: synced sidecar results ────────────────────────────────────────
+
+    private val syncedLyrics = LyricsResult.Synced(
+        lines = listOf(SyncedLyricsLine(1_000L, "Line one"), SyncedLyricsLine(2_000L, "Line two")),
+        plainText = "Line one\nLine two",
+    )
+
+    private fun syncedSidecar() = FakeSidecarLyricsExtractor(
+        default = sidecarLookup(result = syncedLyrics, sameFolderLrc = LyricsLookupStatus.FOUND),
+    )
+
+    @Test
+    fun `getLyrics returns synced sidecar when embedded lyrics are missing`() {
+        val repo = LyricsRepository(FakeLyricsExtractor(), syncedSidecar())
+
+        assertEquals(syncedLyrics, runBlocking { repo.getLyrics(song(61)) })
+    }
+
+    @Test
+    fun `observeLyrics returns synced sidecar when embedded lyrics are missing`() {
+        val repo = LyricsRepository(FakeLyricsExtractor(), syncedSidecar())
+
+        val emissions = runBlocking { repo.observeLyrics(song(62)).take(2).toList() }
+
+        assertEquals(listOf(LyricsResult.Loading, syncedLyrics), emissions)
+    }
+
+    @Test
+    fun `embedded available lyrics beat a synced sidecar`() {
+        val sidecar = syncedSidecar()
+        val repo = LyricsRepository(FakeLyricsExtractor(default = LyricsResult.Available("Embedded")), sidecar)
+
+        assertEquals(LyricsResult.Available("Embedded"), runBlocking { repo.getLyrics(song(63)) })
+        assertEquals(0, sidecar.callCount)
+    }
+
+    @Test
+    fun `custom override beats a synced sidecar`() {
+        val song = song(64)
+        val sidecar = syncedSidecar()
+        val overrideDao = FakeLyricsOverrideDao(
+            LyricsOverrideEntity(songId = song.id, contentUri = song.uri, lyrics = "Custom", updatedAt = 1L),
+        )
+        val repo = LyricsRepository(FakeLyricsExtractor(), sidecar, LyricsOverrideRepository(overrideDao))
+
+        assertEquals(LyricsResult.Available("Custom"), runBlocking { repo.getLyrics(song) })
+        assertEquals(0, sidecar.callCount)
+    }
+
+    @Test
+    fun `synced sidecar diagnostics report found`() {
+        val repo = LyricsRepository(FakeLyricsExtractor(), syncedSidecar())
+
+        val lookup = runBlocking { repo.getLyricsLookup(song(65)) }
+
+        assertEquals(syncedLyrics, lookup.result)
+        assertEquals(LyricsLookupStatus.FOUND, lookup.diagnostics.sameFolderLrc)
+        assertEquals(LyricsLookupStatus.NOT_FOUND, lookup.diagnostics.sameFolderTxt)
+    }
 }

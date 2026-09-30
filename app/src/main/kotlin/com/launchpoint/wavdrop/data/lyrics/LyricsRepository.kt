@@ -104,7 +104,7 @@ class LyricsRepository @Inject constructor(
 
         val sidecar = sidecarExtractor.lookup(song)
         val result = when {
-            sidecar.result is LyricsResult.Available -> sidecar.result
+            sidecar.result.hasLyrics -> sidecar.result
             embedded is LyricsResult.Error && sidecar.result is LyricsResult.Error ->
                 LyricsResult.Error("${embedded.message}; ${sidecar.result.message}")
             else -> LyricsResult.NotFound
@@ -132,7 +132,7 @@ class LyricsRepository @Inject constructor(
         if (embedded is LyricsResult.Available) return embedded
         val sidecar = sidecarExtractor.lookup(song)
         return when {
-            sidecar.result is LyricsResult.Available -> sidecar.result
+            sidecar.result.hasLyrics -> sidecar.result
             embedded is LyricsResult.Error && sidecar.result is LyricsResult.Error ->
                 LyricsResult.Error("${embedded.message}; ${sidecar.result.message}")
             else -> LyricsResult.NotFound
@@ -140,7 +140,8 @@ class LyricsRepository @Inject constructor(
     }
 
     private fun LyricsResult.toLookupStatus(): LyricsLookupStatus = when (this) {
-        is LyricsResult.Available -> LyricsLookupStatus.FOUND
+        is LyricsResult.Available,
+        is LyricsResult.Synced -> LyricsLookupStatus.FOUND
         is LyricsResult.Error -> LyricsLookupStatus.ERROR
         LyricsResult.Loading,
         LyricsResult.NotFound -> LyricsLookupStatus.NOT_FOUND

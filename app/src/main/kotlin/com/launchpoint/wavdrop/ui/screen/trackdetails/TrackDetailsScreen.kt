@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.lyrics.LyricsResult
+import com.launchpoint.wavdrop.data.lyrics.staticText
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.TrackStats
@@ -428,7 +429,7 @@ private fun LyricsEditorDialog(
     onDismiss: () -> Unit,
 ) {
     var text by remember(lyrics) {
-        mutableStateOf((lyrics as? LyricsResult.Available)?.text.orEmpty())
+        mutableStateOf(lyrics.staticText.orEmpty())
     }
     var clipboardEmpty by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
@@ -651,11 +652,13 @@ private fun LyricsSection(result: LyricsResult) {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
-        is LyricsResult.Available -> {
-            var expanded by remember(result.text) { mutableStateOf(false) }
-            var hasOverflow by remember(result.text) { mutableStateOf(false) }
+        is LyricsResult.Available,
+        is LyricsResult.Synced -> {
+            val lyricsText = result.staticText.orEmpty()
+            var expanded by remember(lyricsText) { mutableStateOf(false) }
+            var hasOverflow by remember(lyricsText) { mutableStateOf(false) }
             Text(
-                text     = result.text,
+                text     = lyricsText,
                 style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurface,
                 maxLines = if (expanded) Int.MAX_VALUE else LYRICS_PREVIEW_MAX_LINES,
