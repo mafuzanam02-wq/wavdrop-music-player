@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.screen.nowplaying
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QueueSheetSemanticsTest {
@@ -40,5 +41,24 @@ class QueueSheetSemanticsTest {
 
         assertEquals(3, sections.upNextStartIndex)
         assertEquals(2, sections.upNextCount)
+    }
+
+    @Test
+    fun `clear actions are offered only for non-empty sections`() {
+        val none = queueSheetSections(currentIndex = 0, queueSize = 1)
+        assertFalse(none.showClearEarlier)
+        assertFalse(none.showClearUpNext)
+
+        val both = queueSheetSections(currentIndex = 2, queueSize = 5)
+        assertTrue(both.showClearEarlier)
+        assertTrue(both.showClearUpNext)
+
+        val onlyEarlier = queueSheetSections(currentIndex = 2, queueSize = 3)
+        assertTrue(onlyEarlier.showClearEarlier)
+        assertFalse(onlyEarlier.showClearUpNext)
+
+        val onlyUpNext = queueSheetSections(currentIndex = 0, queueSize = 4)
+        assertFalse(onlyUpNext.showClearEarlier)
+        assertTrue(onlyUpNext.showClearUpNext)
     }
 }

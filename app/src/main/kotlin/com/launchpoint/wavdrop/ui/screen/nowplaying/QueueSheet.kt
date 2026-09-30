@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -111,7 +112,11 @@ internal data class QueueSheetSections(
     val currentItemIndex: Int?,
     val upNextStartIndex: Int,
     val upNextCount: Int,
-)
+) {
+    /** Bulk "Clear" header actions are offered only when the section has something to clear. */
+    val showClearEarlier: Boolean get() = earlierQueueCount > 0
+    val showClearUpNext: Boolean get() = upNextCount > 0
+}
 
 internal fun queueSheetSections(
     currentIndex: Int,
@@ -147,6 +152,8 @@ fun QueueSheet(
     onDismiss: () -> Unit,
     onJumpToItem: (Int) -> Unit,
     onRemoveItem: (Int) -> Unit,
+    onClearEarlier: () -> Boolean,
+    onClearUpNext: () -> Boolean,
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
     onMoveItemTo: (Int, Int) -> Unit,
@@ -166,6 +173,8 @@ fun QueueSheet(
             onDismiss = onDismiss,
             onJumpToItem = onJumpToItem,
             onRemoveItem = onRemoveItem,
+            onClearEarlier = onClearEarlier,
+            onClearUpNext = onClearUpNext,
             onMoveUp = onMoveUp,
             onMoveDown = onMoveDown,
             onMoveItemTo = onMoveItemTo,
@@ -183,6 +192,8 @@ private fun QueueSheetContent(
     onDismiss: () -> Unit,
     onJumpToItem: (Int) -> Unit,
     onRemoveItem: (Int) -> Unit,
+    onClearEarlier: () -> Boolean,
+    onClearUpNext: () -> Boolean,
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
     onMoveItemTo: (Int, Int) -> Unit,
@@ -234,6 +245,9 @@ private fun QueueSheetContent(
     // index) so the invoked occurrence is re-resolved against the live queue at execute time — the
     // exact same duplicate-safe path as drag. Null when the dialog is closed.
     var moveDialogSession      by remember { mutableStateOf<QueueDragSession?>(null) }
+    // Which bulk clear (if any) is awaiting confirmation. UI-only; the counts shown come from the
+    // live queue, and the clear itself re-reads the controller's current index when it runs.
+    var pendingBulkClear       by remember { mutableStateOf<QueueBulkClear?>(null) }
     // Post-drop confirmation flash (Phase B.1). `pendingDrop` is the intent captured at commit time;
     // `activeDrop` is the confirmation currently flashing (read by rows); `dropFlash` drives the
     // fading tonal overlay. All ephemeral, UI-only, one at a time.
@@ -464,6 +478,26 @@ private fun QueueSheetContent(
         }
     }
 
+    // A bulk clear restructures the whole queue: never continue an old drag or act on an occurrence
+    // captured before it (Move to… dialog, pending drop flash).
+    fun invalidateTransientQueueState() {
+        clearDragState()
+        moveDialogSession = null
+        pendingDrop = null
+        activeDrop = null
+    }
+
+    fun runBulkClear(kind: QueueBulkClear) {
+        val cleared = when (kind) {
+            QueueBulkClear.Earlier -> onClearEarlier()
+            QueueBulkClear.UpNext -> onClearUpNext()
+        }
+        if (cleared) {
+            invalidateTransientQueueState()
+            scope.launch { snackbarHostState.showSnackbar(kind.clearedMessage) }
+        }
+    }
+
     fun showRemovedSnackbar() {
         scope.launch {
             snackbarHostState.showSnackbar("Removed from queue")
@@ -623,7 +657,11 @@ private fun QueueSheetContent(
         // ── Earlier in queue ─────────────────────────────────────────────────
         if (earlierQueueCount > 0) {
             item {
-                QueueSectionHeader(label = sections.earlierQueueHeader.orEmpty())
+                QueueSectionHeader(
+                    label = sections.earlierQueueHeader.orEmpty(),
+                    actionLabel = if (sections.showClearEarlier) "Clear" else null,
+                    onAction = { pendingBulkClear = QueueBulkClear.Earlier },
+                )
             }
             items(
                 count = earlierQueueCount,
@@ -668,6 +706,8 @@ private fun QueueSheetContent(
                 QueueSectionHeader(
                     label = "Up next · $upNextCount",
                     modifier = Modifier.padding(top = 8.dp),
+                    actionLabel = if (sections.showClearUpNext) "Clear" else null,
+                    onAction = { pendingBulkClear = QueueBulkClear.UpNext },
                 )
             }
             items(
@@ -902,6 +942,36 @@ private fun QueueSheetContent(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         )
 
+        // ── Bulk clear confirmation ─────────────────────────────────────────────
+        val bulkClear = pendingBulkClear
+        if (bulkClear != null) {
+            val count = when (bulkClear) {
+                QueueBulkClear.Earlier -> earlierQueueCount
+                QueueBulkClear.UpNext -> upNextCount
+            }
+            if (count <= 0) {
+                // Queue changed underneath the dialog and there is nothing left to clear.
+                LaunchedEffect(Unit) { pendingBulkClear = null }
+            } else {
+                AlertDialog(
+                    onDismissRequest = { pendingBulkClear = null },
+                    title = { Text(bulkClear.dialogTitle) },
+                    text = { Text(bulkClear.dialogBody(count)) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                pendingBulkClear = null
+                                runBulkClear(bulkClear)
+                            },
+                        ) { Text("Clear") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingBulkClear = null }) { Text("Cancel") }
+                    },
+                )
+            }
+        }
+
         // ── "Move to…" dialog (Phase C) ─────────────────────────────────────────
         val activeMoveSession = moveDialogSession
         if (activeMoveSession != null) {
@@ -1062,13 +1132,51 @@ private fun QueueSheetHeader(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun QueueSectionHeader(label: String, modifier: Modifier = Modifier) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-        modifier = modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-    )
+private fun QueueSectionHeader(
+    label: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: () -> Unit = {},
+) {
+    if (actionLabel == null) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+        )
+        return
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onAction) {
+            Text(text = actionLabel, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/** The two explicit bulk queue clears and their confirmation / feedback copy. */
+private enum class QueueBulkClear(
+    val dialogTitle: String,
+    val clearedMessage: String,
+) {
+    Earlier("Clear earlier queue?", "Earlier queue cleared"),
+    UpNext("Clear Up Next?", "Up Next cleared");
+
+    fun dialogBody(count: Int): String = when (this) {
+        Earlier -> "Remove $count previously played tracks from this queue?"
+        UpNext -> "Remove $count upcoming tracks from this queue?"
+    }
 }
 
 // ── Playing-now row (highlighted) ─────────────────────────────────────────────

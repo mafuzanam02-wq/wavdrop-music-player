@@ -74,6 +74,23 @@ class PlayerControllerCurrentIndexResolverTest {
     }
 
     @Test
+    fun `controller that advanced past a stale state index wins`() {
+        // Bulk-clear boundary case: Media3 already moved to index 3 but state still says 1.
+        val queue = listOf(a, b, c, d, a)
+
+        val result = resolveCurrentPlaybackIndex(
+            playbackQueue = queue,
+            controllerIndex = 3,
+            controllerSongId = d.id,
+            stateIndex = 1,
+            stateSongId = b.id,
+            playerQueueNeedsSync = false,
+        )
+
+        assertEquals(3, result)
+    }
+
+    @Test
     fun `controller absent uses valid state current index`() {
         val queue = listOf(a, b, a, c)
 

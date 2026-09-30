@@ -401,6 +401,8 @@ fun NowPlayingScreen(
             onDismiss    = { showQueueSheet = false },
             onJumpToItem = { viewModel.jumpToQueueItem(it) },
             onRemoveItem = { viewModel.removeFromQueue(it) },
+            onClearEarlier = viewModel::clearEarlierQueue,
+            onClearUpNext  = viewModel::clearUpNext,
             onMoveUp     = { viewModel.moveQueueItemUp(it) },
             onMoveDown   = { viewModel.moveQueueItemDown(it) },
             onMoveItemTo = { from, to -> viewModel.moveQueueItemTo(from, to) },

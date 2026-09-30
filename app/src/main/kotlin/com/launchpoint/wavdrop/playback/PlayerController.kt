@@ -1739,6 +1739,52 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    /**
+     * Removes every queue occurrence strictly before the current one. The current occurrence keeps
+     * playing untouched and becomes index 0. Returns true only when something was removed.
+     */
+    fun clearEarlierQueue(): Boolean = applyBulkClear { currentIndex ->
+        QueueMutation.clearEarlier(libraryQueue, playbackOrder, currentIndex)
+    }
+
+    /** Removes every queue occurrence strictly after the current one. Returns true only on a real clear. */
+    fun clearUpNext(): Boolean = applyBulkClear { currentIndex ->
+        QueueMutation.clearUpNext(libraryQueue, playbackOrder, currentIndex)
+    }
+
+    private inline fun applyBulkClear(
+        plan: (currentIndex: Int) -> QueueMutation.BulkClearPlan,
+    ): Boolean {
+        // Media3 can advance before NowPlayingState syncs, so the boundary comes from the
+        // authoritative resolver (resolved once here, not from the possibly stale state index).
+        val currentPlaybackIndex = currentPlaybackIndex() ?: return false
+        val mutation = plan(currentPlaybackIndex) as? QueueMutation.BulkClearPlan.Mutation
+            ?: return false
+
+        bumpQueueGeneration()
+        libraryQueue = mutation.libraryQueue
+        playbackOrder = mutation.playbackOrder
+        playbackQueue = mutation.playbackQueue
+
+        // Media3's playlist mirrors playbackOrder, so one range removal keeps it aligned. Removing
+        // items before/after the current one never interrupts the current item or its position.
+        if (!playerQueueNeedsSync) {
+            mediaController?.removeMediaItems(mutation.mediaRemoveFrom, mutation.mediaRemoveToExclusive)
+        }
+
+        _nowPlayingState.update {
+            it.copy(
+                song = playbackQueue.getOrNull(mutation.currentPlaybackIndex) ?: it.song,
+                queue = playbackQueue,
+                currentIndex = mutation.currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
+        return true
+    }
+
     fun handleSongDeleted(songId: Long) {
         val currentSong = _nowPlayingState.value.song
         if (currentSong?.id == songId) {

@@ -24,6 +24,97 @@ internal object QueueMutation {
         val playbackQueue: List<Song>,
     )
 
+    /** Outcome of a bulk clear: either nothing to do, or the complete replacement queue state. */
+    sealed interface BulkClearPlan {
+        data object NoOp : BulkClearPlan
+
+        /**
+         * [removedCount] playback occurrences were dropped. The Media3 range to remove is
+         * [mediaRemoveFrom] until [mediaRemoveToExclusive] in the pre-mutation playlist.
+         */
+        data class Mutation(
+            val libraryQueue: List<Song>,
+            val playbackOrder: List<Int>,
+            val playbackQueue: List<Song>,
+            val currentPlaybackIndex: Int,
+            val removedCount: Int,
+            val mediaRemoveFrom: Int,
+            val mediaRemoveToExclusive: Int,
+        ) : BulkClearPlan
+    }
+
+    /** Removes every playback occurrence strictly before [currentPlaybackIndex]. */
+    fun clearEarlier(
+        libraryQueue: List<Song>,
+        playbackOrder: List<Int>,
+        currentPlaybackIndex: Int,
+    ): BulkClearPlan {
+        if (!isConsistent(libraryQueue, playbackOrder)) return BulkClearPlan.NoOp
+        if (currentPlaybackIndex <= 0 || currentPlaybackIndex !in playbackOrder.indices) {
+            return BulkClearPlan.NoOp
+        }
+        return retainPlaybackRange(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            keepFrom = currentPlaybackIndex,
+            keepToExclusive = playbackOrder.size,
+            currentPlaybackIndex = currentPlaybackIndex,
+        )
+    }
+
+    /** Removes every playback occurrence strictly after [currentPlaybackIndex]. */
+    fun clearUpNext(
+        libraryQueue: List<Song>,
+        playbackOrder: List<Int>,
+        currentPlaybackIndex: Int,
+    ): BulkClearPlan {
+        if (!isConsistent(libraryQueue, playbackOrder)) return BulkClearPlan.NoOp
+        if (currentPlaybackIndex < 0 || currentPlaybackIndex >= playbackOrder.lastIndex) {
+            return BulkClearPlan.NoOp
+        }
+        return retainPlaybackRange(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            keepFrom = 0,
+            keepToExclusive = currentPlaybackIndex + 1,
+            currentPlaybackIndex = currentPlaybackIndex,
+        )
+    }
+
+    private fun isConsistent(libraryQueue: List<Song>, playbackOrder: List<Int>): Boolean =
+        playbackOrder.size == libraryQueue.size &&
+            playbackOrder.toSet().size == libraryQueue.size &&
+            playbackOrder.all { it in libraryQueue.indices }
+
+    /**
+     * Keeps playback positions [keepFrom] until [keepToExclusive]. The surviving library entries
+     * stay in their original source order and are re-indexed densely; playback order is remapped
+     * through that re-indexing, so occurrences (never song IDs) define what survives.
+     */
+    private fun retainPlaybackRange(
+        libraryQueue: List<Song>,
+        playbackOrder: List<Int>,
+        keepFrom: Int,
+        keepToExclusive: Int,
+        currentPlaybackIndex: Int,
+    ): BulkClearPlan {
+        val keptPlayback = playbackOrder.subList(keepFrom, keepToExclusive)
+        val keptSourceIndices = keptPlayback.sorted()
+        val newIndexBySource = HashMap<Int, Int>(keptSourceIndices.size)
+        keptSourceIndices.forEachIndexed { newIndex, sourceIndex -> newIndexBySource[sourceIndex] = newIndex }
+        val newLibraryQueue = keptSourceIndices.map { libraryQueue[it] }
+        val newPlaybackOrder = keptPlayback.map { newIndexBySource.getValue(it) }
+        return BulkClearPlan.Mutation(
+            libraryQueue = newLibraryQueue,
+            playbackOrder = newPlaybackOrder,
+            playbackQueue = newPlaybackOrder.map { newLibraryQueue[it] },
+            currentPlaybackIndex = currentPlaybackIndex - keepFrom,
+            removedCount = playbackOrder.size - keptPlayback.size,
+            mediaRemoveFrom = if (keepFrom > 0) 0 else keepToExclusive,
+            mediaRemoveToExclusive = if (keepFrom > 0) keepFrom else playbackOrder.size,
+        )
+    }
+
     /** Resolves the current queue occurrence through the old playback order, never by song ID. */
     fun shuffleToggleModel(
         libraryQueue: List<Song>,

@@ -121,6 +121,10 @@ class NowPlayingViewModel @Inject constructor(
 
     fun removeFromQueue(playbackIndex: Int) = playerController.removeFromQueue(playbackIndex)
 
+    fun clearEarlierQueue(): Boolean = playerController.clearEarlierQueue()
+
+    fun clearUpNext(): Boolean = playerController.clearUpNext()
+
     fun moveQueueItemUp(playbackIndex: Int) = playerController.moveQueueItemUp(playbackIndex)
 
     fun moveQueueItemDown(playbackIndex: Int) = playerController.moveQueueItemDown(playbackIndex)
