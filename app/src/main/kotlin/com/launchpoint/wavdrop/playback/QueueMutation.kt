@@ -81,6 +81,121 @@ internal object QueueMutation {
         )
     }
 
+
+    /** Outcome of deleting the song that is currently playing. */
+    sealed interface CurrentDeletionPlan {
+        /** Invalid/inconsistent input; nothing may be mutated. */
+        data object NoOp : CurrentDeletionPlan
+
+        /** No surviving occurrence can continue under the repeat policy: clear the queue and stop. */
+        data object ClearQueue : CurrentDeletionPlan
+
+        /** Complete replacement queue state; [currentPlaybackIndex] is the exact surviving occurrence. */
+        data class Continue(
+            val libraryQueue: List<Song>,
+            val playbackOrder: List<Int>,
+            val playbackQueue: List<Song>,
+            val currentPlaybackIndex: Int,
+        ) : CurrentDeletionPlan {
+            val currentSong: Song get() = playbackQueue[currentPlaybackIndex]
+        }
+    }
+
+    /**
+     * Plans deletion of the current song. The current occurrence is established positionally by
+     * [currentPlaybackIndex]; [deletedSongId] only says which library song is now invalid, and EVERY
+     * occurrence of it is removed. The next survivor is the first later playback occurrence whose id is
+     * not the deleted one (Repeat ALL may wrap to the earliest earlier survivor; Repeat OFF/ONE never
+     * wrap, and ONE advances rather than repeating the deleted song). Surviving library entries keep
+     * source order and are re-indexed densely; playback order keeps its sequence.
+     */
+    fun planCurrentSongDeletion(
+        libraryQueue: List<Song>,
+        playbackOrder: List<Int>,
+        currentPlaybackIndex: Int,
+        deletedSongId: Long,
+        repeatMode: RepeatMode,
+    ): CurrentDeletionPlan {
+        if (!isConsistent(libraryQueue, playbackOrder)) return CurrentDeletionPlan.NoOp
+        if (currentPlaybackIndex !in playbackOrder.indices) return CurrentDeletionPlan.NoOp
+        if (libraryQueue[playbackOrder[currentPlaybackIndex]].id != deletedSongId) return CurrentDeletionPlan.NoOp
+
+        fun survives(playbackPosition: Int) = libraryQueue[playbackOrder[playbackPosition]].id != deletedSongId
+
+        val laterSurvivor = (currentPlaybackIndex + 1 until playbackOrder.size).firstOrNull(::survives)
+        val wrappedSurvivor = if (repeatMode == RepeatMode.ALL) (0 until currentPlaybackIndex).firstOrNull(::survives) else null
+        val nextPosition = laterSurvivor ?: wrappedSurvivor ?: return CurrentDeletionPlan.ClearQueue
+
+        val keptPlayback = playbackOrder.filter { libraryQueue[it].id != deletedSongId }
+        val keptSources = keptPlayback.sorted()
+        val newIndexBySource = HashMap<Int, Int>(keptSources.size)
+        keptSources.forEachIndexed { newIndex, source -> newIndexBySource[source] = newIndex }
+        val newLibraryQueue = keptSources.map { libraryQueue[it] }
+        val newPlaybackOrder = keptPlayback.map { newIndexBySource.getValue(it) }
+        val newCurrent = newPlaybackOrder.indexOf(newIndexBySource.getValue(playbackOrder[nextPosition]))
+        return CurrentDeletionPlan.Continue(
+            libraryQueue = newLibraryQueue,
+            playbackOrder = newPlaybackOrder,
+            playbackQueue = newPlaybackOrder.map { newLibraryQueue[it] },
+            currentPlaybackIndex = newCurrent,
+        )
+    }
+
+    /** Outcome of deleting a library song that is NOT the current occurrence. */
+    sealed interface NonCurrentDeletionPlan {
+        /** Nothing to remove, or invalid input (including a resolved current that has the deleted id). */
+        data object NoOp : NonCurrentDeletionPlan
+
+        /**
+         * Complete replacement queue state. [currentPlaybackIndex] is the same exact surviving source
+         * occurrence as before. [removedPlaybackPositions] are the OLD playback positions to remove from an
+         * aligned Media3 playlist, in descending order so earlier removals cannot shift later targets.
+         */
+        data class Mutation(
+            val libraryQueue: List<Song>,
+            val playbackOrder: List<Int>,
+            val playbackQueue: List<Song>,
+            val currentPlaybackIndex: Int,
+            val removedPlaybackPositions: List<Int>,
+        ) : NonCurrentDeletionPlan
+    }
+
+    /**
+     * Plans removal of EVERY occurrence of [deletedSongId] when the exact current occurrence
+     * ([currentPlaybackIndex], resolved positionally by the caller) is a different song. Never reads Now
+     * Playing state and never identifies the current occurrence by song id.
+     */
+    fun planNonCurrentSongDeletion(
+        libraryQueue: List<Song>,
+        playbackOrder: List<Int>,
+        currentPlaybackIndex: Int,
+        deletedSongId: Long,
+    ): NonCurrentDeletionPlan {
+        if (!isConsistent(libraryQueue, playbackOrder)) return NonCurrentDeletionPlan.NoOp
+        if (currentPlaybackIndex !in playbackOrder.indices) return NonCurrentDeletionPlan.NoOp
+        val currentSource = playbackOrder[currentPlaybackIndex]
+        if (libraryQueue[currentSource].id == deletedSongId) return NonCurrentDeletionPlan.NoOp
+
+        val removed = playbackOrder.indices
+            .filter { libraryQueue[playbackOrder[it]].id == deletedSongId }
+            .sortedDescending()
+        if (removed.isEmpty()) return NonCurrentDeletionPlan.NoOp
+
+        val keptPlayback = playbackOrder.filter { libraryQueue[it].id != deletedSongId }
+        val keptSources = keptPlayback.sorted()
+        val newIndexBySource = HashMap<Int, Int>(keptSources.size)
+        keptSources.forEachIndexed { newIndex, source -> newIndexBySource[source] = newIndex }
+        val newLibraryQueue = keptSources.map { libraryQueue[it] }
+        val newPlaybackOrder = keptPlayback.map { newIndexBySource.getValue(it) }
+        return NonCurrentDeletionPlan.Mutation(
+            libraryQueue = newLibraryQueue,
+            playbackOrder = newPlaybackOrder,
+            playbackQueue = newPlaybackOrder.map { newLibraryQueue[it] },
+            currentPlaybackIndex = newPlaybackOrder.indexOf(newIndexBySource.getValue(currentSource)),
+            removedPlaybackPositions = removed,
+        )
+    }
+
     private fun isConsistent(libraryQueue: List<Song>, playbackOrder: List<Int>): Boolean =
         playbackOrder.size == libraryQueue.size &&
             playbackOrder.toSet().size == libraryQueue.size &&

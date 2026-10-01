@@ -79,6 +79,23 @@ internal data class QueueStart(
 internal fun resolveQueueStart(queue: List<Song>, startIndex: Int): QueueStart? =
     startIndex.takeIf { it in queue.indices }?.let { QueueStart(queue, it) }
 
+/**
+ * Compatibility resolver for callers that only know the song: an empty queue normalizes to
+ * `[startSong]`; otherwise the song must match exactly ONE occurrence. Absent or ambiguous (duplicate
+ * ids) yields null - never the first match, never index 0.
+ */
+internal fun resolveQueueStartBySong(queue: List<Song>, startSong: Song): QueueStart? {
+    if (queue.isEmpty()) return QueueStart(listOf(startSong), 0)
+    var match = -1
+    queue.forEachIndexed { index, song ->
+        if (song.id == startSong.id) {
+            if (match >= 0) return null
+            match = index
+        }
+    }
+    return if (match >= 0) QueueStart(queue, match) else null
+}
+
 internal fun resolveSessionCurrentLibraryIndex(
     libraryQueue: List<Song>,
     playbackOrder: List<Int>,
@@ -182,6 +199,55 @@ internal fun resolveCurrentPlaybackIndex(
 
     return uniquePlaybackIndexForSongId(playbackQueue, controllerSongId)
         ?: uniquePlaybackIndexForSongId(playbackQueue, stateSongId)
+}
+
+/** The song at an already-resolved playback occurrence, or null when it is unresolved/out of range. */
+internal fun songAtResolvedPlaybackIndex(playbackQueue: List<Song>, resolvedIndex: Int?): Song? =
+    resolvedIndex?.let { playbackQueue.getOrNull(it) }
+
+/**
+ * Which duties a Media3 callback owns when it synchronizes Now Playing. Every sync still happens; the
+ * flags decide who performs the StatsTracker song transition and session persistence so a single
+ * state change is never owned twice.
+ */
+internal data class CallbackOwnership(
+    val notifiesStats: Boolean,
+    val persistsSession: Boolean,
+)
+
+internal object PlaybackCallbackOwnership {
+    /**
+     * `DISCONTINUITY_REASON_REMOVE` is emitted (before the media-item transition) when WavDrop replaces
+     * the playlist, e.g. current-song deletion; the PLAYLIST_CHANGED media-item transition owns that
+     * song change, so REMOVE only refreshes state. AUTO_TRANSITION keeps its pre-existing handling
+     * (stats are handled explicitly in the callback; the sync itself does not notify). Everything else
+     * is unchanged.
+     */
+    fun forPositionDiscontinuity(reason: Int): CallbackOwnership = when (reason) {
+        Player.DISCONTINUITY_REASON_REMOVE -> CallbackOwnership(notifiesStats = false, persistsSession = false)
+        Player.DISCONTINUITY_REASON_AUTO_TRANSITION -> CallbackOwnership(notifiesStats = false, persistsSession = true)
+        else -> CallbackOwnership(notifiesStats = true, persistsSession = true)
+    }
+
+    /** The media-item transition is the authoritative song-transition callback (incl. PLAYLIST_CHANGED). */
+    fun forMediaItemTransition(reason: Int): CallbackOwnership =
+        CallbackOwnership(notifiesStats = true, persistsSession = true)
+}
+
+internal enum class SongDeletionRoute { Current, NonCurrent, Unresolved }
+
+/**
+ * Routes a library-song deletion by the RESOLVED current occurrence (never a possibly stale Now Playing
+ * song). The occurrence is positional; only its song id is compared with [deletedSongId].
+ */
+internal fun routeSongDeletion(
+    playbackQueue: List<Song>,
+    resolvedCurrentIndex: Int?,
+    deletedSongId: Long,
+): SongDeletionRoute {
+    val current = songAtResolvedPlaybackIndex(playbackQueue, resolvedCurrentIndex)
+        ?: return SongDeletionRoute.Unresolved
+    return if (current.id == deletedSongId) SongDeletionRoute.Current else SongDeletionRoute.NonCurrent
 }
 
 private fun uniquePlaybackIndexForSongId(playbackQueue: List<Song>, songId: Long?): Int? {
@@ -671,8 +737,9 @@ class PlayerController @Inject constructor(
             // Belt-and-suspenders: covers queue auto-advance and any REPEAT_ONE loop
             // where Media3 does fire this callback. The primary loop-boundary signal
             // is the position ticker below; this handles whatever IPC delivers.
-            syncNowPlayingState(fromTransition = true)
-            saveSessionAsync()
+            val ownership = PlaybackCallbackOwnership.forMediaItemTransition(reason)
+            syncNowPlayingState(fromTransition = ownership.notifiesStats)
+            if (ownership.persistsSession) saveSessionAsync()
         }
 
         override fun onPositionDiscontinuity(
@@ -703,8 +770,9 @@ class PlayerController @Inject constructor(
                     }
                 }
             }
-            syncNowPlayingState(notifyStats = reason != Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
-            saveSessionAsync()
+            val ownership = PlaybackCallbackOwnership.forPositionDiscontinuity(reason)
+            syncNowPlayingState(notifyStats = ownership.notifiesStats)
+            if (ownership.persistsSession) saveSessionAsync()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1124,7 +1192,7 @@ class PlayerController @Inject constructor(
     }
 
     fun playSong(song: Song) {
-        playFromQueue(queue = listOf(song), startSong = song)
+        playFromQueue(queue = listOf(song), startIndex = 0)
     }
 
     fun playSearchResultPreservingQueue(song: Song) {
@@ -1293,12 +1361,14 @@ class PlayerController @Inject constructor(
         startSong: Song,
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
-        val normalizedQueue = queue.ifEmpty { listOf(startSong) }
-        val startIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
-            .takeIf { it >= 0 } ?: 0
+        val start = resolveQueueStartBySong(queue, startSong)
+        if (start == null) {
+            Log.w(TAG, "playFromQueue: start song ${startSong.id} is absent or ambiguous in queue; ignoring")
+            return
+        }
         playFromQueueInternal(
-            queue = normalizedQueue,
-            startIndex = startIndex,
+            queue = start.queue,
+            startIndex = start.startIndex,
             preservePlaybackOrder = false,
             source = source,
         )
@@ -1314,17 +1384,6 @@ class PlayerController @Inject constructor(
             startIndex = startIndex,
             preservePlaybackOrder = false,
             source = source,
-        )
-    }
-
-    private fun playFromQueuePreservingPlaybackOrder(queue: List<Song>, startSong: Song) {
-        val normalizedQueue = queue.ifEmpty { listOf(startSong) }
-        val startIndex = normalizedQueue.indexOfFirst { it.id == startSong.id }
-            .takeIf { it >= 0 } ?: 0
-        playFromQueueInternal(
-            queue = normalizedQueue,
-            startIndex = startIndex,
-            preservePlaybackOrder = true,
         )
     }
 
@@ -1459,7 +1518,7 @@ class PlayerController @Inject constructor(
         when (val plan = planPlayAllNext(songs, hasActiveCurrentItem)) {
             PlayAllNextPlan.NoOp -> Unit
             is PlayAllNextPlan.StartQueue ->
-                playFromQueue(queue = plan.queue, startSong = plan.startSong)
+                playFromQueue(queue = plan.queue, startIndex = 0)
             is PlayAllNextPlan.InsertAfterCurrent -> {
                 insertAllAfterCurrent(plan.songs)
             }
@@ -1477,7 +1536,7 @@ class PlayerController @Inject constructor(
         ) {
             QueueAddPlan.NoOp -> Unit
             // Only a genuinely empty queue starts anew.
-            QueueAddPlan.StartNewQueue -> playFromQueue(queue = songs, startSong = songs.first())
+            QueueAddPlan.StartNewQueue -> playFromQueue(queue = songs, startIndex = 0)
             // Existing queue: append to tail, preserving the queue even when the current index is
             // temporarily unresolvable (previously this destructively replaced the queue).
             QueueAddPlan.AppendPreservingQueue -> appendAllPreservingQueue(songs)
@@ -1787,57 +1846,132 @@ class PlayerController @Inject constructor(
     }
 
     fun handleSongDeleted(songId: Long) {
-        val currentSong = _nowPlayingState.value.song
-        if (currentSong?.id == songId) {
-            handleCurrentSongDeleted()
-        } else {
-            // Song is queued but not the current track — remove all occurrences.
-            val indicesToRemove = playbackQueue.indices
-                .filter { playbackQueue[it].id == songId }
-                .sortedDescending()
-            indicesToRemove.forEach { removeFromQueue(it) }
+        // Resolve the current occurrence ONCE through the occurrence-safe resolver; Now Playing state
+        // may lag Media3 at a transition and must not decide current vs non-current.
+        val currentIndex = currentPlaybackIndex()
+        when (routeSongDeletion(playbackQueue, currentIndex, songId)) {
+            SongDeletionRoute.Unresolved -> return // fail closed
+            SongDeletionRoute.Current -> handleCurrentSongDeleted(songId, currentIndex ?: return)
+            SongDeletionRoute.NonCurrent -> currentIndex?.let { applyNonCurrentSongDeletion(songId, it) }
         }
     }
 
-    private fun handleCurrentSongDeleted() {
-        val currentIdx = currentPlaybackIndex() ?: return
-        if (currentIdx !in playbackQueue.indices) return
 
-        // Use nextIndex (not automaticNextIndex) so RepeatMode.ONE still advances
-        // past the deleted song instead of looping back to it.
-        val nextIdx = QueueNavigator.nextIndex(
-            queueSize    = playbackQueue.size,
-            currentIndex = currentIdx,
-            repeatMode   = repeatMode,
-        )
+    /**
+     * Library deletion of a song that is not the current occurrence: ONE logical mutation planned from the
+     * already-resolved [currentIdx] (never from Now Playing state, which may lag Media3). Removes every
+     * occurrence of [songId]; the surviving current item keeps playing untouched.
+     */
+    private fun applyNonCurrentSongDeletion(songId: Long, currentIdx: Int) {
+        val plan = QueueMutation.planNonCurrentSongDeletion(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            currentPlaybackIndex = currentIdx,
+            deletedSongId = songId,
+        ) as? QueueMutation.NonCurrentDeletionPlan.Mutation ?: return
 
-        val controller = mediaController
-        if (nextIdx == null || controller == null) {
-            // No next song available, or controller not yet connected — clear queue and stop.
-            mediaController?.pause()
-            mediaController?.clearMediaItems()
-            libraryQueue        = emptyList()
-            playbackOrder       = emptyList()
-            playbackQueue       = emptyList()
-            lastKnownPositionMs = -1L
-            _nowPlayingState.update {
-                it.copy(
-                    song         = null,
-                    isPlaying    = false,
-                    queue        = emptyList(),
-                    currentIndex = 0,
-                    positionMs   = 0L,
-                    durationMs   = 0L,
-                )
-            }
-            saveSessionAsync()
-            return
+        bumpQueueGeneration()
+        libraryQueue = plan.libraryQueue
+        playbackOrder = plan.playbackOrder
+        playbackQueue = plan.playbackQueue
+
+        // Aligned Media3 playlist mirrors the old playback order: remove the old positions, descending.
+        // A dirty playlist is not authoritative and is left for the existing resync path.
+        if (!playerQueueNeedsSync) {
+            val controller = mediaController
+            if (controller != null) plan.removedPlaybackPositions.forEach { controller.removeMediaItem(it) }
         }
 
-        // Advance to the next song first (preserving play/pause state), then remove
-        // the stale entry that was at currentIdx — now behind the new current position.
-        seekToPlaybackIndex(controller, nextIdx)
-        removeFromQueue(currentIdx)
+        // Only queue/index are refreshed: the current song itself did not change, so Now Playing's song is
+        // left to the normal Media3 sync (touching it here could hide a pending stats transition).
+        _nowPlayingState.update {
+            it.copy(
+                queue = playbackQueue,
+                currentIndex = plan.currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+            )
+        }
+        saveSessionAsync()
+    }
+
+    private fun handleCurrentSongDeleted(deletedSongId: Long, currentIdx: Int) {
+        if (currentIdx !in playbackQueue.indices) return
+
+        // One coherent mutation: plan the whole resulting queue + current occurrence up front, so
+        // nothing depends on a seek becoming observable before the removal (the old seek->remove race).
+        // Deletion uses "next survivor" semantics (Repeat ONE still advances; see planner).
+        val plan = QueueMutation.planCurrentSongDeletion(
+            libraryQueue = libraryQueue,
+            playbackOrder = playbackOrder,
+            currentPlaybackIndex = currentIdx,
+            deletedSongId = deletedSongId,
+            repeatMode = repeatMode,
+        )
+        val controller = mediaController
+        when {
+            plan is QueueMutation.CurrentDeletionPlan.NoOp -> return
+            plan is QueueMutation.CurrentDeletionPlan.Continue && controller != null ->
+                applyCurrentDeletionContinuation(controller, plan)
+            else -> {
+                // No survivor to continue with, or controller not yet connected - clear queue and stop.
+                bumpQueueGeneration()
+                mediaController?.pause()
+                mediaController?.clearMediaItems()
+                libraryQueue        = emptyList()
+                playbackOrder       = emptyList()
+                playbackQueue       = emptyList()
+                lastKnownPositionMs = -1L
+                _nowPlayingState.update {
+                    it.copy(
+                        song         = null,
+                        isPlaying    = false,
+                        queue        = emptyList(),
+                        currentIndex = 0,
+                        positionMs   = 0L,
+                        durationMs   = 0L,
+                    )
+                }
+                saveSessionAsync()
+            }
+        }
+    }
+
+    private fun applyCurrentDeletionContinuation(
+        controller: MediaController,
+        plan: QueueMutation.CurrentDeletionPlan.Continue,
+    ) {
+        // Original play intent (playWhenReady survives buffering); a paused user is never auto-started.
+        val wasPlaying = controller.playWhenReady || controller.isPlaying
+        bumpQueueGeneration()
+        libraryQueue = plan.libraryQueue
+        playbackOrder = plan.playbackOrder
+        playbackQueue = plan.playbackQueue
+        lastKnownPositionMs = -1L
+
+        // Explicit destructive library mutation (not a natural G-1 boundary): push the resulting
+        // queue at the planned occurrence. Now Playing is updated from the plan below, never from a
+        // controller index that may not be observable yet.
+        syncPlayerQueueAt(controller, plan.currentPlaybackIndex, positionMs = 0L, playWhenReady = wasPlaying)
+
+        val newSong = plan.currentSong
+        // StatsTracker song transition and session persistence are owned by the Media3 transition callback
+        // (onMediaItemTransition -> syncNowPlayingState(fromTransition = true) + saveSessionAsync) that the
+        // playlist replacement above triggers; doing either here too would double-own them.
+        _nowPlayingState.update {
+            it.copy(
+                song = newSong,
+                isPlaying = wasPlaying,
+                queue = playbackQueue,
+                currentIndex = plan.currentPlaybackIndex,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
+                positionMs = 0L,
+                durationMs = newSong.duration.coerceAtLeast(0L),
+                bufferedPositionMs = 0L,
+                isSeekable = false,
+            )
+        }
     }
 
     fun moveQueueItemUp(playbackIndex: Int) {
@@ -2967,9 +3101,8 @@ class PlayerController @Inject constructor(
         }
 
         if (LoopBoundaryDetector.isLoopBoundary(prev, currentPos, repeatMode)) {
-            val song = controller.currentMediaItem?.mediaId?.toLongOrNull()
-                ?.let { id -> libraryQueue.firstOrNull { it.id == id } }
-                ?: playbackQueue.getOrNull(controller.currentMediaItemIndex)
+            // Occurrence authority: the same resolver as everywhere else; unresolved => skip, never guess.
+            val song = songAtResolvedPlaybackIndex(playbackQueue, currentPlaybackIndex())
             if (song != null) {
                 if (DEBUG_STATS) Log.d(TAG, "[ticker] LOOP BOUNDARY detected prev=$prev cur=$currentPos songId=${song.id}")
                 if (_sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG) {

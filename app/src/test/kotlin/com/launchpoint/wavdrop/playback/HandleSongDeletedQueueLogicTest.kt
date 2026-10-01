@@ -1,135 +1,160 @@
 package com.launchpoint.wavdrop.playback
 
+import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.playback.QueueMutation.CurrentDeletionPlan
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Verifies the queue-navigation logic that drives handleCurrentSongDeleted():
- *   1. QueueNavigator.nextIndex determines whether to advance or stop.
- *   2. The resulting current-index after "advance then remove" is correct.
- *
- * These are pure-function tests; no ExoPlayer or Android infrastructure is needed.
+ * Current-song deletion is ONE coherent pure plan (no seek-then-remove sequencing). Songs are named
+ * by id (A=1, B=2, C=3, D=4); a duplicate is the same id at another position, told apart by `tag`.
  */
 class HandleSongDeletedQueueLogicTest {
 
-    // ── Next-index determination (drives advance-or-stop decision) ────────────
+    private fun song(id: Long, tag: Long = 0L) = Song(
+        id = id, title = "S$id", artist = "Artist", album = "Album",
+        albumId = 0L, duration = 200_000L, uri = "content://media/$id/$tag",
+        dateAdded = tag, trackNumber = 0, year = 2020,
+    )
 
-    @Test
-    fun `mid-queue delete has a next item with repeat off`() {
-        val next = QueueNavigator.nextIndex(queueSize = 5, currentIndex = 2, repeatMode = RepeatMode.OFF)
-        assertEquals(3, next)
+    private val a = 1L
+    private val b = 2L
+    private val c = 3L
+    private val d = 4L
+
+    private fun plan(
+        ids: List<Long>,
+        current: Int,
+        deleted: Long,
+        repeat: RepeatMode = RepeatMode.OFF,
+        order: List<Int> = ids.indices.toList(),
+    ): CurrentDeletionPlan {
+        val library = ids.mapIndexed { i, id -> song(id, tag = i.toLong()) }
+        return QueueMutation.planCurrentSongDeletion(library, order, current, deleted, repeat)
     }
 
-    @Test
-    fun `first-item delete has a next item with repeat off`() {
-        val next = QueueNavigator.nextIndex(queueSize = 5, currentIndex = 0, repeatMode = RepeatMode.OFF)
-        assertEquals(1, next)
+    private fun CurrentDeletionPlan.cont(): CurrentDeletionPlan.Continue {
+        assertTrue("expected Continue but was $this", this is CurrentDeletionPlan.Continue)
+        return this as CurrentDeletionPlan.Continue
     }
 
-    @Test
-    fun `last-item delete returns null with repeat off — queue clears`() {
-        val next = QueueNavigator.nextIndex(queueSize = 5, currentIndex = 4, repeatMode = RepeatMode.OFF)
-        assertNull(next)
+    /** Ids of the resulting playback queue, plus the id at the new current occurrence. */
+    private fun CurrentDeletionPlan.shape(): Pair<List<Long>, Long> {
+        val p = cont()
+        return p.playbackQueue.map { it.id } to p.currentSong.id
     }
 
-    @Test
-    fun `last-item delete wraps to index 0 with repeat all`() {
-        val next = QueueNavigator.nextIndex(queueSize = 5, currentIndex = 4, repeatMode = RepeatMode.ALL)
-        assertEquals(0, next)
+    @Test fun middleCurrentRepeatOff() {
+        val p = plan(listOf(a, b, c, d), current = 1, deleted = b)
+        assertEquals(listOf(a, c, d) to c, p.shape())
+        assertEquals(1, p.cont().currentPlaybackIndex)
     }
 
-    @Test
-    fun `repeat one delete still advances — deleted song is not looped`() {
-        // nextIndex (not automaticNextIndex) is used so RepeatMode.ONE does not
-        // cause the deleted item to be re-queued as the next item.
-        val next = QueueNavigator.nextIndex(queueSize = 5, currentIndex = 2, repeatMode = RepeatMode.ONE)
-        assertEquals(3, next)
+    @Test fun firstCurrent() {
+        val p = plan(listOf(a, b, c), current = 0, deleted = a)
+        assertEquals(listOf(b, c) to b, p.shape())
+        assertEquals(0, p.cont().currentPlaybackIndex)
     }
 
-    @Test
-    fun `repeat one delete at last item returns null — queue clears`() {
-        val next = QueueNavigator.nextIndex(queueSize = 5, currentIndex = 4, repeatMode = RepeatMode.ONE)
-        assertNull(next)
+    @Test fun lastCurrentRepeatOffClears() =
+        assertEquals(CurrentDeletionPlan.ClearQueue, plan(listOf(b, c, a), 2, a, RepeatMode.OFF))
+
+    @Test fun lastCurrentRepeatOneClears() =
+        assertEquals(CurrentDeletionPlan.ClearQueue, plan(listOf(b, c, a), 2, a, RepeatMode.ONE))
+
+    @Test fun lastCurrentRepeatAllWraps() {
+        val p = plan(listOf(b, c, a), 2, a, RepeatMode.ALL)
+        assertEquals(listOf(b, c) to b, p.shape())
+        assertEquals(0, p.cont().currentPlaybackIndex)
     }
 
-    @Test
-    fun `single-song queue always clears regardless of repeat mode`() {
-        for (mode in listOf(RepeatMode.OFF, RepeatMode.ONE, RepeatMode.ALL)) {
-            assertNull(
-                "Expected null for $mode (single-song queue cannot advance after deletion)",
-                QueueNavigator.nextIndex(queueSize = 1, currentIndex = 0, repeatMode = mode),
-            )
+    @Test fun repeatOneAdvancesInsteadOfRepeatingDeletedSong() {
+        val p = plan(listOf(b, a, c), 1, a, RepeatMode.ONE)
+        assertEquals(listOf(b, c) to c, p.shape())
+    }
+
+    @Test fun repeatOneDeletionAdvancesWhileAutomaticTransitionRepeats() {
+        assertEquals(2, QueueNavigator.nextIndex(3, 1, RepeatMode.ONE))
+        assertEquals(1, QueueNavigator.automaticNextIndex(3, 1, RepeatMode.ONE))
+    }
+
+    @Test fun currentSongDuplicatedLaterRemovesEveryOccurrence() {
+        assertEquals(listOf(b) to b, plan(listOf(a, b, a), 0, a).shape())
+    }
+
+    @Test fun currentAndLaterDuplicateAreBothRemoved() {
+        val p = plan(listOf(b, a, a, c), 1, a)
+        assertEquals(listOf(b, c) to c, p.shape())
+        assertEquals(1, p.cont().currentPlaybackIndex)
+    }
+
+    @Test fun immediateNextOccurrenceWithDeletedIdIsSkipped() {
+        assertEquals(listOf(b) to b, plan(listOf(a, a, b), 0, a).shape())
+    }
+
+    @Test fun severalConsecutiveDeletedDuplicatesAreSkipped() {
+        assertEquals(listOf(b, c) to c, plan(listOf(b, a, a, a, c), 1, a, RepeatMode.ONE).shape())
+    }
+
+    @Test fun allOccurrencesDeletedClears() {
+        for (mode in RepeatMode.entries) {
+            assertEquals(CurrentDeletionPlan.ClearQueue, plan(listOf(a, a, a), 1, a, mode))
         }
     }
 
-    // ── Post-advance current-index after removeFromQueue ─────────────────────
-    //
-    // After seekToPlaybackIndex(nextIdx) the controller's currentIndex is nextIdx.
-    // removeFromQueue(oldCurrentIdx) then applies:
-    //   if (oldCurrentIdx < nextIdx) newIdx = nextIdx - 1
-    //   else                         newIdx = nextIdx
-    //
-    // This matches the existing removeFromQueue index-shift formula.
-
-    @Test
-    fun `mid-queue delete index decrements because old slot was before new current`() {
-        // playbackQueue: [A, B, C, D, E], delete C at 2, next D at 3.
-        // After remove C: [A, B, D, E], current D now sits at 2 (was 3, adjusted -1).
-        val newIdx = computePostRemoveCurrentIndex(oldCurrentIdx = 2, nextIdx = 3, newQueueSize = 4)
-        assertEquals(2, newIdx)
+    @Test fun repeatAllWrapSkipsEarlierDeletedDuplicates() {
+        assertEquals(listOf(b) to b, plan(listOf(a, b, a), 2, a, RepeatMode.ALL).shape())
     }
 
-    @Test
-    fun `first-item delete index decrements to 0`() {
-        // [A, B, C], delete A at 0, next B at 1.
-        // After remove A: [B, C], current B is at 0 (was 1, adjusted -1).
-        val newIdx = computePostRemoveCurrentIndex(oldCurrentIdx = 0, nextIdx = 1, newQueueSize = 2)
-        assertEquals(0, newIdx)
+    @Test fun repeatOffDoesNotJumpBackIntoHistory() =
+        assertEquals(CurrentDeletionPlan.ClearQueue, plan(listOf(b, c, a, a), 2, a, RepeatMode.OFF))
+
+    // ── Shuffle / occurrence preservation ───────────────────────────────────────
+
+    @Test fun shuffledOrderKeepsPlaybackSequenceAndPicksNextInPlaybackOrder() {
+        // library [A, B, C, D]; playback order D, B, A, C; current = A at playback 2 -> next is C.
+        val p = plan(listOf(a, b, c, d), 2, a, order = listOf(3, 1, 0, 2))
+        assertEquals(listOf(d, b, c) to c, p.shape())
     }
 
-    @Test
-    fun `repeat all wrap old last-item is behind wrapped index so index stays unchanged`() {
-        // [A, B, C], delete C at 2, next wraps to A at 0 (Repeat.ALL).
-        // oldCurrentIdx (2) >= nextIdx (0) — no decrement: newIdx = 0.
-        val newIdx = computePostRemoveCurrentIndex(oldCurrentIdx = 2, nextIdx = 0, newQueueSize = 2)
-        assertEquals(0, newIdx)
+    @Test fun shuffledQueueWithDuplicateDeletedSong() {
+        // library [A, B, A, C]; playback order 2, 3, 0, 1 => A(src2) current, C, A(src0), B.
+        val p = plan(listOf(a, b, a, c), 0, a, order = listOf(2, 3, 0, 1))
+        assertEquals(listOf(c, b) to c, p.shape())
     }
 
-    @Test
-    fun `penultimate item delete with repeat all index decrements`() {
-        // [A, B, C, D], delete C at 2, next D at 3.
-        // After remove C: [A, B, D], current D at 2 (was 3, adjusted -1).
-        val newIdx = computePostRemoveCurrentIndex(oldCurrentIdx = 2, nextIdx = 3, newQueueSize = 3)
-        assertEquals(2, newIdx)
+    @Test fun duplicateSurvivingSongsKeepTheirOwnOccurrences() {
+        // library [B, A, B, C]; current A; surviving B occurrences stay distinct (tags 0 and 2).
+        val p = plan(listOf(b, a, b, c), 1, a).cont()
+        assertEquals(listOf(b, b, c), p.playbackQueue.map { it.id })
+        assertEquals(listOf(0L, 2L, 3L), p.playbackQueue.map { it.dateAdded })
+        assertEquals(1, p.currentPlaybackIndex)
+        assertEquals(2L, p.currentSong.dateAdded) // the second B occurrence, not the first
     }
 
-    // ── Distinction from automaticNextIndex ───────────────────────────────────
-
-    @Test
-    fun `nextIndex and automaticNextIndex differ for repeat one`() {
-        // Deletion uses nextIndex so the deleted song is skipped.
-        // Normal auto-advance uses automaticNextIndex so Repeat.ONE replays the same slot.
-        val forDeletion   = QueueNavigator.nextIndex(queueSize = 3, currentIndex = 1, repeatMode = RepeatMode.ONE)
-        val forAutoAdvance = QueueNavigator.automaticNextIndex(queueSize = 3, currentIndex = 1, repeatMode = RepeatMode.ONE)
-        assertEquals("deletion must advance", 2, forDeletion)
-        assertEquals("auto-advance must stay", 1, forAutoAdvance)
+    @Test fun resultingOrderIsDenseValidMappingAndQueueIsDerivedFromIt() {
+        val p = plan(listOf(a, b, a, c, d, a), 1, c, order = listOf(5, 3, 0, 4, 1, 2)).cont()
+        assertEquals(p.libraryQueue.size, p.playbackOrder.size)
+        assertEquals(p.libraryQueue.indices.toSet(), p.playbackOrder.toSet())
+        assertEquals(p.playbackOrder.map { p.libraryQueue[it] }, p.playbackQueue)
+        assertTrue(p.currentPlaybackIndex in p.playbackQueue.indices)
+        assertTrue(p.playbackQueue.none { it.id == c })
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
+    // ── Fail closed ─────────────────────────────────────────────────────────────
 
-    /**
-     * Mirrors the index-adjustment logic in removeFromQueue:
-     *   if (playbackIndex < currentPlaybackIndex) currentPlaybackIndex - 1 else currentPlaybackIndex
-     * where playbackIndex == oldCurrentIdx and currentPlaybackIndex == nextIdx (post-seek).
-     */
-    private fun computePostRemoveCurrentIndex(
-        oldCurrentIdx: Int,
-        nextIdx: Int,
-        newQueueSize: Int,
-    ): Int = if (oldCurrentIdx < nextIdx) {
-        nextIdx - 1
-    } else {
-        nextIdx
-    }.coerceIn(0, maxOf(0, newQueueSize - 1))
+    @Test fun malformedPlaybackOrderFailsClosed() {
+        assertEquals(CurrentDeletionPlan.NoOp, plan(listOf(a, b, c), 0, a, order = listOf(0, 1)))
+        assertEquals(CurrentDeletionPlan.NoOp, plan(listOf(a, b, c), 0, a, order = listOf(0, 0, 1)))
+        assertEquals(CurrentDeletionPlan.NoOp, plan(listOf(a, b, c), 0, a, order = listOf(0, 1, 5)))
+    }
+
+    @Test fun invalidCurrentIndexFailsClosed() {
+        assertEquals(CurrentDeletionPlan.NoOp, plan(listOf(a, b), -1, a))
+        assertEquals(CurrentDeletionPlan.NoOp, plan(listOf(a, b), 2, a))
+    }
+
+    @Test fun currentOccurrenceNotMatchingDeletedIdFailsClosed() =
+        assertEquals(CurrentDeletionPlan.NoOp, plan(listOf(a, b, c), 1, a))
 }
