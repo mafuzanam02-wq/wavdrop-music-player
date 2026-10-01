@@ -3245,6 +3245,26 @@ class PlayerController @Inject constructor(
         return "queue(size=$size $samples$current)"
     }
 
+    /**
+     * Read-only snapshot of the logical playback state for the future crossfade engine (CF-2B1).
+     * No side effects: reads in-memory state and the existing occurrence resolution only.
+     */
+    internal fun captureCrossfadeRuntimeSnapshot(): CrossfadeRuntimeSnapshot {
+        val controller = mediaController
+        return CrossfadeRuntimeSnapshot(
+            queueGeneration = queueGeneration,
+            playbackQueue = playbackQueue.toList(),
+            currentPlaybackIndex = currentPlaybackIndex(),
+            repeatMode = repeatMode,
+            shuffleEnabled = shuffleEnabled,
+            isPlaying = controller?.isPlaying ?: _nowPlayingState.value.isPlaying,
+            isExternalPlayback = isExternalPlayback,
+            playerQueueNeedsSync = playerQueueNeedsSync,
+            controllerConnected = controller != null &&
+                controllerConnectionState == ControllerConnectionState.Connected,
+        )
+    }
+
     private fun currentPlaybackIndex(): Int? {
         val controller = mediaController
         val controllerIndex = controller?.currentMediaItemIndex
