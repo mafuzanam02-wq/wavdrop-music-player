@@ -68,7 +68,7 @@ internal fun initialIncomingGain(latenessMs: Long, effectiveDurationMs: Long): F
     initialCrossfadeProgress(latenessMs, effectiveDurationMs)?.let { CrossfadeGainCurve.equalPower(it).incoming }
 
 /** A start gain must be finite and within 0..1; the ownership layer never coerces. */
-internal fun isValidInitialGain(gain: Float): Boolean = gain.isFinite() && gain in 0f..1f
+internal fun isValidInitialGain(gain: Float): Boolean = isValidCrossfadeGain(gain)
 
 /**
  * Owns and silently prepares the future secondary player (CF-2B2); CF-2C2 adds a once-only, key-bound start.

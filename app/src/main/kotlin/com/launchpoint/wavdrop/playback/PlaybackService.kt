@@ -128,6 +128,16 @@ class PlaybackService : MediaLibraryService() {
             crossfadePreparation = CrossfadePreparationRuntime(
                 snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot() },
                 backendFactory = { ExoSecondaryPlayerBackend(this, audioAttributes) },
+                // Narrow local seam to the authoritative primary ExoPlayer; never routed through a controller/session.
+                primaryGainBackend = PrimaryGainBackend { gain ->
+                    try {
+                        player.volume = gain
+                        true
+                    } catch (e: Exception) {
+                        Log.w(AUDIO_SESSION_TAG, "primary crossfade gain write failed", e)
+                        false
+                    }
+                },
             )
         }
         val sessionPlayer = PreviousBehaviorPlayer(
@@ -374,6 +384,10 @@ class PlaybackService : MediaLibraryService() {
         // Cancel the settings observer before releasing the player to avoid
         // calling setHandleAudioBecomingNoisy on a released ExoPlayer instance.
         serviceScope.cancel()
+        // CF-2C6: restore any crossfade-lowered primary gain while the primary player is still alive, then
+        // release the secondary. Must precede the primary player release below.
+        crossfadePreparation?.close()
+        crossfadePreparation = null
         // Release audio effects before the player so the session is still valid during cleanup.
         enhancementController?.release()
         enhancementController = null
@@ -382,9 +396,6 @@ class PlaybackService : MediaLibraryService() {
             release()
         }
         mediaSession = null
-        // Independent of the MediaSession: the secondary is not session-owned.
-        crossfadePreparation?.close()
-        crossfadePreparation = null
         super.onDestroy()
     }
 

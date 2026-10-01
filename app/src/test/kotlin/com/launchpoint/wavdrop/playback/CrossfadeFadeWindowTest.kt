@@ -115,8 +115,22 @@ class CrossfadeFadeWindowTest {
     )
 
     private var snap = snapshot()
+    private class FakePrimary : PrimaryGainBackend {
+        val gains = mutableListOf<Float>()
+        var failWhen: (Float) -> Boolean = { false }
+        var throwWhen: (Float) -> Boolean = { false }
+        var onWrite: (Float) -> Unit = {}
+        override fun setGain(gain: Float): Boolean {
+            gains += gain
+            onWrite(gain)
+            if (throwWhen(gain)) throw IllegalStateException("boom")
+            return !failWhen(gain)
+        }
+    }
+
     private val backend = FakeBackend()
-    private val runtime = CrossfadePreparationRuntime({ snap }, { backend })
+    private val primary = FakePrimary()
+    private val runtime = CrossfadePreparationRuntime({ snap }, { backend }, primaryGainBackend = primary)
     private val keyA = CrossfadeTransitionKey(5L, 1, 2)
     private val startA = 194_000L // configured 6000 on 200_000 ms tracks
 
@@ -490,13 +504,14 @@ class CrossfadeFadeWindowTest {
         assertEquals(listOf(start.initialIncomingGain), backend.starts)
     }
 
-    @Test fun initialApplyGainsIsDeferredNotFailedClosed() {
+    @Test fun initialOutgoingGainIsAppliedToPrimaryFromTheSameReduction() {
         val d = readyDue(1_000L)
+        val reduction = reduceCrossfade(runtime.state, CrossfadeEvent.BeginFade(keyA, now, 1_000L))
+        val apply = reduction.commands[1] as CrossfadeCommand.ApplyGains
         assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(listOf(apply.gains.outgoing), primary.gains)
+        assertEquals(CrossfadeGainCurve.equalPower(1_000f / 6_000f).outgoing, primary.gains.single(), 0f)
         assertTrue(runtime.state is CrossfadeState.Fading)
-        val deferred = runtime.deferredGainCommands.single() as CrossfadeCommand.ApplyGains
-        assertEquals(keyA, deferred.key)
-        assertEquals(CrossfadeGainCurve.equalPower(1_000f / 6_000f), deferred.gains)
         assertTrue(runtime.rejectedAudibleCommands.isEmpty())
         assertEquals(0, backend.resets)
     }
@@ -506,7 +521,7 @@ class CrossfadeFadeWindowTest {
         assertTrue(runtime.executeBeginFade(d, now))
         assertFalse(runtime.executeBeginFade(d, now + 10))
         assertEquals(1, backend.starts.size)
-        assertEquals(1, runtime.deferredGainCommands.size)
+        assertEquals(1, primary.gains.size)
         assertTrue(runtime.state is CrossfadeState.Fading)
     }
 
@@ -524,7 +539,7 @@ class CrossfadeFadeWindowTest {
         assertFalse(runtime.executeBeginFade(d, now))
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(1, backend.resets)
-        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertTrue("primary must stay untouched", primary.gains.isEmpty())
         assertTrue(runtime.rejectedAudibleCommands.isEmpty())
     }
 
@@ -536,7 +551,7 @@ class CrossfadeFadeWindowTest {
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(1, backend.resets) // one terminal reset path
         assertEquals(1, backend.starts.size)
-        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertTrue("primary must stay untouched", primary.gains.isEmpty())
     }
 
     @Test fun reentrantReplacementDuringStartKeepsNewOwner() {
@@ -548,7 +563,7 @@ class CrossfadeFadeWindowTest {
         assertFalse(runtime.executeBeginFade(d, now))
         val armed = runtime.state as CrossfadeState.Armed
         assertEquals(CrossfadeTransitionKey(5L, 2, 3), armed.key)
-        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertTrue("primary must stay untouched", primary.gains.isEmpty())
         assertEquals(1, backend.starts.size)
     }
 
@@ -560,16 +575,16 @@ class CrossfadeFadeWindowTest {
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(1, backend.starts.size)
         assertEquals(1, backend.resets)
-        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertEquals(listOf(1f, 1f), primary.gains) // on-time outgoing = 1, then restore
     }
 
-    @Test fun cancelAfterSuccessfulStartResetsSecondaryOnceWithoutPrimaryAction() {
+    @Test fun cancelAfterSuccessfulStartResetsSecondaryOnceAndRestoresPrimary() {
         val d = readyDue(0L)
         assertTrue(runtime.executeBeginFade(d, now))
         runtime.cancel(CrossfadeCancelReason.Pause)
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(1, backend.resets)
-        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertEquals(listOf(1f, 1f), primary.gains)
         assertTrue(runtime.rejectedAudibleCommands.isEmpty())
     }
 
@@ -616,6 +631,205 @@ class CrossfadeFadeWindowTest {
         )
         assertEquals(listOf<CrossfadeCommand>(CrossfadeCommand.StartSecondary(keyA, 0f)), runtime.rejectedAudibleCommands)
         assertTrue(backend.starts.isEmpty())
+    }
+
+    // -- CF-2C6: occurrence-owned primary gain -----------------------------------------
+
+    @Test fun onTimeBeginAppliesFullPrimaryGainAndZeroSecondaryGain() {
+        assertTrue(runtime.executeBeginFade(readyDue(0L), now))
+        assertEquals(listOf(0f), backend.starts)
+        assertEquals(listOf(1f), primary.gains)
+        assertTrue(runtime.state is CrossfadeState.Fading)
+    }
+
+    @Test fun lateBeginAppliesCoordinatorOutgoingAndIncomingGains() {
+        assertTrue(runtime.executeBeginFade(readyDue(MAX_FADE_START_LATENESS_MS), now))
+        val g = CrossfadeGainCurve.equalPower(0.25f)
+        assertEquals(listOf(g.incoming), backend.starts)
+        assertEquals(listOf(g.outgoing), primary.gains)
+    }
+
+    @Test fun primaryIsNotLoweredBeforeSecondaryHasStarted() {
+        val d = readyDue(1_000L)
+        var primarySeenAtStart: List<Float>? = null
+        backend.onStart = { primarySeenAtStart = primary.gains.toList() }
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(emptyList<Float>(), primarySeenAtStart)
+    }
+
+    @Test fun primaryApplyFailureCancelsRestoresAndAbandonsSecondary() {
+        val d = readyDue(1_000L)
+        primary.failWhen = { it < 1f }
+        assertFalse(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+        assertEquals(2, primary.gains.size)
+        assertEquals(1f, primary.gains.last(), 0f) // restoration attempted despite the failed lowering write
+    }
+
+    @Test fun primaryApplyExceptionIsContainedAndRestored() {
+        val d = readyDue(1_000L)
+        primary.throwWhen = { it < 1f }
+        assertFalse(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1f, primary.gains.last(), 0f)
+    }
+
+    @Test fun cancelReasonsAfterBeginAllRestorePrimary() {
+        for (reason in listOf(
+            CrossfadeCancelReason.Pause,
+            CrossfadeCancelReason.Seek,
+            CrossfadeCancelReason.QueueMutation,
+            CrossfadeCancelReason.SecondaryError,
+        )) {
+            val b = FakeBackend()
+            val p = FakePrimary()
+            val r = CrossfadePreparationRuntime({ snap }, { b }, primaryGainBackend = p)
+            r.evaluatePreparation(6_000L, null)
+            b.ready(b.prepared.last())
+            val d = r.observePrimaryPosition(keyA, startA + 1_000L) as FadeWindowObservation.Due
+            assertTrue(r.executeBeginFade(d, now))
+            r.cancel(reason)
+            assertEquals(CrossfadeState.Idle, r.state)
+            assertEquals(1f, p.gains.last(), 0f)
+            assertEquals(1, b.resets)
+        }
+    }
+
+    @Test fun secondaryFailureAfterPrimaryLoweredRestoresPrimary() {
+        val d = readyDue(1_000L)
+        val attempt = backend.prepared.last()
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertTrue(primary.gains.single() < 1f)
+        backend.error(attempt)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1f, primary.gains.last(), 0f)
+    }
+
+    @Test fun failedRestoreStillAbandonsSecondaryAndStaysFailClosed() {
+        val d = readyDue(1_000L)
+        assertTrue(runtime.executeBeginFade(d, now))
+        primary.failWhen = { it == 1f }
+        runtime.cancel(CrossfadeCancelReason.Pause)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+    }
+
+    @Test fun closeRestoresPrimaryBeforeReleasingSecondaryAndIsIdempotent() {
+        val d = readyDue(1_000L)
+        assertTrue(runtime.executeBeginFade(d, now))
+        var releasesWhenRestored = -1
+        primary.onWrite = { if (it == 1f) releasesWhenRestored = backend.releases }
+        runtime.close()
+        runtime.close()
+        assertEquals(0, releasesWhenRestored) // restore happened before the secondary release
+        assertEquals(1, backend.releases)
+        assertEquals(2, primary.gains.size) // lowered, then exactly one restore
+        assertEquals(1f, primary.gains.last(), 0f)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+    }
+
+    @Test fun staleDueNeverTouchesPrimary() {
+        val dueA = readyDue(0L)
+        evaluate(configured = 4_000L)
+        backend.ready(backend.prepared.last())
+        assertFalse(runtime.executeBeginFade(dueA, now))
+        assertTrue(primary.gains.isEmpty())
+    }
+
+    @Test fun duplicateSongPrimaryOwnershipIsPositional() {
+        val dup = listOf(song(10, 0), song(20, 1), song(10, 2), song(10, 3))
+        snap = snapshot(queue = dup, index = 2)
+        evaluate()
+        backend.ready(backend.prepared.last())
+        val key = CrossfadeTransitionKey(5L, 2, 3)
+        val d = observe(startA, key = key) as FadeWindowObservation.Due
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(listOf(1f), primary.gains)
+        runtime.cancel(CrossfadeCancelReason.Pause)
+        assertEquals(listOf(1f, 1f), primary.gains)
+    }
+
+    @Test fun genericApplyReductionStillRefusesApplyGains() {
+        makeReady()
+        val apply = CrossfadeCommand.ApplyGains(keyA, CrossfadeGains(0.5f, 0.5f))
+        runtime.applyReduction(CrossfadeReduction(runtime.state, listOf(apply)), snap)
+        assertEquals(listOf<CrossfadeCommand>(apply), runtime.rejectedAudibleCommands)
+        assertTrue(primary.gains.isEmpty())
+    }
+
+    private fun unsupportedCommands(): List<CrossfadeCommand> = listOf(
+        CrossfadeCommand.ApplyGains(keyA, CrossfadeGains(0.5f, 0.5f)),
+        CrossfadeCommand.StartSecondary(keyA, 0.5f),
+        CrossfadeCommand.RequestHandoff(keyA),
+    )
+
+    @Test fun unsupportedCommandWhileFadingRestoresLoweredPrimaryThenAbandons() {
+        val d = readyDue(1_000L) // non-zero lateness: primary genuinely lowered
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertTrue(runtime.state is CrossfadeState.Fading)
+        assertTrue(primary.gains.last() < 1f)
+        assertEquals(1, backend.starts.size)
+        val apply = CrossfadeCommand.ApplyGains(keyA, CrossfadeGains(0.5f, 0.5f))
+        runtime.applyReduction(CrossfadeReduction(runtime.state, listOf(apply)), snap)
+        assertEquals(listOf<CrossfadeCommand>(apply), runtime.rejectedAudibleCommands)
+        assertEquals(1f, primary.gains.last(), 0f)
+        assertEquals(2, primary.gains.size)
+        assertEquals(1, backend.resets)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+    }
+
+    @Test fun failedRestoreDuringRefusalStillAbandonsSecondaryAndGoesIdle() {
+        val d = readyDue(1_000L)
+        assertTrue(runtime.executeBeginFade(d, now))
+        primary.failWhen = { it == 1f }
+        val apply = CrossfadeCommand.ApplyGains(keyA, CrossfadeGains(0.5f, 0.5f))
+        runtime.applyReduction(CrossfadeReduction(runtime.state, listOf(apply)), snap)
+        assertEquals(2, primary.gains.size) // lowered, then the (failed) restore attempt
+        assertEquals(1f, primary.gains.last(), 0f)
+        assertEquals(1, backend.resets)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        // Ownership retained: a later restore attempt (e.g. on close) retries the write.
+        primary.failWhen = { false }
+        runtime.close()
+        assertEquals(3, primary.gains.size)
+        assertEquals(1f, primary.gains.last(), 0f)
+    }
+
+    @Test fun everyUnsupportedCommandUsesTheSameRestoreThenAbandonPath() {
+        for (command in unsupportedCommands()) {
+            val b = FakeBackend()
+            val p = FakePrimary()
+            val r = CrossfadePreparationRuntime({ snap }, { b }, primaryGainBackend = p)
+            r.evaluatePreparation(6_000L, null)
+            b.ready(b.prepared.last())
+            val d = r.observePrimaryPosition(keyA, startA + 1_000L) as FadeWindowObservation.Due
+            assertTrue(r.executeBeginFade(d, now))
+            r.applyReduction(CrossfadeReduction(r.state, listOf(command)), snap)
+            assertEquals(listOf(command), r.rejectedAudibleCommands)
+            assertEquals(1f, p.gains.last(), 0f)
+            assertEquals(1, b.resets)
+            assertEquals(CrossfadeState.Idle, r.state)
+        }
+    }
+
+    @Test fun unsupportedCommandWhileReadyDoesNotTouchPrimary() {
+        makeReady()
+        runtime.applyReduction(CrossfadeReduction(runtime.state, listOf(unsupportedCommands().first())), snap)
+        assertTrue(primary.gains.isEmpty())
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+    }
+
+    @Test fun missingPrimaryBackendFailsClosedInsteadOfLeavingPrimaryAtFullVolume() {
+        val b = FakeBackend()
+        val r = CrossfadePreparationRuntime({ snap }, { b }) // default: Unavailable
+        r.evaluatePreparation(6_000L, null)
+        b.ready(b.prepared.last())
+        val d = r.observePrimaryPosition(keyA, startA) as FadeWindowObservation.Due
+        assertFalse(r.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Idle, r.state)
+        assertEquals(1, b.resets)
     }
 
     // -- Safety ------------------------------------------------------------------

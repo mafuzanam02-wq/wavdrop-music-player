@@ -40,6 +40,8 @@ internal enum class CrossfadeCancelReason {
     ConfigurationDisabled,
     /** The CF-1 plan no longer holds (e.g. duration or next occurrence changed). */
     PlanInvalidated,
+    /** The primary gain path could not safely apply/restore the requested crossfade gain. */
+    PrimaryGainError,
 }
 
 internal enum class CrossfadeArmRejection {

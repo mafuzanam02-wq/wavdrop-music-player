@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2C5. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2C6. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2C5 (below).
+- Crossfade engineering foundations CF-1 to CF-2C6 (below).
 
 ## Crossfade - current state
 
@@ -62,6 +62,7 @@ Completed, internal-only foundations:
 | CF-2C3 | lateness-aware `BeginFade` timing contract |
 | CF-2C4 | plan-bound `Due` -> `BeginFade` runtime bridge (event-building only) |
 | CF-2C5 | `BeginFade` reduction execution + exact prepared-secondary start (`executeBeginFade`) |
+| CF-2C6 | occurrence-owned primary gain application / restoration (`CrossfadePrimaryGainController`) |
 
 **Live runtime integration is NOT implemented.** Specifically:
 
@@ -69,14 +70,16 @@ Completed, internal-only foundations:
   production.
 - Inside the internal runtime the secondary can now start (`executeBeginFade` -> `Fading` + `StartSecondary`),
   but the production gate is `false`, so this is unreachable in the shipped app.
-- The primary player gain is never changed: the initial `ApplyGains` is only recorded as deferred.
-  No continuous gain mutation or fade timing driver exists.
+- The initial BeginFade now also applies the coordinator's outgoing gain to the primary (after the secondary
+  started), and cancellation/failure/close restore the primary to `1f`. Primary gain is owned per
+  transition key through a narrow `PrimaryGainBackend` seam; the runtime holds no Player/ExoPlayer/MediaSession.
+- No continuous (FadeTick) gain mutation, secondary dynamic-gain seam or fade timing driver exists.
 - Handoff/promotion is not implemented.
 - There is no Settings / persisted crossfade preference.
 - No physical crossfade validation has occurred. Crossfade is not shipped and must not appear in
   user-facing copy.
 
-The next engineering frontier is primary gain mutation (first item in the backlog list).
+The next engineering frontier is the continuous fade progression / timing driver (first item in the backlog list).
 
 ## In progress
 

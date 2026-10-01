@@ -255,7 +255,8 @@ toPlaybackIndex)` - never `song.id`. Anything uncertain fails closed.
 | CF-2C2 | `CrossfadeSecondaryPlayer.start(...)` | occurrence-safe, once-only secondary start primitive with lateness-derived initial gain |
 | CF-2C3 | `BeginFade(key, now, initialElapsedMs)`, `Fading(..., initialElapsedMs)`, `StartSecondary(key, initialIncomingGain)` | lateness-aware fade-begin timing contract; overflow-safe completion; clock regression cancels |
 | CF-2C4 | `CrossfadePreparationRuntime.beginFadeEvent(due, nowElapsedRealtimeMs)` | plan-bound `Due` -> `BeginFade(key, now, initialElapsedMs = latenessMs)`; revalidates exact key+plan and live ownership; builds the event only (no reduction, state stays Ready, nothing started) |
-| CF-2C5 | `CrossfadePreparationRuntime.executeBeginFade(due, now)` | runs the CF-2C4 bridge, reduces `BeginFade` (state -> `Fading` first), then executes exactly `StartSecondary` via `CrossfadeSecondaryPlayer.start`; start failure / re-entrant error fails closed; initial `ApplyGains` is recorded in `deferredGainCommands` (no primary-gain seam); `RestorePrimaryGain` is a no-op because the primary is never lowered |
+| CF-2C5 | `CrossfadePreparationRuntime.executeBeginFade(due, now)` | runs the CF-2C4 bridge, reduces `BeginFade` (state -> `Fading` first), then executes exactly `StartSecondary` via `CrossfadeSecondaryPlayer.start`; start failure / re-entrant error fails closed; initial `ApplyGains` is consumed by CF-2C6 |
+| CF-2C6 | `CrossfadePrimaryGainController` over `PrimaryGainBackend`; `PrimaryGainError` cancel reason | transition-key-owned primary gain: after the secondary started, `executeBeginFade` applies the coordinator's `gains.outgoing`; `RestorePrimaryGain` and `close()` restore `1f`. Ownership is claimed before the write and kept on failed apply/restore; other keys cannot change or restore it. Production backend is the local primary `ExoPlayer.volume` in `PlaybackService`; `onDestroy` closes the runtime (restoring gain) before releasing the primary player. Generic `ApplyGains` still refused |
 
 Design rules already in force:
 
@@ -267,8 +268,9 @@ Design rules already in force:
 - The runtime is only constructed inside `if (CROSSFADE_SECONDARY_RUNTIME_ENABLED)` and closed in
   `onDestroy`.
 
-The secondary can now start inside the internal runtime (CF-2C5) but the gate stays `false`. Not implemented
-(see the backlog for the itemised list): primary gain mutation (the runtime holds no Player reference), a fade timing driver, occurrence handoff/promotion,
+The secondary can start and the primary gain can be lowered/restored inside the internal runtime (CF-2C5/2C6) but the
+gate stays `false`. Not implemented (see the backlog for the itemised list): continuous fade/gain updates (incl. a
+secondary dynamic-gain seam), a fade timing driver, occurrence handoff/promotion,
 failure recovery during overlap, interaction with seek/pause/skip/queue mutation while fading,
 dual-player EQ validation, a Settings/persisted preference, production enablement, and physical device
 validation.

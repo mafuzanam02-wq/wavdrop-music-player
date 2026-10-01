@@ -122,10 +122,10 @@ internal sealed interface FadeWindowObservation {
  *
  * CF-2C5: [executeBeginFade] is the ONLY audible entry point. It reduces a validated BeginFade and executes
  * exactly its StartSecondary (via [CrossfadeSecondaryPlayer.start]). The accompanying ApplyGains is
- * coordinator-approved but NOT executable until the primary-gain slice, so it is only recorded in
- * [deferredGainCommands]; the primary is never touched (no Player reference exists here), which is why
- * RestorePrimaryGain on cancellation is a safe no-op for now. [applyReduction] still refuses every other
- * audible command. The historical class name is kept deliberately (a rename would obscure this change).
+ * ApplyGains's outgoing gain is applied (CF-2C6) through an occurrence-owned [CrossfadePrimaryGainController]
+ * over a narrow [PrimaryGainBackend] (this class holds no Player/MediaSession), only AFTER the secondary has
+ * started; RestorePrimaryGain commands and [close] restore the primary to 1f. [applyReduction] still refuses
+ * every other audible command (notably generic ApplyGains: continuous fades are a later slice). The historical class name is kept deliberately (a rename would obscure this change).
  *
  * Main-thread confined: every entry point (evaluation, secondary callbacks, close) must run on the
  * authoritative playback/main looper, where [snapshotProvider] may be called. This runtime owns the
@@ -135,20 +135,16 @@ internal class CrossfadePreparationRuntime(
     private val snapshotProvider: () -> CrossfadeRuntimeSnapshot,
     backendFactory: () -> SecondaryPlayerBackend,
     mediaItemFactory: (Song) -> MediaItem = { it.toPlaybackMediaItem() },
+    primaryGainBackend: PrimaryGainBackend = PrimaryGainBackend.Unavailable,
 ) {
+    private val primaryGain = CrossfadePrimaryGainController(primaryGainBackend)
+
     var state: CrossfadeState = CrossfadeState.Idle
         private set
 
     /** Audible commands that must never reach this slice; recorded (and refused) so tests can observe them. */
     val rejectedAudibleCommands: List<CrossfadeCommand> get() = rejected
     private val rejected = mutableListOf<CrossfadeCommand>()
-
-    /**
-     * ApplyGains emitted by an executed BeginFade that cannot yet be applied (no primary-gain seam). Diagnostic
-     * only; cleared whenever the state leaves Fading. Never a general command queue.
-     */
-    val deferredGainCommands: List<CrossfadeCommand> get() = deferredGains
-    private val deferredGains = mutableListOf<CrossfadeCommand>()
 
     private var closed = false
 
@@ -296,11 +292,15 @@ internal class CrossfadePreparationRuntime(
         val started = secondary.start(start.key, start.initialIncomingGain)
         if (state != fading) return false // re-entrantly cancelled/superseded: the newer state stands
         if (!started) {
-            // Nothing is playing. The primary was never lowered, so cancelling needs no primary restoration.
+            // Nothing is playing and the primary was never touched (no ownership claimed): nothing to restore.
             cancel(CrossfadeCancelReason.SecondaryError, snapshotProvider())
             return false
         }
-        deferredGains += gain
+        // Only now, with the secondary audibly running, lower the primary by the coordinator's outgoing gain.
+        if (!primaryGain.apply(gain.key, gain.gains.outgoing)) {
+            cancel(CrossfadeCancelReason.PrimaryGainError, snapshotProvider()) // restores (owner claimed) + abandons
+            return false
+        }
         return true
     }
 
@@ -317,9 +317,9 @@ internal class CrossfadePreparationRuntime(
         closed = true
         state = CrossfadeState.Idle
         dueMark = null
-        deferredGains.clear()
+        // Restore the primary FIRST (the caller keeps the primary player alive until this returns); needs no snapshot.
+        primaryGain.ownerKey?.let { if (!primaryGain.restore(it)) Log.w(TAG, "primary gain restore failed on close") }
         if (toCancel is CrossfadeState.Active) {
-            // Pre-audible cleanup is covered by release(); no primary operation is ever required here.
             secondary.abandon(toCancel.key)
         }
         secondary.release()
@@ -356,13 +356,13 @@ internal class CrossfadePreparationRuntime(
     internal fun applyReduction(reduction: CrossfadeReduction, snapshot: CrossfadeRuntimeSnapshot) {
         state = reduction.state
         if (state !is CrossfadeState.Ready) dueMark = null
-        if (state !is CrossfadeState.Fading) deferredGains.clear()
         for (command in reduction.commands) {
             when (command) {
                 is CrossfadeCommand.AbandonSecondary -> secondary.abandon(command.key)
-                // CF-2C5: the primary gain is never lowered (no Player reference, ApplyGains is only deferred),
-                // so there is nothing to restore yet. Becomes a real operation in the primary-gain slice.
-                is CrossfadeCommand.RestorePrimaryGain -> Unit
+                // Cleanup order from the coordinator: restore the primary (retains ownership on failure), then abandon.
+                is CrossfadeCommand.RestorePrimaryGain -> {
+                    if (!primaryGain.restore(command.key)) Log.w(TAG, "primary gain restore failed for $command")
+                }
                 is CrossfadeCommand.PrepareSecondary -> {
                     val target = snapshot.playbackQueue.getOrNull(command.key.toPlaybackIndex)
                     if (target == null || !secondary.prepare(command.key, target)) {
@@ -380,6 +380,11 @@ internal class CrossfadePreparationRuntime(
                     if (state is CrossfadeState.Active) {
                         val active = state as CrossfadeState.Active
                         state = CrossfadeState.Idle
+                        // Same order as coordinator cancellation: restore a possibly lowered primary (a no-op
+                        // for Armed/Ready, which own no gain; ownership is kept if it fails), then abandon.
+                        if (!primaryGain.restore(active.key)) {
+                            Log.w(TAG, "primary gain restore failed while refusing $command")
+                        }
                         secondary.abandon(active.key)
                     }
                     return
