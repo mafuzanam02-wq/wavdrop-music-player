@@ -71,6 +71,8 @@ class PlaybackService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
+    // CF-2B2: only ever constructed behind CROSSFADE_SECONDARY_RUNTIME_ENABLED (false). Not a session player.
+    private var crossfadeSecondary: CrossfadeSecondaryPlayer? = null
     private var previousRestartThresholdMs: Long =
         PreviousButtonBehavior.DEFAULT.previousRestartThresholdMs()
 
@@ -121,6 +123,12 @@ class PlaybackService : MediaLibraryService() {
             .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        if (CROSSFADE_SECONDARY_RUNTIME_ENABLED) {
+            crossfadeSecondary = CrossfadeSecondaryPlayer(
+                backendFactory = { ExoSecondaryPlayerBackend(this, audioAttributes) },
+                listener = CrossfadeSecondaryListener.NoOp,
+            )
+        }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
             thresholdProvider = { previousRestartThresholdMs },
@@ -373,6 +381,9 @@ class PlaybackService : MediaLibraryService() {
             release()
         }
         mediaSession = null
+        // Independent of the MediaSession: the secondary is not session-owned.
+        crossfadeSecondary?.release()
+        crossfadeSecondary = null
         super.onDestroy()
     }
 
@@ -643,6 +654,9 @@ class PlaybackService : MediaLibraryService() {
     }
 
     companion object {
+        // Hard gate for the secondary crossfade player (CF-2B2). Must stay false until audible crossfade is enabled.
+        internal const val CROSSFADE_SECONDARY_RUNTIME_ENABLED = false
+
         const val ACTION_AUDIO_OUTPUT_CONNECTED = "com.launchpoint.wavdrop.ACTION_AUDIO_OUTPUT_CONNECTED"
         const val EXTRA_AUDIO_OUTPUT_KIND = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
         const val OUTPUT_BLUETOOTH = "bluetooth"
