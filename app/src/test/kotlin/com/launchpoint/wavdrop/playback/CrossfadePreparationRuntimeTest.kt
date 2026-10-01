@@ -365,13 +365,13 @@ class CrossfadePreparationRuntimeTest {
             CrossfadeReduction(
                 readyState,
                 listOf(
-                    CrossfadeCommand.StartSecondary(keyA),
+                    CrossfadeCommand.StartSecondary(keyA, 0f),
                     CrossfadeCommand.ApplyGains(keyA, CrossfadeGains(1f, 0f)),
                 ),
             ),
             snap,
         )
-        assertEquals(listOf<CrossfadeCommand>(CrossfadeCommand.StartSecondary(keyA)), runtime.rejectedAudibleCommands)
+        assertEquals(listOf<CrossfadeCommand>(CrossfadeCommand.StartSecondary(keyA, 0f)), runtime.rejectedAudibleCommands)
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(resetsBefore + 1, backend.resets) // only pre-audible cleanup
     }
@@ -493,7 +493,7 @@ class CrossfadePreparationRuntimeTest {
         assertTrue(isRetainablePlan(CrossfadeState.Ready(keyA, 6_000L, 194_000L), plan))
         assertFalse(isRetainablePlan(CrossfadeState.Armed(keyA, 5_000L, 194_000L), plan))
         assertFalse(isRetainablePlan(CrossfadeState.Ready(keyA, 6_000L, 190_000L), plan))
-        assertFalse(isRetainablePlan(CrossfadeState.Fading(keyA, 6_000L, 1L), plan))
+        assertFalse(isRetainablePlan(CrossfadeState.Fading(keyA, 6_000L, 1L, 0L), plan))
         assertFalse(isRetainablePlan(CrossfadeState.HandoffPending(keyA, 6_000L), plan))
     }
 

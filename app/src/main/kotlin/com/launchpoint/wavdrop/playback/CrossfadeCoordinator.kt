@@ -75,11 +75,16 @@ internal sealed interface CrossfadeState {
         val startAtPositionMs: Long,
     ) : Active
 
-    /** Overlap has begun; gains progress from [startedAtElapsedRealtimeMs]. */
+    /**
+     * Overlap has begun. [beganAtElapsedRealtimeMs] is the monotonic time execution began; [initialElapsedMs]
+     * is how much of the planned fade window had already elapsed at that moment (0 for an on-time begin).
+     * The two are kept separate so no timestamp is synthesized by subtraction.
+     */
     data class Fading(
         override val key: CrossfadeTransitionKey,
         override val effectiveDurationMs: Long,
-        val startedAtElapsedRealtimeMs: Long,
+        val beganAtElapsedRealtimeMs: Long,
+        val initialElapsedMs: Long,
     ) : Active
 
     /** Fade complete; exactly one handoff request has been emitted. */
@@ -98,7 +103,12 @@ internal sealed interface CrossfadeEvent {
 
     data class SecondaryReady(val key: CrossfadeTransitionKey) : CrossfadeEvent
     data class SecondaryFailed(val key: CrossfadeTransitionKey) : CrossfadeEvent
-    data class BeginFade(val key: CrossfadeTransitionKey, val startedAtElapsedRealtimeMs: Long) : CrossfadeEvent
+    /** [nowElapsedRealtimeMs] is monotonic now; [initialElapsedMs] is the already-elapsed part of the fade window. */
+    data class BeginFade(
+        val key: CrossfadeTransitionKey,
+        val nowElapsedRealtimeMs: Long,
+        val initialElapsedMs: Long,
+    ) : CrossfadeEvent
     data class FadeTick(val key: CrossfadeTransitionKey, val nowElapsedRealtimeMs: Long) : CrossfadeEvent
     data class HandoffSucceeded(val key: CrossfadeTransitionKey) : CrossfadeEvent
     data class HandoffFailed(val key: CrossfadeTransitionKey) : CrossfadeEvent
@@ -112,7 +122,11 @@ internal sealed interface CrossfadeCommand {
     val key: CrossfadeTransitionKey
 
     data class PrepareSecondary(override val key: CrossfadeTransitionKey) : CrossfadeCommand
-    data class StartSecondary(override val key: CrossfadeTransitionKey) : CrossfadeCommand
+    /** Starts the prepared secondary at [initialIncomingGain], the incoming component of the begin gains. */
+    data class StartSecondary(
+        override val key: CrossfadeTransitionKey,
+        val initialIncomingGain: Float,
+    ) : CrossfadeCommand
     data class ApplyGains(override val key: CrossfadeTransitionKey, val gains: CrossfadeGains) : CrossfadeCommand
     data class RequestHandoff(override val key: CrossfadeTransitionKey) : CrossfadeCommand
     data class RestorePrimaryGain(override val key: CrossfadeTransitionKey) : CrossfadeCommand
@@ -180,26 +194,39 @@ private fun reduceArm(state: CrossfadeState, event: CrossfadeEvent.Arm): Crossfa
 }
 
 private fun reduceBegin(state: CrossfadeState, event: CrossfadeEvent.BeginFade): CrossfadeReduction {
-    if (state !is CrossfadeState.Ready || state.key != event.key || event.startedAtElapsedRealtimeMs < 0L) {
-        return CrossfadeReduction(state)
-    }
+    if (state !is CrossfadeState.Ready || state.key != event.key) return CrossfadeReduction(state)
+    if (event.nowElapsedRealtimeMs < 0L || event.initialElapsedMs < 0L) return CrossfadeReduction(state)
+    // A fade that already consumed its whole duration must not newly enter Fading.
+    if (event.initialElapsedMs >= state.effectiveDurationMs) return CrossfadeReduction(state)
+    val progress = initialCrossfadeProgress(event.initialElapsedMs, state.effectiveDurationMs)
+        ?: return CrossfadeReduction(state)
+    // One gain point: the secondary physically starts at the same incoming gain applied to the transition.
+    val gains = CrossfadeGainCurve.equalPower(progress)
     return CrossfadeReduction(
-        CrossfadeState.Fading(state.key, state.effectiveDurationMs, event.startedAtElapsedRealtimeMs),
+        CrossfadeState.Fading(
+            key = state.key,
+            effectiveDurationMs = state.effectiveDurationMs,
+            beganAtElapsedRealtimeMs = event.nowElapsedRealtimeMs,
+            initialElapsedMs = event.initialElapsedMs,
+        ),
         listOf(
-            CrossfadeCommand.StartSecondary(state.key),
-            CrossfadeCommand.ApplyGains(state.key, CrossfadeGainCurve.equalPower(0f)),
+            CrossfadeCommand.StartSecondary(state.key, gains.incoming),
+            CrossfadeCommand.ApplyGains(state.key, gains),
         ),
     )
 }
 
 private fun reduceTick(state: CrossfadeState, event: CrossfadeEvent.FadeTick): CrossfadeReduction {
     if (state !is CrossfadeState.Fading || state.key != event.key) return CrossfadeReduction(state)
-    // startedAt is validated non-negative, so a non-regressing `now` cannot overflow on subtraction.
-    if (event.nowElapsedRealtimeMs < state.startedAtElapsedRealtimeMs) {
+    // beganAt is validated non-negative, so a non-regressing `now` cannot overflow on subtraction.
+    if (event.nowElapsedRealtimeMs < state.beganAtElapsedRealtimeMs) {
         return cancel(state, CrossfadeCancelReason.ClockRegression)
     }
-    val elapsedMs = event.nowElapsedRealtimeMs - state.startedAtElapsedRealtimeMs
-    if (elapsedMs >= state.effectiveDurationMs) {
+    val elapsedSinceBeginMs = event.nowElapsedRealtimeMs - state.beganAtElapsedRealtimeMs
+    // initialElapsed < duration was enforced at begin, so this is positive; comparing against the remaining
+    // time (instead of summing) keeps the arithmetic overflow-free.
+    val remainingAtBeginMs = state.effectiveDurationMs - state.initialElapsedMs
+    if (elapsedSinceBeginMs >= remainingAtBeginMs) {
         return CrossfadeReduction(
             CrossfadeState.HandoffPending(state.key, state.effectiveDurationMs),
             listOf(
@@ -208,10 +235,13 @@ private fun reduceTick(state: CrossfadeState, event: CrossfadeEvent.FadeTick): C
             ),
         )
     }
-    val progress = elapsedMs.toDouble() / state.effectiveDurationMs.toDouble()
+    // Here initialElapsed + elapsedSinceBegin < effectiveDuration, so the sum cannot overflow.
+    val totalElapsedMs = state.initialElapsedMs + elapsedSinceBeginMs
+    val progress = initialCrossfadeProgress(totalElapsedMs, state.effectiveDurationMs)
+        ?: return cancel(state, CrossfadeCancelReason.ClockRegression)
     return CrossfadeReduction(
         state,
-        listOf(CrossfadeCommand.ApplyGains(state.key, CrossfadeGainCurve.equalPower(progress.toFloat()))),
+        listOf(CrossfadeCommand.ApplyGains(state.key, CrossfadeGainCurve.equalPower(progress))),
     )
 }
 

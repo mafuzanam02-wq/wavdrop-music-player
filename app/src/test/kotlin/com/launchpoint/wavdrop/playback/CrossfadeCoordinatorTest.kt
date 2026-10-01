@@ -26,8 +26,8 @@ class CrossfadeCoordinatorTest {
     private fun ready(key: CrossfadeTransitionKey = keyA): CrossfadeState =
         reduceCrossfade(armed(key), CrossfadeEvent.SecondaryReady(key)).state
 
-    private fun fading(key: CrossfadeTransitionKey = keyA, startedAt: Long = 1_000L): CrossfadeState =
-        reduceCrossfade(ready(key), CrossfadeEvent.BeginFade(key, startedAt)).state
+    private fun fading(key: CrossfadeTransitionKey = keyA, startedAt: Long = 1_000L, initial: Long = 0L): CrossfadeState =
+        reduceCrossfade(ready(key), CrossfadeEvent.BeginFade(key, startedAt, initial)).state
 
     private fun handoffPending(key: CrossfadeTransitionKey = keyA): CrossfadeState =
         reduceCrossfade(fading(key, 1_000L), CrossfadeEvent.FadeTick(key, 1_000L + duration)).state
@@ -49,7 +49,7 @@ class CrossfadeCoordinatorTest {
         listOf(
             CrossfadeEvent.SecondaryReady(keyA),
             CrossfadeEvent.SecondaryFailed(keyA),
-            CrossfadeEvent.BeginFade(keyA, 0L),
+            CrossfadeEvent.BeginFade(keyA, 0L, 0L),
             CrossfadeEvent.FadeTick(keyA, 10L),
             CrossfadeEvent.HandoffSucceeded(keyA),
             CrossfadeEvent.HandoffFailed(keyA),
@@ -151,7 +151,7 @@ class CrossfadeCoordinatorTest {
         listOf(
             CrossfadeEvent.SecondaryReady(keyA),
             CrossfadeEvent.SecondaryFailed(keyA),
-            CrossfadeEvent.BeginFade(keyA, 5L),
+            CrossfadeEvent.BeginFade(keyA, 5L, 0L),
             CrossfadeEvent.FadeTick(keyA, 10L),
             CrossfadeEvent.HandoffSucceeded(keyA),
             CrossfadeEvent.HandoffFailed(keyA),
@@ -185,10 +185,10 @@ class CrossfadeCoordinatorTest {
     // ── Begin ───────────────────────────────────────────────────────────────────
 
     @Test fun beginFromReadyStartsFadeWithProgressZeroGains() {
-        val r = reduceCrossfade(ready(), CrossfadeEvent.BeginFade(keyA, 5_000L))
-        assertEquals(CrossfadeState.Fading(keyA, duration, 5_000L), r.state)
+        val r = reduceCrossfade(ready(), CrossfadeEvent.BeginFade(keyA, 5_000L, 0L))
+        assertEquals(CrossfadeState.Fading(keyA, duration, 5_000L, 0L), r.state)
         assertEquals(
-            listOf<CrossfadeCommand>(StartSecondary(keyA), ApplyGains(keyA, CrossfadeGainCurve.equalPower(0f))),
+            listOf<CrossfadeCommand>(StartSecondary(keyA, CrossfadeGainCurve.equalPower(0f).incoming), ApplyGains(keyA, CrossfadeGainCurve.equalPower(0f))),
             r.commands,
         )
         val gains = (r.commands[1] as ApplyGains).gains
@@ -196,20 +196,20 @@ class CrossfadeCoordinatorTest {
         assertEquals(0f, gains.incoming, 0f)
     }
 
-    @Test fun staleBeginIgnored() = assertNoOp(ready(keyA), CrossfadeEvent.BeginFade(keyB, 1L))
+    @Test fun staleBeginIgnored() = assertNoOp(ready(keyA), CrossfadeEvent.BeginFade(keyB, 1L, 0L))
 
-    @Test fun beginWhileArmedDoesNotStart() = assertNoOp(armed(), CrossfadeEvent.BeginFade(keyA, 1L))
+    @Test fun beginWhileArmedDoesNotStart() = assertNoOp(armed(), CrossfadeEvent.BeginFade(keyA, 1L, 0L))
 
     @Test fun beginInIdleOrHandoffPendingDoesNotStart() {
-        assertNoOp(CrossfadeState.Idle, CrossfadeEvent.BeginFade(keyA, 1L))
-        assertNoOp(handoffPending(), CrossfadeEvent.BeginFade(keyA, 1L))
+        assertNoOp(CrossfadeState.Idle, CrossfadeEvent.BeginFade(keyA, 1L, 0L))
+        assertNoOp(handoffPending(), CrossfadeEvent.BeginFade(keyA, 1L, 0L))
     }
 
     @Test fun duplicateBeginDoesNotStartSecondaryTwice() {
-        assertNoOp(fading(), CrossfadeEvent.BeginFade(keyA, 9_999L))
+        assertNoOp(fading(), CrossfadeEvent.BeginFade(keyA, 9_999L, 0L))
     }
 
-    @Test fun negativeStartTimestampIsIgnored() = assertNoOp(ready(), CrossfadeEvent.BeginFade(keyA, -1L))
+    @Test fun negativeStartTimestampIsIgnored() = assertNoOp(ready(), CrossfadeEvent.BeginFade(keyA, -1L, 0L))
 
     // ── Fading ──────────────────────────────────────────────────────────────────
 
@@ -295,6 +295,123 @@ class CrossfadeCoordinatorTest {
 
     // ── Handoff ─────────────────────────────────────────────────────────────────
 
+    // -- Lateness-aware begin (CF-2C3) ----------------------------------------------
+
+    private fun begin(initial: Long, now: Long = 10_000L) =
+        reduceCrossfade(ready(), CrossfadeEvent.BeginFade(keyA, now, initial))
+
+    private fun assertBeginGains(initial: Long, progress: Float) {
+        val r = begin(initial)
+        assertEquals(CrossfadeState.Fading(keyA, duration, 10_000L, initial), r.state)
+        val gains = CrossfadeGainCurve.equalPower(progress)
+        assertEquals(
+            listOf<CrossfadeCommand>(StartSecondary(keyA, gains.incoming), ApplyGains(keyA, gains)),
+            r.commands,
+        )
+        // The start gain and the applied incoming gain are the very same value.
+        assertEquals((r.commands[0] as StartSecondary).initialIncomingGain, (r.commands[1] as ApplyGains).gains.incoming, 0f)
+    }
+
+    @Test fun beginAtZeroLatenessUsesProgressZeroGains() = assertBeginGains(0L, 0f)
+
+    @Test fun lateBeginAtQuarterUsesQuarterProgressGains() = assertBeginGains(1_500L, 0.25f)
+
+    @Test fun lateBeginAtMidpointUsesHalfProgressGains() = assertBeginGains(3_000L, 0.5f)
+
+    @Test fun startSecondaryCarriesOnlyKeyAndGain() {
+        val fields = StartSecondary::class.java.declaredFields
+            .filter { !it.isSynthetic && !java.lang.reflect.Modifier.isStatic(it.modifiers) }
+            .map { it.name }.toSet()
+        assertEquals(setOf("key", "initialIncomingGain"), fields)
+    }
+
+    @Test fun invalidBeginInputsAreNoOps() {
+        val r = ready()
+        assertNoOp(r, CrossfadeEvent.BeginFade(keyA, -1L, 0L)) // negative now
+        assertNoOp(r, CrossfadeEvent.BeginFade(keyA, 10_000L, -1L)) // negative initial elapsed
+        assertNoOp(r, CrossfadeEvent.BeginFade(keyA, 10_000L, duration)) // fully elapsed
+        assertNoOp(r, CrossfadeEvent.BeginFade(keyA, 10_000L, duration + 1)) // beyond duration
+        assertNoOp(r, CrossfadeEvent.BeginFade(keyA, 10_000L, Long.MAX_VALUE))
+        assertNoOp(r, CrossfadeEvent.BeginFade(keyB, 10_000L, 0L)) // wrong key
+        assertNoOp(CrossfadeState.Idle, CrossfadeEvent.BeginFade(keyA, 10_000L, 1_500L))
+        assertNoOp(armed(), CrossfadeEvent.BeginFade(keyA, 10_000L, 1_500L))
+        assertNoOp(fading(), CrossfadeEvent.BeginFade(keyA, 10_000L, 1_500L))
+        assertNoOp(handoffPending(), CrossfadeEvent.BeginFade(keyA, 10_000L, 1_500L))
+    }
+
+    @Test fun oneMillisecondBeforeFullDurationStillBegins() {
+        val r = begin(duration - 1)
+        assertTrue(r.state is CrossfadeState.Fading)
+    }
+
+    @Test fun tickAfterLateBeginContinuesFromTheInitialOffset() {
+        // duration 6000, initial 1500, began at 10000; tick at 11000 -> total elapsed 2500 (not 1000).
+        val state = fading(startedAt = 10_000L, initial = 1_500L)
+        val r = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, 11_000L))
+        assertEquals(state, r.state)
+        val expected = CrossfadeGainCurve.equalPower(2_500f / 6_000f)
+        assertEquals(listOf<CrossfadeCommand>(ApplyGains(keyA, expected)), r.commands)
+        assertTrue(expected != CrossfadeGainCurve.equalPower(1_000f / 6_000f))
+    }
+
+    @Test fun tickAtTheBeginInstantMatchesTheInitialGains() {
+        val state = fading(startedAt = 10_000L, initial = 1_500L)
+        val r = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, 10_000L))
+        assertEquals(listOf<CrossfadeCommand>(ApplyGains(keyA, CrossfadeGainCurve.equalPower(0.25f))), r.commands)
+    }
+
+    @Test fun lateBeginCompletionUsesTheRemainingDurationOnly() {
+        val state = fading(startedAt = 10_000L, initial = 1_500L) // remaining 4500
+        val before = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, 14_499L))
+        assertTrue(before.state is CrossfadeState.Fading)
+        assertTrue(before.commands.none { it is RequestHandoff })
+        val at = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, 14_500L))
+        assertEquals(CrossfadeState.HandoffPending(keyA, duration), at.state)
+        assertEquals(
+            listOf<CrossfadeCommand>(ApplyGains(keyA, CrossfadeGainCurve.equalPower(1f)), RequestHandoff(keyA)),
+            at.commands,
+        )
+    }
+
+    @Test fun lateBeginClockRegressionFailsClosedWithAudibleCleanup() {
+        val r = reduceCrossfade(fading(startedAt = 10_000L, initial = 1_500L), CrossfadeEvent.FadeTick(keyA, 9_999L))
+        assertEquals(CrossfadeState.Idle, r.state)
+        assertEquals(CrossfadeCancelReason.ClockRegression, r.cancelReason)
+        assertEquals(listOf<CrossfadeCommand>(RestorePrimaryGain(keyA), AbandonSecondary(keyA)), r.commands)
+    }
+
+    @Test fun zeroLatenessBeginMatchesLegacyTimeline() {
+        val state = fading(startedAt = 1_000L, initial = 0L)
+        val mid = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, 1_000L + 3_000L))
+        assertEquals(listOf<CrossfadeCommand>(ApplyGains(keyA, CrossfadeGainCurve.equalPower(0.5f))), mid.commands)
+        val end = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, 1_000L + duration))
+        assertEquals(CrossfadeState.HandoffPending(keyA, duration), end.state)
+    }
+
+    @Test fun extremeMonotonicValuesDoNotOverflowWithLateBegin() {
+        // began near the top of the clock range: 100 ms later is still inside the 4500 ms remainder, and the
+        // progress is the exact (1500 + 100) / 6000, with no overflow or negative timing.
+        val nearMax = Long.MAX_VALUE - 100L
+        val state = fading(startedAt = nearMax, initial = 1_500L)
+        val still = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, Long.MAX_VALUE))
+        assertEquals(state, still.state)
+        assertEquals(
+            listOf<CrossfadeCommand>(ApplyGains(keyA, CrossfadeGainCurve.equalPower(1_600f / 6_000f))),
+            still.commands,
+        )
+    }
+
+    @Test fun handoffAtTheExtremeEndOfTheClockIsDeterministic() {
+        val began = 0L
+        val state = fading(startedAt = began, initial = 1_500L)
+        val end = reduceCrossfade(state, CrossfadeEvent.FadeTick(keyA, Long.MAX_VALUE))
+        assertEquals(CrossfadeState.HandoffPending(keyA, duration), end.state)
+        val regress = reduceCrossfade(fading(startedAt = Long.MAX_VALUE, initial = 1_500L), CrossfadeEvent.FadeTick(keyA, 0L))
+        assertEquals(CrossfadeCancelReason.ClockRegression, regress.cancelReason)
+        val same = reduceCrossfade(fading(startedAt = Long.MAX_VALUE, initial = 1_500L), CrossfadeEvent.FadeTick(keyA, Long.MAX_VALUE))
+        assertEquals(listOf<CrossfadeCommand>(ApplyGains(keyA, CrossfadeGainCurve.equalPower(0.25f))), same.commands)
+    }
+
     @Test fun matchingHandoffSuccessGoesIdleOnce() {
         val r = reduceCrossfade(handoffPending(), CrossfadeEvent.HandoffSucceeded(keyA))
         assertEquals(CrossfadeState.Idle, r.state)
@@ -362,7 +479,7 @@ class CrossfadeCoordinatorTest {
         listOf(
             CrossfadeEvent.SecondaryReady(keyA),
             CrossfadeEvent.SecondaryFailed(keyA),
-            CrossfadeEvent.BeginFade(keyA, 1L),
+            CrossfadeEvent.BeginFade(keyA, 1L, 0L),
             CrossfadeEvent.FadeTick(keyA, 2L),
             CrossfadeEvent.HandoffSucceeded(keyA),
             CrossfadeEvent.HandoffFailed(keyA),
@@ -397,7 +514,7 @@ class CrossfadeCoordinatorTest {
     @Test fun commandsNeverCarryAnythingButKeysAndGains() {
         // Sanity: every command exposes the key of the transition it acts on.
         val all = listOf(
-            PrepareSecondary(keyA), StartSecondary(keyA), ApplyGains(keyA, CrossfadeGains(1f, 0f)),
+            PrepareSecondary(keyA), StartSecondary(keyA, 0f), ApplyGains(keyA, CrossfadeGains(1f, 0f)),
             RequestHandoff(keyA), RestorePrimaryGain(keyA), AbandonSecondary(keyA),
         )
         all.forEach { assertEquals(keyA, it.key) }
