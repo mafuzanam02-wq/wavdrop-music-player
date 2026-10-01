@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2C3. The implementation reviewed during the documentation
+**Implementation baseline:** post-CF-2C4. The implementation reviewed during the documentation
 reconciliation was `58ba4cf` ("Add lateness-aware crossfade begin timing"); the reconciliation itself is
 documentation-only and lands in a later commit, so that SHA is not the repository HEAD. Update this
 paragraph when the project state changes materially.
@@ -47,7 +47,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2C3 (below).
+- Crossfade engineering foundations CF-1 to CF-2C4 (below).
 
 ## Crossfade - current state
 
@@ -60,15 +60,16 @@ Completed, internal-only foundations:
 | CF-2B1 | runtime snapshot + occurrence binding |
 | CF-2B2 | silent secondary preparation foundation |
 | CF-2B3 | silent preparation orchestration |
-| CF-2C1 | fade-window decision, `Due(key, latenessMs)` |
+| CF-2C1 | fade-window decision, plan-bound `Due(key, effectiveDurationMs, startAtPositionMs, latenessMs)` |
 | CF-2C2 | occurrence-safe once-only secondary start primitive |
 | CF-2C3 | lateness-aware `BeginFade` timing contract |
+| CF-2C4 | plan-bound `Due` -> `BeginFade` runtime bridge (event-building only) |
 
 **Live runtime integration is NOT implemented.** Specifically:
 
 - `PlaybackService.CROSSFADE_SECONDARY_RUNTIME_ENABLED` is `false`; the runtime is never constructed in
   production.
-- `Due` is not wired to `BeginFade` / start; nothing starts the secondary player from the runtime.
+- `BeginFade` is built from a plan-bound `Due` but never executed; state stays Ready and nothing starts the secondary player from the runtime.
 - Continuous real gain mutation is not wired; no fade timing driver exists.
 - Handoff/promotion is not implemented.
 - There is no Settings / persisted crossfade preference.

@@ -251,9 +251,10 @@ toPlaybackIndex)` - never `song.id`. Anything uncertain fails closed.
 | CF-2B1 | `CrossfadeRuntimeSnapshot` | runtime snapshot of the primary queue and occurrence binding |
 | CF-2B2 | `CrossfadeSecondaryPlayer` + `SecondaryPlayerBackend` (`ExoSecondaryPlayerBackend`) | silent secondary preparation foundation with attempt-token + key ownership |
 | CF-2B3 | `CrossfadePreparationRuntime` | silent preparation orchestration; plan/target validation; ownership-loss cancellation |
-| CF-2C1 | `observePrimaryPosition` -> `FadeWindowObservation` (`Due(key, latenessMs)`) | fade-window decision (lateness bounded by `MAX_FADE_START_LATENESS_MS`) |
+| CF-2C1 | `observePrimaryPosition` -> `FadeWindowObservation` (`Due(key, effectiveDurationMs, startAtPositionMs, latenessMs)`, plan-bound) | fade-window decision (lateness bounded by `MAX_FADE_START_LATENESS_MS`) |
 | CF-2C2 | `CrossfadeSecondaryPlayer.start(...)` | occurrence-safe, once-only secondary start primitive with lateness-derived initial gain |
 | CF-2C3 | `BeginFade(key, now, initialElapsedMs)`, `Fading(..., initialElapsedMs)`, `StartSecondary(key, initialIncomingGain)` | lateness-aware fade-begin timing contract; overflow-safe completion; clock regression cancels |
+| CF-2C4 | `CrossfadePreparationRuntime.beginFadeEvent(due, nowElapsedRealtimeMs)` | plan-bound `Due` -> `BeginFade(key, now, initialElapsedMs = latenessMs)`; revalidates exact key+plan and live ownership; builds the event only (no reduction, state stays Ready, nothing started) |
 
 Design rules already in force:
 
@@ -265,7 +266,7 @@ Design rules already in force:
 - The runtime is only constructed inside `if (CROSSFADE_SECONDARY_RUNTIME_ENABLED)` and closed in
   `onDestroy`.
 
-Not implemented (see the backlog for the itemised list): `Due` -> `BeginFade` wiring, real secondary
+Not implemented (see the backlog for the itemised list): `BeginFade` execution and real secondary
 start from the runtime, primary gain mutation, a fade timing driver, occurrence handoff/promotion,
 failure recovery during overlap, interaction with seek/pause/skip/queue mutation while fading,
 dual-player EQ validation, a Settings/persisted preference, production enablement, and physical device

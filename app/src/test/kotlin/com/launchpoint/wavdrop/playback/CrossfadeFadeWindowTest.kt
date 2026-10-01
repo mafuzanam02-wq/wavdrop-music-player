@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.playback
 import androidx.media3.common.MediaItem
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -10,7 +11,12 @@ class CrossfadeFadeWindowTest {
 
     // -- Pure decision -----------------------------------------------------------
 
-    private fun due(key: CrossfadeTransitionKey, latenessMs: Long = 0L) = FadeWindowObservation.Due(key, latenessMs)
+    private fun due(
+        key: CrossfadeTransitionKey,
+        latenessMs: Long = 0L,
+        effectiveDurationMs: Long = 6_000L,
+        startAtPositionMs: Long = 194_000L,
+    ) = FadeWindowObservation.Due(key, effectiveDurationMs, startAtPositionMs, latenessMs)
 
     private fun decide(position: Long, start: Long = 194_000L, effective: Long = 6_000L) =
         decideFadeWindow(start, effective, position)
@@ -198,7 +204,7 @@ class CrossfadeFadeWindowTest {
         backend.ready(backend.prepared.last())
         assertEquals(CrossfadeState.Ready(keyA, 4_000L, 196_000L), runtime.state)
         assertEquals(FadeWindowObservation.Waiting, observe(startA)) // old start no longer applies
-        assertEquals(due(keyA), observe(196_000L))
+        assertEquals(due(keyA, 0L, effectiveDurationMs = 4_000L, startAtPositionMs = 196_000L), observe(196_000L))
     }
 
     @Test fun reArmedSameKeyAndPlanAfterCancellationReportsDueAgain() {
@@ -309,6 +315,143 @@ class CrossfadeFadeWindowTest {
         val key = CrossfadeTransitionKey(5L, 2, 0)
         assertEquals(due(key), observe(startA, key = key))
         assertEquals(FadeWindowObservation.AlreadyReported, observe(startA + 500, key = key))
+    }
+
+    // -- CF-2C4: plan-bound Due -> BeginFade bridge ----------------------------------
+
+    private fun readyDue(late: Long = 0L): FadeWindowObservation.Due {
+        makeReady()
+        return observe(startA + late) as FadeWindowObservation.Due
+    }
+
+    private fun assertBridgeRejectedWithoutSideEffects(d: FadeWindowObservation.Due, now: Long = 10_000L) {
+        val before = runtime.state
+        val resets = backend.resets
+        assertNull(runtime.beginFadeEvent(d, now))
+        assertEquals(before, runtime.state)
+        assertEquals(resets, backend.resets)
+        assertTrue(backend.starts.isEmpty())
+    }
+
+    @Test fun dueCarriesExactPlanFactsFromCurrentReady() {
+        val d = readyDue(250L)
+        assertEquals(FadeWindowObservation.Due(keyA, 6_000L, 194_000L, 250L), d)
+    }
+
+    @Test fun bridgeMapsLatenessToInitialElapsedExactly() {
+        val d = readyDue(250L)
+        assertEquals(CrossfadeEvent.BeginFade(keyA, 10_000L, 250L), runtime.beginFadeEvent(d, 10_000L))
+    }
+
+    @Test fun bridgeZeroLatenessGivesZeroInitialElapsed() {
+        val d = readyDue(0L)
+        assertEquals(CrossfadeEvent.BeginFade(keyA, 10_000L, 0L), runtime.beginFadeEvent(d, 10_000L))
+        assertEquals(CrossfadeEvent.BeginFade(keyA, 0L, 0L), runtime.beginFadeEvent(d, 0L))
+    }
+
+    @Test fun bridgeAcceptsExactToleranceBoundaryAndRejectsBeyond() {
+        // configured 1000 -> effective 1000, start 199000, tolerance min(1500, 500) = 500
+        evaluate(configured = 1_000L)
+        backend.ready(backend.prepared.last())
+        assertEquals(CrossfadeState.Ready(keyA, 1_000L, 199_000L), runtime.state)
+        val d = observe(199_500L) as FadeWindowObservation.Due
+        assertEquals(CrossfadeEvent.BeginFade(keyA, 7L, 500L), runtime.beginFadeEvent(d, 7L))
+        assertBridgeRejectedWithoutSideEffects(d.copy(latenessMs = 501L))
+    }
+
+    @Test fun bridgeRejectsNegativeMonotonicTimeWithoutCancelling() {
+        val d = readyDue(250L)
+        assertBridgeRejectedWithoutSideEffects(d, now = -1L)
+        assertTrue(runtime.state is CrossfadeState.Ready)
+    }
+
+    @Test fun bridgeRejectsFabricatedInvalidLateness() {
+        val d = readyDue(0L)
+        assertBridgeRejectedWithoutSideEffects(d.copy(latenessMs = -1L))
+        assertBridgeRejectedWithoutSideEffects(d.copy(latenessMs = d.effectiveDurationMs))
+        assertBridgeRejectedWithoutSideEffects(d.copy(latenessMs = MAX_FADE_START_LATENESS_MS + 1))
+        assertEquals(CrossfadeState.Ready(keyA, 6_000L, 194_000L), runtime.state)
+    }
+
+    @Test fun bridgeRejectsStaleKeyWithoutCancellingCurrentOwner() {
+        val d = readyDue(0L)
+        assertBridgeRejectedWithoutSideEffects(d.copy(key = CrossfadeTransitionKey(5L, 2, 3)))
+        assertBridgeRejectedWithoutSideEffects(d.copy(key = keyA.copy(queueGeneration = 4L)))
+        assertEquals(CrossfadeState.Ready(keyA, 6_000L, 194_000L), runtime.state)
+    }
+
+    @Test fun staleDueFromReplacedPlanIsHarmlessForSameKey() {
+        val dueA = readyDue(0L) // plan A: 6000 @ 194000
+        evaluate(configured = 4_000L) // same key, plan B: 4000 @ 196000
+        backend.ready(backend.prepared.last())
+        val readyB = CrossfadeState.Ready(keyA, 4_000L, 196_000L)
+        assertEquals(readyB, runtime.state)
+        assertBridgeRejectedWithoutSideEffects(dueA)
+        assertEquals(readyB, runtime.state)
+        // Plan B's own Due still bridges normally.
+        val dueB = observe(196_000L) as FadeWindowObservation.Due
+        assertEquals(CrossfadeEvent.BeginFade(keyA, 9L, 0L), runtime.beginFadeEvent(dueB, 9L))
+    }
+
+    private fun assertBridgeCancelsOn(newSnapshot: CrossfadeRuntimeSnapshot, reason: CrossfadeCancelReason, key: CrossfadeTransitionKey = keyA) {
+        val d = readyDue(0L).copy(key = key)
+        snap = newSnapshot
+        assertNull(runtime.beginFadeEvent(d, 10_000L))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets) // abandoned once, via existing pre-audible cleanup
+        assertTrue(backend.starts.isEmpty())
+        assertTrue(runtime.rejectedAudibleCommands.isEmpty())
+        // Cancellation reason is the existing ownership-loss reason.
+        assertEquals(reason, crossfadeOwnershipLossReason(newSnapshot, key))
+    }
+
+    @Test fun bridgePauseCancelsAndReturnsNull() = assertBridgeCancelsOn(snapshot(playing = false), CrossfadeCancelReason.Pause)
+    @Test fun bridgeGenerationChangeCancelsAndReturnsNull() = assertBridgeCancelsOn(snapshot(generation = 6L), CrossfadeCancelReason.QueueMutation)
+    @Test fun bridgeOccurrenceChangeCancelsAndReturnsNull() = assertBridgeCancelsOn(snapshot(index = 2), CrossfadeCancelReason.ManualNavigation)
+    @Test fun bridgeExternalPlaybackCancelsAndReturnsNull() = assertBridgeCancelsOn(snapshot(external = true), CrossfadeCancelReason.ExternalPlayback)
+
+    @Test fun bridgeRepeatTargetChangeCancelsAndReturnsNull() {
+        snap = snapshot(index = 3, repeat = RepeatMode.ALL)
+        evaluate()
+        backend.ready(backend.prepared.last())
+        val wrapKey = CrossfadeTransitionKey(5L, 3, 0)
+        val d = observe(startA, key = wrapKey) as FadeWindowObservation.Due
+        snap = snapshot(index = 3, repeat = RepeatMode.OFF)
+        assertNull(runtime.beginFadeEvent(d, 10_000L))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+        assertTrue(backend.starts.isEmpty())
+    }
+
+    @Test fun successfulBridgeIsNonMutatingAndDeterministicWhenRepeated() {
+        val d = readyDue(250L)
+        val resets = backend.resets
+        val first = runtime.beginFadeEvent(d, 10_000L)
+        val second = runtime.beginFadeEvent(d, 10_000L)
+        assertEquals(CrossfadeEvent.BeginFade(keyA, 10_000L, 250L), first)
+        assertEquals(first, second)
+        assertEquals(CrossfadeState.Ready(keyA, 6_000L, 194_000L), runtime.state)
+        assertEquals(resets, backend.resets)
+        assertEquals(1, backend.prepared.size)
+        assertTrue(backend.starts.isEmpty())
+        assertTrue(runtime.rejectedAudibleCommands.isEmpty())
+    }
+
+    @Test fun bridgeAfterCloseOrWhenNotReadyReturnsNull() {
+        val d = readyDue(0L)
+        runtime.close()
+        assertNull(runtime.beginFadeEvent(d, 10_000L))
+        val idle = CrossfadePreparationRuntime({ snap }, { FakeBackend() })
+        assertNull(idle.beginFadeEvent(d, 10_000L))
+    }
+
+    @Test fun audibleCommandRefusalRemainsInPreparationRuntime() {
+        makeReady()
+        val reduction = reduceCrossfade(runtime.state, CrossfadeEvent.BeginFade(keyA, 10_000L, 0L))
+        runtime.applyReduction(reduction, snap)
+        assertTrue(runtime.rejectedAudibleCommands.isNotEmpty())
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(backend.starts.isEmpty())
     }
 
     // -- Safety ------------------------------------------------------------------

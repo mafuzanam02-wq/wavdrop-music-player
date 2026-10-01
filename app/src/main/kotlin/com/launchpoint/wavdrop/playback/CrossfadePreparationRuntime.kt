@@ -84,9 +84,15 @@ internal fun decideFadeWindow(
     if (positionMs < 0L || startAtPositionMs < 0L || effectiveDurationMs <= 0L) return FadeWindowDecision.Invalid
     if (positionMs < startAtPositionMs) return FadeWindowDecision.Waiting
     val lateness = positionMs - startAtPositionMs // both non-negative and position >= start: cannot overflow
-    val tolerance = minOf(MAX_FADE_START_LATENESS_MS, effectiveDurationMs / 2)
-    return if (lateness <= tolerance) FadeWindowDecision.Due(lateness) else FadeWindowDecision.Missed
+    return if (isAcceptableFadeLateness(lateness, effectiveDurationMs)) FadeWindowDecision.Due(lateness) else FadeWindowDecision.Missed
 }
+
+/** The CF-2C1 accepted window: `0 <= lateness < effective` and `lateness <= min(MAX, effective / 2)`. */
+internal fun isAcceptableFadeLateness(latenessMs: Long, effectiveDurationMs: Long): Boolean =
+    effectiveDurationMs > 0L &&
+        latenessMs >= 0L &&
+        latenessMs < effectiveDurationMs &&
+        latenessMs <= minOf(MAX_FADE_START_LATENESS_MS, effectiveDurationMs / 2)
 
 /** Result of observing the primary position for a Ready transition. No audible action ever results. */
 internal sealed interface FadeWindowObservation {
@@ -96,8 +102,15 @@ internal sealed interface FadeWindowObservation {
     /**
      * The fade window was reached for this exact key+plan; reported exactly once. [latenessMs] is how far past
      * the planned start the observation was (0 = on time); a later slice must account for it.
+     * The plan facts ([effectiveDurationMs], [startAtPositionMs]) are copied from the Ready state that produced
+     * it: the key names the occurrence, not the overlap, so they prove which plan this Due belongs to.
      */
-    data class Due(val key: CrossfadeTransitionKey, val latenessMs: Long) : FadeWindowObservation
+    data class Due(
+        val key: CrossfadeTransitionKey,
+        val effectiveDurationMs: Long,
+        val startAtPositionMs: Long,
+        val latenessMs: Long,
+    ) : FadeWindowObservation
     data object AlreadyReported : FadeWindowObservation
     data class Cancelled(val reason: CrossfadeCancelReason) : FadeWindowObservation
 }
@@ -214,10 +227,36 @@ internal class CrossfadePreparationRuntime(
                     FadeWindowObservation.AlreadyReported
                 } else {
                     dueMark = mark
-                    FadeWindowObservation.Due(ready.key, decision.latenessMs)
+                    FadeWindowObservation.Due(ready.key, ready.effectiveDurationMs, ready.startAtPositionMs, decision.latenessMs)
                 }
             }
         }
+    }
+
+    /**
+     * CF-2C4: builds the semantic [CrossfadeEvent.BeginFade] for a [due] observation, or null. Pure event
+     * construction: it never reduces the event, never starts the secondary and leaves [state] Ready. Null (with
+     * no mutation) for a closed runtime, a negative monotonic time, a malformed/out-of-tolerance Due, or a Due
+     * that is not for the exact current Ready key+plan (a stale Due must not disturb a replacement plan). Only
+     * lost live ownership cancels (existing reason, fresh snapshot), then returns null. Stateless: repeated calls
+     * for a still-valid Due return an equal event; lifecycle idempotency belongs to the later executing slice.
+     */
+    fun beginFadeEvent(due: FadeWindowObservation.Due, nowElapsedRealtimeMs: Long): CrossfadeEvent.BeginFade? {
+        if (closed) return null
+        if (nowElapsedRealtimeMs < 0L) return null
+        val ready = state as? CrossfadeState.Ready ?: return null
+        if (ready.key != due.key ||
+            ready.effectiveDurationMs != due.effectiveDurationMs ||
+            ready.startAtPositionMs != due.startAtPositionMs
+        ) return null
+        if (!isAcceptableFadeLateness(due.latenessMs, due.effectiveDurationMs)) return null
+
+        val snapshot = snapshotProvider()
+        crossfadeOwnershipLossReason(snapshot, due.key)?.let {
+            cancel(it, snapshot)
+            return null
+        }
+        return CrossfadeEvent.BeginFade(due.key, nowElapsedRealtimeMs, due.latenessMs)
     }
 
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */
