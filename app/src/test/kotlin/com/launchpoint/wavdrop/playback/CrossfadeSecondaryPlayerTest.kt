@@ -15,17 +15,23 @@ class CrossfadeSecondaryPlayerTest {
         data class Prepared(val attempt: Long, val item: MediaItem)
 
         val prepared = mutableListOf<Prepared>()
+        val events = mutableListOf<String>()
         var callbacks: SecondaryBackendCallbacks? = null
         var resets = 0
         var releases = 0
 
         override fun prepare(attempt: Long, item: MediaItem, callbacks: SecondaryBackendCallbacks) {
             prepared += Prepared(attempt, item)
+            events += "prepare"
             this.callbacks = callbacks
         }
 
-        override fun reset() { resets++ }
+        override fun reset() { resets++; events += "reset" }
         override fun release() { releases++ }
+
+        val starts = mutableListOf<Float>()
+        var startResult = true
+        override fun start(initialGain: Float): Boolean { starts += initialGain; events += "start"; return startResult }
 
         fun ready(attempt: Long, durationMs: Long = 180_000L) = callbacks!!.onReady(attempt, durationMs)
         fun error(attempt: Long) = callbacks!!.onError(attempt)
@@ -201,12 +207,89 @@ class CrossfadeSecondaryPlayerTest {
         assertEquals(1, listener.readies.size)
     }
 
-    @Test fun readyThenFailureIgnoresFailure() {
+    @Test fun readyThenFailureDeliversBothAndDropsOwnership() {
         owner.prepare(keyA, song(1))
         backend.ready(attemptOf(0))
         backend.error(attemptOf(0))
         assertEquals(1, listener.readies.size)
+        assertEquals(listOf(keyA), listener.failures)
+        assertEquals(1, backend.resets)
+        assertNull(owner.currentKey)
+        assertFalse(owner.start(keyA, 0f))
+    }
+
+    @Test fun startedThenFailureDeliversFailureOnceAndResets() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        assertTrue(owner.start(keyA, 0f))
+        backend.error(attemptOf(0))
+        assertEquals(listOf(keyA), listener.failures)
+        assertEquals(1, backend.resets)
+        assertNull(owner.currentKey)
+        assertFalse(owner.start(keyA, 0f))
+        assertEquals(1, backend.starts.size)
+    }
+
+    @Test fun duplicateFailureAfterReadyAndStartIsIgnored() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        owner.start(keyA, 0f)
+        backend.error(attemptOf(0))
+        backend.error(attemptOf(0))
+        assertEquals(1, listener.failures.size)
+        assertEquals(1, backend.resets)
+    }
+
+    @Test fun lateReadyAfterPostReadyFailureDoesNotResurrect() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        backend.error(attemptOf(0))
+        backend.ready(attemptOf(0))
+        assertEquals(1, listener.readies.size)
+        assertNull(owner.currentKey)
+        assertFalse(owner.start(keyA, 0f))
+    }
+
+    @Test fun supersededPreparedAttemptLateErrorLeavesNewOwnerUnaffected() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        owner.prepare(keyB, song(2))
+        backend.error(attemptOf(0)) // late error of A
         assertTrue(listener.failures.isEmpty())
+        assertEquals(keyB, owner.currentKey)
+        backend.ready(attemptOf(1))
+        assertTrue(owner.start(keyB, 0f))
+    }
+
+    @Test fun supersedingAStartedSecondaryStopsItBeforePreparingTheNext() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        assertTrue(owner.start(keyA, 0.2f))
+        owner.prepare(keyB, song(2))
+        // A is reset (stopped/cleared) BEFORE B is prepared; ownership never moves while A keeps playing.
+        assertEquals(listOf("prepare", "start", "reset", "prepare"), backend.events)
+        assertEquals(keyB, owner.currentKey)
+        assertFalse(owner.start(keyA, 0f)) // A's authority is gone
+        backend.error(attemptOf(0)) // late A error
+        backend.ready(attemptOf(0)) // late A ready
+        assertTrue(listener.failures.isEmpty())
+        assertEquals(1, listener.readies.size)
+        backend.ready(attemptOf(1))
+        assertTrue(owner.start(keyB, 0.3f))
+    }
+
+    @Test fun supersedingAPreparedButNotStartedSecondaryDoesNotNeedAReset() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        owner.prepare(keyB, song(2))
+        assertEquals(0, backend.resets) // the real backend silences on prepare; nothing was playing
+    }
+
+    @Test fun readyIsAcceptedOnlyWhilePreparing() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        backend.ready(attemptOf(0))
+        assertEquals(1, listener.readies.size)
     }
 
     @Test fun failureThenReadyIgnoresReady() {

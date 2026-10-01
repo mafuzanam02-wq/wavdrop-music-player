@@ -28,6 +28,10 @@ class CrossfadePreparationRuntimeTest {
         override fun reset() { resets++ }
         override fun release() { releases++ }
 
+        val starts = mutableListOf<Float>()
+        var startResult = true
+        override fun start(initialGain: Float): Boolean { starts += initialGain; return startResult }
+
         fun ready(attempt: Long, durationMs: Long = 180_000L) = callbacks!!.onReady(attempt, durationMs)
         fun error(attempt: Long) = callbacks!!.onError(attempt)
     }
@@ -333,9 +337,9 @@ class CrossfadePreparationRuntimeTest {
 
     // ── Commands / safety ───────────────────────────────────────────────────────
 
-    @Test fun secondaryBackendHasNoPlayOperation() {
+    @Test fun secondaryBackendHasOnlyPrepareStartResetRelease() {
         val names = SecondaryPlayerBackend::class.java.declaredMethods.map { it.name }.toSet()
-        assertEquals(setOf("prepare", "reset", "release"), names)
+        assertEquals(setOf("prepare", "start", "reset", "release"), names)
     }
 
     @Test fun runtimeHoldsNoPrimaryPlayerReference() {

@@ -71,6 +71,10 @@ class CrossfadeFadeWindowTest {
         }
         override fun reset() { resets++ }
         override fun release() { releases++ }
+
+        val starts = mutableListOf<Float>()
+        var startResult = true
+        override fun start(initialGain: Float): Boolean { starts += initialGain; return startResult }
         fun ready(attempt: Long, durationMs: Long = 180_000L) = callbacks!!.onReady(attempt, durationMs)
     }
 
@@ -316,12 +320,13 @@ class CrossfadeFadeWindowTest {
         observe(startA + 500)
         observe(startA + MAX_FADE_START_LATENESS_MS + 10)
         assertTrue(runtime.rejectedAudibleCommands.isEmpty())
+        assertTrue("Due must never start the secondary", backend.starts.isEmpty())
         assertTrue(runtime.state !is CrossfadeState.Fading)
     }
 
-    @Test fun secondaryBackendStillHasOnlySilentOperations() {
+    @Test fun secondaryBackendHasOnlyPrepareStartResetRelease() {
         val names = SecondaryPlayerBackend::class.java.declaredMethods.map { it.name }.toSet()
-        assertEquals(setOf("prepare", "reset", "release"), names)
+        assertEquals(setOf("prepare", "start", "reset", "release"), names)
     }
 
     @Test fun productionGateRemainsFalse() {
