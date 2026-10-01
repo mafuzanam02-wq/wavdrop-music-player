@@ -117,9 +117,15 @@ internal sealed interface FadeWindowObservation {
 
 /**
  * CF-2B3: silent preparation orchestration. Wires snapshot -> CF-1 plan -> occurrence binding -> CF-2A
- * coordinator -> CF-2B2 secondary preparation, and stops at Ready. It never plays the secondary, never
- * changes any gain, never touches the primary player/MediaSession/EQ, and executes only the pre-audible
- * commands (PrepareSecondary, AbandonSecondary).
+ * coordinator -> CF-2B2 secondary preparation, and stops at Ready. Evaluation/observation never play the
+ * secondary, change any gain, or touch the primary player/MediaSession/EQ.
+ *
+ * CF-2C5: [executeBeginFade] is the ONLY audible entry point. It reduces a validated BeginFade and executes
+ * exactly its StartSecondary (via [CrossfadeSecondaryPlayer.start]). The accompanying ApplyGains is
+ * coordinator-approved but NOT executable until the primary-gain slice, so it is only recorded in
+ * [deferredGainCommands]; the primary is never touched (no Player reference exists here), which is why
+ * RestorePrimaryGain on cancellation is a safe no-op for now. [applyReduction] still refuses every other
+ * audible command. The historical class name is kept deliberately (a rename would obscure this change).
  *
  * Main-thread confined: every entry point (evaluation, secondary callbacks, close) must run on the
  * authoritative playback/main looper, where [snapshotProvider] may be called. This runtime owns the
@@ -136,6 +142,13 @@ internal class CrossfadePreparationRuntime(
     /** Audible commands that must never reach this slice; recorded (and refused) so tests can observe them. */
     val rejectedAudibleCommands: List<CrossfadeCommand> get() = rejected
     private val rejected = mutableListOf<CrossfadeCommand>()
+
+    /**
+     * ApplyGains emitted by an executed BeginFade that cannot yet be applied (no primary-gain seam). Diagnostic
+     * only; cleared whenever the state leaves Fading. Never a general command queue.
+     */
+    val deferredGainCommands: List<CrossfadeCommand> get() = deferredGains
+    private val deferredGains = mutableListOf<CrossfadeCommand>()
 
     private var closed = false
 
@@ -259,6 +272,38 @@ internal class CrossfadePreparationRuntime(
         return CrossfadeEvent.BeginFade(due.key, nowElapsedRealtimeMs, due.latenessMs)
     }
 
+    /**
+     * CF-2C5: the single safe execution operation for a [due] observation. Runs the CF-2C4 bridge
+     * ([beginFadeEvent]: plan, lateness, monotonic time and live-ownership validation), reduces the BeginFade
+     * through the coordinator, makes the resulting Fading state visible FIRST, then starts the exact prepared
+     * secondary at the coordinator-provided incoming gain. True only when that start succeeded and this
+     * Fading transition is still the live owner. Any failure fails closed to Idle (when this call still owns
+     * the state); a state changed re-entrantly during the start (error, supersession) is never overwritten.
+     */
+    fun executeBeginFade(due: FadeWindowObservation.Due, nowElapsedRealtimeMs: Long): Boolean {
+        val event = beginFadeEvent(due, nowElapsedRealtimeMs) ?: return false
+        val reduction = reduceCrossfade(state, event)
+        val fading = reduction.state as? CrossfadeState.Fading ?: return false
+        val start = reduction.commands.getOrNull(0) as? CrossfadeCommand.StartSecondary
+        val gain = reduction.commands.getOrNull(1) as? CrossfadeCommand.ApplyGains
+        if (reduction.commands.size != 2 || start == null || gain == null || start.key != fading.key || gain.key != fading.key) {
+            Log.w(TAG, "unexpected BeginFade reduction commands; refusing: ${reduction.commands}")
+            return false
+        }
+
+        state = fading // state first: a synchronous backend error must observe Fading
+        dueMark = null
+        val started = secondary.start(start.key, start.initialIncomingGain)
+        if (state != fading) return false // re-entrantly cancelled/superseded: the newer state stands
+        if (!started) {
+            // Nothing is playing. The primary was never lowered, so cancelling needs no primary restoration.
+            cancel(CrossfadeCancelReason.SecondaryError, snapshotProvider())
+            return false
+        }
+        deferredGains += gain
+        return true
+    }
+
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */
     fun cancel(reason: CrossfadeCancelReason) {
         if (closed) return
@@ -272,6 +317,7 @@ internal class CrossfadePreparationRuntime(
         closed = true
         state = CrossfadeState.Idle
         dueMark = null
+        deferredGains.clear()
         if (toCancel is CrossfadeState.Active) {
             // Pre-audible cleanup is covered by release(); no primary operation is ever required here.
             secondary.abandon(toCancel.key)
@@ -310,9 +356,13 @@ internal class CrossfadePreparationRuntime(
     internal fun applyReduction(reduction: CrossfadeReduction, snapshot: CrossfadeRuntimeSnapshot) {
         state = reduction.state
         if (state !is CrossfadeState.Ready) dueMark = null
+        if (state !is CrossfadeState.Fading) deferredGains.clear()
         for (command in reduction.commands) {
             when (command) {
                 is CrossfadeCommand.AbandonSecondary -> secondary.abandon(command.key)
+                // CF-2C5: the primary gain is never lowered (no Player reference, ApplyGains is only deferred),
+                // so there is nothing to restore yet. Becomes a real operation in the primary-gain slice.
+                is CrossfadeCommand.RestorePrimaryGain -> Unit
                 is CrossfadeCommand.PrepareSecondary -> {
                     val target = snapshot.playbackQueue.getOrNull(command.key.toPlaybackIndex)
                     if (target == null || !secondary.prepare(command.key, target)) {
@@ -324,8 +374,7 @@ internal class CrossfadePreparationRuntime(
                 }
                 is CrossfadeCommand.StartSecondary,
                 is CrossfadeCommand.ApplyGains,
-                is CrossfadeCommand.RequestHandoff,
-                is CrossfadeCommand.RestorePrimaryGain -> {
+                is CrossfadeCommand.RequestHandoff -> {
                     rejected += command
                     Log.w(TAG, "refusing audible crossfade command in silent-preparation runtime: $command")
                     if (state is CrossfadeState.Active) {

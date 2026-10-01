@@ -3,10 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2C4. The implementation reviewed during the documentation
-reconciliation was `58ba4cf` ("Add lateness-aware crossfade begin timing"); the reconciliation itself is
-documentation-only and lands in a later commit, so that SHA is not the repository HEAD. Update this
-paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2C5. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -47,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2C4 (below).
+- Crossfade engineering foundations CF-1 to CF-2C5 (below).
 
 ## Crossfade - current state
 
@@ -64,24 +61,27 @@ Completed, internal-only foundations:
 | CF-2C2 | occurrence-safe once-only secondary start primitive |
 | CF-2C3 | lateness-aware `BeginFade` timing contract |
 | CF-2C4 | plan-bound `Due` -> `BeginFade` runtime bridge (event-building only) |
+| CF-2C5 | `BeginFade` reduction execution + exact prepared-secondary start (`executeBeginFade`) |
 
 **Live runtime integration is NOT implemented.** Specifically:
 
 - `PlaybackService.CROSSFADE_SECONDARY_RUNTIME_ENABLED` is `false`; the runtime is never constructed in
   production.
-- `BeginFade` is built from a plan-bound `Due` but never executed; state stays Ready and nothing starts the secondary player from the runtime.
-- Continuous real gain mutation is not wired; no fade timing driver exists.
+- Inside the internal runtime the secondary can now start (`executeBeginFade` -> `Fading` + `StartSecondary`),
+  but the production gate is `false`, so this is unreachable in the shipped app.
+- The primary player gain is never changed: the initial `ApplyGains` is only recorded as deferred.
+  No continuous gain mutation or fade timing driver exists.
 - Handoff/promotion is not implemented.
 - There is no Settings / persisted crossfade preference.
 - No physical crossfade validation has occurred. Crossfade is not shipped and must not appear in
   user-facing copy.
 
-The next engineering frontier is the future runtime integration (itemised in the backlog), after the
-current documentation pass.
+The next engineering frontier is primary gain mutation (first item in the backlog list).
 
 ## In progress
 
-Documentation reconciliation (this pass). No feature work is half-finished on `master`.
+Crossfade runtime integration is in progress through individually closed, reviewed slices; no
+implementation slice is left partially applied on `master`.
 
 ## Invariants (do not break)
 

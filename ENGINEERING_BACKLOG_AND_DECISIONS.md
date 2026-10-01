@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2C4 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2C5 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2C4
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2C5
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2C4 (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2C5 (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -199,6 +199,9 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
   - **CF-2C4** plan-bound `Due` -> `BeginFade` runtime bridge (`beginFadeEvent`): maps `latenessMs` to
     `initialElapsedMs`, rejects stale/replaced-plan Dues, revalidates live ownership; event-building only,
     state stays Ready, nothing audible.
+  - **CF-2C5** `executeBeginFade`: reduces the validated `BeginFade`, enters `Fading` before the effect and
+    starts the exact prepared secondary once at the coordinator gain. Start failure / re-entrant error fails
+    closed. The initial `ApplyGains` is deferred (no primary-gain seam); gate remains `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -429,21 +432,20 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2C4 are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2C5 are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
-1. Real secondary start / `BeginFade` execution (reduce the bridged `BeginFade`; `CrossfadeSecondaryPlayer.start` driven by `StartSecondary`).
-2. Primary gain mutation (applying `ApplyGains` / `RestorePrimaryGain` to the real primary player).
-3. Continuous fade progression / timing driver (a main-thread tick source feeding `FadeTick`).
-4. Occurrence-safe handoff / promotion / reconciliation of primary and secondary.
-5. Failure / cancel recovery during audible overlap.
-6. Manual seek / pause / next / previous interaction while preparing or fading.
-7. Queue / shuffle / repeat mutation behaviour while fading.
-8. Dual-player Equalizer / audio-session validation.
-9. Settings + persisted crossfade preference.
-10. Production enablement (flipping the gate, with rollout safeguards).
-11. Physical Bluetooth / background / EQ validation.
+1. Primary gain mutation (applying the deferred `ApplyGains` / `RestorePrimaryGain` to the real primary player).
+2. Continuous fade progression / timing driver (a main-thread tick source feeding `FadeTick`).
+3. Occurrence-safe handoff / promotion / reconciliation of primary and secondary.
+4. Failure / cancel recovery during audible overlap.
+5. Manual seek / pause / next / previous interaction while preparing or fading.
+6. Queue / shuffle / repeat mutation behaviour while fading.
+7. Dual-player Equalizer / audio-session validation.
+8. Settings + persisted crossfade preference.
+9. Production enablement (flipping the gate, with rollout safeguards).
+10. Physical Bluetooth / background / EQ validation.
 
 ### Playback hardening (engineering)
 

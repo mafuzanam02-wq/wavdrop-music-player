@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.playback
 import androidx.media3.common.MediaItem
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,8 +81,14 @@ class CrossfadeFadeWindowTest {
 
         val starts = mutableListOf<Float>()
         var startResult = true
-        override fun start(initialGain: Float): Boolean { starts += initialGain; return startResult }
+        var onStart: (() -> Unit)? = null
+        override fun start(initialGain: Float): Boolean {
+            starts += initialGain
+            onStart?.invoke()
+            return startResult
+        }
         fun ready(attempt: Long, durationMs: Long = 180_000L) = callbacks!!.onReady(attempt, durationMs)
+        fun error(attempt: Long) = callbacks!!.onError(attempt)
     }
 
     private fun song(id: Long, tag: Long = 0L) = Song(
@@ -451,6 +458,163 @@ class CrossfadeFadeWindowTest {
         runtime.applyReduction(reduction, snap)
         assertTrue(runtime.rejectedAudibleCommands.isNotEmpty())
         assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(backend.starts.isEmpty())
+    }
+
+    // -- CF-2C5: BeginFade execution + exact secondary start ---------------------------
+
+    private val now = 10_000L
+
+    @Test fun onTimeExecutionStartsSecondaryAtZeroGainAndEntersFading() {
+        val d = readyDue(0L)
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Fading(keyA, 6_000L, now, 0L), runtime.state)
+        assertEquals(listOf(0f), backend.starts)
+        assertTrue(runtime.rejectedAudibleCommands.isEmpty())
+    }
+
+    @Test fun lateExecutionUsesCoordinatorEqualPowerGain() {
+        val d = readyDue(MAX_FADE_START_LATENESS_MS) // 1500 / 6000 = 0.25
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Fading(keyA, 6_000L, now, 1_500L), runtime.state)
+        assertEquals(listOf(CrossfadeGainCurve.equalPower(0.25f).incoming), backend.starts)
+    }
+
+    @Test fun backendGainEqualsCoordinatorStartAndApplyGains() {
+        val d = readyDue(1_000L)
+        val reduction = reduceCrossfade(runtime.state, CrossfadeEvent.BeginFade(keyA, now, 1_000L))
+        val start = reduction.commands[0] as CrossfadeCommand.StartSecondary
+        val apply = reduction.commands[1] as CrossfadeCommand.ApplyGains
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(start.initialIncomingGain, apply.gains.incoming, 0f)
+        assertEquals(listOf(start.initialIncomingGain), backend.starts)
+    }
+
+    @Test fun initialApplyGainsIsDeferredNotFailedClosed() {
+        val d = readyDue(1_000L)
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertTrue(runtime.state is CrossfadeState.Fading)
+        val deferred = runtime.deferredGainCommands.single() as CrossfadeCommand.ApplyGains
+        assertEquals(keyA, deferred.key)
+        assertEquals(CrossfadeGainCurve.equalPower(1_000f / 6_000f), deferred.gains)
+        assertTrue(runtime.rejectedAudibleCommands.isEmpty())
+        assertEquals(0, backend.resets)
+    }
+
+    @Test fun duplicateExecutionDoesNotStartTwice() {
+        val d = readyDue(0L)
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertFalse(runtime.executeBeginFade(d, now + 10))
+        assertEquals(1, backend.starts.size)
+        assertEquals(1, runtime.deferredGainCommands.size)
+        assertTrue(runtime.state is CrossfadeState.Fading)
+    }
+
+    @Test fun stateIsFadingBeforeBackendStartIsCalled() {
+        val d = readyDue(0L)
+        var seen: CrossfadeState? = null
+        backend.onStart = { seen = runtime.state }
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Fading(keyA, 6_000L, now, 0L), seen)
+    }
+
+    @Test fun backendRefusingStartFailsClosedToIdle() {
+        val d = readyDue(0L)
+        backend.startResult = false
+        assertFalse(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertTrue(runtime.rejectedAudibleCommands.isEmpty())
+    }
+
+    @Test fun synchronousErrorDuringStartIsNotOverwrittenByFading() {
+        val d = readyDue(0L)
+        val attempt = backend.prepared.last()
+        backend.onStart = { backend.error(attempt) }
+        assertFalse(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets) // one terminal reset path
+        assertEquals(1, backend.starts.size)
+        assertTrue(runtime.deferredGainCommands.isEmpty())
+    }
+
+    @Test fun reentrantReplacementDuringStartKeepsNewOwner() {
+        val d = readyDue(0L)
+        backend.onStart = {
+            snap = snapshot(index = 2)
+            runtime.evaluatePreparation(6_000L, null) // old owner lost; B = (5, 2, 3) becomes Armed
+        }
+        assertFalse(runtime.executeBeginFade(d, now))
+        val armed = runtime.state as CrossfadeState.Armed
+        assertEquals(CrossfadeTransitionKey(5L, 2, 3), armed.key)
+        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertEquals(1, backend.starts.size)
+    }
+
+    @Test fun secondaryErrorAfterSuccessfulStartReturnsToIdle() {
+        val d = readyDue(0L)
+        val attempt = backend.prepared.last()
+        assertTrue(runtime.executeBeginFade(d, now))
+        backend.error(attempt)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.starts.size)
+        assertEquals(1, backend.resets)
+        assertTrue(runtime.deferredGainCommands.isEmpty())
+    }
+
+    @Test fun cancelAfterSuccessfulStartResetsSecondaryOnceWithoutPrimaryAction() {
+        val d = readyDue(0L)
+        assertTrue(runtime.executeBeginFade(d, now))
+        runtime.cancel(CrossfadeCancelReason.Pause)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+        assertTrue(runtime.deferredGainCommands.isEmpty())
+        assertTrue(runtime.rejectedAudibleCommands.isEmpty())
+    }
+
+    @Test fun cf2c4RejectionsNeverStartTheSecondary() {
+        val d = readyDue(0L)
+        assertFalse(runtime.executeBeginFade(d.copy(key = CrossfadeTransitionKey(5L, 2, 3)), now)) // stale key
+        assertFalse(runtime.executeBeginFade(d, -1L)) // negative now
+        assertEquals(CrossfadeState.Ready(keyA, 6_000L, 194_000L), runtime.state)
+        evaluate(configured = 4_000L) // same key, replaced plan
+        backend.ready(backend.prepared.last())
+        assertFalse(runtime.executeBeginFade(d, now)) // stale plan Due
+        assertEquals(CrossfadeState.Ready(keyA, 4_000L, 196_000L), runtime.state)
+        assertTrue(backend.starts.isEmpty())
+        snap = snapshot(playing = false) // lost live ownership
+        val dueB = d.copy(effectiveDurationMs = 4_000L, startAtPositionMs = 196_000L)
+        assertFalse(runtime.executeBeginFade(dueB, now))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(backend.starts.isEmpty())
+    }
+
+    @Test fun duplicateSongStartBelongsToExactPositionalKey() {
+        val dup = listOf(song(10, 0), song(20, 1), song(10, 2), song(10, 3))
+        snap = snapshot(queue = dup, index = 2)
+        evaluate()
+        backend.ready(backend.prepared.last())
+        val key = CrossfadeTransitionKey(5L, 2, 3)
+        val d = observe(startA, key = key) as FadeWindowObservation.Due
+        assertTrue(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Fading(key, 6_000L, now, 0L), runtime.state)
+        assertEquals(1, backend.starts.size)
+    }
+
+    @Test fun runtimeHoldsNoPlayerReference() {
+        val offending = CrossfadePreparationRuntime::class.java.declaredFields.map { it.type.name }
+            .filter { it.startsWith("androidx.media3") }
+        assertTrue(offending.isEmpty())
+    }
+
+    @Test fun genericApplyReductionStillRefusesStartSecondary() {
+        makeReady()
+        runtime.applyReduction(
+            CrossfadeReduction(runtime.state, listOf(CrossfadeCommand.StartSecondary(keyA, 0f))),
+            snap,
+        )
+        assertEquals(listOf<CrossfadeCommand>(CrossfadeCommand.StartSecondary(keyA, 0f)), runtime.rejectedAudibleCommands)
         assertTrue(backend.starts.isEmpty())
     }
 

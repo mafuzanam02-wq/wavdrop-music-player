@@ -53,10 +53,10 @@ Not yet distributed. Source: git history after tag `v0.1.0-beta9`.
 ### Engineering foundations (not user-facing)
 
 - **Crossfade engineering foundation only - not user-facing, not enabled.** Foundations CF-1 through
-  CF-2C4 (planning rules, lifecycle coordinator, runtime snapshot, silent secondary-player preparation,
-  fade-window trigger, secondary start primitive, lateness-aware begin timing, plan-bound fade-begin event bridge) are merged behind a hard
+  CF-2C5 (planning rules, lifecycle coordinator, runtime snapshot, silent secondary-player preparation,
+  fade-window trigger, secondary start primitive, lateness-aware begin timing, plan-bound fade-begin bridge, BeginFade execution with exact secondary start) are merged behind a hard
   gate (`CROSSFADE_SECONDARY_RUNTIME_ENABLED = false`). There is no crossfade setting and nothing audible
-  changes. Live runtime integration is not implemented.
+  changes: the internal runtime can start the secondary but the gate is off and the primary gain is never changed. Live runtime integration is not implemented.
 
 ---
 
