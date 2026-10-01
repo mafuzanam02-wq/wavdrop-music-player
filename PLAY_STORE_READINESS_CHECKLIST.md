@@ -9,12 +9,12 @@ as items are completed. Tick `[x]` when done; leave `[ ]` open.
 
 | Item | Status | Notes |
 |---|---|---|
-| `compileSdk = 35` | ✅ Set | `app/build.gradle.kts` |
-| `targetSdk = 35` | ✅ Set | Meets Google Play's current minimum requirement |
+| `compileSdk = 36` | ✅ Set | `app/build.gradle.kts` |
+| `targetSdk = 36` | ✅ Set | Android 16; re-check Google Play's current target-API requirement before each submission |
 | `minSdk = 26` (Android 8.0) | ✅ Set | Covers a wide device range |
 | `versionCode` set to production value | ⬜ Pending | Currently `9` (`app/build.gradle.kts`); must be incremented before every Play Console upload (each upload requires a unique, higher value) |
-| `versionName` set to release value | ✅ `"0.1.0"` | Appropriate for initial/beta track |
-| Release build signed with production keystore | ⬜ Pending | Generate and store keystore securely before upload |
+| `versionName` set to release value | ✅ `"0.1.0-beta9"` | Current value in `app/build.gradle.kts`; appropriate for the beta track |
+| Release build signed with upload key | ⬜ Pending | Signing is wired in `app/build.gradle.kts` (see `docs/RELEASE_SIGNING.md`): all four credentials (`keystore.properties` or `WAVDROP_UPLOAD_*`) produce a signed release; none produces an unsigned release; a partial set fails the build. Credentials are never committed. Play Console enrollment / first upload is not recorded here and remains to be confirmed. |
 | ProGuard/R8 enabled for release build | ✅ `isMinifyEnabled = true`, `isShrinkResources = true` | Confirmed in `app/build.gradle.kts` |
 | Debug APK removed from release track | ⬜ Pending | Only upload a release-signed APK/AAB |
 | AAB (Android App Bundle) built for upload | ⬜ Pending | Play Console prefers `.aab` over `.apk` |
@@ -29,6 +29,8 @@ as items are completed. Tick `[x]` when done; leave `[ ]` open.
 | `READ_MEDIA_AUDIO` | ✅ | ✅ | API 33+ granular audio permission |
 | `FOREGROUND_SERVICE` | ✅ | ✅ | Required for background media playback |
 | `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | ✅ | ✅ | Matches `foregroundServiceType=mediaPlayback` in service |
+| `BLUETOOTH` | ✅ | ✅ | `maxSdkVersion="30"`; used only to receive profile connection broadcasts for auto-resume |
+| `BLUETOOTH_CONNECT` | ✅ | ✅ | API 31+; reconnect broadcasts and output-route detection. No scan/discovery is performed; no location permission |
 | `INTERNET` | ✅ Absent | ✅ | App makes no network requests |
 | Location | ✅ Absent | ✅ | Not used |
 | Camera | ✅ Absent | ✅ | Not used |
@@ -45,7 +47,7 @@ No data leaves the device except via user-initiated file export or share sheet.
 
 | Question | Answer | Evidence |
 |---|---|---|
-| Does the app collect user data and send it to your servers? | **No** | No `INTERNET` permission; no networking libraries |
+| Does the app collect user data and send it to your servers? | **No** | No `INTERNET` permission; no networking libraries. (Now Playing "search online" actions open a search URL in the user's own browser via `ACTION_VIEW`; Wavdrop sends nothing itself.) |
 | Does the app share data with third parties? | **No** | Share sheet is user-initiated OS feature; no data pipeline |
 | Is data encrypted in transit? | **N/A** | No data in transit |
 | Does the app use advertising ID? | **No** | No ad SDK; `INTERNET` absent |
@@ -103,7 +105,10 @@ types to explicitly confirm as not collected:
 | `PlaybackService` exported with media session action | ✅ | Required for system media UI on API 33+ |
 | `foregroundServiceType=mediaPlayback` declared | ✅ | Matches `FOREGROUND_SERVICE_MEDIA_PLAYBACK` permission |
 | `android:supportsRtl="true"` | ✅ | Required for international distribution |
-| 6 launcher aliases declared | ✅ | `MidnightViolet` enabled; others disabled until user selects |
+| 6 launcher aliases declared | ✅ | `ObsidianBlack` is the enabled default; Midnight Violet, Clean Purple, Deep Teal, Ocean Blue, and Sunset Orange are disabled until the user selects them |
+| Media / system integration declared | ✅ | `PlaybackService` is a `MediaLibraryService` (also `MediaBrowserService` / `MediaSessionService` actions); `MediaButtonReceiver`; exported only where required |
+| Non-exported internal receivers | ✅ | `AudioOutputReconnectReceiver` and `WidgetActionReceiver` are `exported="false"`; the widget provider is exported for the launcher |
+| Background work | ✅ | WorkManager periodic automatic-backup check (default initializer replaced by a Hilt worker factory) |
 
 ---
 
@@ -111,7 +116,7 @@ types to explicitly confirm as not collected:
 
 | Asset | Status | Spec |
 |---|---|---|
-| App icon (512 × 512 px, PNG, no alpha) | ⬜ Pending | Required for listing. Use Midnight Violet icon as base |
+| App icon (512 × 512 px, PNG, no alpha) | ⬜ Pending | Required for listing. Use the Obsidian Black icon (the default launcher icon) as base — see `docs/BRANDING.md` |
 | Feature graphic (1024 × 500 px, JPG or PNG, no alpha) | ⬜ Pending | Required — appears at the top of listing on large screens |
 | Phone screenshots (minimum 2, portrait) | ⬜ Pending | See Section 7 |
 | Tablet screenshots | ⬜ Optional | Recommended if targeting tablets |
@@ -148,7 +153,7 @@ Minimum 2 phone screenshots required; 6–8 recommended.
 | Internal test track created in Play Console | ⬜ Pending | Use for initial upload before promotion |
 | APK/AAB uploaded to internal/closed track | ⬜ Pending | |
 | Minimum 1 tester confirmed install and launch | ⬜ Pending | |
-| QA smoke pass completed | ⬜ Pending | See `SOFT_LAUNCH_QA_CHECKLIST.md` |
+| QA smoke pass completed | ⬜ Pending | See `QA_CHECKLIST.md` |
 | No P0/P1 crashes in closed track | ⬜ Pending | |
 | Test devices: Samsung (One UI) | ⬜ Pending | Launcher icon caching; share sheet behavior |
 | Test devices: Pixel / stock Android | ⬜ Pending | Reference behavior |

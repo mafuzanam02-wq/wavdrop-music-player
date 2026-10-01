@@ -48,10 +48,10 @@ access.
 
 **Browse your music your way.**
 Navigate by songs, albums, artists, and folders. Create and manage playlists
-with full drag-to-reorder support. Explore eight smart collections —
-Favorites, Most Played, Recently Played, Never Played, Recently Added, Most
-Skipped, Long Tracks, and Short Tracks — built automatically from your
-listening history.
+with full drag-to-reorder support. Explore eleven smart collections —
+Favorites, Most Played, Recently Played, Forgotten Gems, Never Played,
+Recently Added, Most Skipped, Long Tracks, Short Tracks, Always Finish, and
+Usually Abandon — built automatically from your listening history.
 
 **Detailed listening insights.**
 Track play counts, skip counts, listening time, and favorites per song.
@@ -66,16 +66,21 @@ Reports for top songs, artists, and albums across your full history.
 · Bluetooth and wired headphone auto-resume controls
 · Swipe album art to skip, double-tap for lyrics, long-press for details
 · Media notification controls and lock-screen playback
+· Home-screen widget with artwork and playback controls
+· Equalizer with device-supported bands and presets (availability depends
+  on your device)
 
 **Lyrics support.**
-Display embedded lyrics (ID3 USLT/SYLT), same-folder .lrc sidecar files,
-and .txt sidecar files. Add or edit your own plain-text lyrics for any track
-inside the app.
+Display embedded lyrics (ID3 USLT/SYLT), same-folder .lrc sidecar files
+(synchronized when the file has timestamps), and .txt sidecar files. Add or
+edit your own plain-text lyrics for any track inside the app.
 
 **Migration and backup.**
 · Import listening stats from BlackPlayer EX .bpstat files
 · Export a full local backup covering stats, playlists, lyrics, preferences,
-  and listening history as a local JSON file
+  and listening history as a local JSON file, verified after it is written
+· Optional automatic backup checks to a folder you choose (best-effort,
+  subject to Android scheduling)
 · Restore a Wavdrop backup on the same or a new device
 · Share audio tracks with any app via Android's native share sheet
 
@@ -106,7 +111,11 @@ For display in promotional copy or feature bullets on the listing:
 - Offline playback — works without internet access
 - Browse by songs, albums, artists, folders
 - Playlists with drag-to-reorder
-- Smart collections (Favorites, Most Played, Never Played, and more)
+- 11 smart collections (Favorites, Most Played, Forgotten Gems, Never Played, and more)
+- Equalizer (device-supported)
+- Home-screen widget
+- Synchronized lyrics for timed .lrc files
+- Automatic backup checks (best-effort)
 - Statistics Dashboard and Listening Reports
 - Monthly Reports — activity grouped by calendar month
 - Wrapped — yearly listening highlights
@@ -205,9 +214,13 @@ fully shipped:
 - Lyrics fetching from the internet
 - Last.fm or scrobbling integration
 - Android Auto support
-- Lock-screen or home-screen widgets
+- Lock-screen widgets (only a home-screen widget ships)
 - Tag / ID3 metadata editing
-- Equalizer
+- Crossfade (engineering foundation only; not enabled)
+- "Preservation-grade" or exact authoritative recovery (restore is merge-only;
+  see docs/BACKUP_PRESERVATION_CONTRACT.md section 18)
+- Guaranteed scheduled or daily backups (automatic backup is best-effort)
+- Equalizer on every device (availability depends on device support)
 
 ---
 
@@ -215,6 +228,10 @@ fully shipped:
 
 - Update `versionName` in the description after each release if it appears
 - Update the feature list when new features ship (check `RELEASE_NOTES.md`)
-- Re-verify privacy claims after any networking or analytics library is added
+- Re-verify privacy claims after any networking or analytics library is added. Current basis: the manifest
+  declares no `INTERNET` permission and no networking library is a dependency. Now Playing offers
+  "search lyrics/artist online" actions that only hand a Google search URL to the user's own browser
+  (`ACTION_VIEW`); Wavdrop itself makes no network requests and does not fetch lyrics.
+- Launcher icon facts (six choices, default Obsidian Black) live in `docs/BRANDING.md`
 - Re-verify the Data Safety form after any permission or data-flow change
 - Update the Privacy Policy URL reference once the web page is live

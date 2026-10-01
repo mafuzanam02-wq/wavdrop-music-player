@@ -1,7 +1,7 @@
 # TECHNICAL DEBT REGISTER
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Record of intentional engineering compromises. Last review: 0.1.0-beta9 (Soft Launch Stabilization).
+> Record of intentional engineering compromises. Last reviewed after CF-2C3 (post-beta9).
 
 ---
 
@@ -31,7 +31,8 @@ Accepted It* fields.
 
 This register is **not** a bug list, an unfinished-feature list, or a roadmap. Bugs are fixed; debt
 is *accepted and tracked.* Unfinished features live in the backlog; deferred architecture lives in
-`ENGINEERING_BACKLOG_AND_DECISIONS.md` §6.
+`ENGINEERING_BACKLOG_AND_DECISIONS.md` §6. In particular, **unfinished crossfade work is active feature
+architecture, not technical debt**; its remaining items are tracked in the backlog (§11).
 
 ---
 
@@ -50,23 +51,24 @@ is *accepted and tracked.* Unfinished features live in the backlog; deferred arc
 
 | ID | Category | Status | Priority |
 |---|---|---|---|
-| TD-001 | Playback recovery messaging | ACTIVE | Medium |
+| TD-001 | Playback recovery messaging | RESOLVED | Medium |
 | TD-002 | Library sync retry | ACTIVE | Low |
 | TD-003 | TrackIdentity lifecycle | ACTIVE | High (guardrail) |
 | TD-004 | Smart Collections ranking | ACTIVE | Medium |
-| TD-005 | Wrapped preview recompute | MONITOR | Medium |
-| TD-006 | Home search normalization | ACTIVE | High |
-| TD-007 | Full-events flow coupling | ACTIVE | High |
-| TD-008 | Search normalization caching | ACTIVE | Medium |
+| TD-005 | Wrapped preview recompute | MONITOR | Low |
+| TD-006 | Home search normalization | RESOLVED | High |
+| TD-007 | Full-events flow coupling | ACTIVE (narrowed) | Medium |
+| TD-008 | Search normalization caching | RESOLVED | Medium |
 | TD-009 | Dashboard top-N sorting | MONITOR | Low |
 | TD-010 | Artwork image loader | MONITOR | Low |
 | TD-011 | Full-table scan upsert | MONITOR | Medium |
 | TD-012 | Insights in-memory grouping | MONITOR | Low |
 | TD-013 | Quarantine snapshot scoping | ACTIVE | High (guardrail) |
 | TD-014 | Legacy eventId backfill | ACTIVE | High (guardrail) |
-| TD-015 | Auto-backup scheduling model | ACTIVE | Medium |
+| TD-015 | Auto-backup scheduling model | SUPERSEDED | Low |
 | TD-016 | Legacy merge reconciliation | ACTIVE | Medium |
 | TD-017 | Permission-revoked recovery UX | MONITOR | Low |
+| TD-018 | Natural AUTO-transition callback ownership | ACTIVE | Medium |
 
 ---
 
@@ -74,11 +76,14 @@ is *accepted and tracked.* Unfinished features live in the backlog; deferred arc
 
 **ID:** TD-001
 **Category:** Playback recovery messaging
-**Current Status:** ACTIVE
+**Current Status:** RESOLVED
 **Priority:** Medium
 **Origin:** Wave B audit (WB-01 fix)
-**Current Implementation:** On a Media3 `PlaybackException`, `PlayerController.onPlayerError`
-bypasses the failing item (advance to next valid track, or stop cleanly), logging the error but
+**Resolution:** `PlayerController` now emits a typed `PlaybackUserMessage` (`BAD_TRACK_SKIPPED`,
+`QUEUE_EXHAUSTED`; at most one per recovery episode) that Now Playing surfaces. The original limitation
+is kept below for historical reasoning.
+**Original Implementation:** On a Media3 `PlaybackException`, `PlayerController.onPlayerError`
+bypassed the failing item (advance to next valid track, or stop cleanly), logging the error but
 showing **no user-facing message.**
 **Reason This Exists:** The playback layer has no existing transient-message / snackbar / event
 channel between `PlayerController` and the UI.
@@ -123,7 +128,7 @@ persistent failures.
 **Category:** TrackIdentity lifecycle
 **Current Status:** ACTIVE
 **Priority:** High (guardrail — do not "fix" casually)
-**Origin:** P2-B1 design; Backup v2 Preservation Contract §5/§15; Wave B audit (WB-03)
+**Origin:** P2-B1 design; `docs/BACKUP_PRESERVATION_CONTRACT.md` §5/§15; Wave B audit (WB-03)
 **Current Implementation:** A track removed and later re-added with a new MediaStore ID receives a
 **fresh** `identityUuid`; the old identity simply has its `currentSongId` cleared. No reconnection
 (rematching) is attempted.
@@ -175,8 +180,9 @@ preferred over micro-optimization; the work is already off-main (`flowOn(Default
 **Current Status:** MONITOR
 **Priority:** Medium
 **Origin:** Wave C audit (WC-05)
-**Current Implementation:** `wrappedPreview` rebuilds a full-year Wrapped (`availableYears` +
-`buildYear`) on Home whenever listen events change, off the main thread.
+**Current Implementation:** `wrappedPreview` rebuilds the latest-year Wrapped on Home whenever listen
+events change, off the main thread. Since post-beta9 its input is bounded to the latest year through a
+ranged event query instead of the full history.
 **Reason This Exists:** No incremental Wrapped cache exists; recomputing guarantees the preview is
 always correct.
 **Risk:** A full year computation runs for a preview card on every playback event; cost scales with
@@ -195,10 +201,12 @@ explicit refresh.
 
 **ID:** TD-006
 **Category:** Home search normalization
-**Current Status:** ACTIVE
+**Current Status:** RESOLVED
 **Priority:** High
 **Origin:** Wave C audit (WC-01)
-**Current Implementation:** Home `uiState` filters the full library on the **main thread** per
+**Resolution:** Home search now filters on `Dispatchers.Default` with a 200 ms debounce over a cached
+`LibrarySearchIndex`. The original limitation is kept below for history.
+**Original Implementation:** Home `uiState` filtered the full library on the **main thread** per
 keystroke (no debounce, no `flowOn(Default)`), running the expensive `MusicTextNormalizer` over each
 song's title/artist/album.
 **Reason This Exists:** The Home `uiState` predates the later, correct pattern used by
@@ -219,13 +227,13 @@ the correct approach.
 
 **ID:** TD-007
 **Category:** Full-events flow coupling
-**Current Status:** ACTIVE
-**Priority:** High
+**Current Status:** ACTIVE (narrowed)
+**Priority:** Medium
 **Origin:** Wave C audit (WC-02)
-**Current Implementation:** `allListenEvents()` (`observeAll`) observes the **entire**
-`track_listen_events` table and re-emits on every insert; it is combined into the main Songs list
-(`songsUiState`), the Wrapped preview, and Insights. The Songs list re-derives on every play even
-though events are only needed there for the `MOST_PLAYED_THIS_MONTH` sort.
+**Current Implementation:** `allListenEvents()` (`observeAll`) still observes the **entire**
+`track_listen_events` table and re-emits on every insert. Home and Songs no longer depend on it; the
+remaining consumers are Monthly Reports, Insights, Statistics, Wrapped, Smart Collection details, and
+Diagnostics, each only while subscribed.
 **Reason This Exists:** A single full-history flow is simple and was sufficient at current data sizes.
 **Risk:** Memory and CPU scale with full history; the Songs list churns on each playback event.
 **Why We Accepted It:** Correct and simple for current libraries; the cost concentrates only at large
@@ -244,11 +252,13 @@ active; prefer range-scoped flows over `observeAll`.
 
 **ID:** TD-008
 **Category:** Search normalization caching
-**Current Status:** ACTIVE
+**Current Status:** RESOLVED
 **Priority:** Medium
 **Origin:** Wave C audit (WC-03)
-**Current Implementation:** Every filter pass re-normalizes raw song fields from scratch; there is no
-precomputed normalized search index on `Song`.
+**Resolution:** `LibrarySearchIndex` precomputes normalized title/artist/album once per library change
+and is shared by Home, global, and grouped search. The original limitation is kept for history.
+**Original Implementation:** Every filter pass re-normalized raw song fields from scratch; there was no
+precomputed normalized search index.
 **Reason This Exists:** Normalizing on demand kept the model simple and avoided a derived index to
 maintain.
 **Risk:** Search cost scales linearly with library size on every keystroke; compounds TD-006.
@@ -349,7 +359,7 @@ memory, off the main thread, recomputed on each event while Insights is subscrib
 **Category:** Quarantine snapshot scoping
 **Current Status:** ACTIVE
 **Priority:** High (guardrail — do not "fix" casually)
-**Origin:** Backup v2 Preservation Contract §6; P2-A/P2-B0; `QuarantinePlanner` design
+**Origin:** `docs/BACKUP_PRESERVATION_CONTRACT.md` §6; P2-A/P2-B0; `QuarantinePlanner` design
 **Current Implementation:** Pending (quarantine) rows are **snapshot-scoped**: the `originKey`
 includes the backup fingerprint (which includes `exportedAt`), so two exports from the same
 installation at different times create separate pending rows for the same logical unresolved track.
@@ -375,7 +385,7 @@ foundations exist. This is a guardrail, not an inefficiency.
 **Category:** Legacy eventId backfill
 **Current Status:** ACTIVE
 **Priority:** High (guardrail — do not "fix" casually)
-**Origin:** Decision D-06/D-07; P2-B1; Backup v2 Preservation Contract §9.2
+**Origin:** Decision D-06/D-07; P2-B1; `docs/BACKUP_PRESERVATION_CONTRACT.md` §9.2
 **Current Implementation:** Legacy listen events without an `eventId` are **not backfilled.** New
 events get a stable `eventId` at creation; legacy null-eventId rows remain null and are excluded from
 eventId integrity unless present.
@@ -398,13 +408,17 @@ pre-eventId baseline.
 
 **ID:** TD-015
 **Category:** Auto-backup scheduling model
-**Current Status:** ACTIVE
-**Priority:** Medium
-**Origin:** Backup v2 Preservation Contract §14
-**Current Implementation:** "Automatic" backup runs **when Wavdrop is opened** after the configured
-interval has elapsed — it is not background-scheduled. User-facing wording is constrained to describe
-this truthfully ("Back up when you open Wavdrop, if at least [interval] has passed").
-**Reason This Exists:** No `WorkManager`-based background scheduling has been implemented yet.
+**Current Status:** SUPERSEDED
+**Priority:** Low
+**Origin:** Backup preservation contract (automatic backup section)
+**Superseded by:** durable WorkManager scheduling (commit "Add durable automatic backup scheduling"):
+a unique 24-hour periodic check (`AutoBackupWorkScheduler` / `AutoBackupWorker`) calls
+`AutoBackupRepository.runIfDue()`. Scheduling is still **best-effort** under Android/OEM constraints
+(storage-not-low constraint; the folder permission may be revoked), so UI wording stays qualified
+("Automatic Backup Check", "Last automatic check") instead of promising exact schedules.
+**Original Implementation:** "Automatic" backup ran **when Wavdrop was opened** after the configured
+interval had elapsed — it was not background-scheduled.
+**Reason This Existed:** No `WorkManager`-based background scheduling had been implemented.
 **Risk:** Users who rarely open the app back up less often than the nominal interval suggests.
 **Why We Accepted It:** Honest wording over implied capability; real background scheduling is a
 larger, separately-staged feature.
@@ -423,7 +437,7 @@ must then be updated to the future-WorkManager phrasing.
 **Category:** Legacy merge reconciliation
 **Current Status:** ACTIVE
 **Priority:** Medium
-**Origin:** Backup v2 Preservation Contract §8.3
+**Origin:** `docs/BACKUP_PRESERVATION_CONTRACT.md` §8.3
 **Current Implementation:** For old backups without stable event IDs or complete event history, merge
 uses conservative aggregate reconciliation; `MAX(local, backup)` is used as a fallback and the
 limitation is disclosed rather than claiming a perfect combination.
@@ -468,13 +482,48 @@ behaviour is a conscious, accepted limitation rather than a planned feature.
 
 ---
 
+### TD-018
+
+**ID:** TD-018
+**Category:** Natural AUTO-transition callback ownership
+**Current Status:** ACTIVE
+**Priority:** Medium
+**Origin:** Occurrence-authority hardening (OH-1) review
+**Current Implementation:** A natural Media3 AUTO transition can be observed by two callbacks in
+`PlayerController`: `onPositionDiscontinuity(DISCONTINUITY_REASON_AUTO_TRANSITION)` and
+`onMediaItemTransition(MEDIA_ITEM_TRANSITION_REASON_AUTO)`. The discontinuity handler performs the
+`StatsTracker` song transition explicitly (and `PlaybackCallbackOwnership` marks that reason
+`notifiesStats = false, persistsSession = true`), while the media-item-transition handler also syncs Now
+Playing with `notifiesStats = true` and persists the session. Ownership of the stats transition and of
+session persistence for one natural transition is therefore split across two callbacks, relying on
+ordering and on the stats tracker tolerating the overlap. Other reasons (REMOVE / PLAYLIST_CHANGED) were
+made single-owner in OH-1.
+**Reason This Exists:** OH-1 deliberately limited itself to reasons it could prove (REMOVE, deletion
+routing, routing through the occurrence resolver) and preserved AUTO behaviour to avoid regressing
+gapless playback, loop-boundary detection, and sleep-timer end-of-song handling in the same change.
+**Risk:** A future change to either callback (notably crossfade, which will add a second player and new
+transition timing) could double-count or drop a stats transition or session save for a natural
+transition.
+**Why We Accepted It:** No demonstrated user-visible defect; the existing behaviour is covered by
+current tests and has shipped. Changing it opportunistically would couple an unrelated risk to other work.
+**When To Revisit:** As a **dedicated slice**, ideally before crossfade handoff work depends on AUTO
+transition semantics; or immediately if it becomes a demonstrated blocker. It should not be mixed into
+crossfade slices otherwise.
+**Dependencies:** A single-owner design for natural transitions (stats, persistence, sleep timer, loop
+detection) with tests for gapless and repeat-one boundaries.
+**Possible Future Solution:** Make `onMediaItemTransition` the sole owner of the song transition for
+AUTO, and let the discontinuity callback only refresh state.
+**Notes:** Distinct from crossfade feature work, which is tracked in the backlog, not here.
+
+---
+
 ## Guiding Principles — When Should Technical Debt Be Paid?
 
 Pay down an item in this register when one or more of the following is true:
 
 - **When correctness improves.** If changing the implementation removes a real risk of wrong results,
   data loss, or misleading UI (e.g. the Wave B fixes), it is worth doing.
-- **When measurable performance improves.** Pay performance debt (TD-006/007/008 and the MONITOR
+- **When measurable performance improves.** Pay performance debt (TD-007 and the MONITOR
   performance items) when profiling at realistic scale shows a *measured* regression — not on
   suspicion. Wave C provides the measurement tests to use.
 - **When the maintenance burden exceeds the benefit.** If keeping the compromise costs more in

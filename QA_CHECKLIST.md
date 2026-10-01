@@ -1,8 +1,11 @@
-# Wavdrop Soft Launch QA Checklist
+# Wavdrop QA Checklist
 
-Use this checklist on a real Android phone with a realistic local music library. Record device model, Android version, Wavdrop version, and any screen recordings or logs for failures.
+Current comprehensive manual / physical QA checklist. Use it on a real Android phone with a realistic local
+music library. Record device model, Android version, Wavdrop version (Settings -> About), and any screen
+recordings or logs for failures. Automated JVM tests do not replace these checks; Bluetooth, OEM, and
+background behaviour can only be validated on hardware.
 
-> **⚠️ Back up Wavdrop first.** Uninstalling or clearing app data removes local stats, playlists, settings, and backup schedules unless restored from a backup. Before ANY test below that involves uninstalling, clearing app data, or a fresh install, run Settings → Backup & Migration → Back Up Now (or Save Backup File) and confirm the backup exists in your chosen folder.
+> **Warning - back up Wavdrop first.** Uninstalling or clearing app data removes local stats, playlists, settings, and backup schedules unless restored from a backup. Wavdrop has no in-app reset. Before ANY test below that involves uninstalling, clearing app data, or a fresh install, run Settings -> Backup & Migration -> Back Up Now (or Save Backup File), open Backup Verification, and confirm the file is verified and located in a place that survives the test. Restore is **merge-only** and never restores audio files.
 
 ## High-Risk Areas
 
@@ -117,6 +120,8 @@ Use this checklist on a real Android phone with a realistic local music library.
 |---|---|---|
 | Open lyrics for a song with embedded lyrics. | Lyrics display. | |
 | Open lyrics for a song with same-folder `.lrc`. | Sidecar lyrics display if supported by device storage access. | |
+| Play a song with a timed `.lrc` sidecar. | Lyrics are synchronized: the current line follows playback and scrolls; seeking re-syncs. | |
+| Pause, seek, and resume with synchronized lyrics open. | Highlight stays correct; no stutter or drift. | |
 | Open lyrics for a song with same-folder `.txt`. | Text lyrics display if supported by device storage access. | |
 | Open lyrics for a song without lyrics. | Empty state explains no lyrics are available and how to add/edit them. | |
 | Edit unsynced lyrics in Track Details. | Saved custom lyrics display afterward. | |
@@ -173,10 +178,11 @@ Use this checklist on a real Android phone with a realistic local music library.
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
-| Open Smart Collections. | All supported collection cards/rows appear. | |
+| Open Smart Collections. | All 11 collection cards/rows appear (Favorites, Most Played, Recently Played, Forgotten Gems, Never Played, Recently Added, Most Skipped, Long Tracks, Short Tracks, Always Finish, Usually Abandon). | |
 | Open Favorites. | Favorite songs are listed or an intentional empty state appears. | |
 | Open Most Played. | Aggregate/event rules display expected results. | |
 | Open Recently Played. | Recent Wavdrop plays appear after listening activity. | |
+| Open Forgotten Gems, Always Finish, and Usually Abandon. | Each lists plausible songs or an intentional empty state; counts say how many songs qualify. | |
 | Open Never Played. | Songs with no play history appear. | |
 | Open Recently Added. | Recently added songs appear in plausible order. | |
 | Open Most Skipped. | Skipped songs appear after skip activity. | |
@@ -207,6 +213,14 @@ Use this checklist on a real Android phone with a realistic local music library.
 | Import an invalid JSON file. | App shows a clear error and does not change data. | |
 | Import an unsupported backup version if available. | App rejects it safely. | |
 | Restore does not duplicate playlists unexpectedly. | Playlist results remain understandable. | |
+| Open Settings -> Backup & Migration -> Backup Verification on a fresh backup. | File is reported verified with counts for songs, stats, playlists, events, lyrics. | |
+| Restore the same backup a second time. | Result is a no-op or reports nothing new; stats, events, and playlists do not inflate. | |
+| Restore an older backup over newer local activity. | An older-backup warning appears; local history is not lowered (merge keeps the higher values). | |
+| Restore on a clean install (after uninstall/reinstall). | Preferences restore, you are prompted to re-select the music folder if needed, then history merges after the scan. | |
+| Restore a backup that contains songs not on this device. | Result reports history preserved for later matching (pending/quarantine); no crash; nothing is shown as playable. | |
+| Edit a backup file by hand and import it. | Import is rejected with an integrity error before any change. | |
+| Import a Wavdrop Desktop backup (if available), twice. | Matched stats, playlists, and desktop events import; second import does not duplicate events. | |
+| Export, then re-import an export that came from a restored device. | Restored history (events from `manual_restore`) survives a second backup generation. | |
 
 ## 16. BlackPlayer .bpstat Import
 
@@ -229,6 +243,10 @@ Use this checklist on a real Android phone with a realistic local music library.
 | Disconnect Bluetooth headphones. | Playback pauses or continues according to audio route/settings behavior. | |
 | Change Bluetooth auto-resume setting. | New behavior is reflected on next connection. | |
 | Switch between phone speaker and Bluetooth output. | App remains responsive and Now Playing state stays correct. | |
+| Connect Bluetooth while the app process is cold (swipe away, force-stop is a harsher variant). | Resume follows the setting; if a session exists it is rebuilt without overwriting a queue you started. | |
+| Press Pause on the headset/car right as Bluetooth reconnects. | Explicit user pause/play wins over the automatic resume; no unexpected restart. | |
+| Disconnect Bluetooth quickly after connecting (before auto-resume fires). | A lost route cancels the pending automatic resume; playback does not start on the speaker. | |
+| Test a Bluetooth LE Audio device, if available. | Reconnect behaviour matches classic A2DP behaviour. | |
 
 ## 18. Wired Headphones
 
@@ -250,6 +268,10 @@ Use this checklist on a real Android phone with a realistic local music library.
 | Resume from notification/media controls. | Playback resumes and UI reflects state when reopened. | |
 | Use Next/Previous from system controls. | Queue navigation matches app behavior. | |
 | Swipe app away from recents during playback. | Behavior is predictable and no crash occurs. | |
+| Pause, then swipe the app away from recents; press Play from the notification / headset / lock screen. | The paused session survives and playback resumes at the saved position. | |
+| With the process cold, press PLAY from notification, Bluetooth, lock screen, and widget (one at a time). | Playback starts from the restored session without opening the app UI. | |
+| Open an Android system media surface / music-app integration that lists Wavdrop. | Wavdrop appears with a browsable Songs list and a Recent item; tapping resumes correctly. | |
+| Start a queue in the app, then trigger an external PLAY. | The existing queue is not replaced by the saved session. | |
 
 ## 20. Theme / Accent / Launcher Icon
 
@@ -259,6 +281,8 @@ Use this checklist on a real Android phone with a realistic local music library.
 | Switch theme to Dark. | App updates to dark styling without unreadable text. | |
 | Switch theme to System. | App follows device theme. | |
 | Change accent color. | Primary controls and highlights use selected accent. | |
+| Fresh install: check the launcher icon. | Default is Obsidian Black. | |
+| Cycle through all six launcher icons (Obsidian Black, Midnight Violet, Clean Purple, Deep Teal, Ocean Blue, Sunset Orange). | Each applies; only one launcher entry exists at a time; launcher caching may delay the visible change. | |
 | Change launcher icon. | Preference saves; launcher icon updates according to device launcher behavior. | |
 | Restart app after theme/accent changes. | Preferences persist. | |
 
@@ -319,9 +343,78 @@ Use this checklist on a real Android phone with a realistic local music library.
 | Song row artwork. | Shared rows show artwork/fallback consistently across screens. | |
 | Artist artwork. | Artist list/details use local album-art-derived image or fallback. | |
 | About/legal screens. | Privacy, Disclaimer, Open Source, Supported Formats, and Diagnostics all open. | |
-| Reports & Insights naming. | Settings category/screen title uses Reports & Insights where expected. | |
+| Insights naming. | Bottom-nav tab and Settings entry both read "Insights". | |
 | Library statistics card. | Library shows compact song/album/artist/duration summary. | |
 | Sleep Timer state. | Timer can be turned off and does not persist after process kill. | |
+
+## 26. Duplicate Songs in the Queue
+
+Build a queue where the same song appears more than once (for example Add to queue twice, or a playlist
+that contains the song and an album queue).
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Play the second occurrence of a duplicated song from the Queue Sheet. | That exact occurrence plays; Previously Played / Up Next split is correct around it. | |
+| Jump to a duplicated song from the queue, then press Next and Previous. | Navigation follows queue positions, not the first copy of the song. | |
+| Turn shuffle on and off while a duplicated song is playing. | The same occurrence keeps playing; no jump to the other copy. | |
+| Remove one occurrence of a duplicated song from Up Next. | Only that occurrence is removed. | |
+| Reorder around a duplicated song. | Current occurrence and position are preserved. | |
+| Start playback of a song from a playlist that contains it twice (each position). | The tapped position starts, not the first match. | |
+| Kill the app mid-playback of the second copy, reopen, and resume. | The same occurrence is restored. | |
+| Delete (Track Details, Android 11+) a song that appears twice in the queue. | Playback and queue stay consistent; no crash. | |
+
+## 27. Queue Bulk Cleanup and Mutations
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Use the bulk clear actions in the Queue Sheet (for example clear upcoming). | The current song keeps playing and only the intended songs are removed; the queue updates immediately. | |
+| Add many songs (Play next / Add to queue / album actions) in quick succession. | Order is correct; no stutter or restart of the current song. | |
+| Move a song up/down and by drag during playback. | Order commits once on drop; current song and position unchanged. | |
+
+## 28. Equalizer
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Open Settings -> Equalizer. | Screen shows device-supported bands and presets, or a clear unsupported state. | |
+| Enable the Equalizer and pick a platform preset, a Wavdrop preset, then custom bands. | Sound changes audibly; settings persist after leaving the screen. | |
+| Restart the app and the process. | Equalizer settings persist and apply to the next track. | |
+| Switch output (speaker / Bluetooth / wired) with the Equalizer on. | No crash; the effect stays applied or re-attaches. | |
+| Note: Equalizer settings are not part of backups today. | Restoring a backup does not change Equalizer settings. | |
+
+## 29. Home-Screen Widget
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Add the Wavdrop widget to the home screen. | Shows artwork, title, artist. | |
+| Tap Previous / Play-Pause / Next on the widget with the app open and closed. | Controls act on the current session; the widget updates immediately. | |
+| Press the widget Play with a cold process. | Playback resumes from the saved session. | |
+| Resize the widget. | Layout adapts without clipping. | |
+
+## 30. Automatic Backup
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Choose a backup folder and set an interval. | Settings shows the folder and a "Last automatic check" status; wording says automatic checks, not guaranteed schedules. | |
+| Leave the app closed past the interval (or advance the device clock for a quick test). | A verified backup appears in the folder after the periodic check runs (timing is best-effort). | |
+| Revoke the folder permission or remove the folder. | Status shows "Folder unavailable"; no crash; no backup is written elsewhere. | |
+| Set the interval to Off. | No further automatic backups are created. | |
+
+## 31. Identity and Event Ids (observable via backup files)
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Play several songs, then export a backup and inspect the JSON. | New `listenEvents` carry an `eventId`; older events from before the identity foundation have none. | |
+| Restore the same backup twice and recount events. | Event count does not grow on the second restore. | |
+| Remove a song from storage, rescan, re-add it, rescan. | No crash; the song's history is not silently attached to a different song. | |
+| Inspect an exported backup. | There is no track-identity section (identity is device-local and not exported). | |
+
+## 32. Crossfade
+
+**Not yet user-testable.** Crossfade exists only as gated engineering foundations
+(`CROSSFADE_SECONDARY_RUNTIME_ENABLED = false`); there is no setting and no audible behaviour to verify. A
+physical crossfade QA procedure will be written when live runtime integration exists. Until then, the only
+expectation is that playback behaves exactly as before: gapless native transitions, no overlap, no volume
+dips between tracks.
 
 ## Final Sign-Off
 

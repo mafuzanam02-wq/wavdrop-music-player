@@ -1,6 +1,62 @@
 # Wavdrop Release Notes
 
-Historical record of completed and shipped work. Newest changes first.
+Historical record of completed and shipped work. Newest changes first. Each version entry reflects what was
+true when it shipped; do not rewrite old entries to match later behaviour. The current user-facing summary
+is `WHATS_NEW.md`.
+
+---
+
+## Unreleased / Engineering since beta9
+
+Work merged to `master` after the `v0.1.0-beta9` tag (the app version is still `0.1.0-beta9`, versionCode 9).
+Not yet distributed. Source: git history after tag `v0.1.0-beta9`.
+
+### Platform
+
+- Targets Android 16 (API 36); build toolchain upgraded for API 36; Media3 upgraded to 1.11.x; Compose
+  and Lifecycle baseline modernized.
+
+### Playback reliability and system integration
+
+- **Queue and duplicate safety.** The playback queue is now occurrence-safe: songs that appear more than
+  once in a queue behave correctly across shuffle, session restore, playlist playback, queue jumps,
+  batch Play next, seeks during controller reconnect, and song deletion. Ambiguous cases fail safely
+  rather than guessing. Playlist and queue UI actions are duplicate-safe.
+- **Resume after process death.** Playback can be resumed from notification, Bluetooth, lock screen, and
+  widget controls even when the app process was cold; the saved session is rebuilt on demand and never
+  overwrites a queue you already started.
+- **System media integration.** Wavdrop exposes a browsable library and a "recent" item to system media
+  surfaces and the music-app launcher integration.
+- **Paused sessions survive.** A paused, resumable session is no longer destroyed when the app is swiped
+  away from Recents.
+- **Bluetooth / LE Audio / wired reconnect.** Automatic resume uses request-ownership rules so an explicit
+  pause/play always wins over an automatic resume, and a lost route cancels a pending resume.
+- **Gapless transitions hardened**; playback progress is synchronized with Media3; unplayable tracks are
+  skipped with a short on-screen message instead of stalling.
+- **Queue controls.** Move controls, drop confirmation, long-queue drag fixes, and bulk cleanup actions.
+
+### Library, search, and lyrics
+
+- Faster search for large libraries (cached normalized index, off-main-thread filtering).
+- Configurable Smart Collections on Home; contextual artist/album navigation; Home Wrapped preview bounded
+  to the latest year.
+- **Synchronized lyrics** for timed `.lrc` sidecar files on Now Playing.
+- Polish passes across Home, Library, Search, Now Playing, Statistics, and Wrapped; shared motion and
+  interaction foundation.
+
+### Backup and security
+
+- **Automatic backup now runs through WorkManager** (a periodic check) instead of only when the app opens;
+  it remains best-effort under Android scheduling.
+- Backup reliability and preference-parity hardening (backed-up settings now round-trip consistently).
+
+### Engineering foundations (not user-facing)
+
+- **Crossfade engineering foundation only - not user-facing, not enabled.** Foundations CF-1 through
+  CF-2C3 (planning rules, lifecycle coordinator, runtime snapshot, silent secondary-player preparation,
+  fade-window trigger, secondary start primitive, lateness-aware begin timing) are merged behind a hard
+  gate (`CROSSFADE_SECONDARY_RUNTIME_ENABLED = false`). There is no crossfade setting and nothing audible
+  changes. Live runtime integration is not implemented.
 
 ---
 
@@ -295,3 +351,40 @@ Beta 7.9 is the major public-facing upgrade from Beta 4. Betas 5, 6, 7, and 7.5 
 
 ### Changed
 - Unified Home and Songs search result experience — both surfaces now share the same song row component and action set.
+
+---
+
+## v0.9.0 Soft Launch (historical snapshot)
+
+First soft-launch snapshot (tag `v0.9.0-soft-launch`, version name `0.1.0`, version code 1), merged here from
+the former standalone soft-launch release note. Intended for real-device testing and early feedback.
+
+### Playback reliability
+
+- Improved Bluetooth and wired-headphone auto-resume, including cold-start resume after reconnect.
+- Clearer resume modes: Off, Resume if interrupted, Always resume.
+- Background-playback reliability guidance for devices that restrict background activity.
+- Now Playing layout responsiveness on small and larger phones; time display options (Elapsed / Duration,
+  Elapsed / Remaining).
+
+### Backup and restore
+
+- Wavdrop JSON backup/restore reliability, backup preference restore, folder-based backup with fewer
+  duplicate files, selected-folder auto-backup, fixed-filename overwrite behaviour, and restore guidance
+  when automatic backup settings are restored on a new device.
+
+### BlackPlayer migration
+
+- More reliable `.bpstat` import; repeated imports of the same source no longer inflate statistics;
+  clearer reconciliation wording.
+
+### Search, statistics, and settings
+
+- Grouped search results, long-press song actions, preserved play/skip/listening-time data across
+  import/restore, display personalization options, and polished Settings organization.
+
+### Known limitations at the time
+
+- Auto-resume after the app is swiped from Recents could be blocked by Android/OEM restrictions
+  (since improved by paused-session retention; see Unreleased).
+- The home-screen widget existed in code but was dormant for this snapshot; it shipped in Beta 3.1.

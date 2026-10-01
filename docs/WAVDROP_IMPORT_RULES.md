@@ -1,20 +1,36 @@
 # Wavdrop Import Rules
 
-Version: 1.0
-
-Status: Active
+Status: **Active.** Describes import semantics as currently implemented. Format fields live in
+`WAVDROP_DATA_FORMAT_SPEC.md`; preservation semantics live in `BACKUP_PRESERVATION_CONTRACT.md`.
 
 ## Required Reading
 
 Read these files before changing backup, import, export, or migration behavior:
 
-- `docs/WAVDROP_DATA_FORMAT_SPEC.md`
-- `docs/WAVDROP_BACKUP_SCHEMA_V1.md`
-- `docs/WAVDROP_IMPORT_RULES.md`
+- `docs/WAVDROP_DATA_FORMAT_SPEC.md` (canonical format)
+- `docs/BACKUP_PRESERVATION_CONTRACT.md` (preservation semantics)
+- `docs/WAVDROP_BACKUP_SCHEMA_V1.md` (legacy V1 compatibility)
+- `docs/WAVDROP_IMPORT_RULES.md` (this file)
+
+## Routing
+
+Import routes by origin and version before any rule is applied:
+
+1. **Desktop origin** (`appName = "wavdrop-desktop-lab"` or `sourcePlatform = "desktop"`): desktop import
+   path, regardless of other identity fields.
+2. **Android v2** (`format = "wavdrop_backup"`, `version = 2`): v2 parser with mandatory integrity.
+3. **Android v1** (`version = 1`, with the V1 `app` field): legacy adapter; `UNVERIFIED_LEGACY` unless a
+   payload checksum is present and valid.
+4. `version` greater than 2, an unknown required capability, a duplicate JSON key, an integrity or manifest
+   mismatch, or implausible statistic magnitudes: **rejected before any database mutation**.
+
+Preview runs first and reports matched, unmatched, ambiguous, and changed records; apply then runs in a
+transaction and re-checks for a no-op inside the transaction. Import never modifies audio files.
 
 ## Identity Rules
 
-Android backup identity:
+Android v1 backup identity (legacy; v2 backups carry `format`, `version = 2`, `formatMajor` instead of
+`app` / `packageName`):
 
 - `app = "Wavdrop"`
 - `format = "wavdrop_backup"`
@@ -60,7 +76,21 @@ Recommended matching evidence:
 - normalized album when available
 - duration or folder evidence when available
 
-If no local song matches an imported song, skip it with a warning. If multiple local songs match, treat it as ambiguous and skip it. Do not guess.
+If multiple local songs match, treat it as ambiguous and do not guess. A wrong match is worse than an
+unresolved song.
+
+What happens to an unresolved song depends on origin:
+
+- **Android-origin (v1/v2):** history for tracks that match no local song (stats, events, lyrics
+  overrides, import baselines, playlist entries) is **preserved in the snapshot-scoped pending
+  (quarantine) tables**, not discarded. Pending rows are archive data: they do not affect current
+  stats, are not rematched to live songs, and are not auto-merged across snapshots. Re-importing the
+  same backup does not duplicate pending rows.
+- **Desktop-origin (standalone Desktop backup):** unmatched or ambiguous songs, playlist entries, and
+  events are **skipped with a warning** (no quarantine).
+
+Android-side matching for Android-origin backups uses the multi-tier `BackupSongLinkResolver`. The
+device-local TrackIdentity is not used for matching, is not exported, and no rematching exists.
 
 ## Aggregate Stats Merge Rules
 
@@ -126,11 +156,17 @@ listen events still restore normally, and repeat import idempotency remains pres
 
 Exportable listen-event sources are `wavdrop_playback`, `manual_restore`, and `wavdrop_desktop_playback`. Unsupported or synthetic sources remain excluded, including `blackplayer_import` and unknown future sources unless explicitly supported later.
 
-Restored/imported listen-event idempotency uses this identity concept:
+Restored/imported listen-event idempotency (eventId-aware):
+
+- If the incoming event has a non-null `eventId`, it is deduplicated against existing local non-null
+  `eventId`s and against earlier events in the same batch. `eventId` is carried through to the stored row.
+- If the incoming event has no `eventId` (legacy), the legacy identity concept applies:
 
 ```text
 local Android songId + occurredAt + eventType + listenedMs
 ```
+
+- Legacy events are never assigned a fabricated `eventId` on import.
 
 Do not dedupe only by song ID; multiple plays of the same song are valid. Repeat import of the same Desktop backup must not duplicate events, inflate `playCount`, inflate raw `totalListeningTimeMs`, duplicate playlist songs, or destabilize `importBaselines` and `lyricsOverrides`.
 
@@ -244,13 +280,23 @@ Result: `wavdrop_desktop_playback` events survived Android import/export, the se
 
 Real QA counts: source Desktop backup had 732 songs and 1523 listen events, including 14 `wavdrop_desktop_playback` events. Android export after first import had 732 songs and 1525 listen events, including the same 14 Desktop-origin events. Android export after second import remained 732 songs and 1525 listen events with the same 14 Desktop-origin events. `importBaselines` stayed 723, `lyricsOverrides` stayed 28, playlists stayed 3.
 
-## Deferred Beyond Beta 3.1
+## Lyrics, Baselines, and Extension Roots
 
-The following are P2/P3 items, not Beta 3.1 scope:
+- **Lyrics overrides:** a matched override is applied only when no local override exists or the backup's
+  `updatedAt` is newer. Unmatched overrides are quarantined (Android-origin).
+- **Import baselines:** restored per matched song so re-importing BlackPlayer stats after a restore never
+  inflates counts; unmatched baselines are quarantined. BlackPlayer `.bpstat` import itself is
+  delta-based and idempotent through baselines and never writes events.
+- **Extension roots:** the `desktopOverlay` root of a verified backup is stored verbatim in
+  `pending_backup_extensions` and re-exported by Android; its stats/events/favourites are also applied
+  through the Desktop overlay planner where they match local songs. Other unknown roots are ignored
+  (general extension preservation is deferred).
 
-- Desktop portable import of `importBaselines`, `lyricsOverrides`, and `preferences.android` beyond the current safe Android-side behavior.
-- Portable song identity layer or optional `portableSongKey`.
-- Partial audio hash or acoustic fingerprinting.
-- Backup schema v2.
-- Shared cross-platform validation library.
-- Unknown future-field preservation architecture.
+## Unsupported / Deferred
+
+- Required capabilities of any kind (rejected), portable song identity or `portableSongKey`, TrackIdentity
+  export, rematching of pending history, a restore-mode selector (restore is merge-only), and encrypted or
+  signed backups.
+- Desktop portable import of `importBaselines`, `lyricsOverrides`, and `preferences.android` beyond the
+  current safe Android-side behavior.
+- A shared cross-platform validation library and general unknown-field preservation.

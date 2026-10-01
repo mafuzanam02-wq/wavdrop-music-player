@@ -1,12 +1,28 @@
-# Wavdrop Backup Schema V1
+# Wavdrop Backup Schema V1 (Legacy / Compatibility Contract)
 
-Version: 1.0
+Status: **Legacy.** Android no longer exports V1; it exports format **v2**. V1 is retained because
+Android must keep importing V1 backups indefinitely (through a legacy adapter) and because Desktop
+backups still use V1-shaped identity fields. **For current behaviour, read
+[WAVDROP_DATA_FORMAT_SPEC.md](WAVDROP_DATA_FORMAT_SPEC.md)** (the canonical contract) and
+[WAVDROP_IMPORT_RULES.md](WAVDROP_IMPORT_RULES.md).
 
-Status: Active
+## What V1 cannot express (compared with the current format)
 
-## Android Backup Identity
+- No mandatory integrity: V1 may carry an optional `payloadSha256` and a `manifest`; without a checksum
+  the backup is imported as `UNVERIFIED_LEGACY` and never shown as fully verified.
+- No `backupId`, `sourceInstallationId`, `formatMajor/Minor`, `producer`, or capability arrays.
+- Opaque ids are JSON numbers (v2: strings); no strict integer typing guarantees.
+- No `lastListenedAt` (Recently Played state is approximated from `lastPlayedAt`).
+- Events have no stable `eventId`, so event dedup uses the legacy fingerprint.
+- No extension-root preservation (`desktopOverlay`) and no way to declare required capabilities.
+- Android-origin V1 backups cannot be authoritative about preservation: unmatched history is quarantined
+  on import exactly as for v2, but the file itself carries no identity or lineage.
 
-Android Wavdrop backups must identify themselves with:
+Android never writes V1. Do not add new fields to V1.
+
+## Android Backup Identity (V1)
+
+V1 Android backups identify themselves with:
 
 ```json
 {
@@ -17,7 +33,8 @@ Android Wavdrop backups must identify themselves with:
 }
 ```
 
-These values are part of the shared data contract and should remain stable for V1 Android backups.
+These values define V1 Android backups and must remain stable for V1 import compatibility (the V1
+parser requires the `app` field; v2 backups do not carry `app` / `packageName`).
 
 ## Desktop Backup Identity
 
@@ -54,7 +71,7 @@ a backup schema version bump and did not require a database schema change.
 
 ## Android Backup Sections
 
-Android V1 backups may contain:
+Android V1 backups (historical export shape) may contain:
 
 - backup identity metadata
 - exported timestamp/version metadata
@@ -256,13 +273,8 @@ Unsupported versions should fail safely. Unknown fields should be ignored only w
 
 Validated Android/Desktop portability QA: Desktop exported 732 songs and 1523 listen events, including 14 `wavdrop_desktop_playback` events. Android export after first import had 732 songs and 1525 listen events, including the same 14 Desktop-origin events. Android export after second import remained 732 songs and 1525 listen events with the same 14 Desktop-origin events. `importBaselines` stayed 723, `lyricsOverrides` stayed 28, playlists stayed 3, aggregate play counts/listening time did not inflate, and no backup or database schema change was needed.
 
-## Deferred Beyond Beta 3.1
+## Future work
 
-The following are P2/P3 items, not Beta 3.1 scope:
-
-- Desktop portable import of `importBaselines`, `lyricsOverrides`, and `preferences.android` beyond the current safe Android-side behavior.
-- Portable song identity layer or optional `portableSongKey`.
-- Partial audio hash or acoustic fingerprinting.
-- Backup schema v2.
-- Shared cross-platform validation library.
-- Unknown future-field preservation architecture.
+Backup schema v2 now exists (see the data-format spec). Remaining deferred items - portable song identity,
+fingerprinting, a shared cross-platform validation library, and general unknown-field preservation - are
+tracked in [WAVDROP_DATA_FORMAT_SPEC.md](WAVDROP_DATA_FORMAT_SPEC.md) section 11.

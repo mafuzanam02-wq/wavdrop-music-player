@@ -1,7 +1,16 @@
 # Wavdrop Planned Work
 
-Source of truth for upcoming work. Nothing in this file is implemented.
-When work ships, move it to RELEASE_NOTES.md and remove it here.
+Product-level view of upcoming work. Nothing in this file is implemented.
+When work ships, move it to RELEASE_NOTES.md and remove it here. Detailed engineering slices and
+architecture backlog live in [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md);
+do not duplicate them here.
+
+---
+
+## In Progress (not user-facing)
+
+- **Crossfade** - architecture in progress; live user-facing feature not yet enabled. There is no
+  crossfade setting and nothing audible changes yet.
 
 ---
 
@@ -25,8 +34,8 @@ Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped o
   Folder, Smart Collection screens). Requires assessment of accidental-deletion risk in
   list-view contexts.
 - **Drag auto-scroll/reorder library**: evaluate replacing the current custom drag-to-reorder
-  implementation with a stable third-party library if real-device edge cases surface after
-  Beta 3 distribution. The current implementation is functional but the auto-scroll and
+  implementation with a stable third-party library if real-device edge cases surface in
+  testing. The current implementation is functional but the auto-scroll and
   virtualization-interrupt paths are non-trivial to maintain.
 - **Broader folder exclusion system**: extending the per-folder scan exclusion beyond the current
   WhatsApp-specific toggle and the planned scan-exclusion folder list to a general block/allow
@@ -42,11 +51,13 @@ Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped o
 - Bulk delete (multi-select delete from device).
 - Undo / recycle-bin behavior for deleted files (not feasible: Android provides no recycle bin
   for shared media storage).
-- Equalizer.
 - Scrobbling / last.fm integration.
 - Android Auto support.
-- Home screen or lock screen widgets.
+- Lock-screen widgets / additional widget surfaces (a home-screen widget already ships).
+- Equalizer expansion beyond the shipped device Equalizer (portable/custom curves; Output Profiles,
+  Headphones, and Loudness Protection placeholders in Settings are "Coming later").
 - Metadata / ID3 tag editing.
+- In-app reset / clear-data (if ever added it must require an export-before-reset prompt).
 
 ---
 
@@ -85,8 +96,6 @@ Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped o
 - **Notification shuffle/repeat controls**: media notification action button visibility and
   behaviour is determined by Android's media session UI and the OEM notification shade — not
   directly controllable by the app. Exact appearance varies by device and Android version.
-- **Backup/restore regression check**: the Backup & Restore flow should be fully retested before
-  Beta 3 distribution. Several user-facing systems changed since the last backup validation:
-  playlist duplicate prevention, duplicate-add feedback, greyed-out Add to Playlist dialog
-  entries, and the share action. None of these affect the backup format, but end-to-end testing
-  is warranted.
+- **Backup/restore regression check**: the Backup & Restore flow (manual export, verification,
+  merge restore, automatic WorkManager backup, Desktop import, quarantine behaviour) should be
+  retested end to end on a real device before the next distribution; see `QA_CHECKLIST.md`.

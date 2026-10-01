@@ -1,8 +1,11 @@
 # Wavdrop Release Signing (WD-06)
 
-Status: **scaffold in place, credentials pending.** No keystore exists yet; the
-release build is intentionally unsigned until an upload key is generated and
-supplied out-of-band. Generating the keystore is a separate, explicitly-authorized step.
+Status: **signing wiring complete; credentials are supplied out-of-band and are never in the
+repository.** The repository contains no keystore, passwords, or `keystore.properties` (only the
+template `keystore.properties.example`). A build is signed only on a machine/CI job that supplies all
+four credentials; otherwise `assembleRelease` intentionally produces an **unsigned** APK. Play Console
+enrollment and the first upload are not recorded in the repository. Generating a keystore is a separate,
+explicitly-authorized step.
 
 ## Intended architecture
 
@@ -12,7 +15,7 @@ supplied out-of-band. Generating the keystore is a separate, explicitly-authoriz
   key; Play re-signs with the app key on distribution. If the upload key is ever
   lost it can be reset via Play Console without breaking installed users.
 - **Distribution channel:** Google Play **internal testing → closed testing** for
-  Beta (see `PLAY_STORE_READINESS_CHECKLIST.md` §8). Play Console prefers an
+  Beta (see `PLAY_STORE_READINESS_CHECKLIST.md` section 8). Play Console prefers an
   **AAB** (`bundleRelease`) over an APK for upload. Direct debug-signed APK
   sideloading (how beta3–beta7 were shared) is legacy and should not be used for
   the Play track.
@@ -62,7 +65,7 @@ Never place passwords in Gradle files, source, docs, logs, or shell history. Kee
 the keystore backed up securely and off Git — losing it (before Play App Signing
 enrollment) means no future updates.
 
-## Manual setup still required (not done here — needs explicit authorization)
+## One-time setup (outside the repository; needs explicit authorization)
 
 1. Generate an upload keystore (`keytool -genkeypair … -keyalg RSA -keysize 2048 -validity 10000`)
    and store it securely outside the repo.
@@ -75,18 +78,18 @@ enrollment) means no future updates.
 ## Verification
 
 ```bash
-# Unsigned today (expected until credentials are supplied):
+# No credentials supplied (unsigned output):
 apksigner verify --verbose app/build/outputs/apk/release/app-release-unsigned.apk
-#   → DOES NOT VERIFY / Missing META-INF/MANIFEST.MF
+#   -> DOES NOT VERIFY / Missing META-INF/MANIFEST.MF
 
-# Once signed with a real upload key:
+# Credentials supplied (signed with the upload key):
 apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
 ```
 
 ## versionCode / package notes
 
-- `versionCode = 9`, `versionName = "0.1.0-beta9"`. Each Play upload needs a unique,
+- Current values in `app/build.gradle.kts`: `versionCode = 9`, `versionName = "0.1.0-beta9"`,
+  `compileSdk = 36`, `targetSdk = 36`, `minSdk = 26`. Each Play upload needs a unique,
   monotonically increasing `versionCode` — bump before every new upload.
-  (The readiness checklist's "Currently `1`" note is stale; the build is at 9.)
 - `applicationId = com.launchpoint.wavdrop` — this is **permanent** once first
   uploaded to Play and can never change for this app listing.
