@@ -71,8 +71,9 @@ class PlaybackService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
-    // CF-2B2: only ever constructed behind CROSSFADE_SECONDARY_RUNTIME_ENABLED (false). Not a session player.
-    private var crossfadeSecondary: CrossfadeSecondaryPlayer? = null
+    // CF-2B2/2B3: only ever constructed behind CROSSFADE_SECONDARY_RUNTIME_ENABLED (false). Owns the silent
+    // secondary player (single release owner); not a session player and never scheduled yet.
+    private var crossfadePreparation: CrossfadePreparationRuntime? = null
     private var previousRestartThresholdMs: Long =
         PreviousButtonBehavior.DEFAULT.previousRestartThresholdMs()
 
@@ -124,9 +125,9 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         if (CROSSFADE_SECONDARY_RUNTIME_ENABLED) {
-            crossfadeSecondary = CrossfadeSecondaryPlayer(
+            crossfadePreparation = CrossfadePreparationRuntime(
+                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot() },
                 backendFactory = { ExoSecondaryPlayerBackend(this, audioAttributes) },
-                listener = CrossfadeSecondaryListener.NoOp,
             )
         }
         val sessionPlayer = PreviousBehaviorPlayer(
@@ -382,8 +383,8 @@ class PlaybackService : MediaLibraryService() {
         }
         mediaSession = null
         // Independent of the MediaSession: the secondary is not session-owned.
-        crossfadeSecondary?.release()
-        crossfadeSecondary = null
+        crossfadePreparation?.close()
+        crossfadePreparation = null
         super.onDestroy()
     }
 

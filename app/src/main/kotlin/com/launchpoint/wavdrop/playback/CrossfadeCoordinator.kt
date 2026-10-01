@@ -36,6 +36,10 @@ internal enum class CrossfadeCancelReason {
     MissedWindow,
     ClockRegression,
     ServiceStopping,
+    /** The configured crossfade duration is now OFF. */
+    ConfigurationDisabled,
+    /** The CF-1 plan no longer holds (e.g. duration or next occurrence changed). */
+    PlanInvalidated,
 }
 
 internal enum class CrossfadeArmRejection {
