@@ -55,6 +55,53 @@ internal fun isPreparedDurationCompatible(effectiveDurationMs: Long, preparedDur
         effectiveDurationMs >= CrossfadeRules.MIN_ENABLED_DURATION_MS &&
         preparedDurationMs / 2 >= effectiveDurationMs
 
+/** Where the primary playback position stands relative to a Ready transition's planned fade window. */
+internal sealed interface FadeWindowDecision {
+    data object Waiting : FadeWindowDecision
+
+    /** The window was entered [latenessMs] (>= 0) past the planned start; preserved, never discarded. */
+    data class Due(val latenessMs: Long) : FadeWindowDecision
+
+    data object Missed : FadeWindowDecision
+    data object Invalid : FadeWindowDecision
+}
+
+/** How late (past the planned start) the fade window may still be entered. Covers a ~500 ms ticker. */
+internal const val MAX_FADE_START_LATENESS_MS = 1_500L
+
+/**
+ * Pure track-position decision (not wall-clock; no elapsed-realtime here). The window is entered when the
+ * position reaches or crosses [startAtPositionMs] - never by equality, since observations are coarse.
+ * Policy for lateness: Due only while `position - start <= min(MAX_FADE_START_LATENESS_MS, effective / 2)`;
+ * anything later (a large seek forward, a stalled/delayed observer) is Missed and must fail closed rather
+ * than start an overlap whose intended timing has passed. Negative/unusable inputs are Invalid.
+ */
+internal fun decideFadeWindow(
+    startAtPositionMs: Long,
+    effectiveDurationMs: Long,
+    positionMs: Long,
+): FadeWindowDecision {
+    if (positionMs < 0L || startAtPositionMs < 0L || effectiveDurationMs <= 0L) return FadeWindowDecision.Invalid
+    if (positionMs < startAtPositionMs) return FadeWindowDecision.Waiting
+    val lateness = positionMs - startAtPositionMs // both non-negative and position >= start: cannot overflow
+    val tolerance = minOf(MAX_FADE_START_LATENESS_MS, effectiveDurationMs / 2)
+    return if (lateness <= tolerance) FadeWindowDecision.Due(lateness) else FadeWindowDecision.Missed
+}
+
+/** Result of observing the primary position for a Ready transition. No audible action ever results. */
+internal sealed interface FadeWindowObservation {
+    /** Not Ready, closed, or the observation belonged to a different transition. */
+    data object Inactive : FadeWindowObservation
+    data object Waiting : FadeWindowObservation
+    /**
+     * The fade window was reached for this exact key+plan; reported exactly once. [latenessMs] is how far past
+     * the planned start the observation was (0 = on time); a later slice must account for it.
+     */
+    data class Due(val key: CrossfadeTransitionKey, val latenessMs: Long) : FadeWindowObservation
+    data object AlreadyReported : FadeWindowObservation
+    data class Cancelled(val reason: CrossfadeCancelReason) : FadeWindowObservation
+}
+
 /**
  * CF-2B3: silent preparation orchestration. Wires snapshot -> CF-1 plan -> occurrence binding -> CF-2A
  * coordinator -> CF-2B2 secondary preparation, and stops at Ready. It never plays the secondary, never
@@ -78,6 +125,11 @@ internal class CrossfadePreparationRuntime(
     private val rejected = mutableListOf<CrossfadeCommand>()
 
     private var closed = false
+
+    // One-shot timing identity: occurrence key AND plan values, so a replaced plan (same key, different
+    // duration/start) is a fresh window. Cleared whenever the state leaves Ready.
+    private data class DueMark(val key: CrossfadeTransitionKey, val effectiveDurationMs: Long, val startAtPositionMs: Long)
+    private var dueMark: DueMark? = null
 
     private val secondary = CrossfadeSecondaryPlayer(
         backendFactory = backendFactory,
@@ -128,6 +180,46 @@ internal class CrossfadePreparationRuntime(
         applyReduction(reduceCrossfade(state, CrossfadeEvent.Arm(key, plan)), snapshot)
     }
 
+    /**
+     * CF-2C1: consumes a primary track-position observation for [key]'s Ready transition and reports, at most
+     * once per exact key+plan, that the fade window was reached. Silent: it never begins a fade, never plays
+     * the secondary and never touches gains; the state stays Ready. Ownership is revalidated against a fresh
+     * snapshot first; a missed window or an unusable position cancels fail closed.
+     */
+    fun observePrimaryPosition(key: CrossfadeTransitionKey, positionMs: Long): FadeWindowObservation {
+        if (closed) return FadeWindowObservation.Inactive
+        val ready = state as? CrossfadeState.Ready ?: return FadeWindowObservation.Inactive
+        if (ready.key != key) return FadeWindowObservation.Inactive // observation for a different/stale transition
+
+        val snapshot = snapshotProvider()
+        crossfadeOwnershipLossReason(snapshot, key)?.let {
+            cancel(it, snapshot)
+            return FadeWindowObservation.Cancelled(it)
+        }
+        val decision = decideFadeWindow(ready.startAtPositionMs, ready.effectiveDurationMs, positionMs)
+        return when (decision) {
+            FadeWindowDecision.Invalid -> {
+                // Timing cannot be established: fail closed; native primary playback stays authoritative.
+                cancel(CrossfadeCancelReason.PlanInvalidated, snapshot)
+                FadeWindowObservation.Cancelled(CrossfadeCancelReason.PlanInvalidated)
+            }
+            FadeWindowDecision.Waiting -> FadeWindowObservation.Waiting
+            FadeWindowDecision.Missed -> {
+                cancel(CrossfadeCancelReason.MissedWindow, snapshot)
+                FadeWindowObservation.Cancelled(CrossfadeCancelReason.MissedWindow)
+            }
+            is FadeWindowDecision.Due -> {
+                val mark = DueMark(ready.key, ready.effectiveDurationMs, ready.startAtPositionMs)
+                if (dueMark == mark) {
+                    FadeWindowObservation.AlreadyReported
+                } else {
+                    dueMark = mark
+                    FadeWindowObservation.Due(ready.key, decision.latenessMs)
+                }
+            }
+        }
+    }
+
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */
     fun cancel(reason: CrossfadeCancelReason) {
         if (closed) return
@@ -140,6 +232,7 @@ internal class CrossfadePreparationRuntime(
         val toCancel = state
         closed = true
         state = CrossfadeState.Idle
+        dueMark = null
         if (toCancel is CrossfadeState.Active) {
             // Pre-audible cleanup is covered by release(); no primary operation is ever required here.
             secondary.abandon(toCancel.key)
@@ -177,6 +270,7 @@ internal class CrossfadePreparationRuntime(
     /** State first (so synchronous callbacks see the new owner), then the pre-audible commands. */
     internal fun applyReduction(reduction: CrossfadeReduction, snapshot: CrossfadeRuntimeSnapshot) {
         state = reduction.state
+        if (state !is CrossfadeState.Ready) dueMark = null
         for (command in reduction.commands) {
             when (command) {
                 is CrossfadeCommand.AbandonSecondary -> secondary.abandon(command.key)
