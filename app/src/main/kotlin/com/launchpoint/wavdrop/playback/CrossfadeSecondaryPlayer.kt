@@ -47,6 +47,13 @@ internal interface SecondaryPlayerBackend {
      */
     fun start(initialGain: Float): Boolean
 
+    /**
+     * Sets the volume of the already-started item to [gain] (finite, 0..1). Returns false (and does nothing)
+     * for an invalid gain or when the backend is not holding a started, usable item. Never starts, prepares,
+     * seeks, changes media, touches the primary, or takes audio focus.
+     */
+    fun setGain(gain: Float): Boolean
+
     /** Stops, clears media, and leaves the player silent (volume 0, playWhenReady false). */
     fun reset()
 
@@ -133,6 +140,22 @@ internal class CrossfadeSecondaryPlayer(
             return true
         }
         return false
+    }
+
+    /**
+     * Sets the dynamic gain of the exact started secondary for [key]. Succeeds only when not released, [key]
+     * is the active key, the phase is Started, and [gain] is finite within 0..1. A false result (including a
+     * backend refusal or exception) never changes ownership, phase, or notifies the listener; the caller
+     * decides what a failed write means. Song ids play no role.
+     */
+    fun setGain(key: CrossfadeTransitionKey, gain: Float): Boolean {
+        if (released || activeKey != key || phase != Phase.Started) return false
+        if (!isValidCrossfadeGain(gain)) return false
+        return try {
+            backend?.setGain(gain) == true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** Occurrence-bound: only abandons when [key] is the active preparation. */
@@ -241,6 +264,16 @@ internal class ExoSecondaryPlayerBackend(
         if (player.mediaItemCount != 1 || player.playbackState != Player.STATE_READY) return false
         player.volume = initialGain // intended gain first, so it is never audible at a stale level
         player.play()
+        return true
+    }
+
+    override fun setGain(gain: Float): Boolean {
+        if (!isValidCrossfadeGain(gain)) return false
+        // Only a started item (playWhenReady) that is still loaded and live; buffering is a normal live state.
+        if (player.mediaItemCount != 1 || !player.playWhenReady) return false
+        val state = player.playbackState
+        if (state != Player.STATE_READY && state != Player.STATE_BUFFERING) return false
+        player.volume = gain
         return true
     }
 

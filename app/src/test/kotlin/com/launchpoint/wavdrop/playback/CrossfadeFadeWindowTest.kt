@@ -78,6 +78,7 @@ class CrossfadeFadeWindowTest {
         }
         override fun reset() { resets++ }
         override fun release() { releases++ }
+        override fun setGain(gain: Float): Boolean = true
 
         val starts = mutableListOf<Float>()
         var startResult = true
@@ -847,7 +848,7 @@ class CrossfadeFadeWindowTest {
 
     @Test fun secondaryBackendHasOnlyPrepareStartResetRelease() {
         val names = SecondaryPlayerBackend::class.java.declaredMethods.map { it.name }.toSet()
-        assertEquals(setOf("prepare", "start", "reset", "release"), names)
+        assertEquals(setOf("prepare", "start", "setGain", "reset", "release"), names)
     }
 
     @Test fun productionGateRemainsFalse() {

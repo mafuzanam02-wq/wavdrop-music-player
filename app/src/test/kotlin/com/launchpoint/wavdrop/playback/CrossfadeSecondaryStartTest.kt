@@ -74,6 +74,15 @@ class CrossfadeSecondaryStartTest {
         override fun reset() { resets++; order += "reset" }
         override fun release() { releases++; order += "release" }
 
+        val gains = mutableListOf<Float>()
+        var setGainResult = true
+        var setGainThrows = false
+        override fun setGain(gain: Float): Boolean {
+            gains += gain
+            if (setGainThrows) throw IllegalStateException("boom")
+            return setGainResult
+        }
+
         fun ready(attempt: Long, durationMs: Long = 180_000L) = callbacks!!.onReady(attempt, durationMs)
         fun error(attempt: Long) = callbacks!!.onError(attempt)
     }
@@ -330,5 +339,116 @@ class CrossfadeSecondaryStartTest {
         val gain = initialIncomingGain(1_500L, 6_000L)!!
         assertTrue(owner.start(keyA, gain))
         assertEquals(CrossfadeGainCurve.equalPower(0.25f).incoming, backend.starts.single(), 0f)
+    }
+
+    // -- CF-2C7A: occurrence-owned dynamic gain --------------------------------------
+
+    private fun startA(gain: Float = 0f) {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        assertTrue(owner.start(keyA, gain))
+    }
+
+    @Test fun startedOwnerAcceptsRepeatedExactKeyGains() {
+        startA()
+        assertTrue(owner.setGain(keyA, 0.75f))
+        assertTrue(owner.setGain(keyA, 0.25f))
+        assertEquals(listOf(0.75f, 0.25f), backend.gains)
+    }
+
+    @Test fun boundaryGainsAreAccepted() {
+        startA()
+        assertTrue(owner.setGain(keyA, 0f))
+        assertTrue(owner.setGain(keyA, 1f))
+        assertEquals(listOf(0f, 1f), backend.gains)
+    }
+
+    @Test fun invalidGainsNeverReachTheBackend() {
+        startA()
+        for (g in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, -0.01f, 1.01f)) {
+            assertFalse("gain $g", owner.setGain(keyA, g))
+        }
+        assertTrue(backend.gains.isEmpty())
+    }
+
+    @Test fun setGainWhilePreparingOrPreparedIsRejected() {
+        owner.prepare(keyA, song(1))
+        assertFalse(owner.setGain(keyA, 0.5f))
+        backend.ready(attemptOf(0))
+        assertFalse(owner.setGain(keyA, 0.5f))
+        assertTrue(backend.gains.isEmpty())
+    }
+
+    @Test fun wrongKeyCannotSetGainAndOwnershipSurvives() {
+        startA()
+        assertFalse(owner.setGain(keyB, 0.5f))
+        assertTrue(backend.gains.isEmpty())
+        assertEquals(keyA, owner.currentKey)
+        assertTrue(owner.setGain(keyA, 0.5f))
+    }
+
+    @Test fun supersededKeyCannotSetGainAndNewKeyNeedsStart() {
+        startA()
+        owner.prepare(keyB, song(2))
+        assertFalse(owner.setGain(keyA, 0.5f))
+        assertFalse(owner.setGain(keyB, 0.5f)) // Preparing
+        backend.ready(attemptOf(1))
+        assertFalse(owner.setGain(keyB, 0.5f)) // Prepared, not started
+        assertTrue(owner.start(keyB, 0f))
+        assertTrue(owner.setGain(keyB, 0.5f))
+        assertEquals(listOf(0.5f), backend.gains)
+    }
+
+    @Test fun abandonAndReleaseBlockSetGain() {
+        startA()
+        assertTrue(owner.abandon(keyA))
+        assertFalse(owner.setGain(keyA, 0.5f))
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(1))
+        assertTrue(owner.start(keyA, 0f))
+        owner.release()
+        assertFalse(owner.setGain(keyA, 0.5f))
+        assertTrue(backend.gains.isEmpty())
+    }
+
+    @Test fun backendFalseKeepsOwnershipAndLaterWriteCanSucceed() {
+        startA()
+        backend.setGainResult = false
+        assertFalse(owner.setGain(keyA, 0.5f))
+        assertEquals(keyA, owner.currentKey)
+        backend.setGainResult = true
+        assertTrue(owner.setGain(keyA, 0.6f))
+        assertEquals(0, backend.resets)
+    }
+
+    @Test fun backendExceptionIsContainedWithoutListenerOrReset() {
+        val b = FakeBackend()
+        val failures = mutableListOf<CrossfadeTransitionKey>()
+        val o = CrossfadeSecondaryPlayer({ b }, object : CrossfadeSecondaryListener {
+            override fun onSecondaryReady(key: CrossfadeTransitionKey, preparedDurationMs: Long) = Unit
+            override fun onSecondaryFailed(key: CrossfadeTransitionKey) { failures += key }
+        })
+        o.prepare(keyA, song(1))
+        b.ready(b.prepared.single())
+        assertTrue(o.start(keyA, 0f))
+        b.setGainThrows = true
+        assertFalse(o.setGain(keyA, 0.5f))
+        assertTrue(failures.isEmpty())
+        assertEquals(0, b.resets)
+        assertEquals(keyA, o.currentKey)
+        b.setGainThrows = false
+        assertTrue(o.setGain(keyA, 0.5f))
+    }
+
+    @Test fun duplicateSongIdAtAnotherOccurrenceCannotMutate() {
+        val same = song(5)
+        val k1 = CrossfadeTransitionKey(3L, 0, 2)
+        val k2 = CrossfadeTransitionKey(3L, 1, 2)
+        owner.prepare(k1, same)
+        backend.ready(attemptOf(0))
+        assertTrue(owner.start(k1, 0f))
+        assertFalse(owner.setGain(k2, 0.5f))
+        assertTrue(backend.gains.isEmpty())
+        assertTrue(owner.setGain(k1, 0.5f))
     }
 }
