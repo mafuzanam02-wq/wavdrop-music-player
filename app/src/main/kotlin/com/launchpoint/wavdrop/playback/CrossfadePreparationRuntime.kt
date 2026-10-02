@@ -115,17 +115,32 @@ internal sealed interface FadeWindowObservation {
     data class Cancelled(val reason: CrossfadeCancelReason) : FadeWindowObservation
 }
 
+/** Result of [CrossfadePreparationRuntime.executeFadeTick]. */
+internal sealed interface FadeTickExecutionResult {
+    /** Closed, not Fading, a different key, or superseded re-entrantly during the tick: nothing (more) was done. */
+    data object Inactive : FadeTickExecutionResult
+
+    /** A gain pair was applied and the fade continues. */
+    data object Applied : FadeTickExecutionResult
+
+    /** The terminal gain pair (primary 0, secondary 1) was applied; the runtime now rests in HandoffPending. */
+    data object HandoffPending : FadeTickExecutionResult
+
+    /** The tick failed closed: primary restore and secondary abandon were run; the runtime is Idle. */
+    data class Cancelled(val reason: CrossfadeCancelReason) : FadeTickExecutionResult
+}
+
 /**
  * CF-2B3: silent preparation orchestration. Wires snapshot -> CF-1 plan -> occurrence binding -> CF-2A
  * coordinator -> CF-2B2 secondary preparation, and stops at Ready. Evaluation/observation never play the
  * secondary, change any gain, or touch the primary player/MediaSession/EQ.
  *
- * CF-2C5: [executeBeginFade] is the ONLY audible entry point. It reduces a validated BeginFade and executes
+ * CF-2C5/2C7B: [executeBeginFade] and [executeFadeTick] are the ONLY audible entry points. It reduces a validated BeginFade and executes
  * exactly its StartSecondary (via [CrossfadeSecondaryPlayer.start]). The accompanying ApplyGains is
  * ApplyGains's outgoing gain is applied (CF-2C6) through an occurrence-owned [CrossfadePrimaryGainController]
  * over a narrow [PrimaryGainBackend] (this class holds no Player/MediaSession), only AFTER the secondary has
  * started; RestorePrimaryGain commands and [close] restore the primary to 1f. [applyReduction] still refuses
- * every other audible command (notably generic ApplyGains: continuous fades are a later slice). The historical class name is kept deliberately (a rename would obscure this change).
+ * every other audible command (generic ApplyGains and RequestHandoff stay refused; only the two dedicated paths execute their exact validated shapes). The historical class name is kept deliberately (a rename would obscure this change).
  *
  * Main-thread confined: every entry point (evaluation, secondary callbacks, close) must run on the
  * authoritative playback/main looper, where [snapshotProvider] may be called. This runtime owns the
@@ -302,6 +317,68 @@ internal class CrossfadePreparationRuntime(
             return false
         }
         return true
+    }
+
+    /**
+     * CF-2C7B: executes one caller-supplied [CrossfadeEvent.FadeTick] for [key]. Eligible only while the runtime
+     * is open and Fading for that exact key; anything else is [FadeTickExecutionResult.Inactive] with no mutation
+     * and no gain write. Live ownership is revalidated against a fresh snapshot BEFORE the coordinator reduces
+     * the tick (loss cancels with its reason and applies no gain). The coordinator owns all fade mathematics:
+     * its [CrossfadeCommand.ApplyGains] pair is applied verbatim, secondary incoming FIRST, then primary
+     * outgoing. The reduced state is made visible before either backend runs, and after each external effect a
+     * state changed re-entrantly is never overwritten (the old tick simply stops). A failed gain write cancels
+     * fail-closed (restore primary, abandon secondary). The terminal tick leaves [CrossfadeState.HandoffPending]
+     * with final gains applied; its RequestHandoff is recognised here but NOT executed (the handoff is a later
+     * slice). There is no timer: the caller supplies monotonic time.
+     */
+    fun executeFadeTick(key: CrossfadeTransitionKey, nowElapsedRealtimeMs: Long): FadeTickExecutionResult {
+        if (closed) return FadeTickExecutionResult.Inactive
+        val fading = state as? CrossfadeState.Fading ?: return FadeTickExecutionResult.Inactive
+        if (fading.key != key) return FadeTickExecutionResult.Inactive
+
+        val snapshot = snapshotProvider()
+        crossfadeOwnershipLossReason(snapshot, key)?.let {
+            cancel(it, snapshot)
+            return FadeTickExecutionResult.Cancelled(it)
+        }
+
+        val reduction = reduceCrossfade(fading, CrossfadeEvent.FadeTick(key, nowElapsedRealtimeMs))
+        val clockReason = reduction.cancelReason
+        if (clockReason != null) {
+            // Coordinator-owned cleanup (RestorePrimaryGain, AbandonSecondary); no gain is applied.
+            applyReduction(reduction, snapshot)
+            return FadeTickExecutionResult.Cancelled(clockReason)
+        }
+        val target = reduction.state
+        val gain = reduction.commands.getOrNull(0) as? CrossfadeCommand.ApplyGains
+        val terminal = target is CrossfadeState.HandoffPending
+        val shapeOk = gain != null && gain.key == key && when (target) {
+            is CrossfadeState.Fading -> target == fading && reduction.commands.size == 1
+            is CrossfadeState.HandoffPending ->
+                target.key == key && reduction.commands.size == 2 &&
+                    (reduction.commands[1] as? CrossfadeCommand.RequestHandoff)?.key == key
+            else -> false
+        }
+        if (!shapeOk || gain == null) {
+            Log.w(TAG, "unexpected FadeTick reduction; failing closed: ${reduction.commands}")
+            cancel(CrossfadeCancelReason.PlanInvalidated, snapshot)
+            return FadeTickExecutionResult.Cancelled(CrossfadeCancelReason.PlanInvalidated)
+        }
+
+        state = target // state first: reentrant work must observe the new (possibly terminal) state
+        if (!secondary.setGain(key, gain.gains.incoming)) {
+            if (state != target) return FadeTickExecutionResult.Inactive
+            cancel(CrossfadeCancelReason.SecondaryError, snapshotProvider())
+            return FadeTickExecutionResult.Cancelled(CrossfadeCancelReason.SecondaryError)
+        }
+        if (state != target) return FadeTickExecutionResult.Inactive // changed re-entrantly: never apply the old pair
+        if (!primaryGain.apply(key, gain.gains.outgoing)) {
+            if (state != target) return FadeTickExecutionResult.Inactive
+            cancel(CrossfadeCancelReason.PrimaryGainError, snapshotProvider())
+            return FadeTickExecutionResult.Cancelled(CrossfadeCancelReason.PrimaryGainError)
+        }
+        if (state != target) return FadeTickExecutionResult.Inactive
+        return if (terminal) FadeTickExecutionResult.HandoffPending else FadeTickExecutionResult.Applied
     }
 
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */

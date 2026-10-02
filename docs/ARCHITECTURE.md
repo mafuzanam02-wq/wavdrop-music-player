@@ -258,6 +258,7 @@ toPlaybackIndex)` - never `song.id`. Anything uncertain fails closed.
 | CF-2C5 | `CrossfadePreparationRuntime.executeBeginFade(due, now)` | runs the CF-2C4 bridge, reduces `BeginFade` (state -> `Fading` first), then executes exactly `StartSecondary` via `CrossfadeSecondaryPlayer.start`; start failure / re-entrant error fails closed; initial `ApplyGains` is consumed by CF-2C6 |
 | CF-2C6 | `CrossfadePrimaryGainController` over `PrimaryGainBackend`; `PrimaryGainError` cancel reason | transition-key-owned primary gain: after the secondary started, `executeBeginFade` applies the coordinator's `gains.outgoing`; `RestorePrimaryGain` and `close()` restore `1f`. Ownership is claimed before the write and kept on failed apply/restore; other keys cannot change or restore it. Production backend is the local primary `ExoPlayer.volume` in `PlaybackService`; `onDestroy` closes the runtime (restoring gain) before releasing the primary player. Generic `ApplyGains` still refused |
 | CF-2C7A | `SecondaryPlayerBackend.setGain`, `CrossfadeSecondaryPlayer.setGain(key, gain)` | occurrence-owned secondary dynamic gain primitive: succeeds only for the exact active key in the Started phase with a valid gain (shared `isValidCrossfadeGain`); repeated updates allowed. A backend false/exception returns false without changing ownership, phase or notifying the listener. Not called by the runtime; generic `ApplyGains` and `FadeTick` execution are still absent, no ticker exists |
+| CF-2C7B | `CrossfadePreparationRuntime.executeFadeTick(key, nowElapsedRealtimeMs)`, `FadeTickExecutionResult` | dedicated execution of one caller-supplied coordinator `FadeTick`: only while Fading for the exact key; live ownership is revalidated first (loss cancels, no gain applied); the reduced state is visible before any backend runs; the coordinator `ApplyGains` pair is applied verbatim, secondary incoming first then primary outgoing; a failed write cancels with `SecondaryError`/`PrimaryGainError` (restore primary, abandon secondary), clock regression cancels with `ClockRegression`; a state changed re-entrantly is never overwritten. The terminal tick applies the final pair and rests in `HandoffPending` (`RequestHandoff` recognised, not executed). Results: Inactive / Applied / HandoffPending / Cancelled(reason). Generic `applyReduction` still refuses `ApplyGains` and `RequestHandoff`; no timing driver and no production caller |
 
 Design rules already in force:
 
@@ -269,9 +270,9 @@ Design rules already in force:
 - The runtime is only constructed inside `if (CROSSFADE_SECONDARY_RUNTIME_ENABLED)` and closed in
   `onDestroy`.
 
-The secondary can start and the primary gain can be lowered/restored inside the internal runtime (CF-2C5/2C6) but the
-gate stays `false`. Not implemented (see the backlog for the itemised list): continuous fade/gain execution (the secondary dynamic-gain primitive exists since CF-2C7A but is unused; a
-FadeTick runtime), a fade timing driver, occurrence handoff/promotion,
+The secondary can start, the primary gain can be lowered/restored, and explicit FadeTicks can be executed inside the internal runtime (CF-2C5/2C6/2C7B) but the
+gate stays `false`. Not implemented (see the backlog for the itemised list): the active-fade evaluation policy,
+a fade timing driver (no ticker; nothing calls `executeFadeTick`), occurrence handoff/promotion,
 failure recovery during overlap, interaction with seek/pause/skip/queue mutation while fading,
 dual-player EQ validation, a Settings/persisted preference, production enablement, and physical device
 validation.
