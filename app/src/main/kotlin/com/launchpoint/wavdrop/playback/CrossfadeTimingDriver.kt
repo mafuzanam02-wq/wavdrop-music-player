@@ -56,7 +56,8 @@ internal class MainLooperCrossfadeTimingScheduler(
  * Exactly one callback is ever pending: a pulse finishes, then schedules at most one next pulse through the
  * scheduler (never recursively). A terminal FadeTick (or a pulse that starts in HandoffPending) runs the runtime handoff in
  * the same pulse; success resumes pre-fade polling, a genuine failure halts the run (restartable). The
- * driver does not own, close or reset the runtime. Main-thread confined; no production code constructs it yet.
+ * driver does not own, close or reset the runtime. Main-thread confined. PlaybackService may construct it behind the hard
+ * gate (CF-2E1, gate false in shipping) and starts/stops it from the persisted duration (CF-2E2).
  */
 internal class CrossfadeTimingDriver(
     private val runtime: CrossfadePreparationRuntime,

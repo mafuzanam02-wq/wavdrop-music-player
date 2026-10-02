@@ -76,6 +76,9 @@ class PlaybackService : MediaLibraryService() {
     // exact runtime but is never started (dormant).
     private var crossfadePreparation: CrossfadePreparationRuntime? = null
     private var crossfadeTimingDriver: CrossfadeTimingDriver? = null
+    // CF-2E2: main-thread cached, already-normalized persisted duration read synchronously by the driver provider.
+    private var crossfadeConfiguredDurationMs: Long = CrossfadeRules.OFF_MS
+    private var lastObservedCrossfadeDurationMs: Long? = null
     private var previousRestartThresholdMs: Long =
         PreviousButtonBehavior.DEFAULT.previousRestartThresholdMs()
 
@@ -127,8 +130,8 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         if (CROSSFADE_SECONDARY_RUNTIME_ENABLED) {
-            // CF-2E1: dormant composition only. The timing driver is constructed but deliberately NEVER started
-            // here; its configured duration is 0 ms (Crossfade OFF) until a persisted setting exists.
+            // CF-2E1/2E2: composition only. The graph does not start the driver; the persisted-duration observer below
+            // (CF-2E2 activation policy) starts/stops it. Shipping stays inert because this whole block is gated off.
             val graph = createCrossfadeProductionGraph(
                 snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot() },
                 backendFactory = { ExoSecondaryPlayerBackend(this, audioAttributes) },
@@ -145,12 +148,27 @@ class PlaybackService : MediaLibraryService() {
                 reconcilePrimary = { key, snapshot -> playerController.reconcileCrossfadePrimary(key, snapshot) },
                 scheduler = MainLooperCrossfadeTimingScheduler(),
                 clock = ElapsedRealtimeCrossfadeClock,
+                configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
                 primaryDurationMs = { player.duration },
                 primaryPositionMs = { player.currentPosition },
             )
             crossfadePreparation = graph.runtime
             crossfadeTimingDriver = graph.timingDriver
-            // Intentionally no crossfadeTimingDriver.start() (activation/start policy is a later slice).
+            // Intentionally no start() here: only the activation policy (initial-enabled / OFF->enabled) starts it.
+        }
+        // CF-2E2: persisted duration -> cached value + explicit driver lifecycle policy. A persisted value is NOT
+        // rollout permission: with the hard gate false there is no graph, so this only updates the cache.
+        serviceScope.launch {
+            appSettingsRepository.crossfadeDurationMs
+                .distinctUntilChanged()
+                .collect { duration ->
+                    val previous = lastObservedCrossfadeDurationMs
+                    crossfadeConfiguredDurationMs = duration
+                    if (CROSSFADE_SECONDARY_RUNTIME_ENABLED) {
+                        applyCrossfadeConfiguredDurationChange(previous, duration, crossfadePreparation, crossfadeTimingDriver)
+                    }
+                    lastObservedCrossfadeDurationMs = duration
+                }
         }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,

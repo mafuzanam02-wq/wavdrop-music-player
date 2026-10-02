@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2E1 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2E2 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2E1
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2E2
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2E1 (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2E2 (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -243,8 +243,12 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     retry loop). Driver not constructed in production at the time (CF-2E1 later adds gated, dormant construction), gate `false`.
   - **CF-2E1** dormant production construction/lifecycle wiring (production composition foundation, not enablement):
     `PlaybackService` can own the runtime, the `PlayerController` reconciler adapter and the timing driver behind the
-    gate; the driver is never started, the configured duration is a dormant 0 ms (OFF), teardown closes driver then
-    runtime then primary. Gate `false`; no setting, UI, EQ forwarding or audio-focus change.
+    gate; at the CF-2E1 boundary the driver was never started and the configured duration was a dormant 0 ms / OFF provider (CF-2E2 subsequently replaced it with the persisted normalized provider and added the start/stop policy), teardown closes driver then
+    runtime then primary. Gate `false`; at the CF-2E1 boundary there was no persisted setting. There is still no user-facing UI, EQ forwarding or audio-focus change.
+  - **CF-2E2** persisted configuration + explicit driver start/stop policy (internal infrastructure, not enablement):
+    normalized millisecond `crossfade_duration_ms` (default OFF) cached by `PlaybackService`; driver starts on initial
+    enabled / OFF->enabled only, enabled->enabled updates the cache, enabled->OFF cancels the runtime with
+    `ConfigurationDisabled` before stopping the driver. Hard gate `false`; no UI; not in backups yet.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -475,7 +479,7 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2E1 are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2E2 are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
@@ -484,19 +488,20 @@ items are validated.
    b. CF-2C7B - runtime `FadeTick` execution with paired primary/secondary gains (fresh ownership revalidation, failure
       ordering, terminal tick, transition to `HandoffPending`) - complete (handoff is executed by CF-2D3/CF-2D4).
    c. CF-2C7C - active-fade `evaluatePreparation` policy - complete.
-   d. CF-2C7D - main-thread monotonic timing-driver foundation - complete (internal continuous-fade foundation is complete; production integration is NOT, the driver is deliberately unwired).
+   d. CF-2C7D - main-thread monotonic timing-driver foundation - complete (internal continuous-fade foundation is complete; production integration was NOT: at the CF-2C7D boundary the driver was deliberately unwired; CF-2E1 later added dormant gated production composition and CF-2E2 added configuration and start/stop policy; the hard gate is still false).
 2. Occurrence-safe handoff / promotion / reconciliation of primary and secondary:
    a. CF-2D1 - secondary handoff snapshot primitive - complete.
    b. CF-2D2 - primary occurrence-reconciliation primitive - complete.
    c. CF-2D3 - runtime handoff execution / coordinator success-failure closure - complete (called by the internal driver since CF-2D4; production handoff is NOT complete).
    d. CF-2D4 - timing-driver handoff execution + continuation after successful handoff - complete.
    CF-2E1 - dormant production construction/lifecycle wiring - complete (gate false, driver not started).
-   Next boundary: persisted crossfade configuration + explicit driver start/stop policy (a setting must not be read as enablement; the hard gate remains the rollout boundary). Separate later items: manual transport interaction during audible overlap, queue/shuffle/repeat mutation while fading, dual-player EQ/audio-session validation, production enablement, physical Bluetooth/background validation.
+   CF-2E2 - persisted crossfade configuration + explicit driver start/stop policy - complete (internal; a setting is not enablement, the hard gate remains the rollout boundary; no UI, not in backups).
+   Next boundaries are separate and not auto-selected: failure/cancel recovery during overlap, manual transport interaction, queue/shuffle/repeat mutation while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, physical Bluetooth/background validation.
 3. Failure / cancel recovery during audible overlap.
 4. Manual seek / pause / next / previous interaction while preparing or fading.
 5. Queue / shuffle / repeat mutation behaviour while fading.
 6. Dual-player Equalizer / audio-session validation.
-7. Settings + persisted crossfade preference.
+7. User-facing Settings UI / product exposure of the crossfade preference (the persisted internal preference exists since CF-2E2).
 8. Production enablement (flipping the gate, with rollout safeguards).
 9. Physical Bluetooth / background / EQ validation.
 

@@ -61,6 +61,7 @@ class CrossfadeProductionGraphTest {
         reconcilePrimary = { _, _ -> reconcileCalls++; CrossfadePrimaryReconciliationResult.Succeeded },
         scheduler = scheduler,
         clock = { clockReads++; 1L },
+        configuredDurationMsProvider = { 0L },
         primaryDurationMs = { durationReads++; rawDuration },
         primaryPositionMs = { rawPosition },
     )
@@ -73,11 +74,6 @@ class CrossfadeProductionGraphTest {
         assertNull(usableCrossfadePrimaryDuration(0L))
         assertNull(usableCrossfadePrimaryDuration(-1L))
         assertNull(usableCrossfadePrimaryDuration(C.TIME_UNSET))
-    }
-
-    @Test fun configuredDurationIsDormantOff() {
-        assertEquals(0L, DORMANT_CROSSFADE_CONFIGURED_DURATION_MS)
-        assertFalse(CrossfadeRules.isEnabled(DORMANT_CROSSFADE_CONFIGURED_DURATION_MS))
     }
 
     @Test fun reconcilerAdapterDelegatesOnceAndReturnsTheExactResult() {

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
+import com.launchpoint.wavdrop.playback.CrossfadeRules
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -490,6 +491,25 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    /**
+     * CF-2E2: persisted crossfade duration in milliseconds (one canonical unit). Always normalized through the CF-1
+     * rules on read (missing/negative/0 -> OFF, positive clamped to the enabled range), so no invalid value escapes.
+     * Internal configuration only: no user-facing exposure yet, and it never enables the rollout-gated runtime.
+     */
+    val crossfadeDurationMs: Flow<Long> = dataStore.data
+        .catch { error ->
+            if (error is IOException) emit(emptyPreferences()) else throw error
+        }
+        .map { preferences ->
+            CrossfadeRules.normalizeDurationMs(preferences[CROSSFADE_DURATION_MS_KEY] ?: CrossfadeRules.OFF_MS)
+        }
+
+    suspend fun setCrossfadeDurationMs(durationMs: Long) {
+        dataStore.edit { preferences ->
+            preferences[CROSSFADE_DURATION_MS_KEY] = CrossfadeRules.normalizeDurationMs(durationMs)
+        }
+    }
+
     private fun String.toAutoBackupInterval(): AutoBackupInterval? =
         runCatching { AutoBackupInterval.valueOf(this) }.getOrNull()
 
@@ -551,5 +571,6 @@ class AppSettingsRepository @Inject constructor(
         val WRAPPED_BACKGROUND_INTENSITY_KEY         = stringPreferencesKey("wrapped_background_intensity")
         val WRAPPED_FALLBACK_THEME_KEY               = stringPreferencesKey("wrapped_fallback_theme")
         val WRAPPED_VISUAL_STYLE_KEY                 = stringPreferencesKey("wrapped_visual_style")
+        val CROSSFADE_DURATION_MS_KEY               = longPreferencesKey("crossfade_duration_ms")
     }
 }

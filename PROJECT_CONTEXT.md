@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2E1. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2E2. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2E1 (below).
+- Crossfade engineering foundations CF-1 to CF-2E2 (below).
 
 ## Crossfade - current state
 
@@ -71,9 +71,10 @@ Completed, internal-only foundations:
 | CF-2D2 | exact-generation / exact-occurrence primary reconciliation primitive (`PlayerController.reconcileCrossfadePrimary`) |
 | CF-2D3 | exact-key runtime handoff execution (`CrossfadePreparationRuntime.executeHandoff`, internal; called only by the internal timing driver since CF-2D4) |
 | CF-2D4 | timing-driver handoff execution + lifecycle continuation (`CrossfadeTimingDriver`; unwired at the CF-2D4 boundary, composed dormantly by CF-2E1) |
-| CF-2E1 | dormant production composition: runtime + reconciler adapter + timing driver constructed behind the hard gate, driver never started |
+| CF-2E1 | dormant production composition: runtime + reconciler adapter + timing driver constructed behind the hard gate, driver never started at that boundary (CF-2E2 later adds the explicit start policy) |
+| CF-2E2 | persisted normalized crossfade duration + explicit driver start/stop policy (internal; gate still false, no UI) |
 
-**Live runtime integration is NOT implemented.** Specifically:
+**Live/audible production rollout is NOT enabled.** Specifically:
 
 - `PlaybackService.CROSSFADE_SECONDARY_RUNTIME_ENABLED` is `false`; the runtime is never constructed in
   production.
@@ -83,14 +84,14 @@ Completed, internal-only foundations:
   started), and cancellation/failure/close restore the primary to `1f`. Primary gain is owned per
   transition key through a narrow `PrimaryGainBackend` seam; the runtime holds no Player/ExoPlayer/MediaSession.
 - CF-2C7A added the secondary dynamic-gain primitive (exact-key `setGain` on a started secondary). CF-2C7B added `CrossfadePreparationRuntime.executeFadeTick(key, now)`: for an explicitly supplied tick it revalidates live ownership, reduces the coordinator `FadeTick`, and applies the coordinator gain pair (secondary incoming first, then primary outgoing); a failed write or clock regression cancels (restore primary, abandon secondary). The terminal tick applies the final pair and leaves `HandoffPending`; `RequestHandoff` is recognised but NOT executed. At the CF-2C7B boundary nothing called `executeFadeTick` in production (no ticker/timing driver existed yet; CF-2C7D/CF-2D4 later add the driver), generic `ApplyGains` and `RequestHandoff` stay refused, and handoff was not implemented yet.
-- Internal exact-key handoff/promotion is implemented through CF-2D3/CF-2D4, but production execution remains dormant because the hard gate is false and the timing driver is never started.
-- There is no Settings / persisted crossfade preference.
+- Internal exact-key handoff/promotion is implemented through CF-2D3/CF-2D4, but production execution remains dormant because the hard gate is false and the timing driver is only ever started by the CF-2E2 persisted-duration policy when a gated graph exists, which never happens in shipping.
+- A persisted, normalized crossfade duration exists internally (CF-2E2, default 0 ms / OFF) but there is no user-facing Settings preference or UI.
 - No physical crossfade validation has occurred. Crossfade is not shipped and must not appear in
   user-facing copy.
 
 CF-2C7C: while `Fading`/`HandoffPending`, `evaluatePreparation` bypasses CF-1 re-planning; it revalidates live occurrence ownership (loss cancels and returns, no same-call re-arm), cancels on explicit crossfade OFF, and otherwise retains the exact state (enabled-duration and current-duration changes apply to the next transition). Armed/Ready planning is unchanged. At the CF-2C7C boundary no ticker existed; CF-2C7D subsequently added the internal timing driver.
 
-CF-2C7D: `CrossfadeTimingDriver` (scheduling only) drives the runtime through injected `CrossfadeTimingScheduler` and `CrossfadeMonotonicClock` seams: a 250 ms pre-fade cadence evaluates preparation and observes the primary position (Due begins the fade with the monotonic now), a 50 ms fade cadence runs active evaluation then `executeFadeTick`, at most one callback is pending, stale callbacks are generation-guarded, (as of CF-2D4 the terminal tick runs the runtime handoff in the same pulse instead of stopping). At the CF-2C7D boundary nothing constructed it (CF-2E1 later composes it dormantly; `PlaybackService` still never starts it); no persisted duration setting exists, handoff was not yet implemented (added by CF-2D1..CF-2D4), and the gate stays `false`.
+CF-2C7D: `CrossfadeTimingDriver` (scheduling only) drives the runtime through injected `CrossfadeTimingScheduler` and `CrossfadeMonotonicClock` seams: a 250 ms pre-fade cadence evaluates preparation and observes the primary position (Due begins the fade with the monotonic now), a 50 ms fade cadence runs active evaluation then `executeFadeTick`, at most one callback is pending, stale callbacks are generation-guarded, (as of CF-2D4 the terminal tick runs the runtime handoff in the same pulse instead of stopping). At the CF-2C7D boundary nothing constructed it (CF-2E1 later composes it dormantly; `PlaybackService` still never starts it); no persisted duration setting existed yet (CF-2E2 later added one), handoff was not yet implemented (added by CF-2D1..CF-2D4), and the gate stays `false`.
 
 CF-2D1: an exact-key, Started-only `CrossfadeSecondaryPlayer.handoffSnapshot(key)` reports the secondary's validated physical position and duration (`SecondaryHandoffSnapshot`). It is observational (no volume, playback, seek or ownership change); a null result or backend exception keeps ownership. At the CF-2D1 boundary the runtime did not execute handoff, the primary was not moved, and the timing driver still stopped at `HandoffPending`; CF-2D2..CF-2D4 subsequently added reconciliation and handoff execution, while the gate remains `false`.
 
@@ -100,9 +101,11 @@ CF-2D3: `CrossfadePreparationRuntime.executeHandoff(key)` can now explicitly exe
 
 CF-2D4: `CrossfadeTimingDriver` now executes the runtime handoff in the same pulse as the terminal `FadeTick` (and first thing in a pulse that starts in `HandoffPending`, before any provider read). `Succeeded` resumes the 250 ms pre-fade polling for the new authoritative occurrence; ownership-loss `Cancelled` and re-entrant `Inactive` follow the resulting runtime state's ordinary cadence; a genuine `Failed` halts the automatic run (no retry, no re-arm loop) and leaves the driver restartable. At most one handoff attempt per pulse; the driver does no handoff mechanics itself. At the CF-2D4 boundary the driver was not yet constructed in production and the production reconciler adapter was not yet wired; CF-2E1 adds that dormant composition while the gate remains false.
 
-CF-2E1 (production composition foundation, NOT enablement): `PlaybackService` can own the runtime, the `PlayerController.reconcileCrossfadePrimary` adapter (`CrossfadePrimaryReconciler`) and the `CrossfadeTimingDriver` (main-looper scheduler, elapsed-realtime clock, primary physical duration/position providers) via `createCrossfadeProductionGraph`. Three safety barriers remain: (1) `CROSSFADE_SECONDARY_RUNTIME_ENABLED` is `false`; (2) the graph is constructed only behind that gate; (3) the driver is never started even inside the gated path. The configured-duration provider is a dormant 0 ms (Crossfade OFF under the CF-1 rules), explicitly not a default or recommended duration, until a persisted setting exists. Teardown closes the driver, then the runtime, then releases the primary. The reconciler is therefore connected but unreachable during normal execution.
+CF-2E1 (production composition foundation, NOT enablement): `PlaybackService` can own the runtime, the `PlayerController.reconcileCrossfadePrimary` adapter (`CrossfadePrimaryReconciler`) and the `CrossfadeTimingDriver` (main-looper scheduler, elapsed-realtime clock, primary physical duration/position providers) via `createCrossfadeProductionGraph`. Three safety barriers remain: (1) `CROSSFADE_SECONDARY_RUNTIME_ENABLED` is `false`; (2) the graph is constructed only behind that gate; (3) at the CF-2E1 boundary the driver was never started even inside the gated path (CF-2E2 later added the explicit start policy). At the CF-2E1 boundary the configured-duration provider was a dormant 0 ms (Crossfade OFF under the CF-1 rules), explicitly not a default or recommended duration; CF-2E2 replaced it with the persisted duration. Teardown closes the driver, then the runtime, then releases the primary. The reconciler is therefore connected but unreachable during normal execution.
 
-The next boundary is persisted crossfade configuration plus an explicit driver start/stop policy (gate still `false`), then manual-transport and queue-mutation behaviour during overlap, dual-player EQ/audio-session validation, production enablement and physical Bluetooth/background validation.
+CF-2E2 (configuration + lifecycle policy, NOT rollout): `AppSettingsRepository.crossfadeDurationMs` persists one canonical unit (milliseconds, key `crossfade_duration_ms`), default 0 ms / OFF, normalized through `CrossfadeRules.normalizeDurationMs` on both read and write. `PlaybackService` caches the value (main thread) and the driver reads that synchronous cached provider. The explicit activation policy starts the driver only for an initial enabled value or an OFF -> enabled transition; enabled -> enabled changes only update the cache (a live fade keeps its plan; a halted driver is not restarted); enabled -> OFF cancels the runtime with `ConfigurationDisabled` (restore primary, abandon secondary, Idle) BEFORE stopping the driver. A persisted value is not rollout permission: the hard gate stays `false`, so no graph, driver or audible crossfade exists in shipping. No UI, no physical validation, and the preference is deliberately not part of backups yet.
+
+The next boundaries are separate: user-facing Settings UI, manual transport and queue-mutation behaviour during overlap, dual-player EQ\/audio-session validation, production enablement and physical Bluetooth\/background validation.
 
 ## In progress
 
