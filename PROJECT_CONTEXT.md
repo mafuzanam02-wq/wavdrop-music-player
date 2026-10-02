@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2D3. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2D4. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2D3 (below).
+- Crossfade engineering foundations CF-1 to CF-2D4 (below).
 
 ## Crossfade - current state
 
@@ -69,7 +69,8 @@ Completed, internal-only foundations:
 | CF-2C7D | main-thread monotonic timing-driver foundation (`CrossfadeTimingDriver`, unwired) |
 | CF-2D1 | occurrence-owned secondary handoff snapshot primitive (`CrossfadeSecondaryPlayer.handoffSnapshot`) |
 | CF-2D2 | exact-generation / exact-occurrence primary reconciliation primitive (`PlayerController.reconcileCrossfadePrimary`) |
-| CF-2D3 | exact-key runtime handoff execution (`CrossfadePreparationRuntime.executeHandoff`, internal, uncalled) |
+| CF-2D3 | exact-key runtime handoff execution (`CrossfadePreparationRuntime.executeHandoff`, internal; called only by the internal timing driver since CF-2D4) |
+| CF-2D4 | timing-driver handoff execution + lifecycle continuation (`CrossfadeTimingDriver`, still unwired) |
 
 **Live runtime integration is NOT implemented.** Specifically:
 
@@ -88,15 +89,17 @@ Completed, internal-only foundations:
 
 CF-2C7C: while `Fading`/`HandoffPending`, `evaluatePreparation` bypasses CF-1 re-planning; it revalidates live occurrence ownership (loss cancels and returns, no same-call re-arm), cancels on explicit crossfade OFF, and otherwise retains the exact state (enabled-duration and current-duration changes apply to the next transition). Armed/Ready planning is unchanged. No ticker exists.
 
-CF-2C7D: `CrossfadeTimingDriver` (scheduling only) drives the runtime through injected `CrossfadeTimingScheduler` and `CrossfadeMonotonicClock` seams: a 250 ms pre-fade cadence evaluates preparation and observes the primary position (Due begins the fade with the monotonic now), a 50 ms fade cadence runs active evaluation then `executeFadeTick`, at most one callback is pending, stale callbacks are generation-guarded, and `HandoffPending` stops the driver. Nothing constructs it: `PlaybackService` does not start it, no persisted duration setting exists, handoff is unimplemented, and the gate stays `false`.
+CF-2C7D: `CrossfadeTimingDriver` (scheduling only) drives the runtime through injected `CrossfadeTimingScheduler` and `CrossfadeMonotonicClock` seams: a 250 ms pre-fade cadence evaluates preparation and observes the primary position (Due begins the fade with the monotonic now), a 50 ms fade cadence runs active evaluation then `executeFadeTick`, at most one callback is pending, stale callbacks are generation-guarded, (as of CF-2D4 the terminal tick runs the runtime handoff in the same pulse instead of stopping). Nothing constructs it: `PlaybackService` does not start it, no persisted duration setting exists, handoff is unimplemented, and the gate stays `false`.
 
 CF-2D1: an exact-key, Started-only `CrossfadeSecondaryPlayer.handoffSnapshot(key)` reports the secondary's validated physical position and duration (`SecondaryHandoffSnapshot`). It is observational (no volume, playback, seek or ownership change); a null result or backend exception keeps ownership. The runtime does not execute handoff, the primary is not moved, the timing driver still stops at `HandoffPending`, and the gate stays `false`.
 
 CF-2D2: `PlayerController.reconcileCrossfadePrimary(key, snapshot)` seeks the authoritative primary to `key.toPlaybackIndex` at the secondary's physical position (then installs that exact occurrence, position and duration locally without depending on immediate MediaController propagation) only when the controller is connected, the queue generation matches, the physical queue is clean, the snapshot is valid, and both the logical and physical source index equal `fromPlaybackIndex` and the automatic next still resolves to `toPlaybackIndex`; otherwise it rejects with no seek, no queue rebuild, no song-id fallback and no deferred request. Queue generation is not bumped, playback intent and primary gain are untouched, and the secondary keeps running. Nothing calls it yet: the runtime does not execute handoff, the timing driver still stops at `HandoffPending`, and the gate stays `false`.
 
-CF-2D3: `CrossfadePreparationRuntime.executeHandoff(key)` can now explicitly execute an exact `HandoffPending(key)` inside the internal runtime: it revalidates live ownership (loss cancels with its exact reason), reads the secondary physical snapshot, hands it unchanged to an injected `CrossfadePrimaryReconciler` (production adapter: `PlayerController.reconcileCrossfadePrimary`, not wired), then restores primary gain to 1f, abandons the secondary and closes through the coordinator `HandoffSucceeded` (Idle). Snapshot/reconciliation/restore/abandon failures close through `HandoffFailed` (restore + abandon, Idle); a primary seek is never rolled back, and primary restore ownership is retained if restoration stays uncertain. Generic `RequestHandoff` remains refused. Nothing calls `executeHandoff` (the timing driver still stops at `HandoffPending`, no automatic handoff), `PlaybackService` is unwired and the gate stays `false`. Media3 callbacks remain the stats-transition owner; the runtime has no stats or persistence.
+CF-2D3: `CrossfadePreparationRuntime.executeHandoff(key)` can now explicitly execute an exact `HandoffPending(key)` inside the internal runtime: it revalidates live ownership (loss cancels with its exact reason), reads the secondary physical snapshot, hands it unchanged to an injected `CrossfadePrimaryReconciler` (production adapter: `PlayerController.reconcileCrossfadePrimary`, not wired), then restores primary gain to 1f, abandons the secondary and closes through the coordinator `HandoffSucceeded` (Idle). Snapshot/reconciliation/restore/abandon failures close through `HandoffFailed` (restore + abandon, Idle); a primary seek is never rolled back, and primary restore ownership is retained if restoration stays uncertain. Generic `RequestHandoff` remains refused. As of CF-2D4 the internal timing driver calls `executeHandoff`; production code still does not construct it, `PlaybackService` is unwired and the gate stays `false`. Media3 callbacks remain the stats-transition owner; the runtime has no stats or persistence.
 
-The next engineering frontier is timing-driver handoff execution and continuation (2.d).
+CF-2D4: `CrossfadeTimingDriver` now executes the runtime handoff in the same pulse as the terminal `FadeTick` (and first thing in a pulse that starts in `HandoffPending`, before any provider read). `Succeeded` resumes the 250 ms pre-fade polling for the new authoritative occurrence; ownership-loss `Cancelled` and re-entrant `Inactive` follow the resulting runtime state's ordinary cadence; a genuine `Failed` halts the automatic run (no retry, no re-arm loop) and leaves the driver restartable. At most one handoff attempt per pulse; the driver does no handoff mechanics itself. The driver is still not constructed in production, the production reconciler adapter is not wired, and the gate stays `false`.
+
+The next engineering boundary is production construction/wiring of the runtime, the `PlayerController` reconciler adapter and the timing driver (gate still `false`).
 
 ## In progress
 

@@ -54,7 +54,8 @@ internal class MainLooperCrossfadeTimingScheduler(
  * tracks just started/stopped/closed plus a generation token so stale callbacks are no-ops.
  *
  * Exactly one callback is ever pending: a pulse finishes, then schedules at most one next pulse through the
- * scheduler (never recursively). Reaching HandoffPending stops scheduling (handoff is a later slice). The
+ * scheduler (never recursively). A terminal FadeTick (or a pulse that starts in HandoffPending) runs the runtime handoff in
+ * the same pulse; success resumes pre-fade polling, a genuine failure halts the run (restartable). The
  * driver does not own, close or reset the runtime. Main-thread confined; no production code constructs it yet.
  */
 internal class CrossfadeTimingDriver(
@@ -116,7 +117,8 @@ internal class CrossfadeTimingDriver(
     /** One pulse; returns the next delay, or null when scheduling should stop. */
     private fun runPulse(): Long? {
         val before = runtime.state
-        if (before is CrossfadeState.HandoffPending) return null // terminal for this driver
+        // Already-pending entry: hand off before any provider read or preparation (one attempt per pulse).
+        if (before is CrossfadeState.HandoffPending) return handOff(before.key)
         val configured = configuredDurationMsProvider()
         val current = currentDurationMsProvider()
         runtime.evaluatePreparation(configured, current) // audible states: ownership + explicit OFF only (CF-2C7C)
@@ -127,7 +129,9 @@ internal class CrossfadeTimingDriver(
                 // Only the same transition may be ticked; anything else means it ended or was replaced.
                 if (after is CrossfadeState.Fading && after.key == before.key) {
                     if (runtime.executeFadeTick(before.key, clock.nowMs()) == FadeTickExecutionResult.HandoffPending) {
-                        return null
+                        // Same pulse: do not wait a cadence turn while primary ~0 gain and secondary is full.
+                        val pending = runtime.state as? CrossfadeState.HandoffPending ?: return nextDelayFor(runtime.state)
+                        return handOff(pending.key)
                     }
                 }
             }
@@ -139,6 +143,28 @@ internal class CrossfadeTimingDriver(
             }
         }
         return nextDelayFor(runtime.state)
+    }
+
+    /**
+     * Executes the runtime handoff for the exact pending [key] (at most once per pulse) and decides the cadence.
+     * Succeeded resumes pre-fade polling (fresh observations next turn). A genuine Failed halts the automatic run
+     * (no retry, restartable); Cancelled / Inactive follow the resulting runtime state. The runtime owns all handoff
+     * mechanics; the driver only decides when.
+     */
+    private fun handOff(key: CrossfadeTransitionKey): Long? = when (runtime.executeHandoff(key)) {
+        CrossfadeHandoffExecutionResult.Succeeded -> PRE_FADE_POLL_INTERVAL_MS
+        is CrossfadeHandoffExecutionResult.Failed -> {
+            haltAfterHandoffFailure()
+            null
+        }
+        is CrossfadeHandoffExecutionResult.Cancelled,
+        CrossfadeHandoffExecutionResult.Inactive -> nextDelayFor(runtime.state)
+    }
+
+    /** Fail-closed stop after a genuine handoff failure: no callback remains and a later [start] begins afresh. */
+    private fun haltAfterHandoffFailure() {
+        started = false
+        invalidate()
     }
 
     private fun nextDelayFor(state: CrossfadeState): Long? = when (state) {

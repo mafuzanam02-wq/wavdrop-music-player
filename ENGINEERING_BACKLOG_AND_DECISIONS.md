@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2D3 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2D4 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2D3
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2D4
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2D3 (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2D4 (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -221,11 +221,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     gate remains `false`.
   - **CF-2C7D** main-thread monotonic timing-driver foundation (`CrossfadeTimingDriver` with scheduler and clock
     seams): 250 ms pre-fade cadence, 50 ms fade cadence, active evaluation before every FadeTick, one pending
-    callback, generation-guarded stale callbacks, stops at `HandoffPending`. Scheduling only; deliberately not
+    callback, generation-guarded stale callbacks, stopped at `HandoffPending` until CF-2D4. Scheduling only; deliberately not
     wired into `PlaybackService`, no persisted duration setting, no handoff. Gate remains `false`.
   - **CF-2D1** occurrence-owned secondary handoff snapshot (`CrossfadeSecondaryPlayer.handoffSnapshot(key)`,
     `SecondaryHandoffSnapshot`): exact key, Started only, validated physical position + duration, read-only, failure
-    retains ownership. No runtime handoff, no primary movement, driver still stops at `HandoffPending`. Gate
+    retains ownership. No runtime handoff, no primary movement, driver then stopped at `HandoffPending` (superseded by CF-2D4). Gate
     remains `false`.
   - **CF-2D2** exact-generation / exact-occurrence primary reconciliation primitive
     (`PlayerController.reconcileCrossfadePrimary`, pure `planCrossfadePrimaryReconciliation`): rejects dirty queue,
@@ -235,8 +235,12 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
   - **CF-2D3** exact-key runtime handoff execution (`CrossfadePreparationRuntime.executeHandoff`, injected
     `CrossfadePrimaryReconciler`): ownership revalidation, secondary snapshot, primary reconciliation, primary gain
     restored before secondary abandonment, coordinator `HandoffSucceeded`; failures close via `HandoffFailed`; no
-    rollback seek; generic `RequestHandoff` still refused; no caller (driver unchanged, `PlaybackService` unwired);
+    rollback seek; generic `RequestHandoff` still refused; caller added by CF-2D4 (internal driver only; `PlaybackService` unwired);
     Media3 callbacks remain the stats owner. Gate remains `false`.
+  - **CF-2D4** timing-driver handoff execution + continuation: the terminal `FadeTick` (or a pulse entering in
+    `HandoffPending`) runs `runtime.executeHandoff` in the same pulse; success resumes 250 ms pre-fade polling,
+    ownership-loss cancellation follows ordinary state cadence, a genuine failure halts the run (restartable, no
+    retry loop). Driver still not constructed in production, reconciler adapter not wired, gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -467,21 +471,22 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2D3 are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2D4 are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
 1. Continuous fade progression / timing integration:
    a. CF-2C7A - secondary dynamic-gain primitive - complete (unused by the runtime; generic `ApplyGains` still refused).
    b. CF-2C7B - runtime `FadeTick` execution with paired primary/secondary gains (fresh ownership revalidation, failure
-      ordering, terminal tick, transition to `HandoffPending`) - complete (no caller yet; handoff not executed).
+      ordering, terminal tick, transition to `HandoffPending`) - complete (handoff is executed by CF-2D3/CF-2D4).
    c. CF-2C7C - active-fade `evaluatePreparation` policy - complete.
    d. CF-2C7D - main-thread monotonic timing-driver foundation - complete (internal continuous-fade foundation is complete; production integration is NOT, the driver is deliberately unwired).
 2. Occurrence-safe handoff / promotion / reconciliation of primary and secondary:
    a. CF-2D1 - secondary handoff snapshot primitive - complete.
    b. CF-2D2 - primary occurrence-reconciliation primitive - complete.
-   c. CF-2D3 - runtime handoff execution / coordinator success-failure closure - complete (uncalled; production handoff is NOT complete).
-   d. CF-2D4 - timing-driver handoff execution + continuation after successful handoff - NEXT.
+   c. CF-2D3 - runtime handoff execution / coordinator success-failure closure - complete (called by the internal driver since CF-2D4; production handoff is NOT complete).
+   d. CF-2D4 - timing-driver handoff execution + continuation after successful handoff - complete.
+   Next boundary: production construction/wiring of the runtime, the `PlayerController` reconciler adapter and the timing driver (gate still `false`).
 3. Failure / cancel recovery during audible overlap.
 4. Manual seek / pause / next / previous interaction while preparing or fading.
 5. Queue / shuffle / repeat mutation behaviour while fading.

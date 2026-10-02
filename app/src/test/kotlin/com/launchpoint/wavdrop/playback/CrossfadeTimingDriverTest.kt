@@ -47,7 +47,8 @@ class CrossfadeTimingDriverTest {
             this.callbacks = callbacks
         }
         override fun start(initialGain: Float): Boolean = true
-        override fun handoffSnapshot(): SecondaryHandoffSnapshot? = null
+        var handoffSnap: SecondaryHandoffSnapshot? = SecondaryHandoffSnapshot(6_125L, 180_000L)
+        override fun handoffSnapshot(): SecondaryHandoffSnapshot? = handoffSnap
         override fun setGain(gain: Float): Boolean { gains += gain; return true }
         override fun reset() { resets++ }
         override fun release() {}
@@ -55,8 +56,20 @@ class CrossfadeTimingDriverTest {
     }
 
     private class FakePrimary : PrimaryGainBackend {
+        var failWhen: (Float) -> Boolean = { false }
         val gains = mutableListOf<Float>()
-        override fun setGain(gain: Float): Boolean { gains += gain; return true }
+        override fun setGain(gain: Float): Boolean { gains += gain; return !failWhen(gain) }
+    }
+
+    private inner class FakeReconciler : CrossfadePrimaryReconciler {
+        val calls = mutableListOf<Pair<CrossfadeTransitionKey, SecondaryHandoffSnapshot>>()
+        var result: CrossfadePrimaryReconciliationResult = CrossfadePrimaryReconciliationResult.Succeeded
+        var onReconcile: () -> Unit = {}
+        override fun reconcile(key: CrossfadeTransitionKey, snapshot: SecondaryHandoffSnapshot): CrossfadePrimaryReconciliationResult {
+            calls += key to snapshot
+            onReconcile()
+            return result
+        }
     }
 
     private fun song(id: Long, tag: Long = 0L) = Song(
@@ -78,7 +91,14 @@ class CrossfadeTimingDriverTest {
     private var snap = snapshot()
     private val backend = FakeBackend()
     private val primary = FakePrimary()
-    private val runtime = CrossfadePreparationRuntime({ snap }, { backend }, primaryGainBackend = primary)
+    private val reconciler = FakeReconciler()
+    private var throwSnapshot = false
+    private val runtime = CrossfadePreparationRuntime(
+        { if (throwSnapshot) throw IllegalStateException("snapshot") else snap },
+        { backend },
+        primaryGainBackend = primary,
+        primaryReconciler = reconciler,
+    )
     private val scheduler = FakeScheduler()
 
     private var now = 10_000L
@@ -265,34 +285,6 @@ class CrossfadeTimingDriverTest {
         assertEquals(1, scheduler.maxActive)
     }
 
-    @Test fun terminalTickStopsSchedulingAndLeavesHandoffPending() {
-        toFading()
-        now += 6_000L
-        scheduler.runNext()
-        assertEquals(CrossfadeState.HandoffPending(keyA, 6_000L), runtime.state)
-        assertTrue(scheduler.activeNow.isEmpty())
-        assertEquals(0, backend.resets) // no handoff, no teardown
-    }
-
-    @Test fun staleCallbackAfterTerminalIsHarmless() {
-        toFading()
-        val beforeTerminal = scheduler.activeNow.single()
-        now += 6_000L
-        scheduler.runNext()
-        val gains = backend.gains.size
-        val primaryWrites = primary.gains.size
-        val configs = configReads
-        val clocks = clockReads
-        val positions = positionReads
-        scheduler.runStale(beforeTerminal) // delivered again after HandoffPending
-        assertEquals(gains, backend.gains.size)
-        assertEquals(primaryWrites, primary.gains.size)
-        assertEquals(configs, configReads) // HandoffPending is not polled
-        assertEquals(clocks, clockReads)
-        assertEquals(positions, positionReads)
-        assertTrue(scheduler.activeNow.isEmpty())
-        assertTrue(runtime.state is CrossfadeState.HandoffPending)
-    }
 
     @Test fun offDuringFadingCancelsWithoutOldTickAndResumesPreFadeCadence() {
         toFading()
@@ -348,7 +340,8 @@ class CrossfadeTimingDriverTest {
         scheduler.runNext()
         now += 6_000L
         scheduler.runNext()
-        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertEquals(CrossfadeState.Idle, runtime.state) // handoff completed in the terminal pulse
+        assertEquals(pre, scheduler.pendingDelay)
         assertEquals(1, scheduler.maxActive)
     }
 
@@ -367,5 +360,168 @@ class CrossfadeTimingDriverTest {
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertTrue(backend.gains.isEmpty())
         assertFalse(scheduler.activeNow.isEmpty())
+    }
+
+    // -- CF-2D4: handoff execution and continuation ------------------------------------------
+
+    /** Runs the terminal tick pulse (fade complete). */
+    private fun terminalPulse() {
+        now += 6_000L
+        scheduler.runNext()
+    }
+
+    /** Leaves the runtime in HandoffPending (terminal tick executed directly) and the driver restarted. */
+    private fun pendingThenRestart() {
+        toFading()
+        assertEquals(FadeTickExecutionResult.HandoffPending, runtime.executeFadeTick(keyA, now + 6_000L))
+        driver.stop()
+        driver.start()
+        assertEquals(0L, scheduler.pendingDelay)
+    }
+
+    @Test fun terminalTickRunsHandoffInTheSamePulse() {
+        toFading()
+        val callbacksBefore = scheduler.all.size
+        terminalPulse()
+        assertEquals(1, reconciler.calls.size)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+        assertEquals(1f, primary.gains.last(), 0f)
+        assertEquals(pre, scheduler.pendingDelay)
+        assertEquals(callbacksBefore + 1, scheduler.all.size) // no intermediate callback just for handoff
+    }
+
+    @Test fun handoffForwardsTheExactKeyAndSnapshot() {
+        toFading()
+        terminalPulse()
+        assertEquals(listOf(keyA to SecondaryHandoffSnapshot(6_125L, 180_000L)), reconciler.calls)
+    }
+
+    @Test fun successContinuesWithFreshEvaluationForTheNewOccurrence() {
+        toFading()
+        terminalPulse()
+        val configs = configReads
+        snap = snapshot(index = 2) // primary now on the incoming occurrence
+        scheduler.runNext()
+        assertEquals(configs + 1, configReads)
+        assertEquals(CrossfadeTransitionKey(5L, 2, 3), (runtime.state as CrossfadeState.Armed).key)
+        assertEquals(pre, scheduler.pendingDelay)
+    }
+
+    @Test fun alreadyPendingEntryHandsOffBeforeAnyProviderRead() {
+        pendingThenRestart()
+        val configs = configReads
+        val clocks = clockReads
+        val positions = positionReads
+        scheduler.runNext()
+        assertEquals(1, reconciler.calls.size)
+        assertEquals(configs, configReads)
+        assertEquals(clocks, clockReads)
+        assertEquals(positions, positionReads)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(pre, scheduler.pendingDelay)
+    }
+
+    private fun assertHaltedAndRestartable() {
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(scheduler.activeNow.isEmpty())
+        driver.start()
+        assertEquals(0L, scheduler.pendingDelay)
+        assertEquals(1, scheduler.activeNow.size)
+    }
+
+    @Test fun primaryRejectionHaltsTheRunAndIsRestartable() {
+        toFading()
+        reconciler.result = CrossfadePrimaryReconciliationResult.Rejected(CrossfadePrimaryReconciliationRejection.PlayerQueueDirty)
+        terminalPulse()
+        assertEquals(1, reconciler.calls.size)
+        assertEquals(1, backend.resets)
+        assertHaltedAndRestartable()
+    }
+
+    @Test fun unavailableSecondarySnapshotHaltsTheRun() {
+        toFading()
+        backend.handoffSnap = null
+        terminalPulse()
+        assertTrue(reconciler.calls.isEmpty())
+        assertEquals(1, backend.resets)
+        assertHaltedAndRestartable()
+    }
+
+    @Test fun primaryRestoreFailureHaltsEvenIfCleanupRetrySucceeds() {
+        toFading()
+        var failed = false
+        primary.failWhen = { g -> if (g == 1f && !failed) { failed = true; true } else false }
+        terminalPulse()
+        assertTrue(failed)
+        assertEquals(1f, primary.gains.last(), 0f)
+        assertHaltedAndRestartable()
+    }
+
+    @Test fun ownershipLossBeforeHandoffIsCancelledNotAFailureAndResumesPolling() {
+        pendingThenRestart()
+        snap = snapshot(generation = 6L)
+        scheduler.runNext()
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(reconciler.calls.isEmpty())
+        assertEquals(pre, scheduler.pendingDelay)
+    }
+
+    @Test fun manualNavigationBeforeHandoffResumesPolling() {
+        pendingThenRestart()
+        snap = snapshot(index = 2)
+        scheduler.runNext()
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(reconciler.calls.isEmpty())
+        assertEquals(pre, scheduler.pendingDelay)
+    }
+
+    @Test fun reentrantInactiveHandoffIsNotRetriedAndFollowsRuntimeState() {
+        toFading()
+        reconciler.onReconcile = { runtime.cancel(CrossfadeCancelReason.Pause) }
+        terminalPulse()
+        assertEquals(1, reconciler.calls.size) // one attempt only
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(pre, scheduler.pendingDelay)
+    }
+
+    @Test fun unexpectedHandoffExceptionIsContainedAndLeavesNoCallback() {
+        pendingThenRestart()
+        throwSnapshot = true // executeHandoff throws before any effect; state stays HandoffPending
+        scheduler.runNext()
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertTrue(scheduler.activeNow.isEmpty())
+        assertTrue(reconciler.calls.isEmpty())
+    }
+
+    @Test fun staleCallbacksAfterRestartCannotHandOffAgain() {
+        toFading()
+        val stale = scheduler.activeNow.single()
+        driver.stop()
+        driver.start()
+        terminalPulseOnRestart()
+        scheduler.runStale(stale)
+        assertEquals(1, reconciler.calls.size)
+        assertEquals(1, backend.resets)
+        assertEquals(1, scheduler.activeNow.size)
+        assertEquals(1, scheduler.maxActive)
+    }
+
+    private fun terminalPulseOnRestart() {
+        now += 6_000L
+        scheduler.runNext() // evaluate, tick (terminal) and hand off
+    }
+
+    @Test fun duplicateSongOccurrenceHandsOffWithTheExactPositionalKey() {
+        val dup = listOf(song(10, 0), song(20, 1), song(10, 2), song(10, 3))
+        snap = snapshot(queue = dup, index = 2)
+        driver.start()
+        scheduler.runNext()
+        backend.ready()
+        position = startA
+        scheduler.runNext()
+        terminalPulse()
+        assertEquals(CrossfadeTransitionKey(5L, 2, 3), reconciler.calls.single().first)
+        assertEquals(CrossfadeState.Idle, runtime.state)
     }
 }
