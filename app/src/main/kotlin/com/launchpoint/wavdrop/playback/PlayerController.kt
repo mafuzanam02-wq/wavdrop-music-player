@@ -2967,7 +2967,11 @@ class PlayerController @Inject constructor(
         if (BuildConfig.DEBUG) Log.d(RESUME_TAG, message)
     }
 
-    private fun saveSessionAsync() {
+    /**
+     * [exactPlaybackIndex] / [positionOverrideMs] let a caller that has just issued an exact seek (CF-2D2) persist
+     * the intended occurrence and position instead of re-reading a MediaController that may not have updated yet.
+     */
+    private fun saveSessionAsync(exactPlaybackIndex: Int? = null, positionOverrideMs: Long? = null) {
         val action = playbackSessionPersistenceAction(
             isExternalPlayback = isExternalPlayback,
             queueIsEmpty = libraryQueue.isEmpty(),
@@ -2988,15 +2992,15 @@ class PlayerController @Inject constructor(
 
         val state = _nowPlayingState.value
         val controller = mediaController
-        val positionMs = controller?.currentPosition?.coerceAtLeast(0L) ?: state.positionMs
+        val positionMs = positionOverrideMs ?: controller?.currentPosition?.coerceAtLeast(0L) ?: state.positionMs
         lastPositionCheckpointElapsedRealtimeMs = SystemClock.elapsedRealtime()
         lastPositionCheckpointMs = positionMs
-        val preservePlan = pendingPreserveSearchPlan
+        val preservePlan = if (exactPlaybackIndex != null) null else pendingPreserveSearchPlan
 
         val currentLibraryIndex = resolveSessionCurrentLibraryIndex(
             libraryQueue = libraryQueue,
             playbackOrder = playbackOrder,
-            currentPlaybackIndex = preservePlan?.currentIndex ?: currentPlaybackIndex(),
+            currentPlaybackIndex = preservePlan?.currentIndex ?: exactPlaybackIndex ?: currentPlaybackIndex(),
             exactCurrentLibraryIndex = preservePlan?.currentIndex,
             currentSongId = preservePlan?.currentSongId ?: state.song?.id,
         ) ?: return
@@ -3395,6 +3399,45 @@ class PlayerController @Inject constructor(
             playerQueueNeedsSync = playerQueueNeedsSync,
             controllerConnected = controller != null &&
                 controllerConnectionState == ControllerConnectionState.Connected,
+        )
+    }
+
+    /**
+     * CF-2D2: repositions the authoritative primary to [CrossfadeTransitionKey.toPlaybackIndex] at the secondary's
+     * physical [snapshot] position, or rejects with no seek (see [planCrossfadePrimaryReconciliation]). Exact
+     * generation/occurrence only: no queue rebuild, no song-id fallback, no deferred request, no queue-generation
+     * bump, no change to playback intent or gain. Local state follows the seek only after it was issued.
+     */
+    internal fun reconcileCrossfadePrimary(
+        key: CrossfadeTransitionKey,
+        snapshot: SecondaryHandoffSnapshot,
+    ): CrossfadePrimaryReconciliationResult {
+        val controller = mediaController
+        val connected = controller != null && controllerConnectionState == ControllerConnectionState.Connected
+        val plan = planCrossfadePrimaryReconciliation(
+            key = key,
+            snapshot = snapshot,
+            queueGeneration = queueGeneration,
+            playbackQueueSize = playbackQueue.size,
+            currentPlaybackIndex = currentPlaybackIndex(),
+            physicalCurrentIndex = controller?.currentMediaItemIndex,
+            repeatMode = repeatMode,
+            playerQueueNeedsSync = playerQueueNeedsSync,
+            controllerAvailable = connected,
+        )
+        if (controller == null) return executeCrossfadePrimaryReconciliation(plan) { _, _ -> }
+        return executeCrossfadePrimaryReconciliation(
+            plan = plan,
+            seekTo = { index, positionMs -> controller.seekTo(index, positionMs) },
+            // The seek was issued: install the already-validated target locally. Nothing here re-reads the
+            // controller, whose index/position may not have propagated yet.
+            onSeekSucceeded = { targetIndex ->
+                lastKnownPositionMs = -1L
+                _nowPlayingState.update {
+                    reconcileCrossfadeNowPlayingState(it, playbackQueue, targetIndex, snapshot, shuffleEnabled, repeatMode)
+                }
+                saveSessionAsync(exactPlaybackIndex = targetIndex, positionOverrideMs = snapshot.positionMs)
+            },
         )
     }
 
