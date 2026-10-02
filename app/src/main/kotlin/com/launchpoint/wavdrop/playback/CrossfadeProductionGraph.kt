@@ -70,3 +70,13 @@ internal fun closeCrossfadeGraph(driver: CrossfadeTimingDriver?, runtime: Crossf
 internal fun recoverCrossfadeFromPrimaryPlaybackError(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(CrossfadeCancelReason.PlaybackError)
 }
+
+/**
+ * CF-2G1: key-less, synchronous crossfade cleanup for an explicit pause that reached the session player. Must run
+ * BEFORE the pause is forwarded to the primary so a Fading/HandoffPending cleanup can still restore the primary
+ * gain. Same runtime-owned cleanup as other cancellations; the timing driver is left running and a null runtime
+ * (gate false) is a no-op. Deliberately not wired to onIsPlayingChanged (that can fire for non-user reasons).
+ */
+internal fun recoverCrossfadeFromExplicitPause(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(CrossfadeCancelReason.Pause)
+}

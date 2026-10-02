@@ -179,6 +179,7 @@ class PlaybackService : MediaLibraryService() {
             songsProvider = { songRepository.songs.first() },
             logResume = ::logResume,
             sessionProvider = { mediaSession },
+            onExplicitPause = { recoverCrossfadeFromExplicitPause(crossfadePreparation) },
         )
 
         if (BuildConfig.DEBUG) {
@@ -643,6 +644,9 @@ class PlaybackService : MediaLibraryService() {
         private val songsProvider: suspend () -> List<com.launchpoint.wavdrop.data.model.Song>,
         private val logResume: (String) -> Unit,
         private val sessionProvider: () -> MediaSession?,
+        // CF-2G1: invoked on every explicit pause BEFORE the primary pause is forwarded (crossfade cleanup needs the
+        // primary still controllable to restore its gain). Kept as a callback so this player knows nothing of crossfade.
+        private val onExplicitPause: () -> Unit,
     ) : ForwardingPlayer(player) {
 
         override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
@@ -663,6 +667,7 @@ class PlaybackService : MediaLibraryService() {
 
         override fun pause() {
             noteExternalTransport()
+            onExplicitPause() // cancel any owned crossfade first, then forward the pause
             super.pause()
         }
 

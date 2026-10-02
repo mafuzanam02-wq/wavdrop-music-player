@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2F1. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2G1. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2F1 (below).
+- Crossfade engineering foundations CF-1 to CF-2G1 (below).
 
 ## Crossfade - current state
 
@@ -74,6 +74,7 @@ Completed, internal-only foundations:
 | CF-2E1 | dormant production composition: runtime + reconciler adapter + timing driver constructed behind the hard gate, driver never started at that boundary (CF-2E2 later adds the explicit start policy) |
 | CF-2E2 | persisted normalized crossfade duration + explicit driver start/stop policy (internal; gate still false, no UI) |
 | CF-2F1 | primary playback-error crossfade recovery (`PlaybackError` cancellation bridge from the primary listener) |
+| CF-2G1 | manual (explicit) pause crossfade cancellation (`Pause` cancel before the primary pause is forwarded) |
 
 **Live/audible production rollout is NOT enabled.** Specifically:
 
@@ -108,7 +109,9 @@ CF-2E2 (configuration + lifecycle policy, NOT rollout): `AppSettingsRepository.c
 
 CF-2F1 (first slice of failure/cancel recovery): when the authoritative primary ExoPlayer reports a playback error, `PlaybackService` synchronously cancels any owned crossfade with `PlaybackError` (Armed/Ready abandon the secondary; Fading/HandoffPending restore the primary to 1f before abandoning the secondary). The timing driver is neither stopped nor restarted, `PlayerController` bad-media recovery stays authoritative and unchanged, secondary errors keep their separate `SecondaryError` path, and the hard gate stays `false` (a no-op in shipping since no runtime exists).
 
-The next boundaries are separate: the remaining failure/cancel recovery, user-facing Settings UI, manual transport and queue-mutation behaviour during overlap, dual-player EQ\/audio-session validation, production enablement and physical Bluetooth\/background validation.
+CF-2G1 (first slice of manual transport interaction): every explicit pause that reaches the session player (`PreviousBehaviorPlayer.pause()`: app UI, notification, lock screen, media keys, widget, system controllers) now runs `noteExternalTransport()`, then synchronously cancels any owned crossfade with `Pause` (Armed/Ready abandon the secondary; Fading/HandoffPending restore the primary to 1f before abandoning the secondary), and only then forwards the pause to the primary. The timing driver keeps running; while paused no transition is eligible and a later resume lets a fresh pulse arm from the live occurrence. Seek, next and previous are deliberately not handled yet; the hard gate stays `false` (no runtime exists in shipping, so the callback is a no-op).
+
+The next boundaries are separate: the remaining failure/cancel recovery, the remaining manual transport (seek, next, previous), user-facing Settings UI, manual transport and queue-mutation behaviour during overlap, dual-player EQ\/audio-session validation, production enablement and physical Bluetooth\/background validation.
 
 ## In progress
 
