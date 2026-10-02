@@ -83,6 +83,15 @@ class CrossfadeSecondaryStartTest {
             return setGainResult
         }
 
+        var snapshot: SecondaryHandoffSnapshot? = null
+        var snapshotThrows = false
+        var snapshotCalls = 0
+        override fun handoffSnapshot(): SecondaryHandoffSnapshot? {
+            snapshotCalls++
+            if (snapshotThrows) throw IllegalStateException("boom")
+            return snapshot
+        }
+
         fun ready(attempt: Long, durationMs: Long = 180_000L) = callbacks!!.onReady(attempt, durationMs)
         fun error(attempt: Long) = callbacks!!.onError(attempt)
     }
@@ -450,5 +459,150 @@ class CrossfadeSecondaryStartTest {
         assertFalse(owner.setGain(k2, 0.5f))
         assertTrue(backend.gains.isEmpty())
         assertTrue(owner.setGain(k1, 0.5f))
+    }
+
+    // -- CF-2D1: occurrence-owned handoff snapshot ---------------------------------------
+
+    private val snap1 = SecondaryHandoffSnapshot(6_000L, 180_000L)
+
+    private fun startedA() {
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(0))
+        assertTrue(owner.start(keyA, 0f))
+        backend.snapshot = snap1
+    }
+
+    @Test fun startedExactKeyExposesTheBackendSnapshotWithoutMutation() {
+        startedA()
+        val resets = backend.resets
+        assertEquals(snap1, owner.handoffSnapshot(keyA))
+        assertEquals(keyA, owner.currentKey)
+        assertEquals(resets, backend.resets)
+        assertTrue(backend.gains.isEmpty())
+        assertEquals(1, backend.starts.size)
+    }
+
+    @Test fun repeatedSnapshotsAreObservableEvenIfPositionDecreases() {
+        startedA()
+        for (p in listOf(6_000L, 6_050L, 6_125L, 6_100L)) {
+            backend.snapshot = SecondaryHandoffSnapshot(p, 180_000L)
+            assertEquals(p, owner.handoffSnapshot(keyA)!!.positionMs)
+        }
+        assertEquals(keyA, owner.currentKey)
+        assertEquals(0, backend.resets)
+    }
+
+    @Test fun snapshotIsNullBeforeStartWithoutBackendCall() {
+        backend.snapshot = snap1
+        owner.prepare(keyA, song(1))
+        assertNull(owner.handoffSnapshot(keyA)) // Preparing
+        backend.ready(attemptOf(0))
+        assertNull(owner.handoffSnapshot(keyA)) // Prepared
+        assertEquals(0, backend.snapshotCalls)
+    }
+
+    @Test fun wrongKeyIsNullAndExactKeyStillWorks() {
+        startedA()
+        assertNull(owner.handoffSnapshot(keyB))
+        assertNull(owner.handoffSnapshot(keyA.copy(queueGeneration = 2L)))
+        assertEquals(0, backend.snapshotCalls)
+        assertEquals(snap1, owner.handoffSnapshot(keyA))
+    }
+
+    @Test fun duplicateSongIdAtAnotherOccurrenceCannotObserve() {
+        val same = song(5)
+        val k1 = CrossfadeTransitionKey(3L, 0, 2)
+        val k2 = CrossfadeTransitionKey(3L, 1, 2)
+        owner.prepare(k1, same)
+        backend.ready(attemptOf(0))
+        assertTrue(owner.start(k1, 0f))
+        backend.snapshot = snap1
+        assertNull(owner.handoffSnapshot(k2))
+        assertEquals(snap1, owner.handoffSnapshot(k1))
+    }
+
+    @Test fun supersessionRequiresTheNewKeyToBeStarted() {
+        startedA()
+        owner.prepare(keyB, song(2))
+        assertNull(owner.handoffSnapshot(keyA))
+        assertNull(owner.handoffSnapshot(keyB)) // Preparing
+        backend.ready(attemptOf(1))
+        assertNull(owner.handoffSnapshot(keyB)) // Prepared
+        assertTrue(owner.start(keyB, 0f))
+        assertEquals(snap1, owner.handoffSnapshot(keyB))
+    }
+
+    @Test fun abandonAndReleaseBlockSnapshotsWithoutBackendCalls() {
+        startedA()
+        assertTrue(owner.abandon(keyA))
+        assertNull(owner.handoffSnapshot(keyA))
+        owner.prepare(keyA, song(1))
+        backend.ready(attemptOf(1))
+        assertTrue(owner.start(keyA, 0f))
+        owner.release()
+        assertNull(owner.handoffSnapshot(keyA))
+        assertEquals(0, backend.snapshotCalls)
+    }
+
+    @Test fun backendNullRetainsOwnershipAndLaterReadSucceeds() {
+        startedA()
+        backend.snapshot = null
+        assertNull(owner.handoffSnapshot(keyA))
+        assertEquals(keyA, owner.currentKey)
+        assertEquals(0, backend.resets)
+        backend.snapshot = snap1
+        assertEquals(snap1, owner.handoffSnapshot(keyA))
+    }
+
+    @Test fun backendExceptionIsContainedAndRetainsOwnership() {
+        val b = FakeBackend()
+        val failures = mutableListOf<CrossfadeTransitionKey>()
+        val o = CrossfadeSecondaryPlayer({ b }, object : CrossfadeSecondaryListener {
+            override fun onSecondaryReady(key: CrossfadeTransitionKey, preparedDurationMs: Long) = Unit
+            override fun onSecondaryFailed(key: CrossfadeTransitionKey) { failures += key }
+        })
+        o.prepare(keyA, song(1))
+        b.ready(b.prepared.single())
+        assertTrue(o.start(keyA, 0f))
+        b.snapshotThrows = true
+        assertNull(o.handoffSnapshot(keyA))
+        assertTrue(failures.isEmpty())
+        assertEquals(0, b.resets)
+        assertEquals(keyA, o.currentKey)
+        b.snapshotThrows = false
+        b.snapshot = snap1
+        assertEquals(snap1, o.handoffSnapshot(keyA))
+    }
+
+    // -- Pure backend validity rule ------------------------------------------------------
+
+    private fun valid(
+        count: Int = 1,
+        playWhenReady: Boolean = true,
+        state: Int = androidx.media3.common.Player.STATE_READY,
+        position: Long = 6_000L,
+        duration: Long = 180_000L,
+    ) = validatedSecondaryHandoffSnapshot(count, playWhenReady, state, position, duration)
+
+    @Test fun readyAndBufferingAreValid() {
+        assertEquals(SecondaryHandoffSnapshot(6_000L, 180_000L), valid())
+        assertEquals(
+            SecondaryHandoffSnapshot(6_000L, 180_000L),
+            valid(state = androidx.media3.common.Player.STATE_BUFFERING),
+        )
+        assertEquals(SecondaryHandoffSnapshot(0L, 1L), valid(position = 0L, duration = 1L))
+        assertEquals(SecondaryHandoffSnapshot(180_000L, 180_000L), valid(position = 180_000L))
+    }
+
+    @Test fun unusableBackendStatesAreNull() {
+        assertNull(valid(state = androidx.media3.common.Player.STATE_IDLE))
+        assertNull(valid(state = androidx.media3.common.Player.STATE_ENDED))
+        assertNull(valid(playWhenReady = false))
+        assertNull(valid(count = 0))
+        assertNull(valid(count = 2))
+        assertNull(valid(position = -1L))
+        assertNull(valid(duration = 0L))
+        assertNull(valid(duration = -9_223_372_036_854_775_807L)) // C.TIME_UNSET
+        assertNull(valid(position = 180_001L)) // beyond duration: not clamped
     }
 }

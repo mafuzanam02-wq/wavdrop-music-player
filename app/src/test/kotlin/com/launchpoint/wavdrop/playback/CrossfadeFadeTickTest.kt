@@ -28,6 +28,7 @@ class CrossfadeFadeTickTest {
             this.callbacks = callbacks
         }
         override fun start(initialGain: Float): Boolean { starts += initialGain; events += "s:start"; return true }
+        override fun handoffSnapshot(): SecondaryHandoffSnapshot? = null
         override fun setGain(gain: Float): Boolean {
             gains += gain
             events += "s:$gain"

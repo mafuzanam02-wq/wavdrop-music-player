@@ -28,6 +28,7 @@ class CrossfadeSecondaryPlayerTest {
 
         override fun reset() { resets++; events += "reset" }
         override fun release() { releases++ }
+        override fun handoffSnapshot(): SecondaryHandoffSnapshot? = null
         override fun setGain(gain: Float): Boolean = true
 
         val starts = mutableListOf<Float>()

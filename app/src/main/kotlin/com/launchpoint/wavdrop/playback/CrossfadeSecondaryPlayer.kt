@@ -25,6 +25,30 @@ internal interface CrossfadeSecondaryListener {
     }
 }
 
+/** Physical facts about a started secondary for a later handoff: where it actually is and its real duration. */
+internal data class SecondaryHandoffSnapshot(
+    val positionMs: Long,
+    val durationMs: Long,
+)
+
+/**
+ * Pure validity rule for a handoff snapshot. Exactly one loaded item, playWhenReady, READY or BUFFERING (never
+ * IDLE/ENDED), a positive duration and a position within 0..duration. Nothing is clamped: inconsistent
+ * physical data fails closed (null).
+ */
+internal fun validatedSecondaryHandoffSnapshot(
+    mediaItemCount: Int,
+    playWhenReady: Boolean,
+    playbackState: Int,
+    positionMs: Long,
+    durationMs: Long,
+): SecondaryHandoffSnapshot? {
+    if (mediaItemCount != 1 || !playWhenReady) return null
+    if (playbackState != Player.STATE_READY && playbackState != Player.STATE_BUFFERING) return null
+    if (durationMs <= 0L || positionMs < 0L || positionMs > durationMs) return null
+    return SecondaryHandoffSnapshot(positionMs, durationMs)
+}
+
 /** Callbacks from a backend, tagged with the preparation attempt that produced them. */
 internal interface SecondaryBackendCallbacks {
     fun onReady(attempt: Long, durationMs: Long)
@@ -53,6 +77,13 @@ internal interface SecondaryPlayerBackend {
      * seeks, changes media, touches the primary, or takes audio focus.
      */
     fun setGain(gain: Float): Boolean
+
+    /**
+     * Read-only observation of the started item's actual playback position and duration, or null when the backend
+     * does not hold a live started item with consistent physical values. Never changes volume, playback, media
+     * or ownership.
+     */
+    fun handoffSnapshot(): SecondaryHandoffSnapshot?
 
     /** Stops, clears media, and leaves the player silent (volume 0, playWhenReady false). */
     fun reset()
@@ -155,6 +186,21 @@ internal class CrossfadeSecondaryPlayer(
             backend?.setGain(gain) == true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * Observational, exact-key handoff snapshot of the started secondary. Non-null only when not released,
+     * [key] is the active key, the phase is Started and the backend reports a valid snapshot. A null result
+     * (including a backend exception) never changes ownership, phase or notifies the listener; repeated reads
+     * are allowed. Song ids play no role.
+     */
+    fun handoffSnapshot(key: CrossfadeTransitionKey): SecondaryHandoffSnapshot? {
+        if (released || activeKey != key || phase != Phase.Started) return null
+        return try {
+            backend?.handoffSnapshot()
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -276,6 +322,14 @@ internal class ExoSecondaryPlayerBackend(
         player.volume = gain
         return true
     }
+
+    override fun handoffSnapshot(): SecondaryHandoffSnapshot? = validatedSecondaryHandoffSnapshot(
+        mediaItemCount = player.mediaItemCount,
+        playWhenReady = player.playWhenReady,
+        playbackState = player.playbackState,
+        positionMs = player.currentPosition,
+        durationMs = player.duration,
+    )
 
     override fun reset() {
         detachListener()

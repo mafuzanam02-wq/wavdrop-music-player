@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2C7D. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2D1. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2C7D (below).
+- Crossfade engineering foundations CF-1 to CF-2D1 (below).
 
 ## Crossfade - current state
 
@@ -67,6 +67,7 @@ Completed, internal-only foundations:
 | CF-2C7B | dedicated runtime `FadeTick` execution using exact coordinator gain pairs (`executeFadeTick`) |
 | CF-2C7C | active-audible `evaluatePreparation` policy (Fading/HandoffPending are never re-planned) |
 | CF-2C7D | main-thread monotonic timing-driver foundation (`CrossfadeTimingDriver`, unwired) |
+| CF-2D1 | occurrence-owned secondary handoff snapshot primitive (`CrossfadeSecondaryPlayer.handoffSnapshot`) |
 
 **Live runtime integration is NOT implemented.** Specifically:
 
@@ -87,7 +88,9 @@ CF-2C7C: while `Fading`/`HandoffPending`, `evaluatePreparation` bypasses CF-1 re
 
 CF-2C7D: `CrossfadeTimingDriver` (scheduling only) drives the runtime through injected `CrossfadeTimingScheduler` and `CrossfadeMonotonicClock` seams: a 250 ms pre-fade cadence evaluates preparation and observes the primary position (Due begins the fade with the monotonic now), a 50 ms fade cadence runs active evaluation then `executeFadeTick`, at most one callback is pending, stale callbacks are generation-guarded, and `HandoffPending` stops the driver. Nothing constructs it: `PlaybackService` does not start it, no persisted duration setting exists, handoff is unimplemented, and the gate stays `false`.
 
-The next engineering frontier is occurrence-safe handoff / promotion / reconciliation.
+CF-2D1: an exact-key, Started-only `CrossfadeSecondaryPlayer.handoffSnapshot(key)` reports the secondary's validated physical position and duration (`SecondaryHandoffSnapshot`). It is observational (no volume, playback, seek or ownership change); a null result or backend exception keeps ownership. The runtime does not execute handoff, the primary is not moved, the timing driver still stops at `HandoffPending`, and the gate stays `false`.
+
+The next engineering frontier is the primary occurrence-reconciliation primitive (handoff 2.b), then runtime handoff execution and driver continuation.
 
 ## In progress
 

@@ -20,6 +20,7 @@ class CrossfadeActiveFadeEvaluationTest {
             this.callbacks = callbacks
         }
         override fun start(initialGain: Float): Boolean = true
+        override fun handoffSnapshot(): SecondaryHandoffSnapshot? = null
         override fun setGain(gain: Float): Boolean { gains += gain; return true }
         override fun reset() { resets++ }
         override fun release() { releases++ }
