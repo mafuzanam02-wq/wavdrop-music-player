@@ -30,6 +30,10 @@ internal fun crossfadeOwnershipLossReason(
     else -> null
 }
 
+/** Fading and HandoffPending own audible gain state; Armed/Ready are still plan-managed and silent. */
+private fun CrossfadeState.Active.isAudible(): Boolean =
+    this is CrossfadeState.Fading || this is CrossfadeState.HandoffPending
+
 /**
  * A same-key evaluation is idempotent only when the CF-1 plan values are unchanged too: the key names the
  * occurrence, not the overlap. Only Armed/Ready may ever be retained; Fading/HandoffPending are never
@@ -187,6 +191,18 @@ internal class CrossfadePreparationRuntime(
     fun evaluatePreparation(configuredDurationMs: Long, currentDurationMs: Long?) {
         if (closed) return
         val snapshot = snapshotProvider()
+
+        // CF-2C7C: audible transitions are lifecycle-managed, never re-planned. Only live ownership and an
+        // explicit OFF can end them; either cancels and returns (no same-call re-arm). Otherwise the exact
+        // active state is retained, so enabled duration / current-duration changes wait for the next transition.
+        (state as? CrossfadeState.Active)?.takeIf { it.isAudible() }?.let { audible ->
+            val lost = crossfadeOwnershipLossReason(snapshot, audible.key)
+            when {
+                lost != null -> cancel(lost, snapshot)
+                !CrossfadeRules.isEnabled(configuredDurationMs) -> cancel(CrossfadeCancelReason.ConfigurationDisabled, snapshot)
+            }
+            return
+        }
 
         (state as? CrossfadeState.Active)?.let { active ->
             crossfadeOwnershipLossReason(snapshot, active.key)?.let { cancel(it, snapshot) }

@@ -559,9 +559,11 @@ class CrossfadeFadeWindowTest {
         val d = readyDue(0L)
         backend.onStart = {
             snap = snapshot(index = 2)
-            runtime.evaluatePreparation(6_000L, null) // old owner lost; B = (5, 2, 3) becomes Armed
+            runtime.evaluatePreparation(6_000L, null) // old audible owner lost: cancelled, NO same-call re-arm (CF-2C7C)
         }
         assertFalse(runtime.executeBeginFade(d, now))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        runtime.evaluatePreparation(6_000L, null) // a later evaluation arms B = (5, 2, 3)
         val armed = runtime.state as CrossfadeState.Armed
         assertEquals(CrossfadeTransitionKey(5L, 2, 3), armed.key)
         assertTrue("primary must stay untouched", primary.gains.isEmpty())

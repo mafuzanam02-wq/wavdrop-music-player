@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2C7B (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2C7C (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2C7B
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2C7C
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2C7B (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2C7C (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -215,6 +215,10 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     primary outgoing), failures and clock regression fail closed (restore + abandon), terminal tick applies the
     final pair and rests in `HandoffPending` (`RequestHandoff` recognised, not executed). Generic `ApplyGains` and
     `RequestHandoff` still refused; no ticker/timing driver; no production caller; gate remains `false`.
+  - **CF-2C7C** active-audible `evaluatePreparation` policy: Fading/HandoffPending bypass CF-1 re-planning; live
+    ownership is revalidated (loss cancels and returns, no same-call re-arm), explicit OFF cancels, otherwise the
+    exact state is retained (duration changes deferred to the next transition). Armed/Ready unchanged. No ticker;
+    gate remains `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -445,7 +449,7 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2C7B are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2C7C are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
@@ -453,8 +457,8 @@ items are validated.
    a. CF-2C7A - secondary dynamic-gain primitive - complete (unused by the runtime; generic `ApplyGains` still refused).
    b. CF-2C7B - runtime `FadeTick` execution with paired primary/secondary gains (fresh ownership revalidation, failure
       ordering, terminal tick, transition to `HandoffPending`) - complete (no caller yet; handoff not executed).
-   c. Active-fade `evaluatePreparation` policy - NEXT (today it fails closed and may re-arm while `Fading`).
-   d. Main-thread monotonic timing driver.
+   c. CF-2C7C - active-fade `evaluatePreparation` policy - complete.
+   d. Main-thread monotonic timing driver - NEXT.
 2. Occurrence-safe handoff / promotion / reconciliation of primary and secondary.
 3. Failure / cancel recovery during audible overlap.
 4. Manual seek / pause / next / previous interaction while preparing or fading.

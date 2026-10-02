@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2C7B. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2C7C. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2C7B (below).
+- Crossfade engineering foundations CF-1 to CF-2C7C (below).
 
 ## Crossfade - current state
 
@@ -65,6 +65,7 @@ Completed, internal-only foundations:
 | CF-2C6 | occurrence-owned primary gain application / restoration (`CrossfadePrimaryGainController`) |
 | CF-2C7A | occurrence-owned secondary dynamic gain primitive (`CrossfadeSecondaryPlayer.setGain`) |
 | CF-2C7B | dedicated runtime `FadeTick` execution using exact coordinator gain pairs (`executeFadeTick`) |
+| CF-2C7C | active-audible `evaluatePreparation` policy (Fading/HandoffPending are never re-planned) |
 
 **Live runtime integration is NOT implemented.** Specifically:
 
@@ -81,7 +82,9 @@ Completed, internal-only foundations:
 - No physical crossfade validation has occurred. Crossfade is not shipped and must not appear in
   user-facing copy.
 
-The next engineering frontier is the active-fade `evaluatePreparation` policy, then the main-thread monotonic timing driver, then handoff.
+CF-2C7C: while `Fading`/`HandoffPending`, `evaluatePreparation` bypasses CF-1 re-planning; it revalidates live occurrence ownership (loss cancels and returns, no same-call re-arm), cancels on explicit crossfade OFF, and otherwise retains the exact state (enabled-duration and current-duration changes apply to the next transition). Armed/Ready planning is unchanged. No ticker exists.
+
+The next engineering frontier is the main-thread monotonic timing driver, then handoff.
 
 ## In progress
 
