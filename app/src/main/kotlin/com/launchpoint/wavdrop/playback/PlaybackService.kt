@@ -71,9 +71,11 @@ class PlaybackService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
-    // CF-2B2/2B3: only ever constructed behind CROSSFADE_SECONDARY_RUNTIME_ENABLED (false). Owns the silent
-    // secondary player (single release owner); not a session player and never scheduled yet.
+    // CF-2B2/2B3/2E1: only ever constructed behind CROSSFADE_SECONDARY_RUNTIME_ENABLED (false). Owns the silent
+    // secondary player (single release owner); not a session player. The timing driver below is built over this
+    // exact runtime but is never started (dormant).
     private var crossfadePreparation: CrossfadePreparationRuntime? = null
+    private var crossfadeTimingDriver: CrossfadeTimingDriver? = null
     private var previousRestartThresholdMs: Long =
         PreviousButtonBehavior.DEFAULT.previousRestartThresholdMs()
 
@@ -125,7 +127,9 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         if (CROSSFADE_SECONDARY_RUNTIME_ENABLED) {
-            crossfadePreparation = CrossfadePreparationRuntime(
+            // CF-2E1: dormant composition only. The timing driver is constructed but deliberately NEVER started
+            // here; its configured duration is 0 ms (Crossfade OFF) until a persisted setting exists.
+            val graph = createCrossfadeProductionGraph(
                 snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot() },
                 backendFactory = { ExoSecondaryPlayerBackend(this, audioAttributes) },
                 // Narrow local seam to the authoritative primary ExoPlayer; never routed through a controller/session.
@@ -138,7 +142,15 @@ class PlaybackService : MediaLibraryService() {
                         false
                     }
                 },
+                reconcilePrimary = { key, snapshot -> playerController.reconcileCrossfadePrimary(key, snapshot) },
+                scheduler = MainLooperCrossfadeTimingScheduler(),
+                clock = ElapsedRealtimeCrossfadeClock,
+                primaryDurationMs = { player.duration },
+                primaryPositionMs = { player.currentPosition },
             )
+            crossfadePreparation = graph.runtime
+            crossfadeTimingDriver = graph.timingDriver
+            // Intentionally no crossfadeTimingDriver.start() (activation/start policy is a later slice).
         }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
@@ -384,9 +396,11 @@ class PlaybackService : MediaLibraryService() {
         // Cancel the settings observer before releasing the player to avoid
         // calling setHandleAudioBecomingNoisy on a released ExoPlayer instance.
         serviceScope.cancel()
-        // CF-2C6: restore any crossfade-lowered primary gain while the primary player is still alive, then
+        // CF-2E1: invalidate timing callbacks first (the driver owns them), then CF-2C6: restore any crossfade-lowered
+        // primary gain while the primary player is still alive, then
         // release the secondary. Must precede the primary player release below.
-        crossfadePreparation?.close()
+        closeCrossfadeGraph(crossfadeTimingDriver, crossfadePreparation)
+        crossfadeTimingDriver = null
         crossfadePreparation = null
         // Release audio effects before the player so the session is still valid during cleanup.
         enhancementController?.release()

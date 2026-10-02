@@ -53,8 +53,8 @@ Not yet distributed. Source: git history after tag `v0.1.0-beta9`.
 ### Engineering foundations (not user-facing)
 
 - **Crossfade engineering foundation only - not user-facing, not enabled.** Foundations CF-1 through
-  CF-2D4 (planning rules, lifecycle coordinator, runtime snapshot, silent secondary-player preparation,
-  fade-window trigger, secondary start primitive, lateness-aware begin timing, plan-bound fade-begin bridge, BeginFade execution with exact secondary start, occurrence-owned primary gain restoration, occurrence-owned secondary dynamic gain primitive, explicit FadeTick execution ending at HandoffPending, active-fade evaluation policy, unwired main-thread timing-driver foundation, occurrence-owned secondary handoff snapshot, primary occurrence-reconciliation primitive, runtime handoff execution driven by the unwired timing driver) are merged behind a hard
+  CF-2E1 (planning rules, lifecycle coordinator, runtime snapshot, silent secondary-player preparation,
+  fade-window trigger, secondary start primitive, lateness-aware begin timing, plan-bound fade-begin bridge, BeginFade execution with exact secondary start, occurrence-owned primary gain restoration, occurrence-owned secondary dynamic gain primitive, explicit FadeTick execution ending at HandoffPending, active-fade evaluation policy, unwired main-thread timing-driver foundation, occurrence-owned secondary handoff snapshot, primary occurrence-reconciliation primitive, runtime handoff execution driven by the timing driver, dormant production composition that is gated off and never started) are merged behind a hard
   gate (`CROSSFADE_SECONDARY_RUNTIME_ENABLED = false`). There is no crossfade setting and nothing audible
   changes: the internal runtime can start the secondary and lower/restore the primary gain, but the gate is off and nothing is reachable in the app. Live runtime integration is not implemented.
 
