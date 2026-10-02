@@ -60,3 +60,13 @@ internal fun closeCrossfadeGraph(driver: CrossfadeTimingDriver?, runtime: Crossf
     driver?.close()
     runtime?.close()
 }
+
+/**
+ * CF-2F1: key-less, synchronous cleanup when the authoritative primary player reports a playback error. The runtime
+ * owns the cleanup (Fading/HandoffPending restore primary gain before abandoning the secondary; Armed/Ready abandon
+ * the secondary; Idle is harmless). The timing driver is deliberately left alone: activation belongs to the
+ * persisted-duration policy and bad-media queue recovery stays with PlayerController. A null runtime (gate false) is a no-op.
+ */
+internal fun recoverCrossfadeFromPrimaryPlaybackError(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(CrossfadeCancelReason.PlaybackError)
+}

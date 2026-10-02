@@ -13,6 +13,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -203,6 +204,13 @@ class PlaybackService : MediaLibraryService() {
                     hasActiveMedia = item != null,
                     updatedAt      = System.currentTimeMillis(),
                 )
+            }
+
+            // CF-2F1: the authoritative primary reported a real playback error. Synchronously cancel any owned
+            // crossfade (key-less). PlayerController keeps owning bad-media queue recovery; the timing driver is
+            // neither stopped nor restarted here.
+            override fun onPlayerError(error: PlaybackException) {
+                recoverCrossfadeFromPrimaryPlaybackError(crossfadePreparation)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {

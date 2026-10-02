@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2E2. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2F1. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2E2 (below).
+- Crossfade engineering foundations CF-1 to CF-2F1 (below).
 
 ## Crossfade - current state
 
@@ -73,6 +73,7 @@ Completed, internal-only foundations:
 | CF-2D4 | timing-driver handoff execution + lifecycle continuation (`CrossfadeTimingDriver`; unwired at the CF-2D4 boundary, composed dormantly by CF-2E1) |
 | CF-2E1 | dormant production composition: runtime + reconciler adapter + timing driver constructed behind the hard gate, driver never started at that boundary (CF-2E2 later adds the explicit start policy) |
 | CF-2E2 | persisted normalized crossfade duration + explicit driver start/stop policy (internal; gate still false, no UI) |
+| CF-2F1 | primary playback-error crossfade recovery (`PlaybackError` cancellation bridge from the primary listener) |
 
 **Live/audible production rollout is NOT enabled.** Specifically:
 
@@ -105,7 +106,9 @@ CF-2E1 (production composition foundation, NOT enablement): `PlaybackService` ca
 
 CF-2E2 (configuration + lifecycle policy, NOT rollout): `AppSettingsRepository.crossfadeDurationMs` persists one canonical unit (milliseconds, key `crossfade_duration_ms`), default 0 ms / OFF, normalized through `CrossfadeRules.normalizeDurationMs` on both read and write. `PlaybackService` caches the value (main thread) and the driver reads that synchronous cached provider. The explicit activation policy starts the driver only for an initial enabled value or an OFF -> enabled transition; enabled -> enabled changes only update the cache (a live fade keeps its plan; a halted driver is not restarted); enabled -> OFF cancels the runtime with `ConfigurationDisabled` (restore primary, abandon secondary, Idle) BEFORE stopping the driver. A persisted value is not rollout permission: the hard gate stays `false`, so no graph, driver or audible crossfade exists in shipping. No UI, no physical validation, and the preference is deliberately not part of backups yet.
 
-The next boundaries are separate: user-facing Settings UI, manual transport and queue-mutation behaviour during overlap, dual-player EQ\/audio-session validation, production enablement and physical Bluetooth\/background validation.
+CF-2F1 (first slice of failure/cancel recovery): when the authoritative primary ExoPlayer reports a playback error, `PlaybackService` synchronously cancels any owned crossfade with `PlaybackError` (Armed/Ready abandon the secondary; Fading/HandoffPending restore the primary to 1f before abandoning the secondary). The timing driver is neither stopped nor restarted, `PlayerController` bad-media recovery stays authoritative and unchanged, secondary errors keep their separate `SecondaryError` path, and the hard gate stays `false` (a no-op in shipping since no runtime exists).
+
+The next boundaries are separate: the remaining failure/cancel recovery, user-facing Settings UI, manual transport and queue-mutation behaviour during overlap, dual-player EQ\/audio-session validation, production enablement and physical Bluetooth\/background validation.
 
 ## In progress
 
