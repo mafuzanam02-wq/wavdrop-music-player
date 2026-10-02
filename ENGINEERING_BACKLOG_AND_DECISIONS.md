@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2D2 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2D3 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2D2
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2D3
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2D2 (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2D3 (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -232,6 +232,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     disconnected controller, generation/logical/physical source mismatch, drifted automatic target and invalid
     snapshots with no seek; otherwise seeks the primary to the target at the secondary position. No queue-generation
     change, no song-id fallback, no secondary or gain change, no runtime handoff closure. Gate remains `false`.
+  - **CF-2D3** exact-key runtime handoff execution (`CrossfadePreparationRuntime.executeHandoff`, injected
+    `CrossfadePrimaryReconciler`): ownership revalidation, secondary snapshot, primary reconciliation, primary gain
+    restored before secondary abandonment, coordinator `HandoffSucceeded`; failures close via `HandoffFailed`; no
+    rollback seek; generic `RequestHandoff` still refused; no caller (driver unchanged, `PlaybackService` unwired);
+    Media3 callbacks remain the stats owner. Gate remains `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -462,7 +467,7 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2D2 are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2D3 are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
@@ -475,8 +480,8 @@ items are validated.
 2. Occurrence-safe handoff / promotion / reconciliation of primary and secondary:
    a. CF-2D1 - secondary handoff snapshot primitive - complete.
    b. CF-2D2 - primary occurrence-reconciliation primitive - complete.
-   c. Runtime handoff execution / coordinator success-failure closure - NEXT.
-   d. Timing-driver continuation/restart after successful handoff.
+   c. CF-2D3 - runtime handoff execution / coordinator success-failure closure - complete (uncalled; production handoff is NOT complete).
+   d. CF-2D4 - timing-driver handoff execution + continuation after successful handoff - NEXT.
 3. Failure / cancel recovery during audible overlap.
 4. Manual seek / pause / next / previous interaction while preparing or fading.
 5. Queue / shuffle / repeat mutation behaviour while fading.

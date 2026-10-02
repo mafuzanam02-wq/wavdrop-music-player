@@ -134,6 +134,30 @@ internal sealed interface FadeTickExecutionResult {
     data class Cancelled(val reason: CrossfadeCancelReason) : FadeTickExecutionResult
 }
 
+/** Why an explicit handoff execution failed closed (the coordinator transition is always HandoffFailed). */
+internal sealed interface CrossfadeHandoffFailure {
+    data object SecondarySnapshotUnavailable : CrossfadeHandoffFailure
+    data class PrimaryReconciliationRejected(val reason: CrossfadePrimaryReconciliationRejection) : CrossfadeHandoffFailure
+    data object PrimaryReconciliationException : CrossfadeHandoffFailure
+    data object PrimaryGainRestoreFailed : CrossfadeHandoffFailure
+    data object SecondaryAbandonFailed : CrossfadeHandoffFailure
+}
+
+/** Result of [CrossfadePreparationRuntime.executeHandoff]. */
+internal sealed interface CrossfadeHandoffExecutionResult {
+    /** Closed, not HandoffPending, a different key, or superseded re-entrantly: nothing (more) was done. */
+    data object Inactive : CrossfadeHandoffExecutionResult
+
+    /** Primary repositioned and audible, secondary abandoned, coordinator closed via HandoffSucceeded (Idle). */
+    data object Succeeded : CrossfadeHandoffExecutionResult
+
+    /** Live ownership was lost before the handoff began; cancelled with the exact existing reason. */
+    data class Cancelled(val reason: CrossfadeCancelReason) : CrossfadeHandoffExecutionResult
+
+    /** Failed closed through the coordinator's HandoffFailed (restore + abandon, Idle). */
+    data class Failed(val failure: CrossfadeHandoffFailure) : CrossfadeHandoffExecutionResult
+}
+
 /**
  * CF-2B3: silent preparation orchestration. Wires snapshot -> CF-1 plan -> occurrence binding -> CF-2A
  * coordinator -> CF-2B2 secondary preparation, and stops at Ready. Evaluation/observation never play the
@@ -155,6 +179,7 @@ internal class CrossfadePreparationRuntime(
     backendFactory: () -> SecondaryPlayerBackend,
     mediaItemFactory: (Song) -> MediaItem = { it.toPlaybackMediaItem() },
     primaryGainBackend: PrimaryGainBackend = PrimaryGainBackend.Unavailable,
+    private val primaryReconciler: CrossfadePrimaryReconciler = CrossfadePrimaryReconciler.Unavailable,
 ) {
     private val primaryGain = CrossfadePrimaryGainController(primaryGainBackend)
 
@@ -395,6 +420,66 @@ internal class CrossfadePreparationRuntime(
         }
         if (state != target) return FadeTickExecutionResult.Inactive
         return if (terminal) FadeTickExecutionResult.HandoffPending else FadeTickExecutionResult.Applied
+    }
+
+    /**
+     * CF-2D3: explicit, exact-key handoff of a terminal fade. Eligible only while open and in HandoffPending for
+     * [key] (else Inactive, no effects). Live ownership is revalidated first (loss cancels with its exact reason
+     * and nothing else runs). Then: secondary physical snapshot -> primary reconciliation (snapshot forwarded
+     * unchanged) -> primary gain restored to 1f -> secondary abandoned -> coordinator HandoffSucceeded (Idle). The
+     * primary is restored BEFORE the secondary is silenced so the only audible source is never cut first. Any
+     * failure drives the coordinator's HandoffFailed (restore + abandon, Idle); a primary seek already issued is
+     * never rolled back. After every external effect a state changed re-entrantly wins (Inactive). Generic
+     * RequestHandoff stays refused; nothing calls this automatically; no stats or persistence happen here.
+     */
+    fun executeHandoff(key: CrossfadeTransitionKey): CrossfadeHandoffExecutionResult {
+        if (closed) return CrossfadeHandoffExecutionResult.Inactive
+        val pending = state as? CrossfadeState.HandoffPending ?: return CrossfadeHandoffExecutionResult.Inactive
+        if (pending.key != key) return CrossfadeHandoffExecutionResult.Inactive
+
+        val snapshot = snapshotProvider()
+        crossfadeOwnershipLossReason(snapshot, key)?.let {
+            cancel(it, snapshot)
+            return CrossfadeHandoffExecutionResult.Cancelled(it)
+        }
+
+        val handoff = secondary.handoffSnapshot(key)
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (handoff == null) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondarySnapshotUnavailable)
+
+        val reconciliation = try {
+            primaryReconciler.reconcile(key, handoff)
+        } catch (e: Exception) {
+            Log.w(TAG, "primary handoff reconciliation threw", e)
+            if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+            return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationException)
+        }
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (reconciliation is CrossfadePrimaryReconciliationResult.Rejected) {
+            return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationRejected(reconciliation.reason))
+        }
+
+        val restored = primaryGain.restore(key)
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!restored) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryGainRestoreFailed)
+
+        val abandoned = secondary.abandon(key)
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!abandoned) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryAbandonFailed)
+
+        // Physical transfer is complete: the coordinator success reduction carries no cleanup commands.
+        applyReduction(reduceCrossfade(state, CrossfadeEvent.HandoffSucceeded(key)), snapshot)
+        return CrossfadeHandoffExecutionResult.Succeeded
+    }
+
+    private fun failHandoff(
+        pending: CrossfadeState.HandoffPending,
+        snapshot: CrossfadeRuntimeSnapshot,
+        failure: CrossfadeHandoffFailure,
+    ): CrossfadeHandoffExecutionResult {
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        applyReduction(reduceCrossfade(state, CrossfadeEvent.HandoffFailed(pending.key)), snapshot)
+        return CrossfadeHandoffExecutionResult.Failed(failure)
     }
 
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */

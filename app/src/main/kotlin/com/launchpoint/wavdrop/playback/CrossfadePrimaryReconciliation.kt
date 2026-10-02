@@ -121,3 +121,23 @@ internal fun reconcileCrossfadeNowPlayingState(
         bufferedPositionMs = snapshot.positionMs,
     )
 }
+
+/**
+ * Narrow seam over the primary's handoff reconciliation (production: [PlayerController.reconcileCrossfadePrimary]).
+ * The runtime depends only on this, never on a controller. The default never pretends success.
+ */
+internal fun interface CrossfadePrimaryReconciler {
+    fun reconcile(
+        key: CrossfadeTransitionKey,
+        snapshot: SecondaryHandoffSnapshot,
+    ): CrossfadePrimaryReconciliationResult
+
+    object Unavailable : CrossfadePrimaryReconciler {
+        override fun reconcile(
+            key: CrossfadeTransitionKey,
+            snapshot: SecondaryHandoffSnapshot,
+        ): CrossfadePrimaryReconciliationResult = CrossfadePrimaryReconciliationResult.Rejected(
+            CrossfadePrimaryReconciliationRejection.ControllerUnavailable,
+        )
+    }
+}
