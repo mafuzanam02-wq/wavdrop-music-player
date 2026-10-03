@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2H3G. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2F2. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3G (below).
+- Crossfade engineering foundations CF-1 to CF-2H3G and CF-2F2 (below).
 
 ## Crossfade - current state
 
@@ -74,6 +74,7 @@ Completed, internal-only foundations:
 | CF-2E1 | dormant production composition: runtime + reconciler adapter + timing driver constructed behind the hard gate, driver never started at that boundary (CF-2E2 later adds the explicit start policy) |
 | CF-2E2 | persisted normalized crossfade duration + explicit driver start/stop policy (internal; gate still false, no UI) |
 | CF-2F1 | primary playback-error crossfade recovery (`PlaybackError` cancellation bridge from the primary listener) |
+| CF-2F2 | primary terminal playback-state crossfade recovery (`PrimaryPlaybackTerminated` cancel on primary `STATE_IDLE`/`STATE_ENDED`) |
 | CF-2G1 | manual (explicit) pause crossfade cancellation (`Pause` cancel before the primary pause is forwarded) |
 | CF-2G2 | explicit same-track seek crossfade cancellation (`Seek` cancel from the app seek and from external-controller scrubs) |
 | CF-2G3 | explicit next/previous crossfade cancellation (`ManualNavigation` cancel from app skipToNext/skipToPrevious and from external-controller next/previous, including previous restart-current) |
@@ -143,6 +144,8 @@ CF-2H3E (fifth part of remaining queue mutation while fading): library song dele
 CF-2H3F (sixth part of remaining queue mutation while fading): explicit user playback starts that replace the active queue cancel any owned crossfade with the existing `QueueMutation` reason BEFORE validation and any logical mutation, via a separate lifecycle-scoped explicit-queue-replacement listener (registered by `PlaybackService`, cleared in `onDestroy`). Public commands that notify first: `playSong`, `playSearchResultPreservingQueue`, `playExternalUri`, `playFromQueue(queue, startSong)`, `playFromQueue(queue, startIndex)` and `playFromQueueShuffled` (notified before `shuffleEnabled` is set). The internals never notify: `playFromQueueInternal`, `playPreservedSearchPlan`, the pending-request drain (which now calls the private non-notifying `playExternalUriWithoutNotification`) and the new private `startQueueWithoutNotification`, which the Play Next empty-queue and StartQueue branches and the Add to Queue StartNewQueue branches now call, so those fallbacks keep only their own CF-2H3A/CF-2H3B seam and one command still yields one cancel. Session resumption (`adoptPlaybackResumption`) and hydration/restore are NOT covered and stay open. Generation bumps, automatic-resume supersession, stats ownership and session saves are unchanged; the runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
 
 CF-2H3G (final part of queue/shuffle/repeat mutation while fading): a service-owned playback resumption cancels any owned crossfade with the existing `QueueMutation` reason directly from `PlaybackService.onPlaybackResumption`, immediately BEFORE `playerController.adoptPlaybackResumption(plan)` and the Media3 repeat/shuffle update, and ONLY for a Ready mapping with `isForPlayback == true` (`shouldCancelCrossfadeForPlaybackResumption`). This is deliberately later than the explicit-user slices: a mere query (`isForPlayback == false`, which only exposes media items), an `Unavailable` result or a mapping failure leave the old playback state authoritative and never cancel. `adoptPlaybackResumption` stays crossfade-agnostic (no listener registry) and never cancels. Hydration (`ensurePlayerHydratedFromSession`, `restoreSessionIfNeeded`, explicit-PLAY hydration) and automatic Bluetooth/wired resume are NOT changed; hydration was inspected and found unable to mutate the queue during a live crossfade (see the backlog). The runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
+
+CF-2F2 (second slice of failure/cancel recovery): when the authoritative primary ExoPlayer reports a terminal playback state in `PlaybackService`'s primary listener (`onPlaybackStateChanged`), `isPrimaryTerminalPlaybackState` (`STATE_IDLE` or `STATE_ENDED`) gates a synchronous `recoverCrossfadeFromPrimaryTerminalState(runtime)` that runs the new `CrossfadeCancelReason.PrimaryPlaybackTerminated` cancellation BEFORE the asynchronous widget work (no coroutine). `STATE_BUFFERING` and `STATE_READY` never cancel. Fading/HandoffPending restore the primary to 1f before abandoning the secondary; Armed/Ready abandon the secondary; a repeated terminal callback (ended then idle, error then idle, pause then idle) finds the runtime Idle and does nothing, so the initiating CF-2F1 `PlaybackError` or CF-2G1 `Pause` reason keeps ownership. The widget IDLE behaviour, `onPlayerError`, explicit pause, the snapshot `!isPlaying -> Pause` fallback, secondary-error handling, TD-018 natural AUTO transitions, stats and persistence are unchanged. Driver keeps running; the hard gate stays `false`.
 
 The next boundaries are separate: the remaining failure/cancel recovery, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
 

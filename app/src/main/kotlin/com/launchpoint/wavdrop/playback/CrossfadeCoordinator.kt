@@ -31,6 +31,8 @@ internal enum class CrossfadeCancelReason {
     QueueBecameDirty,
     ControllerDisconnected,
     PlaybackError,
+    /** The authoritative primary player reached STATE_IDLE or STATE_ENDED (no onPlayerError callback needed). */
+    PrimaryPlaybackTerminated,
     SecondaryError,
     HandoffFailed,
     MissedWindow,

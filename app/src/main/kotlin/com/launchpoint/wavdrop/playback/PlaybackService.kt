@@ -255,6 +255,10 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                // CF-2F2: synchronous, before any asynchronous widget work. BUFFERING and READY never cancel.
+                if (isPrimaryTerminalPlaybackState(playbackState)) {
+                    recoverCrossfadeFromPrimaryTerminalState(crossfadePreparation)
+                }
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged=$playbackState")
                 if (playbackState == Player.STATE_IDLE) {

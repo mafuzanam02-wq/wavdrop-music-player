@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.playback
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 
 /** The primary's physical duration when usable; Media3's C.TIME_UNSET (negative) and 0 are unknown (null). */
 internal fun usableCrossfadePrimaryDuration(durationMs: Long): Long? = durationMs.takeIf { it > 0L }
@@ -236,4 +237,25 @@ internal fun shouldCancelCrossfadeForPlaybackResumption(resultReady: Boolean, is
  */
 internal fun recoverCrossfadeFromPlaybackResumption(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(PLAYBACK_RESUMPTION_CANCEL_REASON)
+}
+
+/**
+ * CF-2F2: only the authoritative primary's terminal states end crossfade ownership. STATE_IDLE and STATE_ENDED are
+ * terminal; STATE_BUFFERING and STATE_READY are not (transient buffering is tolerated by the existing lifecycle rules).
+ */
+internal fun isPrimaryTerminalPlaybackState(playbackState: Int): Boolean =
+    playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED
+
+/** CF-2F2: the cancel reason of a primary terminal playback state (distinct from PlaybackError and Pause). */
+internal val PRIMARY_TERMINAL_STATE_CANCEL_REASON = CrossfadeCancelReason.PrimaryPlaybackTerminated
+
+/**
+ * CF-2F2: key-less, synchronous cleanup when the authoritative primary reports STATE_IDLE or STATE_ENDED (observed in
+ * PlaybackService.onPlaybackStateChanged, before the asynchronous widget work). Fading/HandoffPending restore the primary
+ * gain before abandoning the secondary; a repeated terminal callback (e.g. error then IDLE, pause then IDLE) finds the
+ * runtime already Idle and does nothing. The timing driver is left running; a null runtime (gate false) is a no-op. The
+ * snapshot-based `!isPlaying -> Pause` ownership check stays as the broad defensive fallback.
+ */
+internal fun recoverCrossfadeFromPrimaryTerminalState(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(PRIMARY_TERMINAL_STATE_CANCEL_REASON)
 }
