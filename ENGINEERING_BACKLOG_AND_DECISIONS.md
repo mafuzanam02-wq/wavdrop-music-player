@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2F2 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2F3 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -314,6 +314,10 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     `onPlaybackStateChanged` synchronously runs `runtime.cancel(PrimaryPlaybackTerminated)` for `STATE_IDLE`/`STATE_ENDED` only
     (BUFFERING/READY never cancel); error, pause and the snapshot fallback keep their own reasons; driver keeps running.
     Gate `false`.
+  - **CF-2F3** secondary terminal playback-state recovery (internal failure/cancel foundation): the secondary backend's
+    attempt listener maps IDLE/ENDED into the existing exact-attempt `onError` path (READY stays readiness, BUFFERING stays
+    allowed), reaching `SecondaryError` through the unchanged owner and runtime chain. No new reason or API. Driver keeps
+    running. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -565,11 +569,11 @@ items are validated.
 3. Failure / cancel recovery during audible overlap:
    a. CF-2F1 - primary playback-error cancellation bridge - complete.
    b. CF-2F2 - primary terminal playback-state recovery (IDLE/ENDED) - complete.
-   c. Remaining failure/cancel recovery - open; not auto-selected. Inspection found these signals still handled only by the
-      defensive snapshot fallback (or not at all), none cancelled synchronously: audio-focus loss and becoming-noisy pauses
-      (ExoPlayer flips playWhenReady, no terminal state, so only `!isPlaying -> Pause` on a later pulse); controller
-      disconnection (`ControllerDisconnected` via the snapshot only); a secondary reaching IDLE/ENDED without an error (its
-      attempt listener only handles READY and onPlayerError). Service teardown is already owned by `closeCrossfadeGraph`.
+   c. CF-2F3 - secondary terminal playback-state recovery (IDLE/ENDED) - complete.
+   d. Remaining failure/cancel recovery - open; not auto-selected. Known signals still handled only by the defensive
+      snapshot fallback, none cancelled synchronously: audio-focus loss and becoming-noisy pauses (ExoPlayer flips
+      playWhenReady, no terminal state, so only `!isPlaying -> Pause` on a later pulse); controller disconnection
+      (`ControllerDisconnected` via the snapshot only). Service teardown is already owned by `closeCrossfadeGraph`.
 4. Manual seek / pause / next / previous interaction while preparing or fading:
    a. CF-2G1 - explicit pause crossfade cancellation - complete.
    b. CF-2G2 - explicit same-track seek cancellation - complete.

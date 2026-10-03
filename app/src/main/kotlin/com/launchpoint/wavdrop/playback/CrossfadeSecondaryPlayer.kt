@@ -269,6 +269,31 @@ internal class CrossfadeSecondaryPlayer(
 }
 
 /**
+ * CF-2F3: the secondary's terminal playback states. IDLE and ENDED are unexpected for an owned secondary (owner-driven
+ * stop/reset/release detach the attempt listener first, so they never reach this), BUFFERING and READY are not terminal.
+ * Deliberately local to the secondary (the primary has its own CF-2F2 helper).
+ */
+internal fun isSecondaryTerminalPlaybackState(playbackState: Int): Boolean =
+    playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED
+
+/**
+ * CF-2F3: maps one secondary ExoPlayer state change of [attempt] onto the backend callbacks. READY is readiness,
+ * IDLE/ENDED route into the already-proven exact-attempt failure path ([SecondaryBackendCallbacks.onError], the same
+ * callback as onPlayerError), BUFFERING is an allowed live state and does nothing. Extracted so the mapping is JVM-testable.
+ */
+internal fun dispatchSecondaryPlaybackState(
+    attempt: Long,
+    playbackState: Int,
+    durationMs: () -> Long,
+    callbacks: SecondaryBackendCallbacks,
+) {
+    when {
+        playbackState == Player.STATE_READY -> callbacks.onReady(attempt, durationMs())
+        isSecondaryTerminalPlaybackState(playbackState) -> callbacks.onError(attempt)
+    }
+}
+
+/**
  * The real secondary ExoPlayer: same media audio attributes as the primary but it does NOT handle
  * audio focus or becoming-noisy, starts silent with playWhenReady false, has no offload, no EQ and
  * no MediaSession. It plays only via [start], with an explicit validated initial gain.
@@ -294,7 +319,7 @@ internal class ExoSecondaryPlayerBackend(
         // A fresh listener per attempt carries that attempt's token.
         val attemptListener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) callbacks.onReady(attempt, player.duration)
+                dispatchSecondaryPlaybackState(attempt, playbackState, { player.duration }, callbacks)
             }
 
             override fun onPlayerError(error: PlaybackException) = callbacks.onError(attempt)
