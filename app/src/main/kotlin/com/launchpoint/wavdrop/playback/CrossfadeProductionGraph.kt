@@ -127,3 +127,17 @@ internal val SHUFFLE_CHANGE_CANCEL_REASON = CrossfadeCancelReason.ShuffleChanged
 internal fun recoverCrossfadeFromShuffleChange(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(SHUFFLE_CHANGE_CANCEL_REASON)
 }
+
+/** CF-2H3A: the cancel reason of an explicit Play Next-family queue mutation (a named seam so a pure test can assert it). */
+internal val PLAY_NEXT_MUTATION_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
+
+/**
+ * CF-2H3A: key-less, synchronous crossfade cleanup for an explicit Play Next-family command (playNext, playAllNext,
+ * moveToPlayNext), run BEFORE the queue-generation bump and any queue/Media3 mutation. Cancels from user intent even if
+ * the command then falls back or no-ops. Internal helpers (insert/append/playFromQueue) never notify, so one command
+ * yields one cancel. The runtime's generation check (also `QueueMutation`) stays as the defensive fallback. The timing
+ * driver is left running; a null runtime is a no-op.
+ */
+internal fun recoverCrossfadeFromPlayNextMutation(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(PLAY_NEXT_MUTATION_CANCEL_REASON)
+}

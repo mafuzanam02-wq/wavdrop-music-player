@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2H2 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2H3A (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2H2
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2H3A
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2H2 (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2H3A (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -275,6 +275,10 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     `runtime.cancel(ShuffleChanged)` before shuffle planning and the existing queue-generation bump, even if the toggle then
     no-ops. Native Media3 shuffle (reasserted off) never cancels; `playFromQueueShuffled` is a separate fresh-queue path.
     Generation validation (`QueueMutation`) remains the fallback. Driver keeps running. Gate `false`.
+  - **CF-2H3A** Play Next family queue-mutation cancellation (internal queue recovery foundation): `playNext`, `playAllNext` and
+    `moveToPlayNext` notify a lifecycle-scoped listener first (one notification per command; internal helpers never notify),
+    running `runtime.cancel(QueueMutation)` before the generation bump and queue/Media3 mutation. Add to Queue, arbitrary
+    reorder and deletion remain open. Generation validation stays as the fallback. Driver keeps running. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -505,7 +509,7 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2H2 are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2H3A are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
@@ -534,7 +538,8 @@ items are validated.
 5. Queue / shuffle / repeat mutation behaviour while fading:
    a. CF-2H1 - repeat-mode change cancellation - complete.
    b. CF-2H2 - logical shuffle-change cancellation - complete.
-   c. Remaining queue mutation - open.
+   c. CF-2H3A - Play Next family queue-mutation cancellation - complete.
+   d. Remaining queue mutation (Add to Queue, arbitrary reorder, deletion, other paths) - open.
 6. Dual-player Equalizer / audio-session validation.
 7. User-facing Settings UI / product exposure of the crossfade preference (the persisted internal preference exists since CF-2E2).
 8. Production enablement (flipping the gate, with rollout safeguards).

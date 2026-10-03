@@ -179,6 +179,8 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitRepeatChangeListener { recoverCrossfadeFromRepeatChange(crossfadePreparation) }
         // CF-2H2: app toggleShuffle (UI and custom notification command) notifies this callback (cleared in onDestroy).
         playerController.setExplicitShuffleChangeListener { recoverCrossfadeFromShuffleChange(crossfadePreparation) }
+        // CF-2H3A: explicit playNext/playAllNext/moveToPlayNext notify this callback (cleared in onDestroy).
+        playerController.setExplicitPlayNextMutationListener { recoverCrossfadeFromPlayNextMutation(crossfadePreparation) }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
             thresholdProvider = { previousRestartThresholdMs },
@@ -431,6 +433,7 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitNavigationListener(null)
         playerController.setExplicitRepeatChangeListener(null)
         playerController.setExplicitShuffleChangeListener(null)
+        playerController.setExplicitPlayNextMutationListener(null)
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)

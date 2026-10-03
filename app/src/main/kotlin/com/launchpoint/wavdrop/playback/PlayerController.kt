@@ -1471,6 +1471,9 @@ class PlayerController @Inject constructor(
     }
 
     fun playNext(song: Song) {
+        // CF-2H3A: explicit Play Next intent cancels an owned crossfade before any queue inspection or mutation, even if
+        // this then falls back (empty queue -> playSong, unresolved index -> append). Internal paths never notify.
+        explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
         if (libraryQueue.isEmpty()) {
             playSong(song)
             return
@@ -1511,6 +1514,9 @@ class PlayerController @Inject constructor(
 
     /** Inserts [songs] immediately after the current item in their original order. */
     fun playAllNext(songs: List<Song>) {
+        // CF-2H3A: one notification per command, before planning (NoOp, StartQueue and InsertAfterCurrent alike).
+        // insertAllAfterCurrent / appendAllPreservingQueue / playFromQueue reached from here never notify again.
+        explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
         // A non-empty library queue counts as active even if the current index is momentarily
         // unresolvable: insertAllAfterCurrent then appends rather than dropping the batch. Only a
         // genuinely empty queue starts a new one.
@@ -2015,6 +2021,8 @@ class PlayerController @Inject constructor(
     }
 
     fun moveToPlayNext(playbackIndex: Int) {
+        // CF-2H3A: notified before index validation so an invalid or already-immediate move still ends ownership.
+        explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         val immediateNextIndex = currentPlaybackIndex + 1
         if (playbackIndex <= currentPlaybackIndex) return
@@ -2322,6 +2330,16 @@ class PlayerController @Inject constructor(
     private val explicitNavigationListeners = ExplicitNavigationListenerRegistry()
     private val explicitRepeatChangeListeners = ExplicitRepeatChangeListenerRegistry()
     private val explicitShuffleChangeListeners = ExplicitShuffleChangeListenerRegistry()
+    private val explicitPlayNextMutationListeners = ExplicitPlayNextMutationListenerRegistry()
+
+    /**
+     * CF-2H3A: registers (or clears with null) the lifecycle-scoped callback notified on every explicit playNext,
+     * playAllNext and moveToPlayNext command. PlayerController knows nothing of crossfade; the owner must clear it on
+     * teardown.
+     */
+    internal fun setExplicitPlayNextMutationListener(listener: (() -> Unit)?) {
+        explicitPlayNextMutationListeners.set(listener)
+    }
 
     /**
      * CF-2H2: registers (or clears with null) the lifecycle-scoped callback notified on every explicit logical
