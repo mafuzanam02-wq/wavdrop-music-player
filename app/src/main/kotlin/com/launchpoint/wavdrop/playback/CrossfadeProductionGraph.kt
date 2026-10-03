@@ -80,3 +80,13 @@ internal fun recoverCrossfadeFromPrimaryPlaybackError(runtime: CrossfadePreparat
 internal fun recoverCrossfadeFromExplicitPause(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(CrossfadeCancelReason.Pause)
 }
+
+/**
+ * CF-2G2: key-less, synchronous crossfade cleanup for an explicit same-track position seek (app UI seek or an
+ * external-controller scrub), run BEFORE the seek is applied. Never used for crossfade-owned seeks (CF-2D2 primary
+ * reconciliation) or other internal app-controller seeks. Uses [CrossfadeCancelReason.Seek]; ManualNavigation is
+ * reserved for next/previous. The timing driver is left running; a null runtime (gate false) is a no-op.
+ */
+internal fun recoverCrossfadeFromExplicitSeek(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(CrossfadeCancelReason.Seek)
+}

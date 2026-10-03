@@ -171,6 +171,8 @@ class PlaybackService : MediaLibraryService() {
                     lastObservedCrossfadeDurationMs = duration
                 }
         }
+        // CF-2G2: app UI position seeks notify this lifecycle-scoped callback (cleared in onDestroy).
+        playerController.setExplicitSeekListener { recoverCrossfadeFromExplicitSeek(crossfadePreparation) }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
             thresholdProvider = { previousRestartThresholdMs },
@@ -180,6 +182,7 @@ class PlaybackService : MediaLibraryService() {
             logResume = ::logResume,
             sessionProvider = { mediaSession },
             onExplicitPause = { recoverCrossfadeFromExplicitPause(crossfadePreparation) },
+            onExplicitSeek = { recoverCrossfadeFromExplicitSeek(crossfadePreparation) },
         )
 
         if (BuildConfig.DEBUG) {
@@ -415,6 +418,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        // CF-2G2: never leave the singleton PlayerController holding a callback into this destroyed service.
+        playerController.setExplicitSeekListener(null)
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
@@ -647,22 +652,36 @@ class PlaybackService : MediaLibraryService() {
         // CF-2G1: invoked on every explicit pause BEFORE the primary pause is forwarded (crossfade cleanup needs the
         // primary still controllable to restore its gain). Kept as a callback so this player knows nothing of crossfade.
         private val onExplicitPause: () -> Unit,
+        // CF-2G2: invoked for an EXTERNAL user controller's same-track position seek only, before the seek is
+        // forwarded. Never for the app-marked controller (its user seeks are handled in PlayerController.seekTo, and its
+        // internal seeks, e.g. CF-2D2 handoff reconciliation, must stay untouched).
+        private val onExplicitSeek: () -> Unit,
     ) : ForwardingPlayer(player) {
 
         override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
 
         // Explicit external transport (notification, lock screen, media keys, widget, system
         // controllers) reaches the player here. Tied to the actual play()/pause() call.
-        private fun noteExternalTransport() {
+        private fun isExternalUserTransportRequest(): Boolean {
             val controller = sessionProvider()?.controllerForCurrentRequest
-            if (ExternalTransportPolicy.isExternalUserController(
-                    hasController = controller != null,
-                    isAppController = controller?.connectionHints
-                        ?.getBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, false) == true,
-                )
-            ) {
+            return ExternalTransportPolicy.isExternalUserController(
+                hasController = controller != null,
+                isAppController = controller?.connectionHints
+                    ?.getBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, false) == true,
+            )
+        }
+
+        private fun noteExternalTransport() {
+            if (isExternalUserTransportRequest()) {
                 playerController.onExplicitExternalTransport()
             }
+        }
+
+        // CF-2G2: same-track position seek (Player.seekTo(positionMs) only). Only an external user controller is an
+        // explicit user seek here; the app-marked controller is never cancelled at this layer.
+        override fun seekTo(positionMs: Long) {
+            if (isExternalUserTransportRequest()) onExplicitSeek()
+            super.seekTo(positionMs)
         }
 
         override fun pause() {
@@ -697,11 +716,11 @@ class PlaybackService : MediaLibraryService() {
         override fun seekToPrevious() {
             val thresholdMs = thresholdProvider()
             if (thresholdMs > 0L && currentPosition > thresholdMs) {
-                seekTo(0L)
+                super.seekTo(0L) // previous/restart semantics stay out of the CF-2G2 seek hook
             } else if (hasPreviousMediaItem()) {
                 seekToPreviousMediaItem()
             } else {
-                seekTo(0L)
+                super.seekTo(0L) // previous/restart semantics stay out of the CF-2G2 seek hook
             }
         }
 

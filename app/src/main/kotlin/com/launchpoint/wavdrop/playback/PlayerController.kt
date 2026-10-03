@@ -2305,7 +2305,20 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    private val explicitSeekListeners = ExplicitSeekListenerRegistry()
+
+    /**
+     * CF-2G2: registers (or clears with null) the lifecycle-scoped callback notified on every explicit app position
+     * seek. PlayerController knows nothing of crossfade; the owner must clear it on teardown.
+     */
+    internal fun setExplicitSeekListener(listener: (() -> Unit)?) {
+        explicitSeekListeners.set(listener)
+    }
+
     fun seekTo(positionMs: Long) {
+        // CF-2G2: the user asked to seek, so any owned crossfade stops owning playback. Notified before the seek is
+        // clamped, deferred or applied (a deferred PendingSeek must not cancel again when it later drains).
+        explicitSeekListeners.notifyExplicitSeek()
         val duration = _nowPlayingState.value.durationMs
         val clamped = positionMs.coerceIn(0L, if (duration > 0) duration else positionMs)
         val controller = mediaController
