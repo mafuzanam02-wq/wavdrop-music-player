@@ -215,3 +215,25 @@ internal val QUEUE_REPLACEMENT_CANCEL_REASON = CrossfadeCancelReason.QueueMutati
 internal fun recoverCrossfadeFromQueueReplacement(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(QUEUE_REPLACEMENT_CANCEL_REASON)
 }
+
+/** CF-2H3G: the cancel reason of a service-owned playback-resumption adoption (a named seam so a pure test can assert it). */
+internal val PLAYBACK_RESUMPTION_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
+
+/**
+ * CF-2H3G: only a resumption that will actually be ADOPTED replaces the authoritative queue and generation, so crossfade
+ * ownership ends only for a Ready mapping with isForPlayback == true. A mere query (isForPlayback == false, which only
+ * exposes media items), an Unavailable result or a mapping failure leave the old playback state authoritative and must
+ * not cancel. Used by PlaybackService.onPlaybackResumption; PlayerController.adoptPlaybackResumption stays
+ * crossfade-agnostic and never cancels.
+ */
+internal fun shouldCancelCrossfadeForPlaybackResumption(resultReady: Boolean, isForPlayback: Boolean): Boolean =
+    resultReady && isForPlayback
+
+/**
+ * CF-2H3G: key-less, synchronous crossfade cleanup run immediately before a service-owned playback resumption is
+ * adopted (before the generation bump, queue replacement and repeat/shuffle application). The timing driver is left
+ * running; a null runtime (gate false) is a no-op. The runtime generation check stays as the defensive fallback.
+ */
+internal fun recoverCrossfadeFromPlaybackResumption(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(PLAYBACK_RESUMPTION_CANCEL_REASON)
+}

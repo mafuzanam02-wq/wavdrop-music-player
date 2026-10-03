@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2H3F. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2H3G. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3F (below).
+- Crossfade engineering foundations CF-1 to CF-2H3G (below).
 
 ## Crossfade - current state
 
@@ -85,6 +85,7 @@ Completed, internal-only foundations:
 | CF-2H3D | queue removal and bulk-clear crossfade cancellation (`QueueMutation` cancel from `removeFromQueue`, `clearEarlierQueue`, `clearUpNext`, before validation and the generation bump) |
 | CF-2H3E | library deletion crossfade cancellation (`QueueMutation` cancel from `handleSongDeleted`, before the current occurrence is resolved and the deletion is routed) |
 | CF-2H3F | explicit whole-queue replacement crossfade cancellation (`QueueMutation` cancel from `playSong`, `playSearchResultPreservingQueue`, `playExternalUri`, both `playFromQueue` overloads and `playFromQueueShuffled`, before validation and any logical mutation) |
+| CF-2H3G | playback-resumption adoption crossfade cancellation (`QueueMutation` cancel in `PlaybackService.onPlaybackResumption` only for Ready + `isForPlayback`, immediately before `adoptPlaybackResumption`) |
 
 **Live/audible production rollout is NOT enabled.** Specifically:
 
@@ -141,7 +142,9 @@ CF-2H3E (fifth part of remaining queue mutation while fading): library song dele
 
 CF-2H3F (sixth part of remaining queue mutation while fading): explicit user playback starts that replace the active queue cancel any owned crossfade with the existing `QueueMutation` reason BEFORE validation and any logical mutation, via a separate lifecycle-scoped explicit-queue-replacement listener (registered by `PlaybackService`, cleared in `onDestroy`). Public commands that notify first: `playSong`, `playSearchResultPreservingQueue`, `playExternalUri`, `playFromQueue(queue, startSong)`, `playFromQueue(queue, startIndex)` and `playFromQueueShuffled` (notified before `shuffleEnabled` is set). The internals never notify: `playFromQueueInternal`, `playPreservedSearchPlan`, the pending-request drain (which now calls the private non-notifying `playExternalUriWithoutNotification`) and the new private `startQueueWithoutNotification`, which the Play Next empty-queue and StartQueue branches and the Add to Queue StartNewQueue branches now call, so those fallbacks keep only their own CF-2H3A/CF-2H3B seam and one command still yields one cancel. Session resumption (`adoptPlaybackResumption`) and hydration/restore are NOT covered and stay open. Generation bumps, automatic-resume supersession, stats ownership and session saves are unchanged; the runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
 
-The next boundaries are separate: the remaining failure/cancel recovery, remaining queue mutation behaviour while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
+CF-2H3G (final part of queue/shuffle/repeat mutation while fading): a service-owned playback resumption cancels any owned crossfade with the existing `QueueMutation` reason directly from `PlaybackService.onPlaybackResumption`, immediately BEFORE `playerController.adoptPlaybackResumption(plan)` and the Media3 repeat/shuffle update, and ONLY for a Ready mapping with `isForPlayback == true` (`shouldCancelCrossfadeForPlaybackResumption`). This is deliberately later than the explicit-user slices: a mere query (`isForPlayback == false`, which only exposes media items), an `Unavailable` result or a mapping failure leave the old playback state authoritative and never cancel. `adoptPlaybackResumption` stays crossfade-agnostic (no listener registry) and never cancels. Hydration (`ensurePlayerHydratedFromSession`, `restoreSessionIfNeeded`, explicit-PLAY hydration) and automatic Bluetooth/wired resume are NOT changed; hydration was inspected and found unable to mutate the queue during a live crossfade (see the backlog). The runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
+
+The next boundaries are separate: the remaining failure/cancel recovery, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
 
 ## In progress
 

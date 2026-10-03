@@ -574,6 +574,11 @@ class PlaybackService : MediaLibraryService() {
                     when (result) {
                         is PlaybackResumptionResult.Ready -> {
                             val plan = result.plan
+                            // CF-2H3G: cancel only when this resumption will really be adopted (Ready + isForPlayback),
+                            // before the generation bump and queue replacement. Queries, Unavailable and failures never cancel.
+                            if (shouldCancelCrossfadeForPlaybackResumption(resultReady = true, isForPlayback = isForPlayback)) {
+                                recoverCrossfadeFromPlaybackResumption(crossfadePreparation)
+                            }
                             if (isForPlayback) {
                                 playerController.adoptPlaybackResumption(plan)
                                 mediaSession.player.repeatMode = plan.repeatMode.toPlayerRepeatMode()

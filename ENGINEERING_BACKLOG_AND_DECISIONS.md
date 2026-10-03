@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2H3F (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2H3G (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2H3F
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2H3G
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2H3F (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2H3G (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -305,6 +305,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     before validation and any logical mutation. Internals (`playFromQueueInternal`, `playPreservedSearchPlan`, the pending
     drain, `startQueueWithoutNotification`) never notify and the CF-2H3A/B fallbacks use them, so there is no double cancel.
     Session resumption stays open. Generation validation stays as the fallback. Driver keeps running. Gate `false`.
+  - **CF-2H3G** playback-resumption adoption cancellation (internal queue recovery foundation): `PlaybackService.onPlaybackResumption`
+    cancels via `runtime.cancel(QueueMutation)` immediately before `adoptPlaybackResumption`, only for Ready + `isForPlayback`
+    (queries, Unavailable and mapping failures never cancel; `adoptPlaybackResumption` stays crossfade-agnostic). Hydration
+    inspected and found unable to mutate a live-crossfade queue. Generation validation stays as the fallback. Driver keeps
+    running. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -535,7 +540,7 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2H3F are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2H3G are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
@@ -552,7 +557,7 @@ items are validated.
    d. CF-2D4 - timing-driver handoff execution + continuation after successful handoff - complete.
    CF-2E1 - dormant production construction/lifecycle wiring - complete (gate false, driver not started).
    CF-2E2 - persisted crossfade configuration + explicit driver start/stop policy - complete (internal; a setting is not enablement, the hard gate remains the rollout boundary; no UI, not in backups).
-   Next boundaries are separate and not auto-selected: failure/cancel recovery during overlap, remaining queue mutation while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, physical Bluetooth/background validation.
+   Next boundaries are separate and not auto-selected: failure/cancel recovery during overlap, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, physical Bluetooth/background validation.
 3. Failure / cancel recovery during audible overlap:
    a. CF-2F1 - primary playback-error cancellation bridge - complete.
    b. Remaining failure/cancel recovery (other failure sources not already owned by CF-2C..CF-2E) - open; not auto-selected.
@@ -570,8 +575,14 @@ items are validated.
    f. CF-2H3D - queue removal / bulk-clear cancellation - complete.
    g. CF-2H3E - library deletion cancellation - complete.
    h. CF-2H3F - explicit whole-queue replacement cancellation - complete.
-   i. Remaining queue mutation - session resumption/adoption (`adoptPlaybackResumption`, which still bumps the queue generation
-      and adopts a whole new logical queue; hydration/restore) - open. Not auto-selected; the parent item stays open.
+   i. CF-2H3G - playback-resumption adoption cancellation - complete.
+   Parent item (queue / shuffle / repeat mutation behaviour while fading) - complete. Evidence for closing it: every
+   `bumpQueueGeneration()` path now has a cancellation owner (explicit commands via the CF-2H1..CF-2H3F listeners, resumption
+   via CF-2H3G), and the one remaining generation bumper, hydration (`ensurePlayerHydratedFromSession`), only mutates when
+   `HydrationAuthority` reports an empty physical Media3 queue (no items and no current item, not external), re-checked
+   synchronously before the bump; a live crossfade requires a playing non-empty primary queue, so hydration is a no-op
+   (`AlreadyHydrated` / `SkippedActiveQueue`) while one is owned. Established by code inspection plus the existing
+   `HydrationAuthority` tests, not a device test; reopen if a hydration path is shown to run against a non-empty primary.
 6. Dual-player Equalizer / audio-session validation.
 7. User-facing Settings UI / product exposure of the crossfade preference (the persisted internal preference exists since CF-2E2).
 8. Production enablement (flipping the gate, with rollout safeguards).
