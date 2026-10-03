@@ -141,3 +141,17 @@ internal val PLAY_NEXT_MUTATION_CANCEL_REASON = CrossfadeCancelReason.QueueMutat
 internal fun recoverCrossfadeFromPlayNextMutation(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(PLAY_NEXT_MUTATION_CANCEL_REASON)
 }
+
+/** CF-2H3B: the cancel reason of an explicit Add to Queue-family mutation (a named seam so a pure test can assert it). */
+internal val ADD_TO_QUEUE_MUTATION_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
+
+/**
+ * CF-2H3B: key-less, synchronous crossfade cleanup for an explicit tail-append command (addToQueue, addAllToQueue), run
+ * BEFORE planning and the generation bump. Cancels from user intent even if the command then no-ops or starts a new
+ * queue. The shared append helper never notifies (it is also reached from the Play Next fallbacks, which own their own
+ * seam), so one command yields one cancel. The runtime generation check stays as the defensive fallback. The timing
+ * driver is left running; a null runtime is a no-op.
+ */
+internal fun recoverCrossfadeFromAddToQueueMutation(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(ADD_TO_QUEUE_MUTATION_CANCEL_REASON)
+}

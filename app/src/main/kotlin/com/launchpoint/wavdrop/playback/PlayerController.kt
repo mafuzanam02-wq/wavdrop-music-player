@@ -1533,6 +1533,9 @@ class PlayerController @Inject constructor(
 
     /** Appends [songs] to the end of the queue in their original order. */
     fun addAllToQueue(songs: List<Song>) {
+        // CF-2H3B: one notification per command, before planning (NoOp, StartNewQueue and AppendPreservingQueue alike).
+        // appendAllPreservingQueue (shared with the Play Next fallbacks) and playFromQueue never notify.
+        explicitAddToQueueMutationListeners.notifyExplicitAddToQueueMutation()
         when (
             planQueueAdd(
                 hasExistingQueue = libraryQueue.isNotEmpty(),
@@ -1550,6 +1553,8 @@ class PlayerController @Inject constructor(
     }
 
     fun addToQueue(song: Song) {
+        // CF-2H3B: notified before planning; see addAllToQueue.
+        explicitAddToQueueMutationListeners.notifyExplicitAddToQueueMutation()
         when (
             planQueueAdd(
                 hasExistingQueue = libraryQueue.isNotEmpty(),
@@ -2331,6 +2336,15 @@ class PlayerController @Inject constructor(
     private val explicitRepeatChangeListeners = ExplicitRepeatChangeListenerRegistry()
     private val explicitShuffleChangeListeners = ExplicitShuffleChangeListenerRegistry()
     private val explicitPlayNextMutationListeners = ExplicitPlayNextMutationListenerRegistry()
+    private val explicitAddToQueueMutationListeners = ExplicitAddToQueueMutationListenerRegistry()
+
+    /**
+     * CF-2H3B: registers (or clears with null) the lifecycle-scoped callback notified on every explicit addToQueue and
+     * addAllToQueue command. PlayerController knows nothing of crossfade; the owner must clear it on teardown.
+     */
+    internal fun setExplicitAddToQueueMutationListener(listener: (() -> Unit)?) {
+        explicitAddToQueueMutationListeners.set(listener)
+    }
 
     /**
      * CF-2H3A: registers (or clears with null) the lifecycle-scoped callback notified on every explicit playNext,
