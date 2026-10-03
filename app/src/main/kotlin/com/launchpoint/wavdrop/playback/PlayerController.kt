@@ -1986,18 +1986,24 @@ class PlayerController @Inject constructor(
     }
 
     fun moveQueueItemUp(playbackIndex: Int) {
+        // CF-2H3C: explicit reorder intent cancels an owned crossfade first, even if validation then no-ops.
+        explicitQueueReorderListeners.notifyExplicitQueueReorder()
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex <= currentPlaybackIndex || playbackIndex <= 0) return
         swapPlaybackItems(playbackIndex, playbackIndex - 1, currentPlaybackIndex)
     }
 
     fun moveQueueItemDown(playbackIndex: Int) {
+        // CF-2H3C: explicit reorder intent cancels an owned crossfade first, even if validation then no-ops.
+        explicitQueueReorderListeners.notifyExplicitQueueReorder()
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex <= currentPlaybackIndex || playbackIndex >= playbackQueue.size - 1) return
         swapPlaybackItems(playbackIndex, playbackIndex + 1, currentPlaybackIndex)
     }
 
     fun moveQueueItemTo(fromPlaybackIndex: Int, toPlaybackIndex: Int) {
+        // CF-2H3C: explicit reorder intent cancels an owned crossfade first, even if validation then no-ops.
+        explicitQueueReorderListeners.notifyExplicitQueueReorder()
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (fromPlaybackIndex <= currentPlaybackIndex || toPlaybackIndex <= currentPlaybackIndex) return
         if (fromPlaybackIndex == toPlaybackIndex) return
@@ -2337,6 +2343,16 @@ class PlayerController @Inject constructor(
     private val explicitShuffleChangeListeners = ExplicitShuffleChangeListenerRegistry()
     private val explicitPlayNextMutationListeners = ExplicitPlayNextMutationListenerRegistry()
     private val explicitAddToQueueMutationListeners = ExplicitAddToQueueMutationListenerRegistry()
+    private val explicitQueueReorderListeners = ExplicitQueueReorderListenerRegistry()
+
+    /**
+     * CF-2H3C: registers (or clears with null) the lifecycle-scoped callback notified on every explicit
+     * moveQueueItemUp/Down/To command (not moveToPlayNext, which belongs to the Play Next seam). PlayerController
+     * knows nothing of crossfade; the owner must clear it on teardown.
+     */
+    internal fun setExplicitQueueReorderListener(listener: (() -> Unit)?) {
+        explicitQueueReorderListeners.set(listener)
+    }
 
     /**
      * CF-2H3B: registers (or clears with null) the lifecycle-scoped callback notified on every explicit addToQueue and

@@ -155,3 +155,17 @@ internal val ADD_TO_QUEUE_MUTATION_CANCEL_REASON = CrossfadeCancelReason.QueueMu
 internal fun recoverCrossfadeFromAddToQueueMutation(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(ADD_TO_QUEUE_MUTATION_CANCEL_REASON)
 }
+
+/** CF-2H3C: the cancel reason of an explicit arbitrary future queue reorder (a named seam so a pure test can assert it). */
+internal val QUEUE_REORDER_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
+
+/**
+ * CF-2H3C: key-less, synchronous crossfade cleanup for an explicit arbitrary future reorder (moveQueueItemUp,
+ * moveQueueItemDown, moveQueueItemTo), run BEFORE validation and the generation bump. Cancels from user intent even if the
+ * request then no-ops. The private swap helper never notifies, and moveToPlayNext keeps its own Play Next seam, so one
+ * command yields one cancel. The runtime generation check stays as the defensive fallback. The timing driver is left
+ * running; a null runtime is a no-op.
+ */
+internal fun recoverCrossfadeFromQueueReorder(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(QUEUE_REORDER_CANCEL_REASON)
+}
