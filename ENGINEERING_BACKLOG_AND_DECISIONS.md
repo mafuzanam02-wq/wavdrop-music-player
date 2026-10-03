@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2G2 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2G3 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -47,7 +47,7 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2G2
+2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2G3
    foundations (see §5 and §11). Not user-facing and not enabled.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2G2 (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2G3 (post-beta9, internal, gated off).** Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -259,7 +259,12 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
   - **CF-2G2** explicit same-track seek cancellation (internal explicit-seek recovery foundation): app UI seek via a
     lifecycle-scoped `PlayerController` listener and external scrubs via `PreviousBehaviorPlayer` (external controllers
     only) run `runtime.cancel(Seek)` before the seek; app-marked controller seeks, including CF-2D2 handoff
-    reconciliation, are never cancelled; driver keeps running. Next/previous open. Gate `false`.
+    reconciliation, are never cancelled; driver keeps running. Gate `false`.
+  - **CF-2G3** explicit next/previous cancellation (internal navigation recovery foundation): app `skipToNext`/`skipToPrevious`
+    notify a lifecycle-scoped `PlayerController` listener and external controllers (only) are intercepted in
+    `PreviousBehaviorPlayer`; both run `runtime.cancel(ManualNavigation)` before navigation is applied or deferred (also for
+    previous restart-current, never `Seek`; one cancel per external PREVIOUS; drained pending navigation does not re-cancel;
+    app-marked requests inert at the session layer). Driver keeps running; resume-authority policy unchanged. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -490,7 +495,7 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
-Foundations CF-1..CF-2G2 are complete (§5). The following remain, and must **not** be combined into one
+Foundations CF-1..CF-2G3 are complete (§5). The following remain, and must **not** be combined into one
 implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
 items are validated.
 
@@ -507,14 +512,15 @@ items are validated.
    d. CF-2D4 - timing-driver handoff execution + continuation after successful handoff - complete.
    CF-2E1 - dormant production construction/lifecycle wiring - complete (gate false, driver not started).
    CF-2E2 - persisted crossfade configuration + explicit driver start/stop policy - complete (internal; a setting is not enablement, the hard gate remains the rollout boundary; no UI, not in backups).
-   Next boundaries are separate and not auto-selected: failure/cancel recovery during overlap, manual transport interaction, queue/shuffle/repeat mutation while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, physical Bluetooth/background validation.
+   Next boundaries are separate and not auto-selected: failure/cancel recovery during overlap, queue/shuffle/repeat mutation while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, physical Bluetooth/background validation.
 3. Failure / cancel recovery during audible overlap:
    a. CF-2F1 - primary playback-error cancellation bridge - complete.
    b. Remaining failure/cancel recovery (other failure sources not already owned by CF-2C..CF-2E) - open; not auto-selected.
 4. Manual seek / pause / next / previous interaction while preparing or fading:
    a. CF-2G1 - explicit pause crossfade cancellation - complete.
    b. CF-2G2 - explicit same-track seek cancellation - complete.
-   c. Next / previous navigation - open.
+   c. CF-2G3 - explicit next/previous navigation cancellation - complete.
+   Parent item (manual seek / pause / next / previous interaction while preparing or fading) - complete. Queue/shuffle/repeat mutation is NOT covered (item 5).
 5. Queue / shuffle / repeat mutation behaviour while fading.
 6. Dual-player Equalizer / audio-session validation.
 7. User-facing Settings UI / product exposure of the crossfade preference (the persisted internal preference exists since CF-2E2).

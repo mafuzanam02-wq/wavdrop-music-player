@@ -2119,6 +2119,9 @@ class PlayerController @Inject constructor(
     }
 
     fun skipToNext() {
+        // CF-2G3: user intent cancels an owned crossfade first, even if navigation is deferred or a no-op. The
+        // deferred-drain path (navigate) never notifies, so a pending command cancels exactly once.
+        explicitNavigationListeners.notifyExplicitNavigation()
         // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
         resetBadMediaRecoveryEpisode()
         val controller = mediaController
@@ -2134,6 +2137,8 @@ class PlayerController @Inject constructor(
     }
 
     fun skipToPrevious() {
+        // CF-2G3: also covers PREVIOUS resolving to restart-current (internal seek, not the public seekTo).
+        explicitNavigationListeners.notifyExplicitNavigation()
         // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
         resetBadMediaRecoveryEpisode()
         val controller = mediaController
@@ -2306,6 +2311,15 @@ class PlayerController @Inject constructor(
     }
 
     private val explicitSeekListeners = ExplicitSeekListenerRegistry()
+    private val explicitNavigationListeners = ExplicitNavigationListenerRegistry()
+
+    /**
+     * CF-2G3: registers (or clears with null) the lifecycle-scoped callback notified on every explicit app
+     * skipToNext/skipToPrevious. PlayerController knows nothing of crossfade; the owner must clear it on teardown.
+     */
+    internal fun setExplicitNavigationListener(listener: (() -> Unit)?) {
+        explicitNavigationListeners.set(listener)
+    }
 
     /**
      * CF-2G2: registers (or clears with null) the lifecycle-scoped callback notified on every explicit app position

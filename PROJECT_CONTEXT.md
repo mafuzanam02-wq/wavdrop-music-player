@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2G2. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2G3. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2G2 (below).
+- Crossfade engineering foundations CF-1 to CF-2G3 (below).
 
 ## Crossfade - current state
 
@@ -76,6 +76,7 @@ Completed, internal-only foundations:
 | CF-2F1 | primary playback-error crossfade recovery (`PlaybackError` cancellation bridge from the primary listener) |
 | CF-2G1 | manual (explicit) pause crossfade cancellation (`Pause` cancel before the primary pause is forwarded) |
 | CF-2G2 | explicit same-track seek crossfade cancellation (`Seek` cancel from the app seek and from external-controller scrubs) |
+| CF-2G3 | explicit next/previous crossfade cancellation (`ManualNavigation` cancel from app skipToNext/skipToPrevious and from external-controller next/previous, including previous restart-current) |
 
 **Live/audible production rollout is NOT enabled.** Specifically:
 
@@ -114,7 +115,9 @@ CF-2G1 (first slice of manual transport interaction): every explicit pause that 
 
 CF-2G2 (second slice of manual transport interaction): an explicit same-track position seek cancels any owned crossfade with `Seek` BEFORE the seek is applied, from two sources. App user seek: `PlayerController.seekTo(positionMs)` notifies a lifecycle-scoped explicit-seek listener (registered by `PlaybackService`, cleared in `onDestroy`) before clamping, deferring or forwarding. External system scrub: `PreviousBehaviorPlayer.seekTo(positionMs)` does the same only when the current request comes from an external user controller (`ExternalTransportPolicy`). Seeks by the app-marked controller are never cancelled at the session layer, so internal seeks (notably CF-2D2 handoff reconciliation, bad-media recovery, hydration, queue sync) stay valid. Previous-button restart is routed to the underlying player so next/previous remains a separate slice. Fading/HandoffPending restore the primary to 1f before abandoning the secondary; the driver keeps running and a later pulse plans afresh from the live position. The hard gate stays `false`.
 
-The next boundaries are separate: the remaining failure/cancel recovery, the remaining manual transport (next and previous navigation), queue/shuffle/repeat mutation behaviour while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
+CF-2G3 (third and final slice of manual transport interaction): an explicit NEXT or PREVIOUS command cancels any owned crossfade with `ManualNavigation` BEFORE navigation is applied or deferred, from two sources. App command: `PlayerController.skipToNext()` / `skipToPrevious()` notify a lifecycle-scoped explicit-navigation listener (registered by `PlaybackService`, cleared in `onDestroy`) first, before the bad-media episode reset, controller lookup, pending-navigation capture or `navigate(...)`; a deferred pending navigation drained on reconnect does not notify again, and a navigation that later turns out to be a no-op has still cancelled. External system command: `PreviousBehaviorPlayer.seekToNext()`, `seekToNextMediaItem()`, `seekToPrevious()` and `seekToPreviousMediaItem()` call the callback only when the request comes from an external user controller; `seekToPrevious()` cancels once at the command boundary and delegates internally via `super.*` so one external PREVIOUS yields one cancel. PREVIOUS restart-current is `ManualNavigation` (never `Seek`) and still uses `super.seekTo(0L)`. App-marked controller requests stay inert at the session layer. External NEXT/PREVIOUS still do not call `noteExternalTransport()` (resume-authority policy unchanged). Driver keeps running; no queue mutation, generation, stats or settings change. The hard gate stays `false`.
+
+The next boundaries are separate: the remaining failure/cancel recovery, queue/shuffle/repeat mutation behaviour while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
 
 ## In progress
 

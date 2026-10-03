@@ -173,6 +173,8 @@ class PlaybackService : MediaLibraryService() {
         }
         // CF-2G2: app UI position seeks notify this lifecycle-scoped callback (cleared in onDestroy).
         playerController.setExplicitSeekListener { recoverCrossfadeFromExplicitSeek(crossfadePreparation) }
+        // CF-2G3: app skipToNext/skipToPrevious notify this lifecycle-scoped callback (cleared in onDestroy).
+        playerController.setExplicitNavigationListener { recoverCrossfadeFromExplicitNavigation(crossfadePreparation) }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
             thresholdProvider = { previousRestartThresholdMs },
@@ -183,6 +185,7 @@ class PlaybackService : MediaLibraryService() {
             sessionProvider = { mediaSession },
             onExplicitPause = { recoverCrossfadeFromExplicitPause(crossfadePreparation) },
             onExplicitSeek = { recoverCrossfadeFromExplicitSeek(crossfadePreparation) },
+            onExplicitNavigation = { recoverCrossfadeFromExplicitNavigation(crossfadePreparation) },
         )
 
         if (BuildConfig.DEBUG) {
@@ -420,6 +423,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         // CF-2G2: never leave the singleton PlayerController holding a callback into this destroyed service.
         playerController.setExplicitSeekListener(null)
+        playerController.setExplicitNavigationListener(null)
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
@@ -656,6 +660,9 @@ class PlaybackService : MediaLibraryService() {
         // forwarded. Never for the app-marked controller (its user seeks are handled in PlayerController.seekTo, and its
         // internal seeks, e.g. CF-2D2 handoff reconciliation, must stay untouched).
         private val onExplicitSeek: () -> Unit,
+        // CF-2G3: invoked ONCE per EXTERNAL user NEXT/PREVIOUS command, before navigation. App-marked controller
+        // requests never reach it (PlayerController already notified). Internal delegation uses super.* to bypass it.
+        private val onExplicitNavigation: () -> Unit,
     ) : ForwardingPlayer(player) {
 
         override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
@@ -713,14 +720,34 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
+        // CF-2G3: each explicit NEXT/PREVIOUS Media3 command is a distinct top-level seam (ForwardingPlayer does not
+        // route one through another). Each cancels once for external user controllers only.
+        override fun seekToNext() {
+            if (isExternalUserTransportRequest()) onExplicitNavigation()
+            super.seekToNext()
+        }
+
+        override fun seekToNextMediaItem() {
+            if (isExternalUserTransportRequest()) onExplicitNavigation()
+            super.seekToNextMediaItem()
+        }
+
+        override fun seekToPreviousMediaItem() {
+            if (isExternalUserTransportRequest()) onExplicitNavigation()
+            super.seekToPreviousMediaItem()
+        }
+
         override fun seekToPrevious() {
+            // One cancel at the PREVIOUS command boundary, before threshold evaluation. Delegations below use super.*
+            // so neither the CF-2G2 seek hook nor the media-item hook fires a second time.
+            if (isExternalUserTransportRequest()) onExplicitNavigation()
             val thresholdMs = thresholdProvider()
             if (thresholdMs > 0L && currentPosition > thresholdMs) {
-                super.seekTo(0L) // previous/restart semantics stay out of the CF-2G2 seek hook
+                super.seekTo(0L)
             } else if (hasPreviousMediaItem()) {
-                seekToPreviousMediaItem()
+                super.seekToPreviousMediaItem()
             } else {
-                super.seekTo(0L) // previous/restart semantics stay out of the CF-2G2 seek hook
+                super.seekTo(0L)
             }
         }
 

@@ -90,3 +90,14 @@ internal fun recoverCrossfadeFromExplicitPause(runtime: CrossfadePreparationRunt
 internal fun recoverCrossfadeFromExplicitSeek(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(CrossfadeCancelReason.Seek)
 }
+
+/**
+ * CF-2G3: key-less, synchronous crossfade cleanup for an explicit user NEXT or PREVIOUS command (app skipToNext/
+ * skipToPrevious or an external controller), run BEFORE navigation is applied or deferred. Also used when PREVIOUS
+ * resolves to restart-current (the initiating command was PREVIOUS, not a scrub, so never [CrossfadeCancelReason.Seek]).
+ * Not used for bad-media recovery or natural transitions. The timing driver is left running; a null runtime (gate
+ * false) is a no-op.
+ */
+internal fun recoverCrossfadeFromExplicitNavigation(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(CrossfadeCancelReason.ManualNavigation)
+}
