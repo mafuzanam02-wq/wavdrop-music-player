@@ -200,3 +200,18 @@ internal val LIBRARY_DELETION_CANCEL_REASON = CrossfadeCancelReason.QueueMutatio
 internal fun recoverCrossfadeFromLibraryDeletion(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(LIBRARY_DELETION_CANCEL_REASON)
 }
+
+/** CF-2H3F: the cancel reason of an explicit whole-queue replacement (a named seam so a pure test can assert it). */
+internal val QUEUE_REPLACEMENT_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
+
+/**
+ * CF-2H3F: key-less, synchronous crossfade cleanup for an explicit user playback start that replaces the active queue
+ * (playSong, playSearchResultPreservingQueue, playExternalUri, both playFromQueue overloads, playFromQueueShuffled), run
+ * BEFORE validation and any logical playback mutation. The queue-start internals (playFromQueueInternal,
+ * playPreservedSearchPlan, the pending-request drain) never notify, and the Play Next / Add to Queue fallbacks that
+ * start a queue use those internals and keep their own seam, so one user command yields one cancel. The runtime
+ * generation check stays as the defensive fallback. The timing driver is left running; a null runtime is a no-op.
+ */
+internal fun recoverCrossfadeFromQueueReplacement(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(QUEUE_REPLACEMENT_CANCEL_REASON)
+}

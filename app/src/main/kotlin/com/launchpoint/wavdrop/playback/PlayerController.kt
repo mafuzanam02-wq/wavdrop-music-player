@@ -1070,7 +1070,7 @@ class PlayerController @Inject constructor(
         pendingPlayWhenReady = null
         pendingSeek = null
         when {
-            externalRequest != null -> playExternalUri(
+            externalRequest != null -> playExternalUriWithoutNotification(
                 uri = externalRequest.uri,
                 displayName = externalRequest.displayName,
             )
@@ -1192,10 +1192,31 @@ class PlayerController @Inject constructor(
     }
 
     fun playSong(song: Song) {
-        playFromQueue(queue = listOf(song), startIndex = 0)
+        // CF-2H3F: explicit start intent cancels an owned crossfade first, then the non-notifying start primitive runs.
+        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        startQueueWithoutNotification(queue = listOf(song), startIndex = 0)
+    }
+
+    /**
+     * Non-notifying whole-queue start. Used by the public play commands (after they notify) and by the Play Next /
+     * Add to Queue fallbacks that own their own cancellation seam, so one user command never cancels twice.
+     */
+    private fun startQueueWithoutNotification(
+        queue: List<Song>,
+        startIndex: Int,
+        source: PlaybackQueueSource = PlaybackQueueSource.Other,
+    ) {
+        playFromQueueInternal(
+            queue = queue,
+            startIndex = startIndex,
+            preservePlaybackOrder = false,
+            source = source,
+        )
     }
 
     fun playSearchResultPreservingQueue(song: Song) {
+        // CF-2H3F: notified first; playPreservedSearchPlan (also used by the pending drain) never notifies.
+        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
         val controller = mediaController
         val currentMediaIndex = controller?.currentMediaItemIndex
         val currentMediaSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
@@ -1309,6 +1330,12 @@ class PlayerController @Inject constructor(
     }
 
     fun playExternalUri(uri: Uri, displayName: String? = null) {
+        // CF-2H3F: notified first, before any state change; the pending drain calls the non-notifying variant.
+        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        playExternalUriWithoutNotification(uri, displayName)
+    }
+
+    private fun playExternalUriWithoutNotification(uri: Uri, displayName: String? = null) {
         val song = uri.toExternalSong(displayName)
 
         isExternalPlayback = true
@@ -1361,6 +1388,8 @@ class PlayerController @Inject constructor(
         startSong: Song,
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
+        // CF-2H3F: notified before resolution so an absent or ambiguous start song still cancels.
+        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
         val start = resolveQueueStartBySong(queue, startSong)
         if (start == null) {
             Log.w(TAG, "playFromQueue: start song ${startSong.id} is absent or ambiguous in queue; ignoring")
@@ -1379,6 +1408,8 @@ class PlayerController @Inject constructor(
         startIndex: Int,
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
+        // CF-2H3F: notified before any resolution or replacement.
+        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
         playFromQueueInternal(
             queue = queue,
             startIndex = startIndex,
@@ -1461,9 +1492,11 @@ class PlayerController @Inject constructor(
         queue: List<Song>,
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
+        // CF-2H3F: notified BEFORE any logical mutation (shuffleEnabled) and without double-notifying via playFromQueue.
+        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
         val normalizedQueue = queue.ifEmpty { return }
         shuffleEnabled = true
-        playFromQueue(
+        startQueueWithoutNotification(
             queue = normalizedQueue,
             startIndex = normalizedQueue.indices.random(),
             source = source,
@@ -1475,7 +1508,7 @@ class PlayerController @Inject constructor(
         // this then falls back (empty queue -> playSong, unresolved index -> append). Internal paths never notify.
         explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
         if (libraryQueue.isEmpty()) {
-            playSong(song)
+            startQueueWithoutNotification(queue = listOf(song), startIndex = 0)
             return
         }
         val currentPlaybackIndex = currentPlaybackIndex()
@@ -1524,7 +1557,7 @@ class PlayerController @Inject constructor(
         when (val plan = planPlayAllNext(songs, hasActiveCurrentItem)) {
             PlayAllNextPlan.NoOp -> Unit
             is PlayAllNextPlan.StartQueue ->
-                playFromQueue(queue = plan.queue, startIndex = 0)
+                startQueueWithoutNotification(queue = plan.queue, startIndex = 0)
             is PlayAllNextPlan.InsertAfterCurrent -> {
                 insertAllAfterCurrent(plan.songs)
             }
@@ -1545,7 +1578,7 @@ class PlayerController @Inject constructor(
         ) {
             QueueAddPlan.NoOp -> Unit
             // Only a genuinely empty queue starts anew.
-            QueueAddPlan.StartNewQueue -> playFromQueue(queue = songs, startIndex = 0)
+            QueueAddPlan.StartNewQueue -> startQueueWithoutNotification(queue = songs, startIndex = 0)
             // Existing queue: append to tail, preserving the queue even when the current index is
             // temporarily unresolvable (previously this destructively replaced the queue).
             QueueAddPlan.AppendPreservingQueue -> appendAllPreservingQueue(songs)
@@ -1563,7 +1596,7 @@ class PlayerController @Inject constructor(
             )
         ) {
             QueueAddPlan.NoOp -> Unit
-            QueueAddPlan.StartNewQueue -> playSong(song)
+            QueueAddPlan.StartNewQueue -> startQueueWithoutNotification(queue = listOf(song), startIndex = 0)
             // Existing queue: append to tail via the proven preserving path, which keeps the queue
             // and current song intact even when the current index is temporarily unresolvable.
             QueueAddPlan.AppendPreservingQueue -> appendAllPreservingQueue(listOf(song))
@@ -2359,6 +2392,17 @@ class PlayerController @Inject constructor(
     private val explicitQueueReorderListeners = ExplicitQueueReorderListenerRegistry()
     private val explicitQueueRemovalListeners = ExplicitQueueRemovalListenerRegistry()
     private val explicitLibraryDeletionListeners = ExplicitLibraryDeletionListenerRegistry()
+    private val explicitQueueReplacementListeners = ExplicitQueueReplacementListenerRegistry()
+
+    /**
+     * CF-2H3F: registers (or clears with null) the lifecycle-scoped callback notified on every explicit user playback
+     * start that replaces the queue. Not used by session resumption (adoptPlaybackResumption), the pending-request
+     * drain, or the Play Next / Add to Queue fallbacks. PlayerController knows nothing of crossfade; the owner must
+     * clear it on teardown.
+     */
+    internal fun setExplicitQueueReplacementListener(listener: (() -> Unit)?) {
+        explicitQueueReplacementListeners.set(listener)
+    }
 
     /**
      * CF-2H3E: registers (or clears with null) the lifecycle-scoped callback notified on every handleSongDeleted event.

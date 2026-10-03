@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2H3E. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2H3F. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3E (below).
+- Crossfade engineering foundations CF-1 to CF-2H3F (below).
 
 ## Crossfade - current state
 
@@ -84,6 +84,7 @@ Completed, internal-only foundations:
 | CF-2H3C | arbitrary future queue reorder crossfade cancellation (`QueueMutation` cancel from `moveQueueItemUp`, `moveQueueItemDown`, `moveQueueItemTo`, before validation and the generation bump) |
 | CF-2H3D | queue removal and bulk-clear crossfade cancellation (`QueueMutation` cancel from `removeFromQueue`, `clearEarlierQueue`, `clearUpNext`, before validation and the generation bump) |
 | CF-2H3E | library deletion crossfade cancellation (`QueueMutation` cancel from `handleSongDeleted`, before the current occurrence is resolved and the deletion is routed) |
+| CF-2H3F | explicit whole-queue replacement crossfade cancellation (`QueueMutation` cancel from `playSong`, `playSearchResultPreservingQueue`, `playExternalUri`, both `playFromQueue` overloads and `playFromQueueShuffled`, before validation and any logical mutation) |
 
 **Live/audible production rollout is NOT enabled.** Specifically:
 
@@ -137,6 +138,8 @@ CF-2H3C (third part of remaining queue mutation while fading): the arbitrary fut
 CF-2H3D (fourth part of remaining queue mutation while fading): the queue-only removal commands `PlayerController.removeFromQueue(playbackIndex)`, `clearEarlierQueue()` and `clearUpNext()` (all preserve the current occurrence) cancel any owned crossfade with the existing `QueueMutation` reason BEFORE validation, planning and the queue-generation bump, via a separate lifecycle-scoped explicit-queue-removal listener (registered by `PlaybackService`, cleared in `onDestroy`). The notification is the first statement of each public command (`clearEarlierQueue`/`clearUpNext` became block bodies, return values unchanged), so rejected requests (current item, invalid index, planner NoOp) still cancel from user intent. The shared `applyBulkClear` never notifies, so one command yields one cancel. Library deletion (`handleSongDeleted` and the current/non-current deletion paths) is NOT covered and does not use this seam. Generation bumps, `playerQueueNeedsSync` and Media3 removal are unchanged; the runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
 
 CF-2H3E (fifth part of remaining queue mutation while fading): library song deletion cancels any owned crossfade with the existing `QueueMutation` reason from the single public deletion boundary `PlayerController.handleSongDeleted(songId)`, via a separate lifecycle-scoped explicit-library-deletion listener (registered by `PlaybackService`, cleared in `onDestroy`; the CF-2H3D queue-removal seam is not reused). The notification is the first statement, before `currentPlaybackIndex()` and `routeSongDeletion`, so the Unresolved, NonCurrent and Current routes all cancel once; for a current-song deletion Fading/HandoffPending restore the primary and abandon the secondary BEFORE the existing continuation or clear/stop path runs. The private deletion helpers (`applyNonCurrentSongDeletion`, `handleCurrentSongDeleted`, `applyCurrentDeletionContinuation`) never notify. Deletion planners, generation bumps, `playerQueueNeedsSync`, Media3 mutation, stats ownership and session saves are unchanged; the runtime generation check stays as the defensive fallback. Inspection found queue-replacement paths that also bump the generation and are not owned yet (see the backlog), so the parent item stays open. Driver keeps running; the hard gate stays `false`.
+
+CF-2H3F (sixth part of remaining queue mutation while fading): explicit user playback starts that replace the active queue cancel any owned crossfade with the existing `QueueMutation` reason BEFORE validation and any logical mutation, via a separate lifecycle-scoped explicit-queue-replacement listener (registered by `PlaybackService`, cleared in `onDestroy`). Public commands that notify first: `playSong`, `playSearchResultPreservingQueue`, `playExternalUri`, `playFromQueue(queue, startSong)`, `playFromQueue(queue, startIndex)` and `playFromQueueShuffled` (notified before `shuffleEnabled` is set). The internals never notify: `playFromQueueInternal`, `playPreservedSearchPlan`, the pending-request drain (which now calls the private non-notifying `playExternalUriWithoutNotification`) and the new private `startQueueWithoutNotification`, which the Play Next empty-queue and StartQueue branches and the Add to Queue StartNewQueue branches now call, so those fallbacks keep only their own CF-2H3A/CF-2H3B seam and one command still yields one cancel. Session resumption (`adoptPlaybackResumption`) and hydration/restore are NOT covered and stay open. Generation bumps, automatic-resume supersession, stats ownership and session saves are unchanged; the runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
 
 The next boundaries are separate: the remaining failure/cancel recovery, remaining queue mutation behaviour while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
 
