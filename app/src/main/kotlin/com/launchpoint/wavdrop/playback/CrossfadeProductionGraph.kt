@@ -259,3 +259,17 @@ internal val PRIMARY_TERMINAL_STATE_CANCEL_REASON = CrossfadeCancelReason.Primar
 internal fun recoverCrossfadeFromPrimaryTerminalState(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(PRIMARY_TERMINAL_STATE_CANCEL_REASON)
 }
+
+/** CF-2F4: the cancel reason of an authoritative MediaController disconnection (the existing ControllerDisconnected). */
+internal val CONTROLLER_DISCONNECTED_CANCEL_REASON = CrossfadeCancelReason.ControllerDisconnected
+
+/**
+ * CF-2F4: key-less, synchronous cleanup when the CURRENT (authoritative) MediaController disconnects, notified by
+ * PlayerController after its identity guard passes and BEFORE it clears the controller reference, so an audible
+ * Fading/HandoffPending cleanup can still restore the primary gain. A stale or superseded controller's disconnect never
+ * reaches this. Reconnection stays demand-driven and nothing is carried over. The snapshot `controllerConnected` check
+ * stays as the defensive fallback. The timing driver is left running; a null runtime (gate false) is a no-op.
+ */
+internal fun recoverCrossfadeFromControllerDisconnected(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(CONTROLLER_DISCONNECTED_CANCEL_REASON)
+}

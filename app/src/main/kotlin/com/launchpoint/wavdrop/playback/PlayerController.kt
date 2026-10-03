@@ -1183,6 +1183,9 @@ class PlayerController @Inject constructor(
             // Identity check preserved: a disconnect from a stale controller (e.g. one released by
             // a superseded connection attempt) must never clear the current controller/state.
             if (ControllerAttemptOwnership.shouldApplyDisconnect(mediaController === controller)) {
+                // CF-2F4: only an authoritative disconnect notifies, and BEFORE the controller reference is cleared so an
+                // audible crossfade cleanup can still reach the live primary. Stale disconnects never get here.
+                controllerDisconnectedListeners.notifyControllerDisconnected()
                 mediaController = null
                 _progressPlayer.value = null
                 controllerConnectionState = ControllerConnectionDecision.onDisconnected()
@@ -2393,6 +2396,16 @@ class PlayerController @Inject constructor(
     private val explicitQueueRemovalListeners = ExplicitQueueRemovalListenerRegistry()
     private val explicitLibraryDeletionListeners = ExplicitLibraryDeletionListenerRegistry()
     private val explicitQueueReplacementListeners = ExplicitQueueReplacementListenerRegistry()
+    private val controllerDisconnectedListeners = ControllerDisconnectedListenerRegistry()
+
+    /**
+     * CF-2F4: registers (or clears with null) the lifecycle-scoped callback notified when the current authoritative
+     * MediaController disconnects. PlaybackService registers it and MUST clear it on teardown; PlayerController knows
+     * nothing of crossfade.
+     */
+    internal fun setControllerDisconnectedListener(listener: (() -> Unit)?) {
+        controllerDisconnectedListeners.set(listener)
+    }
 
     /**
      * CF-2H3F: registers (or clears with null) the lifecycle-scoped callback notified on every explicit user playback
