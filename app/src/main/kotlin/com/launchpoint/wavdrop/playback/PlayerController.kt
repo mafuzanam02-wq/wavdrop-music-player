@@ -1867,6 +1867,9 @@ class PlayerController @Inject constructor(
     }
 
     fun handleSongDeleted(songId: Long) {
+        // CF-2H3E: a deletion event ends crossfade ownership first (even when routing is Unresolved or the plan no-ops).
+        // The private deletion helpers (applyNonCurrentSongDeletion, handleCurrentSongDeleted, ...) never notify.
+        explicitLibraryDeletionListeners.notifyExplicitLibraryDeletion()
         // Resolve the current occurrence ONCE through the occurrence-safe resolver; Now Playing state
         // may lag Media3 at a transition and must not decide current vs non-current.
         val currentIndex = currentPlaybackIndex()
@@ -2355,6 +2358,16 @@ class PlayerController @Inject constructor(
     private val explicitAddToQueueMutationListeners = ExplicitAddToQueueMutationListenerRegistry()
     private val explicitQueueReorderListeners = ExplicitQueueReorderListenerRegistry()
     private val explicitQueueRemovalListeners = ExplicitQueueRemovalListenerRegistry()
+    private val explicitLibraryDeletionListeners = ExplicitLibraryDeletionListenerRegistry()
+
+    /**
+     * CF-2H3E: registers (or clears with null) the lifecycle-scoped callback notified on every handleSongDeleted event.
+     * Separate from the queue-removal seam. PlayerController knows nothing of crossfade; the owner must clear it on
+     * teardown.
+     */
+    internal fun setExplicitLibraryDeletionListener(listener: (() -> Unit)?) {
+        explicitLibraryDeletionListeners.set(listener)
+    }
 
     /**
      * CF-2H3D: registers (or clears with null) the lifecycle-scoped callback notified on every explicit

@@ -184,3 +184,19 @@ internal val QUEUE_REMOVAL_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
 internal fun recoverCrossfadeFromQueueRemoval(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(QUEUE_REMOVAL_CANCEL_REASON)
 }
+
+/** CF-2H3E: the cancel reason of a library song deletion (a named seam so a pure test can assert it). */
+internal val LIBRARY_DELETION_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
+
+/**
+ * CF-2H3E: key-less, synchronous crossfade cleanup for a library song deletion observed by
+ * PlayerController.handleSongDeleted (the single public deletion boundary, covering the Unresolved, NonCurrent and
+ * Current routes), run BEFORE the current occurrence is resolved and before any planner, generation bump, Media3
+ * mutation or transport change. For a current-song deletion, Fading/HandoffPending restore the primary before the
+ * existing continuation replaces the queue. The private deletion helpers never notify, so one deletion yields one
+ * cancel. The runtime generation check stays as the defensive fallback. The timing driver is left running; a null
+ * runtime is a no-op.
+ */
+internal fun recoverCrossfadeFromLibraryDeletion(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(LIBRARY_DELETION_CANCEL_REASON)
+}
