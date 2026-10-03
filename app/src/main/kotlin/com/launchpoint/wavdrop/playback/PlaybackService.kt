@@ -175,6 +175,8 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitSeekListener { recoverCrossfadeFromExplicitSeek(crossfadePreparation) }
         // CF-2G3: app skipToNext/skipToPrevious notify this lifecycle-scoped callback (cleared in onDestroy).
         playerController.setExplicitNavigationListener { recoverCrossfadeFromExplicitNavigation(crossfadePreparation) }
+        // CF-2H1: app cycleRepeatMode notifies this lifecycle-scoped callback (cleared in onDestroy).
+        playerController.setExplicitRepeatChangeListener { recoverCrossfadeFromRepeatChange(crossfadePreparation) }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
             thresholdProvider = { previousRestartThresholdMs },
@@ -186,6 +188,7 @@ class PlaybackService : MediaLibraryService() {
             onExplicitPause = { recoverCrossfadeFromExplicitPause(crossfadePreparation) },
             onExplicitSeek = { recoverCrossfadeFromExplicitSeek(crossfadePreparation) },
             onExplicitNavigation = { recoverCrossfadeFromExplicitNavigation(crossfadePreparation) },
+            onExplicitRepeatChange = { recoverCrossfadeFromRepeatChange(crossfadePreparation) },
         )
 
         if (BuildConfig.DEBUG) {
@@ -424,6 +427,7 @@ class PlaybackService : MediaLibraryService() {
         // CF-2G2: never leave the singleton PlayerController holding a callback into this destroyed service.
         playerController.setExplicitSeekListener(null)
         playerController.setExplicitNavigationListener(null)
+        playerController.setExplicitRepeatChangeListener(null)
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
@@ -663,6 +667,10 @@ class PlaybackService : MediaLibraryService() {
         // CF-2G3: invoked ONCE per EXTERNAL user NEXT/PREVIOUS command, before navigation. App-marked controller
         // requests never reach it (PlayerController already notified). Internal delegation uses super.* to bypass it.
         private val onExplicitNavigation: () -> Unit,
+        // CF-2H1: invoked ONCE per repeat-mode change from an EXTERNAL user controller (system UI, Android Auto,
+        // AVRCP) before it is forwarded. The app-marked controller is inert here: app commands (incl. the custom
+        // CYCLE_REPEAT command, which calls PlayerController.cycleRepeatMode) already notified in PlayerController.
+        private val onExplicitRepeatChange: () -> Unit,
     ) : ForwardingPlayer(player) {
 
         override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
@@ -722,6 +730,11 @@ class PlaybackService : MediaLibraryService() {
 
         // CF-2G3: each explicit NEXT/PREVIOUS Media3 command is a distinct top-level seam (ForwardingPlayer does not
         // route one through another). Each cancels once for external user controllers only.
+        override fun setRepeatMode(repeatMode: Int) {
+            if (isExternalUserTransportRequest()) onExplicitRepeatChange()
+            super.setRepeatMode(repeatMode)
+        }
+
         override fun seekToNext() {
             if (isExternalUserTransportRequest()) onExplicitNavigation()
             super.seekToNext()

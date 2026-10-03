@@ -101,3 +101,16 @@ internal fun recoverCrossfadeFromExplicitSeek(runtime: CrossfadePreparationRunti
 internal fun recoverCrossfadeFromExplicitNavigation(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(CrossfadeCancelReason.ManualNavigation)
 }
+
+/** CF-2H1: the cancel reason of an explicit repeat-mode change (a named seam so a pure test can assert it). */
+internal val REPEAT_CHANGE_CANCEL_REASON = CrossfadeCancelReason.RepeatChanged
+
+/**
+ * CF-2H1: key-less, synchronous crossfade cleanup for an explicit user repeat-mode change, run BEFORE the new repeat
+ * mode is applied to logical state or Media3. Ownership ends from user intent (even when the new mode would not
+ * invalidate the planned target); the runtime's own `crossfadeOwnershipLossReason` stays as the defensive fallback.
+ * The timing driver is left running; a null runtime (gate false) is a no-op.
+ */
+internal fun recoverCrossfadeFromRepeatChange(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(REPEAT_CHANGE_CANCEL_REASON)
+}

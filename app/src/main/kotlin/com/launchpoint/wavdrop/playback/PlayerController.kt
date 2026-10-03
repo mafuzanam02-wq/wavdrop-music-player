@@ -2300,6 +2300,10 @@ class PlayerController @Inject constructor(
     }.isSuccess
 
     fun cycleRepeatMode() {
+        // CF-2H1: user intent cancels an owned crossfade BEFORE the repeat topology changes (every explicit command,
+        // whether or not the new mode would invalidate the planned target). Also the path of the service's custom
+        // CYCLE_REPEAT command, so one user command yields one notification.
+        explicitRepeatChangeListeners.notifyExplicitRepeatChange()
         repeatMode = when (repeatMode) {
             RepeatMode.OFF -> RepeatMode.ALL
             RepeatMode.ALL -> RepeatMode.ONE
@@ -2312,6 +2316,15 @@ class PlayerController @Inject constructor(
 
     private val explicitSeekListeners = ExplicitSeekListenerRegistry()
     private val explicitNavigationListeners = ExplicitNavigationListenerRegistry()
+    private val explicitRepeatChangeListeners = ExplicitRepeatChangeListenerRegistry()
+
+    /**
+     * CF-2H1: registers (or clears with null) the lifecycle-scoped callback notified on every explicit app
+     * cycleRepeatMode. PlayerController knows nothing of crossfade; the owner must clear it on teardown.
+     */
+    internal fun setExplicitRepeatChangeListener(listener: (() -> Unit)?) {
+        explicitRepeatChangeListeners.set(listener)
+    }
 
     /**
      * CF-2G3: registers (or clears with null) the lifecycle-scoped callback notified on every explicit app
