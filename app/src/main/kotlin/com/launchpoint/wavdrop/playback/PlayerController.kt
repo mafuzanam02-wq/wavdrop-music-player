@@ -1772,6 +1772,8 @@ class PlayerController @Inject constructor(
     }
 
     fun removeFromQueue(playbackIndex: Int) {
+        // CF-2H3D: explicit removal intent cancels an owned crossfade first, even if validation then no-ops (e.g. current).
+        explicitQueueRemovalListeners.notifyExplicitQueueRemoval()
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
         if (playbackIndex == currentPlaybackIndex) return
         if (playbackIndex !in playbackQueue.indices) return
@@ -1814,13 +1816,21 @@ class PlayerController @Inject constructor(
      * Removes every queue occurrence strictly before the current one. The current occurrence keeps
      * playing untouched and becomes index 0. Returns true only when something was removed.
      */
-    fun clearEarlierQueue(): Boolean = applyBulkClear { currentIndex ->
-        QueueMutation.clearEarlier(libraryQueue, playbackOrder, currentIndex)
+    fun clearEarlierQueue(): Boolean {
+        // CF-2H3D: one notification per public command, before planning; applyBulkClear never notifies.
+        explicitQueueRemovalListeners.notifyExplicitQueueRemoval()
+        return applyBulkClear { currentIndex ->
+            QueueMutation.clearEarlier(libraryQueue, playbackOrder, currentIndex)
+        }
     }
 
     /** Removes every queue occurrence strictly after the current one. Returns true only on a real clear. */
-    fun clearUpNext(): Boolean = applyBulkClear { currentIndex ->
-        QueueMutation.clearUpNext(libraryQueue, playbackOrder, currentIndex)
+    fun clearUpNext(): Boolean {
+        // CF-2H3D: one notification per public command, before planning; applyBulkClear never notifies.
+        explicitQueueRemovalListeners.notifyExplicitQueueRemoval()
+        return applyBulkClear { currentIndex ->
+            QueueMutation.clearUpNext(libraryQueue, playbackOrder, currentIndex)
+        }
     }
 
     private inline fun applyBulkClear(
@@ -2344,6 +2354,16 @@ class PlayerController @Inject constructor(
     private val explicitPlayNextMutationListeners = ExplicitPlayNextMutationListenerRegistry()
     private val explicitAddToQueueMutationListeners = ExplicitAddToQueueMutationListenerRegistry()
     private val explicitQueueReorderListeners = ExplicitQueueReorderListenerRegistry()
+    private val explicitQueueRemovalListeners = ExplicitQueueRemovalListenerRegistry()
+
+    /**
+     * CF-2H3D: registers (or clears with null) the lifecycle-scoped callback notified on every explicit
+     * removeFromQueue, clearEarlierQueue and clearUpNext command (not library deletion). PlayerController knows
+     * nothing of crossfade; the owner must clear it on teardown.
+     */
+    internal fun setExplicitQueueRemovalListener(listener: (() -> Unit)?) {
+        explicitQueueRemovalListeners.set(listener)
+    }
 
     /**
      * CF-2H3C: registers (or clears with null) the lifecycle-scoped callback notified on every explicit

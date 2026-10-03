@@ -185,6 +185,8 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitAddToQueueMutationListener { recoverCrossfadeFromAddToQueueMutation(crossfadePreparation) }
         // CF-2H3C: explicit moveQueueItemUp/Down/To notify this callback (cleared in onDestroy).
         playerController.setExplicitQueueReorderListener { recoverCrossfadeFromQueueReorder(crossfadePreparation) }
+        // CF-2H3D: explicit removeFromQueue/clearEarlierQueue/clearUpNext notify this callback (cleared in onDestroy).
+        playerController.setExplicitQueueRemovalListener { recoverCrossfadeFromQueueRemoval(crossfadePreparation) }
         val sessionPlayer = PreviousBehaviorPlayer(
             player = player,
             thresholdProvider = { previousRestartThresholdMs },
@@ -440,6 +442,7 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitPlayNextMutationListener(null)
         playerController.setExplicitAddToQueueMutationListener(null)
         playerController.setExplicitQueueReorderListener(null)
+        playerController.setExplicitQueueRemovalListener(null)
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)

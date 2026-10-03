@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2H3C. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2H3D. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3C (below).
+- Crossfade engineering foundations CF-1 to CF-2H3D (below).
 
 ## Crossfade - current state
 
@@ -82,6 +82,7 @@ Completed, internal-only foundations:
 | CF-2H3A | Play Next family queue-mutation crossfade cancellation (`QueueMutation` cancel from `playNext`, `playAllNext`, `moveToPlayNext`, before the generation bump) |
 | CF-2H3B | Add to Queue family queue-mutation crossfade cancellation (`QueueMutation` cancel from `addToQueue`, `addAllToQueue`, before planning and the generation bump) |
 | CF-2H3C | arbitrary future queue reorder crossfade cancellation (`QueueMutation` cancel from `moveQueueItemUp`, `moveQueueItemDown`, `moveQueueItemTo`, before validation and the generation bump) |
+| CF-2H3D | queue removal and bulk-clear crossfade cancellation (`QueueMutation` cancel from `removeFromQueue`, `clearEarlierQueue`, `clearUpNext`, before validation and the generation bump) |
 
 **Live/audible production rollout is NOT enabled.** Specifically:
 
@@ -131,6 +132,8 @@ CF-2H3A (first part of remaining queue mutation while fading): the Play Next fam
 CF-2H3B (second part of remaining queue mutation while fading): the tail-append commands `PlayerController.addToQueue(song)` and `addAllToQueue(songs)` cancel any owned crossfade with the existing `QueueMutation` reason BEFORE planning and the queue-generation bump, via a separate lifecycle-scoped explicit-add-to-queue-mutation listener (registered by `PlaybackService`, cleared in `onDestroy`). The notification is the first statement of each public command, so NoOp (empty batch), StartNewQueue and AppendPreservingQueue all cancel from user intent; even a non-last current occurrence cancels because the append bumps the generation, and a last-item Repeat ALL wrap target is replaced by the appended occurrence on later planning. The shared `appendAllPreservingQueue` (also used by the Play Next fallbacks, which own the Play Next seam) never notifies, so one command yields one cancel. Arbitrary reorder and deletion are not covered. Generation bumps, `playerQueueNeedsSync` and Media3 sync are unchanged; the runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
 
 CF-2H3C (third part of remaining queue mutation while fading): the arbitrary future reorder commands `PlayerController.moveQueueItemUp(playbackIndex)`, `moveQueueItemDown(playbackIndex)` and `moveQueueItemTo(from, to)` cancel any owned crossfade with the existing `QueueMutation` reason BEFORE validation and the queue-generation bump, via a separate lifecycle-scoped explicit-queue-reorder listener (registered by `PlaybackService`, cleared in `onDestroy`). The notification is the first statement of each public command, so invalid and no-op requests still cancel from user intent, and a valid reorder that leaves the immediate next unchanged still cancels because the generation changes. The private `swapPlaybackItems` never notifies, and `moveToPlayNext` stays on the Play Next seam only (no reorder notification), so one command yields one cancel. Deletion and other paths are not covered. Generation bumps, `playerQueueNeedsSync` and Media3 `moveMediaItem` are unchanged; the runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
+
+CF-2H3D (fourth part of remaining queue mutation while fading): the queue-only removal commands `PlayerController.removeFromQueue(playbackIndex)`, `clearEarlierQueue()` and `clearUpNext()` (all preserve the current occurrence) cancel any owned crossfade with the existing `QueueMutation` reason BEFORE validation, planning and the queue-generation bump, via a separate lifecycle-scoped explicit-queue-removal listener (registered by `PlaybackService`, cleared in `onDestroy`). The notification is the first statement of each public command (`clearEarlierQueue`/`clearUpNext` became block bodies, return values unchanged), so rejected requests (current item, invalid index, planner NoOp) still cancel from user intent. The shared `applyBulkClear` never notifies, so one command yields one cancel. Library deletion (`handleSongDeleted` and the current/non-current deletion paths) is NOT covered and does not use this seam. Generation bumps, `playerQueueNeedsSync` and Media3 removal are unchanged; the runtime generation check stays as the defensive fallback. Driver keeps running; the hard gate stays `false`.
 
 The next boundaries are separate: the remaining failure/cancel recovery, remaining queue mutation behaviour while fading, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
 

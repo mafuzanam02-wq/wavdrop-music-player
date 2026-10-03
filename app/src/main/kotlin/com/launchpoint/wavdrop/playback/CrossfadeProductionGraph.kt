@@ -169,3 +169,18 @@ internal val QUEUE_REORDER_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
 internal fun recoverCrossfadeFromQueueReorder(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(QUEUE_REORDER_CANCEL_REASON)
 }
+
+/** CF-2H3D: the cancel reason of an explicit queue removal or bulk clear (a named seam so a pure test can assert it). */
+internal val QUEUE_REMOVAL_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
+
+/**
+ * CF-2H3D: key-less, synchronous crossfade cleanup for an explicit queue-only removal command (removeFromQueue,
+ * clearEarlierQueue, clearUpNext; all preserve the current occurrence), run BEFORE validation and the generation bump.
+ * Cancels from user intent even if the request then no-ops. The shared bulk-clear helper never notifies, and library
+ * deletion (handleSongDeleted) is a separate boundary that does not use this seam, so one command yields one cancel.
+ * The runtime generation check stays as the defensive fallback. The timing driver is left running; a null runtime is a
+ * no-op.
+ */
+internal fun recoverCrossfadeFromQueueRemoval(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(QUEUE_REMOVAL_CANCEL_REASON)
+}
