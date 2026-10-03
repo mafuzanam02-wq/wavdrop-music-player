@@ -114,3 +114,16 @@ internal val REPEAT_CHANGE_CANCEL_REASON = CrossfadeCancelReason.RepeatChanged
 internal fun recoverCrossfadeFromRepeatChange(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(REPEAT_CHANGE_CANCEL_REASON)
 }
+
+/** CF-2H2: the cancel reason of an explicit logical shuffle toggle (a named seam so a pure test can assert it). */
+internal val SHUFFLE_CHANGE_CANCEL_REASON = CrossfadeCancelReason.ShuffleChanged
+
+/**
+ * CF-2H2: key-less, synchronous crossfade cleanup for an explicit LOGICAL shuffle toggle (`PlayerController.toggleShuffle`),
+ * run BEFORE shuffle planning or the queue-generation bump. Cancels from user intent even if the toggle later no-ops.
+ * Native Media3 shuffle attempts (reasserted off) are not a logical shuffle and never reach this. The runtime's generation
+ * check (`QueueMutation`) stays as the defensive fallback. The timing driver is left running; a null runtime is a no-op.
+ */
+internal fun recoverCrossfadeFromShuffleChange(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(SHUFFLE_CHANGE_CANCEL_REASON)
+}

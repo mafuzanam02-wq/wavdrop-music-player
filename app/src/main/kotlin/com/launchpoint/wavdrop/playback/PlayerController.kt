@@ -2185,6 +2185,10 @@ class PlayerController @Inject constructor(
     }
 
     fun toggleShuffle() {
+        // CF-2H2: user intent cancels an owned crossfade BEFORE any shuffle planning or queue-generation bump, even if
+        // the toggle then no-ops (unresolved index, null plan). Native Media3 shuffle is not routed here. The service
+        // custom TOGGLE_SHUFFLE command calls this method, so one user command yields one notification.
+        explicitShuffleChangeListeners.notifyExplicitShuffleChange()
         val controller = mediaController
         val currentIndex = currentPlaybackIndex() ?: return
         val positionMs = controller?.currentPosition?.coerceAtLeast(0L)
@@ -2317,6 +2321,15 @@ class PlayerController @Inject constructor(
     private val explicitSeekListeners = ExplicitSeekListenerRegistry()
     private val explicitNavigationListeners = ExplicitNavigationListenerRegistry()
     private val explicitRepeatChangeListeners = ExplicitRepeatChangeListenerRegistry()
+    private val explicitShuffleChangeListeners = ExplicitShuffleChangeListenerRegistry()
+
+    /**
+     * CF-2H2: registers (or clears with null) the lifecycle-scoped callback notified on every explicit logical
+     * toggleShuffle. PlayerController knows nothing of crossfade; the owner must clear it on teardown.
+     */
+    internal fun setExplicitShuffleChangeListener(listener: (() -> Unit)?) {
+        explicitShuffleChangeListeners.set(listener)
+    }
 
     /**
      * CF-2H1: registers (or clears with null) the lifecycle-scoped callback notified on every explicit app
