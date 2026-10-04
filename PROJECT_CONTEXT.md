@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2J1. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2K1. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3G, CF-2F2, CF-2F3, CF-2F4, CF-2F5, CF-2I1, CF-2I2 and CF-2J1 (below).
+- Crossfade engineering foundations CF-1 to CF-2H3G, CF-2F2, CF-2F3, CF-2F4, CF-2F5, CF-2I1, CF-2I2, CF-2J1 and CF-2K1 (below).
 
 ## Crossfade - current state
 
@@ -81,6 +81,7 @@ Completed, internal-only foundations:
 | CF-2I1 | secondary audio-session observability (read-only, exact-key; no EQ attached, no eligibility change) |
 | CF-2I2 | Equalizer compatibility policy (crossfade unavailable while EQ is enabled; OFF->ON cancels an owned transition with `PlanInvalidated`) |
 | CF-2J1 | rollout-gated Crossfade Settings UI foundation (`CrossfadeRolloutPolicy`, persisted-duration ViewModel wiring, hidden in production while the runtime rollout is false) |
+| CF-2K1 | production enablement safeguards + physical QA contract (pure readiness model, QA checklist section 32; gate stays false) |
 | CF-2G1 | manual (explicit) pause crossfade cancellation (`Pause` cancel before the primary pause is forwarded) |
 | CF-2G2 | explicit same-track seek crossfade cancellation (`Seek` cancel from the app seek and from external-controller scrubs) |
 | CF-2G3 | explicit next/previous crossfade cancellation (`ManualNavigation` cancel from app skipToNext/skipToPrevious and from external-controller next/previous, including previous restart-current) |
@@ -105,7 +106,7 @@ Completed, internal-only foundations:
   transition key through a narrow `PrimaryGainBackend` seam; the runtime holds no Player/ExoPlayer/MediaSession.
 - CF-2C7A added the secondary dynamic-gain primitive (exact-key `setGain` on a started secondary). CF-2C7B added `CrossfadePreparationRuntime.executeFadeTick(key, now)`: for an explicitly supplied tick it revalidates live ownership, reduces the coordinator `FadeTick`, and applies the coordinator gain pair (secondary incoming first, then primary outgoing); a failed write or clock regression cancels (restore primary, abandon secondary). The terminal tick applies the final pair and leaves `HandoffPending`; `RequestHandoff` is recognised but NOT executed. At the CF-2C7B boundary nothing called `executeFadeTick` in production (no ticker/timing driver existed yet; CF-2C7D/CF-2D4 later add the driver), generic `ApplyGains` and `RequestHandoff` stay refused, and handoff was not implemented yet.
 - Internal exact-key handoff/promotion is implemented through CF-2D3/CF-2D4, but production execution remains dormant because the hard gate is false and the timing driver is only ever started by the CF-2E2 persisted-duration policy when a gated graph exists, which never happens in shipping.
-- A persisted, normalized crossfade duration exists internally (CF-2E2, default 0 ms / OFF) but there is no user-facing Settings preference or UI.
+- A persisted, normalized crossfade duration exists internally (CF-2E2, default 0 ms / OFF) but the Playback Settings UI foundation exists (CF-2J1) but stays hidden while `CrossfadeRolloutPolicy.RUNTIME_ENABLED` is false.
 - No physical crossfade validation has occurred. Crossfade is not shipped and must not appear in
   user-facing copy.
 
@@ -167,7 +168,9 @@ CF-2I2 (Equalizer compatibility policy; second slice of item 6): for the current
 
 CF-2J1 (rollout-gated Crossfade Settings UI foundation; first slice of item 7): the persisted `AppSettingsRepository.crossfadeDurationMs` preference (canonical milliseconds, no new key or unit, not in backups) is now represented in Playback Settings code, but the production UI stays hidden because runtime rollout is `false`. The single rollout authority is `CrossfadeRolloutPolicy.RUNTIME_ENABLED` (replacing the service-local constant); `PlaybackService` and the Settings UI both read it, so there is no second gate. `SettingsViewModel` exposes `crossfadeDurationMs: StateFlow<Long>` and `setCrossfadeDurationMs(...)` (persistence only; the UI never calls the runtime, driver, `PlaybackService` or `PlayerController`). `SettingsPlaybackScreen` has a Transitions section (between Session and Search) with a Crossfade `ClickableSettingsRow` and a radio `AlertDialog` (Off, 2, 4, 6, 8, 10, 12 seconds; selecting writes and closes, Cancel writes nothing), rendered only when `buildCrossfadeSettingUiState` says visible. That pure policy hides the row when the runtime is unavailable; when available it shows the saved duration with EQ off, and with EQ on (only the existing `eqEnabled` flag matters) shows a disabled row reading "Unavailable while Equalizer is on" without erasing the saved duration, so it resumes when EQ is turned off (CF-2I2 compatibility). A stored non-product value (e.g. 6500 ms) is displayed exactly ("6.5 seconds"), selects no radio option and is never rewritten by opening Settings. The Compose wiring is code-inspected rather than instrumented; the option, formatting, selection and presentation policy is JVM-tested. No audible crossfade is enabled and the hard gate stays `false`.
 
-The next boundaries are separate: physical dual-session EQ validation / possible future mirroring, final user exposure with production enablement, and physical Bluetooth/background validation.
+CF-2K1 (production enablement safeguards + physical QA contract; first slice of item 8): prepares a later deliberate rollout without enabling anything. `CrossfadeProductionReadiness.kt` adds a pure, dependency-free release-readiness model, `CrossfadeRolloutReadiness` (automated gate, physical core playback, physical background/lock-screen, physical Bluetooth, physical wired, Equalizer-compatibility policy), and `canEnableCrossfadeProduction(readiness)`, which is true only when every condition holds and fails closed otherwise. It deliberately separates automated evidence from physical-device evidence, is not persisted, not a setting and not shipped as runtime state; the Equalizer-compatibility condition means the CF-2I2 policy works on device (EQ on -> crossfade unavailable, primary EQ audible), NOT that a mirrored secondary EQ exists. The explicit release contract is that `CrossfadeRolloutPolicy.RUNTIME_ENABLED` may only change from false to true after the automated gate has passed and every required physical condition has been physically verified on the intended release build and device set; this is documentation plus a test, not enforced by reflection, build flags, environment variables, remote config or a developer menu, and `RUNTIME_ENABLED` remains the single rollout authority (no second gate). `QA_CHECKLIST.md` section 32 replaces the stale "not yet user-testable" text with a staged physical-validation procedure (core overlap, eligibility, duplicate occurrences, manual interaction, audio focus, route removal, Bluetooth, wired, background/lock-screen, Equalizer policy, CF-2I1 audio-session evidence, failure cases, teardown), device-evidence recording requirements, a minimum device scope and a production sign-off table, all explicitly for a deliberate validation build or release candidate with the gate enabled. Driver activation policy, runtime, Settings visibility (still hidden) and the gate (`false`) are unchanged. No physical validation has been performed or claimed.
+
+The next boundaries are separate: physical validation against the CF-2K1 QA contract, the final gate flip after passed validation, physical dual-session EQ validation / possible future mirroring, final user exposure with production enablement, and physical Bluetooth/background validation.
 
 ## In progress
 

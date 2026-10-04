@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2J1 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2K1 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -343,6 +343,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     dialog) behind the single rollout authority `CrossfadeRolloutPolicy.RUNTIME_ENABLED` (`false`, so hidden in production). A pure
     presentation policy hides the row when rollout is off, and when on disables it with "Unavailable while Equalizer is on" while EQ is
     enabled (saved duration preserved). UI persists only; it never drives the runtime. Not in backups. No audible crossfade.
+  - **CF-2K1** production enablement safeguards + physical QA contract (internal; first slice of item 8): a pure
+    `CrossfadeRolloutReadiness` + `canEnableCrossfadeProduction` (automated gate, physical core/background/Bluetooth/wired, EQ-compatibility
+    policy; all required, fail closed) and a rewritten `QA_CHECKLIST.md` section 32 (staged physical procedure, device-evidence record,
+    minimum device scope, sign-off table). Contract: `CrossfadeRolloutPolicy.RUNTIME_ENABLED` flips only after the automated gate has passed and every required
+    physical condition is physically verified on the intended release build/device set; no env/build/remote override. Gate `false`; nothing visible or audible.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -627,7 +632,10 @@ items are validated.
 7. User-facing Settings UI / product exposure:
    a. CF-2J1 - rollout-gated Playback Settings UI foundation - complete (hidden while rollout is false).
    b. Final exposure with production enablement - pending item 8.
-8. Production enablement (flipping the gate, with rollout safeguards).
+8. Production enablement:
+   a. CF-2K1 - rollout safeguards + physical QA contract - complete.
+   b. Physical validation against that contract - pending.
+   c. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 
 ### Playback hardening (engineering)

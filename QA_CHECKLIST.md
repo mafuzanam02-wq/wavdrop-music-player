@@ -410,11 +410,131 @@ that contains the song and an album queue).
 
 ## 32. Crossfade
 
-**Not yet user-testable.** Crossfade exists only as gated engineering foundations
-(`CROSSFADE_SECONDARY_RUNTIME_ENABLED = false`); there is no setting and no audible behaviour to verify. A
-physical crossfade QA procedure will be written when live runtime integration exists. Until then, the only
-expectation is that playback behaves exactly as before: gapless native transitions, no overlap, no volume
-dips between tracks.
+**Current production rollout is disabled** through `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false`.
+
+The Playback Settings UI foundation exists but stays **hidden while the rollout is disabled**, so in the current production build there is no Crossfade row and no audible crossfade. Expected behaviour of the current production build is unchanged: gapless native transitions, no overlap, no volume dips between tracks, and no "Transitions" section in Settings → Playback.
+
+The procedure below is for a **deliberate validation build or future release candidate with the rollout gate intentionally enabled**. No such build has passed it yet. Production enablement is a separate, source-controlled change that may only happen after the automated gate has passed and every required physical condition below is physically verified on the intended release build and device set (see 32.12). Do not change the gate to run this checklist on a build that will be shipped before the sign-off is complete.
+
+### 32.1 Device evidence (record for every run)
+
+Record in the notes column or a short run log: device model, Android version, WavDrop build/commit, audio output used (speaker / wired / Bluetooth device), crossfade duration, EQ state, repeat mode, result and a note/log reference. A manual record is sufficient; no database or telemetry is involved.
+
+Minimum initial validation target: at least one real Android device covering speaker, wired output (if the device supports it), Bluetooth output, foreground, and background/lock-screen. The Samsung S21 already used for Wavdrop validation is acceptable as the first device. One device does not validate Android universally; do not generalise beyond the devices tested.
+
+### 32.2 Basic overlap
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| In a validation build, open Settings → Playback. | A Transitions section with a Crossfade row is visible. (Never visible in a build with the gate disabled.) | |
+| Choose Off and let a track end. | Native transition, no overlap. | |
+| Choose 2 seconds and let a track end. | Audible overlap of roughly 2 seconds; the next track fades in as the current fades out. | |
+| Choose 6 seconds and let a track end. | Audible overlap of roughly 6 seconds. | |
+| Choose 12 seconds and let a track end. | Bounded overlap, no crash. | |
+| Change the duration while playback continues. | The next eligible transition follows the new duration; a transition already fading is not abruptly re-planned. | |
+
+Listening/behaviour validation only; stopwatch precision is not required.
+
+### 32.3 Eligibility
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Repeat One, let a track end. | No crossfade (native repeat). | |
+| Queue with a single entry. | No crossfade. | |
+| Repeat Off, final item ends. | No crossfade; playback ends normally. | |
+| Repeat All, final item ends. | The wrap transition to the first item may crossfade. | |
+| A track so short that a safe overlap is below the minimum. | Native transition, no overlap. | |
+
+### 32.4 Duplicate occurrences (occurrence safety)
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Queue the same song more than once at different positions and let the earlier one end. | The crossfade targets the next occurrence by queue position and does not jump to the first occurrence of that song. | |
+
+### 32.5 Manual interaction during preparation or fade
+
+Perform each during the preparation window and again during an audible fade (organise runs coherently; not all in one run).
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Pause, then resume. | Native/manual action wins; no stuck low volume, no doubled playback, no ghost secondary audio. | |
+| Seek in the current track. | Same expectations. | |
+| Next, then Previous. | Same; the correct track plays. | |
+| Toggle shuffle; change repeat mode. | Same; no wrong-track handoff. | |
+| Play Next; Add to Queue; reorder the queue; remove a queued item. | Same; queue stays correct. | |
+| Delete a queued track from the library (where supported). | Same; no crash. | |
+
+### 32.6 Audio focus
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| During preparation or fade, cause an incoming call or another transient audio-focus interruption (any practical source). | The crossfade is abandoned; primary volume is restored; no secondary ghost audio; the normal WavDrop resume policy remains authoritative. | |
+
+### 32.7 Becoming noisy / route removal
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Unplug wired headphones during preparation and during fade. | The crossfade cancels safely; no second player keeps sounding; the existing WavDrop pause/resume policy remains authoritative. | |
+| Disconnect Bluetooth during preparation and during fade. | Same. | |
+
+### 32.8 Bluetooth
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Start playback on Bluetooth and let tracks crossfade. | One audible stream; normal overlap. | |
+| Background the app; lock the screen; let more transitions occur. | Same; no crash. | |
+| Use next/previous from the headset. | Controls remain authoritative; correct queue occurrence. | |
+| Disconnect during Armed, during Ready, and during Fading; then reconnect. | One audible stream, no duplicate playback, no permanently lowered primary volume, no stale handoff after reconnect. | |
+
+### 32.9 Wired headphones
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Play wired and let tracks crossfade. | Normal overlap. | |
+| Unplug during overlap, then reconnect. | Behaviour follows the existing WavDrop resume policy only (no invented automatic resume); no ghost audio. | |
+| Manual next/previous; background and lock screen. | Same expectations as Bluetooth. | |
+
+### 32.10 Background and lock screen
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Begin a track in the foreground, background the app before the crossfade, let it transition. | No crash, no duplicate playback. | |
+| Lock the screen before the next transition and let it transition. | Same. | |
+| Use notification transport during preparation and fade. | System transport remains primary authority; correct queue occurrence. | |
+| Use lock-screen transport during preparation and fade. | Same. | |
+
+### 32.11 Equalizer policy, audio-session evidence, failures and teardown
+
+| Check | Expected result | Pass / Fail / Notes |
+|---|---|---|
+| Crossfade = 6 seconds, EQ off; play through a transition. | Crossfade is eligible and overlaps. | |
+| Enable the Equalizer. | The Crossfade row is disabled with "Unavailable while Equalizer is on"; the saved 6-second preference stays stored. | |
+| Play through a transition with EQ on. | No crossfade; the primary EQ remains audible. | |
+| Disable the Equalizer. | The row is enabled again and shows 6 seconds; a later eligible transition can crossfade. (No secondary EQ mirroring is claimed.) | |
+| Optional, DEBUG validation build: filter logcat for the audio-session observation line. | Record the primary id, the secondary id or "unavailable", and Shared / Distinct / Unavailable. No particular relationship is required to pass; this is evidence for the open dual-session EQ validation item only. | |
+| Where practical: unreadable next track; next track removed before the transition; secondary preparation failure; primary playback error. | The crossfade fails closed, the primary stays or returns audible, no ghost secondary, existing queue recovery behaviour is unchanged. No artificial destructive hooks are added for this. | |
+| If reproducible: swipe the app away or stop the playback service during Armed, Ready and Fading. | No continuing secondary playback, no leaked audio, the next launch starts from a normal state. | |
+
+### 32.12 Production enablement sign-off
+
+Production enablement requires every row below to be Pass on the intended release build and device set; the gate flip is a separate slice made only after this table is complete.
+
+| Item | Pass / Fail / Notes |
+|---|---|
+| Automated JVM suite green | |
+| Release APK assembled | |
+| Crossfade core overlap passed | |
+| Repeat eligibility passed | |
+| Duplicate occurrence passed | |
+| Manual interaction cancellation passed | |
+| Background / lock-screen passed | |
+| Bluetooth passed | |
+| Wired passed | |
+| EQ compatibility passed | |
+| No stuck primary gain | |
+| No ghost secondary audio | |
+| No stale / wrong handoff | |
+| No crash | |
 
 ## Final Sign-Off
 
