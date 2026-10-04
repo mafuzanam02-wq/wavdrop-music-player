@@ -238,6 +238,9 @@ class PlaybackService : MediaLibraryService() {
             onExplicitSeek = { recoverCrossfadeFromExplicitSeek(crossfadePreparation) },
             onExplicitNavigation = { recoverCrossfadeFromExplicitNavigation(crossfadePreparation) },
             onExplicitRepeatChange = { recoverCrossfadeFromRepeatChange(crossfadePreparation) },
+            // CF-2L3: DEBUG-only evidence of REAL transport commands (distinct from Media3 state changes caused by seeking/buffering).
+            transportLog = if (BuildConfig.DEBUG) { message -> Log.d(CROSSFADE_TAG, message) } else null,
+            crossfadeSummary = { formatCrossfadeSettlementSummary(crossfadePreparation?.settlementSnapshot()) },
         )
 
         if (BuildConfig.DEBUG) {
@@ -286,6 +289,7 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                logCrossfadePrimaryState(player, "PRIMARY_IS_PLAYING value=$isPlaying")
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged=$isPlaying")
                 serviceScope.launch {
@@ -303,6 +307,7 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                logCrossfadePrimaryState(player, "PRIMARY_STATE playbackState=$playbackState")
                 // CF-2F2: synchronous, before any asynchronous widget work. BUFFERING and READY never cancel.
                 if (isPrimaryTerminalPlaybackState(playbackState)) {
                     recoverCrossfadeFromPrimaryTerminalState(crossfadePreparation)
@@ -731,6 +736,21 @@ class PlaybackService : MediaLibraryService() {
         if (BuildConfig.DEBUG) Log.d(RESUME_TAG, message)
     }
 
+    /**
+     * CF-2L3: DEBUG-only primary state-churn evidence, emitted ONLY while a crossfade is Active (never forever, no timer). The
+     * settlement line at handoff completion closes the picture. No titles, paths or ids are logged.
+     */
+    private fun logCrossfadePrimaryState(player: Player, event: String) {
+        if (!BuildConfig.DEBUG) return
+        val settlement = crossfadePreparation?.settlementSnapshot() ?: return
+        if (settlement.state == CrossfadeState.Idle) return
+        Log.d(
+            CROSSFADE_TAG,
+            "$event index=${player.currentMediaItemIndex} playWhenReady=${player.playWhenReady} isPlaying=${player.isPlaying} " +
+                formatCrossfadeSettlementSummary(settlement),
+        )
+    }
+
     @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
     private class PreviousBehaviorPlayer(
         player: Player,
@@ -754,7 +774,23 @@ class PlaybackService : MediaLibraryService() {
         // AVRCP) before it is forwarded. The app-marked controller is inert here: app commands (incl. the custom
         // CYCLE_REPEAT command, which calls PlayerController.cycleRepeatMode) already notified in PlayerController.
         private val onExplicitRepeatChange: () -> Unit,
+        // CF-2L3: DEBUG-only transport diagnostics (null in release). Logging never issues or alters transport.
+        private val transportLog: ((String) -> Unit)? = null,
+        private val crossfadeSummary: () -> String = { "" },
     ) : ForwardingPlayer(player) {
+
+        private fun logTransport(name: String) {
+            val log = transportLog ?: return
+            try {
+                log(
+                    "$name t=${android.os.SystemClock.elapsedRealtime()} external=${isExternalUserTransportRequest()} " +
+                        "hasMedia=${currentMediaItem != null || mediaItemCount > 0} index=$currentMediaItemIndex " +
+                        "playbackState=$playbackState playWhenReady=$playWhenReady isPlaying=$isPlaying ${crossfadeSummary()}",
+                )
+            } catch (_: Exception) {
+                // diagnostics must never affect transport
+            }
+        }
 
         override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
 
@@ -783,12 +819,14 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun pause() {
+            logTransport("TRANSPORT_PAUSE")
             noteExternalTransport()
             onExplicitPause() // cancel any owned crossfade first, then forward the pause
             super.pause()
         }
 
         override fun play() {
+            logTransport("TRANSPORT_PLAY")
             noteExternalTransport()
             if (currentMediaItem != null || mediaItemCount > 0) {
                 playForwarded()
@@ -857,6 +895,7 @@ class PlaybackService : MediaLibraryService() {
         const val EXTRA_AUDIO_OUTPUT_KIND = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
         const val OUTPUT_BLUETOOTH = "bluetooth"
         const val OUTPUT_WIRED = "wired"
+        private const val CROSSFADE_TAG = "WavdropCrossfade"
         private const val CMD_TOGGLE_SHUFFLE = "com.launchpoint.wavdrop.TOGGLE_SHUFFLE"
         private const val CMD_CYCLE_REPEAT = "com.launchpoint.wavdrop.CYCLE_REPEAT"
         @androidx.annotation.OptIn(markerClass = [UnstableApi::class])

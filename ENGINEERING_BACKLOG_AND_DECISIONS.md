@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2L2 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2L3 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -357,6 +357,10 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     begin; a short (150 ms) internal equal-power gain envelope (single curve, secondary written first, driver-evaluated on the monotonic clock, no delays)
     hands audible authority from the secondary to the primary; divergence beyond 200 ms or a non-READY primary aborts back to the secondary; the secondary is
     silenced (exactly 0) before it is abandoned and success follows only the completed transfer. Internal, no setting, gate false, physical retest pending.
+  - **CF-2L3** natural-handoff lifecycle settlement + transport/reconciliation diagnostics (device run of CF-2L2: stutter mostly resolved, but handoffs often did
+    not settle and playback became intermittently unstable; the DEBUG log shows an abort-reseek loop, recorded in PROJECT_CONTEXT): settlement snapshot + invariant
+    (Idle is not proof), success verified settled before return, stale callbacks inert, bounded single-callback driver, DEBUG reconcile/transport/settlement lines.
+    No tolerance tuning, no debounce/suppression; the loop itself is an open decision.
     Awaiting physical retest. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
@@ -647,7 +651,8 @@ items are validated.
    b. Physical validation - blocked: the first 6 s overlap works, but a ~1-2 s final handoff stutter was observed.
    c. CF-2L1 natural AUTO handoff correction - implemented; second physical run: rewind fixed, but a small audible takeover stutter remained.
    d. CF-2L2 continuity-qualified soft natural ownership transfer - implemented / awaiting physical retest.
-   e. Final gate flip after passed validation - pending.
+   e. CF-2L3 lifecycle settlement + diagnostics - implemented; decision pending on the demonstrated abort-reseek loop; physical retest pending.
+   f. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 
 ### Playback hardening (engineering)

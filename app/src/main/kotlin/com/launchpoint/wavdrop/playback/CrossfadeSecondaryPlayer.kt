@@ -136,6 +136,12 @@ internal class CrossfadeSecondaryPlayer(
 
     val currentKey: CrossfadeTransitionKey? get() = activeKey
 
+    /** CF-2L3 diagnostic (read-only): the secondary still holds an active transition key (preparing, prepared or started). */
+    val hasActiveOwnership: Boolean get() = !released && activeKey != null
+
+    /** CF-2L3 diagnostic (read-only): the secondary is in the started (audible-capable) phase for its active key. */
+    val isStarted: Boolean get() = !released && activeKey != null && phase == Phase.Started
+
     private enum class Phase { None, Preparing, Prepared, Started }
 
     private val callbacks = object : SecondaryBackendCallbacks {

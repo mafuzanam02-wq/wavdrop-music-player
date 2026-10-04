@@ -153,6 +153,9 @@ internal sealed interface CrossfadeHandoffFailure {
 
     /** CF-2L2: a primary gain write during the soft ownership transfer (or its abort) failed. */
     data object PrimaryGainWriteFailed : CrossfadeHandoffFailure
+
+    /** CF-2L3: the coordinator reduced success but the runtime was not fully settled (best-effort cleanup was attempted); never reported as Succeeded. */
+    data object SettlementIncomplete : CrossfadeHandoffFailure
 }
 
 /** Result of [CrossfadePreparationRuntime.executeHandoff]. */
@@ -226,6 +229,9 @@ internal class CrossfadePreparationRuntime(
     // CF-2L2: monotonic start of the internal soft ownership transfer (secondary B -> primary B); null while not transferring.
     private var transferStartMs: Long? = null
 
+    // CF-2L3: same-item reconciliation seeks issued for the current transition (diagnostic accounting; cleared with the rest).
+    private var naturalReconcileRequests = 0
+
     /** CF-2L1: true when production wiring supplied the natural-AUTO handoff seams (a pending handoff then waits on real state). */
     val usesNaturalHandoff: Boolean get() = naturalHandoff != null
 
@@ -240,7 +246,22 @@ internal class CrossfadePreparationRuntime(
         handoffSeekLeadMs = 0L
         handoffSeekTargetMs = null
         transferStartMs = null
+        naturalReconcileRequests = 0
     }
+
+    /** CF-2L3: read-only proof of what this runtime still holds (see [isCrossfadeFullySettled]). Never exposes a player. */
+    fun settlementSnapshot(): CrossfadeSettlementSnapshot = CrossfadeSettlementSnapshot(
+        state = state,
+        hasNaturalObservedKey = naturalObservedKey != null,
+        hasSeekTarget = handoffSeekTargetMs != null,
+        seekLeadMs = handoffSeekLeadMs,
+        transferActive = transferStartMs != null,
+        primaryGainOwnerKey = primaryGain.ownerKey,
+        secondaryOwned = secondary.hasActiveOwnership,
+        secondaryStarted = secondary.isStarted,
+        closed = closed,
+        reconcileRequestCount = naturalReconcileRequests,
+    )
 
     private val secondary = CrossfadeSecondaryPlayer(
         backendFactory = backendFactory,
@@ -524,8 +545,32 @@ internal class CrossfadePreparationRuntime(
 
         // Physical transfer is complete: the coordinator success reduction carries no cleanup commands.
         applyReduction(reduceCrossfade(state, CrossfadeEvent.HandoffSucceeded(key)), snapshot)
+        return settleAfterSuccess(key, naturalHandoff)
+    }
+
+    /**
+     * CF-2L3: once HandoffSucceeded is reduced the old transition is DEAD. All natural-handoff bookkeeping is cleared explicitly
+     * here (not only as an incidental side effect of the reduction) and the full settlement invariant is verified BEFORE the
+     * caller can schedule anything. If anything survives, a best-effort cleanup runs and the result is NOT Succeeded.
+     */
+    private fun settleAfterSuccess(key: CrossfadeTransitionKey, seams: CrossfadeNaturalHandoffSeams?): CrossfadeHandoffExecutionResult {
+        clearNaturalHandoff()
+        var settlement = settlementSnapshot()
+        if (!isCrossfadeFullySettled(settlement)) {
+            primaryGain.ownerKey?.let { if (!primaryGain.restore(it)) Log.w(TAG, "primary gain restore failed during settlement") }
+            secondary.currentKey?.let { secondary.abandon(it) }
+            settlement = settlementSnapshot()
+            if (seams != null) logTransfer(seams, settledLine(key, settlement))
+            return CrossfadeHandoffExecutionResult.Failed(CrossfadeHandoffFailure.SettlementIncomplete)
+        }
+        if (seams != null) logTransfer(seams, settledLine(key, settlement))
         return CrossfadeHandoffExecutionResult.Succeeded
     }
+
+    private fun settledLine(key: CrossfadeTransitionKey, s: CrossfadeSettlementSnapshot): String =
+        "HANDOFF_SETTLED key=$key state=${crossfadeStateName(s.state)} transferActive=${s.transferActive} " +
+            "seekTargetPresent=${s.hasSeekTarget} seekLeadMs=${s.seekLeadMs} primaryGainOwned=${s.primaryGainOwnerKey != null} " +
+            "secondaryOwned=${s.secondaryOwned} settled=${isCrossfadeFullySettled(s)}"
 
     /**
      * CF-2L1: an authoritative primary media-item transition fact. Qualifies only while Fading or HandoffPending, only for
@@ -603,6 +648,12 @@ internal class CrossfadePreparationRuntime(
                 val seekTo = decision.positionMs.coerceAtMost(fresh.durationMs)
                 handoffSeekTargetMs = seekTo
                 handoffSeekLeadMs = decision.leadMs
+                naturalReconcileRequests++
+                logTransfer(
+                    seams,
+                    "RECONCILE_REQUEST key=$key n=$naturalReconcileRequests stage=${if (previousTarget == null) "initial" else "reseek"} " +
+                        "requestedPositionMs=$seekTo primaryPositionMs=${facts.positionMs} secondaryPositionMs=${fresh.positionMs} leadMs=${decision.leadMs}",
+                )
                 val reconciliation = try {
                     seams.reconciler.reconcile(key, fresh.copy(positionMs = seekTo))
                 } catch (e: Exception) {
@@ -611,6 +662,13 @@ internal class CrossfadePreparationRuntime(
                     return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationException)
                 }
                 if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+                logTransfer(
+                    seams,
+                    "RECONCILE_RESULT key=$key n=$naturalReconcileRequests " + when (reconciliation) {
+                        is CrossfadePrimaryReconciliationResult.Rejected -> "rejected reason=${reconciliation.reason}"
+                        else -> "succeeded"
+                    },
+                )
                 if (reconciliation is CrossfadePrimaryReconciliationResult.Rejected) {
                     val notPropagatedYet = reconciliation.reason == CrossfadePrimaryReconciliationRejection.PhysicalIndexMismatch ||
                         reconciliation.reason == CrossfadePrimaryReconciliationRejection.CurrentOccurrenceMismatch
@@ -706,7 +764,7 @@ internal class CrossfadePreparationRuntime(
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
         if (!abandoned) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryAbandonFailed)
         applyReduction(reduceCrossfade(state, CrossfadeEvent.HandoffSucceeded(key)), snapshot)
-        return CrossfadeHandoffExecutionResult.Succeeded
+        return settleAfterSuccess(key, seams)
     }
 
     /**

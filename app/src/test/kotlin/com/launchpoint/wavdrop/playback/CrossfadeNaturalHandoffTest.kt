@@ -5,6 +5,8 @@ import androidx.media3.common.Player
 import com.launchpoint.wavdrop.data.model.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -640,7 +642,8 @@ class CrossfadeNaturalHandoffTest {
         assertEquals(1f, primaryWrites.last(), 0f)
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertFalse(runtime.isNaturalTransferInProgress)
-        assertTrue(transferLogs.last().startsWith("TRANSFER_COMPLETE"))
+        assertTrue(transferLogs.any { it.startsWith("TRANSFER_COMPLETE") })
+        assertTrue(transferLogs.last().startsWith("HANDOFF_SETTLED")) // only after the full cleanup
     }
 
     @Test fun secondaryIsNeverAbandonedWhileStillAudibleAndSuccessOnlyFollowsTheCompletedTransfer() {
@@ -893,6 +896,267 @@ class CrossfadeNaturalHandoffTest {
         finishTransfer()
         assertTrue(transferLogs.isNotEmpty())
         assertTrue(transferLogs.none { it.contains("content://") || it.contains("S2") })
+    }
+
+    // ── CF-2L3: lifecycle settlement, stale-callback inertness, scheduler boundedness ──────────────
+
+    private fun settled() = isCrossfadeFullySettled(runtime.settlementSnapshot())
+
+    @Test fun successfulHandoffIsFullySettledSynchronouslyBeforeAnythingIsScheduled() {
+        beginTransfer()
+        clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
+        assertEquals(CrossfadeHandoffExecutionResult.Succeeded, runtime.executeHandoff(key))
+        assertTrue(settled()) // proven at return, not at some later pulse
+    }
+
+    @Test fun successfulHandoffClearsEveryPieceOfNaturalBookkeepingAndOwnership() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 7_250L
+        primaryOnTarget(positionMs = 100L)
+        auto(2) // a reposition: seek target + lead are now set
+        val mid = runtime.settlementSnapshot()
+        assertTrue(mid.hasSeekTarget && mid.hasNaturalObservedKey && mid.primaryGainOwnerKey != null && mid.secondaryOwned && mid.secondaryStarted)
+        backend.snapshotPositionMs = 7_300L
+        primaryOnTarget(positionMs = 7_260L)
+        advanceCrossfadeHandoff(runtime)
+        assertTrue(runtime.settlementSnapshot().transferActive)
+        finishTransfer()
+        val s = runtime.settlementSnapshot()
+        assertEquals(CrossfadeState.Idle, s.state)
+        assertFalse(s.hasNaturalObservedKey)
+        assertFalse(s.hasSeekTarget)
+        assertEquals(0L, s.seekLeadMs)
+        assertFalse(s.transferActive)
+        assertNull(s.primaryGainOwnerKey)
+        assertFalse(s.secondaryOwned)
+        assertFalse(s.secondaryStarted)
+        assertEquals(0, s.reconcileRequestCount)
+        assertTrue(isCrossfadeFullySettled(s))
+        assertTrue(transferLogs.last().startsWith("HANDOFF_SETTLED"))
+        assertTrue(transferLogs.last().contains("settled=true"))
+        assertTrue(transferLogs.last().contains("primaryGainOwned=false") && transferLogs.last().contains("secondaryOwned=false"))
+    }
+
+    @Test fun staleAutoReadyAndPendingAdvanceAfterSuccessAreInert() {
+        beginTransfer()
+        finishTransfer()
+        val resets = backend.resets
+        val gainsSeen = backend.gains.size
+        val primarySeen = primaryWrites.size
+        val seeks = reconcileCalls.size
+        auto(2) // late AUTO for the dead transition
+        advanceCrossfadeHandoff(runtime) // late READY
+        runtime.advancePendingHandoff()
+        assertEquals(CrossfadeHandoffExecutionResult.Inactive, runtime.executeHandoff(key))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(resets, backend.resets)
+        assertEquals(gainsSeen, backend.gains.size)
+        assertEquals(primarySeen, primaryWrites.size)
+        assertEquals(seeks, reconcileCalls.size) // no reconciliation after HandoffSucceeded
+        assertTrue(settled())
+    }
+
+    @Test fun staleTimingPulseAfterSuccessCannotTouchTheOldHandoffAndAFutureTransitionStillArms() {
+        toFading()
+        clockNow += 6_000L
+        scheduler.runNext() // terminal tick -> HandoffPending
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        logicalIndex = 2
+        auto(2)
+        scheduler.runNext() // transfer evaluation at progress 0
+        clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
+        scheduler.runNext() // completes
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(settled())
+        val seeks = reconcileCalls.size
+        val resets = backend.resets
+        val primarySeen = primaryWrites.size
+        position = 1_000L // a fresh track: nothing near its fade window
+        scheduler.runNext() // the next normal pre-fade pulse
+        assertEquals(seeks, reconcileCalls.size)
+        assertEquals(resets, backend.resets)
+        assertEquals(primarySeen, primaryWrites.size)
+        val armed = runtime.state as CrossfadeState.Armed // a later DISTINCT transition still works
+        assertEquals(CrossfadeTransitionKey(5L, 2, 3), armed.key)
+        assertTrue(armed.key != key)
+        assertEquals(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS, scheduler.activeNow.single().delayMs)
+    }
+
+    @Test fun onlyOneReconciliationIsInFlightAtATime() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 7_250L
+        primaryOnTarget(positionMs = 100L)
+        auto(2)
+        repeat(8) {
+            assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek), runtime.executeHandoff(key))
+            advanceCrossfadeHandoff(runtime) // READY churn must not multiply seeks
+        }
+        assertEquals(1, reconcileCalls.size)
+        assertEquals(1, runtime.settlementSnapshot().reconcileRequestCount)
+        assertTrue(transferLogs.first().startsWith("RECONCILE_REQUEST"))
+        assertTrue(transferLogs.first().contains("stage=initial") && transferLogs.first().contains("requestedPositionMs=7250"))
+        assertTrue(transferLogs[1].startsWith("RECONCILE_RESULT") && transferLogs[1].endsWith("succeeded"))
+    }
+
+    @Test fun rejectedReconciliationIsLoggedWithItsReason() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 7_250L
+        primaryOnTarget(positionMs = 100L)
+        reconcileResult = CrossfadePrimaryReconciliationResult.Rejected(CrossfadePrimaryReconciliationRejection.PhysicalIndexMismatch)
+        auto(2)
+        assertTrue(transferLogs.any { it.startsWith("RECONCILE_RESULT") && it.contains("rejected reason=PhysicalIndexMismatch") })
+    }
+
+    @Test fun noReconciliationSeekIsEmittedOnceTheTransferHasStarted() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 100L)
+        auto(2) // seek issued
+        primaryOnTarget(positionMs = 6_100L) // landed and aligned
+        advanceCrossfadeHandoff(runtime)
+        assertTrue(runtime.isNaturalTransferInProgress)
+        val seeks = reconcileCalls.size
+        repeat(5) {
+            clockNow += 20L
+            advanceCrossfadeHandoff(runtime)
+        }
+        assertEquals(seeks, reconcileCalls.size) // no seek during the envelope
+        finishTransfer()
+        assertEquals(seeks, reconcileCalls.size) // nor at completion
+    }
+
+    @Test fun transferAbortClearsTransferStateBeforeReconciliationResumes() {
+        beginTransfer()
+        primaryOnTarget(positionMs = 6_100L - NATURAL_TRANSFER_ABORT_TOLERANCE_MS - 50L)
+        runtime.executeHandoff(key) // abort
+        val s = runtime.settlementSnapshot()
+        assertFalse(s.transferActive) // cleared first
+        assertEquals(0, s.reconcileRequestCount) // and the abort itself issued no seek
+        assertTrue(s.state is CrossfadeState.HandoffPending)
+        runtime.executeHandoff(key) // reconciliation resumes on the next evaluation
+        assertEquals(1, runtime.settlementSnapshot().reconcileRequestCount)
+    }
+
+    // cadence / scheduler boundedness
+
+    private fun transferViaDriver() {
+        toFading()
+        clockNow += 6_000L
+        scheduler.runNext()
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        logicalIndex = 2
+        auto(2)
+        assertTrue(runtime.isNaturalTransferInProgress)
+        scheduler.runNext() // at most one callback ever pending
+        assertEquals(CrossfadeTimingDriver.TRANSFER_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
+    }
+
+    @Test fun afterSuccessTheDriverIsSettledWithExactlyOnePreFadeCallbackAndNoTransferCadence() {
+        transferViaDriver()
+        clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
+        scheduler.runNext()
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(settled()) // already settled when the next callback was scheduled
+        val pending = scheduler.activeNow.single()
+        assertEquals(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS, pending.delayMs)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        repeat(3) { // stale callbacks cannot create a second loop
+            auto(2)
+            advanceCrossfadeHandoff(runtime)
+            assertEquals(1, scheduler.activeNow.size)
+        }
+    }
+
+    @Test fun cancellationDuringTransferLeavesNoSixteenMsLoop() {
+        transferViaDriver()
+        runtime.cancel(CrossfadeCancelReason.ManualNavigation)
+        assertTrue(settled())
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(1, scheduler.activeNow.size) // the one already-pending pulse
+        scheduler.runNext()
+        assertEquals(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS, scheduler.activeNow.single().delayMs) // never 16 ms again
+    }
+
+    @Test fun handoffFailureDuringTransferLeavesNoSpinningDriverAndIsSettled() {
+        transferViaDriver()
+        backend.setGainResult = false
+        clockNow += 40L
+        scheduler.runNext() // the tick's secondary write fails -> HandoffFailed
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(scheduler.activeNow.isEmpty()) // the driver halted
+        assertTrue(settled())
+    }
+
+    @Test fun stopAndCloseClearThePendingCallbackEvenMidTransfer() {
+        transferViaDriver()
+        assertEquals(1, scheduler.activeNow.size)
+        graph.timingDriver.stop()
+        assertTrue(scheduler.activeNow.isEmpty())
+        graph.timingDriver.start()
+        assertEquals(1, scheduler.activeNow.size)
+        graph.timingDriver.close()
+        assertTrue(scheduler.activeNow.isEmpty())
+    }
+
+    // cancellation matrix: every cancel reason ends Idle and fully settled
+
+    private fun assertCancelSettlesDuringTransfer(reason: CrossfadeCancelReason) {
+        beginTransfer()
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        assertTrue(runtime.settlementSnapshot().transferActive)
+        runtime.cancel(reason)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue("reason=$reason", settled())
+        assertFalse(runtime.isNaturalTransferInProgress)
+    }
+
+    @Test fun pauseSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.Pause)
+    @Test fun seekSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.Seek)
+    @Test fun manualNavigationSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.ManualNavigation)
+    @Test fun repeatChangeSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.RepeatChanged)
+    @Test fun shuffleChangeSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.ShuffleChanged)
+    @Test fun queueMutationSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.QueueMutation)
+    @Test fun controllerDisconnectSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.ControllerDisconnected)
+    @Test fun primaryErrorSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.PlaybackError)
+    @Test fun equalizerInvalidationSettles() = assertCancelSettlesDuringTransfer(CrossfadeCancelReason.PlanInvalidated)
+    @Test fun audioFocusInterruptionSettles() {
+        beginTransfer()
+        recoverCrossfadeFromPrimaryInterruption(runtime) // CF-2F5: Media3 focus / noisy / suppression recovery
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(settled())
+    }
+
+    @Test fun handoffFailureCleanupIsSettledWhenRestorationSucceeds() {
+        beginTransfer()
+        backend.setGainResult = false
+        clockNow += 75L
+        assertTrue(runtime.executeHandoff(key) is CrossfadeHandoffExecutionResult.Failed)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(settled())
+    }
+
+    @Test fun aFailedPrimaryRestoreIsNeverReportedAsSettled() {
+        beginTransfer()
+        primaryWriteResult = false // the primary gain cannot be restored
+        runtime.cancel(CrossfadeCancelReason.ManualNavigation)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertNotNull(runtime.settlementSnapshot().primaryGainOwnerKey) // ownership deliberately retained for retry
+        assertFalse(settled())
+    }
+
+    @Test fun abandoningTheSecondaryMeansNoActiveSecondaryOwnership() {
+        beginTransfer()
+        assertTrue(runtime.settlementSnapshot().secondaryOwned)
+        finishTransfer()
+        assertFalse(runtime.settlementSnapshot().secondaryOwned)
+        assertFalse(runtime.settlementSnapshot().secondaryStarted)
     }
 
     @Test fun productionRolloutGateRemainsFalse() {

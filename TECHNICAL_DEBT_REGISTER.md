@@ -518,6 +518,8 @@ AUTO, and let the discontinuity callback only refresh state.
 
 **CF-2L2 update:** the final natural-AUTO ownership seam is now a continuity-qualified soft transfer (internal 150 ms equal-power gain envelope while still `HandoffPending`) instead of an instant primary restore plus secondary reset; it keeps the same ownership model, adds no stats or persistence notification and does not change the two-callback ownership described above. The broader cleanup remains open.
 
+**CF-2L3 update:** the natural handoff now has a testable settlement invariant (a finished or cancelled transition leaves no bookkeeping, gain owner or secondary ownership) and DEBUG transport/reconciliation diagnostics; it changes no callback ownership and the broader cleanup remains open.
+
 ---
 
 ## Guiding Principles — When Should Technical Debt Be Paid?
