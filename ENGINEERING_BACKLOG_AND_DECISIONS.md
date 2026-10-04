@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2F4 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2F5 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -322,6 +322,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     notifies a lifecycle-scoped listener after the identity guard passes and before clearing the controller reference, running
     the existing `ControllerDisconnected` cancellation; stale disconnects never notify; reconnection stays demand-driven.
     The snapshot fallback remains. Driver keeps running. Gate `false`.
+  - **CF-2F5** primary audio-focus / route interruption recovery (internal failure/cancel foundation): media3 1.11.1
+    `onPlayWhenReadyChanged` (AUDIO_FOCUS_LOSS, AUDIO_BECOMING_NOISY pauses) and `onPlaybackSuppressionReasonChanged`
+    (TRANSIENT_AUDIO_FOCUS_LOSS, UNSUITABLE_AUDIO_ROUTE, UNSUITABLE_AUDIO_OUTPUT) are classified by pure helpers and run the
+    existing `Pause` cancellation synchronously. Generic `isPlaying == false`, USER_REQUEST, buffering, suppression NONE and
+    `AudioDeviceCallback` are not triggers; no resurrection on regain. The snapshot fallback remains. Driver keeps running. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -569,15 +574,14 @@ items are validated.
    d. CF-2D4 - timing-driver handoff execution + continuation after successful handoff - complete.
    CF-2E1 - dormant production construction/lifecycle wiring - complete (gate false, driver not started).
    CF-2E2 - persisted crossfade configuration + explicit driver start/stop policy - complete (internal; a setting is not enablement, the hard gate remains the rollout boundary; no UI, not in backups).
-   Next boundaries are separate and not auto-selected: failure/cancel recovery during overlap, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, physical Bluetooth/background validation.
+   Next boundaries are separate and not auto-selected: dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, physical Bluetooth/background validation.
 3. Failure / cancel recovery during audible overlap:
    a. CF-2F1 - primary playback-error cancellation bridge - complete.
    b. CF-2F2 - primary terminal playback-state recovery (IDLE/ENDED) - complete.
    c. CF-2F3 - secondary terminal playback-state recovery (IDLE/ENDED) - complete.
    d. CF-2F4 - authoritative controller-disconnection recovery - complete.
-   e. Remaining failure/cancel recovery - open; not auto-selected. The one known signal still handled only by the defensive
-      snapshot fallback: audio-focus loss and becoming-noisy induced primary pauses (ExoPlayer flips playWhenReady with no
-      terminal state, so only `!isPlaying -> Pause` on a later pulse). Service teardown is owned by `closeCrossfadeGraph`.
+   e. CF-2F5 - primary audio-focus / route interruption recovery - complete.
+   Parent item (failure / cancel recovery during audible overlap) - complete. Service teardown is owned by `closeCrossfadeGraph`; the snapshot fallback remains defensive only.
 4. Manual seek / pause / next / previous interaction while preparing or fading:
    a. CF-2G1 - explicit pause crossfade cancellation - complete.
    b. CF-2G2 - explicit same-track seek cancellation - complete.

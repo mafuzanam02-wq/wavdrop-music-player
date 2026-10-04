@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2F4. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2F5. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3G, CF-2F2, CF-2F3 and CF-2F4 (below).
+- Crossfade engineering foundations CF-1 to CF-2H3G, CF-2F2, CF-2F3, CF-2F4 and CF-2F5 (below).
 
 ## Crossfade - current state
 
@@ -77,6 +77,7 @@ Completed, internal-only foundations:
 | CF-2F2 | primary terminal playback-state crossfade recovery (`PrimaryPlaybackTerminated` cancel on primary `STATE_IDLE`/`STATE_ENDED`) |
 | CF-2F3 | secondary terminal playback-state recovery (unexpected secondary `STATE_IDLE`/`STATE_ENDED` fails the exact attempt through the existing `SecondaryError` path) |
 | CF-2F4 | authoritative MediaController-disconnection crossfade recovery (`ControllerDisconnected` cancel, notified before the controller reference is cleared) |
+| CF-2F5 | primary audio-focus / route interruption crossfade recovery (Media3 `onPlayWhenReadyChanged` + `onPlaybackSuppressionReasonChanged`, existing `Pause` cancel) |
 | CF-2G1 | manual (explicit) pause crossfade cancellation (`Pause` cancel before the primary pause is forwarded) |
 | CF-2G2 | explicit same-track seek crossfade cancellation (`Seek` cancel from the app seek and from external-controller scrubs) |
 | CF-2G3 | explicit next/previous crossfade cancellation (`ManualNavigation` cancel from app skipToNext/skipToPrevious and from external-controller next/previous, including previous restart-current) |
@@ -153,7 +154,11 @@ CF-2F3 (third slice of failure/cancel recovery): the real secondary backend's at
 
 CF-2F4 (fourth slice of failure/cancel recovery): when the CURRENT authoritative `MediaController` disconnects, `PlayerController`'s `controllerLifecycleListener.onDisconnected` notifies a new lifecycle-scoped `ControllerDisconnectedListenerRegistry` (set via `setControllerDisconnectedListener`, registered by `PlaybackService`, cleared in `onDestroy`) after the existing `ControllerAttemptOwnership.shouldApplyDisconnect` identity guard passes and BEFORE `mediaController`, the progress player and the connection state are cleared, so an audible Fading/HandoffPending cleanup can still restore the primary gain. The service callback runs `recoverCrossfadeFromControllerDisconnected(runtime)`, i.e. the existing `CrossfadeCancelReason.ControllerDisconnected` (no new reason). A stale or superseded controller's disconnect fails the identity guard and never notifies; a repeated disconnect of the same controller finds the reference already cleared. Reconnection stays demand-driven (nothing is carried over), a failed connection attempt is unchanged, and service teardown stays with `closeCrossfadeGraph`. The snapshot `controllerConnected` check remains the defensive fallback; CF-2F1/2F2/2F3, audio-focus/noisy handling and TD-018 are unchanged. Driver keeps running; the hard gate stays `false`.
 
-The next boundaries are separate: the remaining failure/cancel recovery, dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
+CF-2F5 (fifth and final slice of failure/cancel recovery): media3 1.11.1. The primary `Player.Listener` in `PlaybackService` now overrides `onPlayWhenReadyChanged(playWhenReady, reason)` and `onPlaybackSuppressionReasonChanged(reason)` and classifies them with pure helpers (`classifyPrimaryPlayWhenReadyInterruption`, `classifyPrimarySuppressionInterruption` -> `PrimaryPlaybackInterruption.{None,AudioFocus,AudioRoute}`). Classified: a pause (`playWhenReady == false`) with `PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS` (audio focus) or `PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY` (route; produced by Media3's `setHandleAudioBecomingNoisy`), and suppression `PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS` (audio focus) or `PLAYBACK_SUPPRESSION_REASON_UNSUITABLE_AUDIO_ROUTE` / `_UNSUITABLE_AUDIO_OUTPUT` (route). Not classified: `USER_REQUEST` (CF-2G1 owns explicit pause), `REMOTE`, `END_OF_MEDIA_ITEM`, `SUPPRESSED_TOO_LONG`, any resume, suppression `NONE` and `SCRUBBING`, and buffering/ready states. A classified signal runs `recoverCrossfadeFromPrimaryInterruption(runtime)`, i.e. the existing `CrossfadeCancelReason.Pause` (no new reason), synchronously inside the callback. Generic `onIsPlayingChanged(false)` is deliberately not a trigger and is unchanged; `AudioDeviceCallback` route removal is not a trigger (resume authority unchanged); with `pauseOnAudioDisconnect` off Media3 does not interrupt, so nothing cancels. Nothing is resurrected when focus/route returns; the snapshot `!isPlaying -> Pause` fallback remains. Driver keeps running; the hard gate stays `false`.
+
+Failure / cancel recovery during audible overlap is complete: primary error (CF-2F1), primary terminal state (CF-2F2), secondary error and terminal state (CF-2F3), controller disconnect (CF-2F4), audio-focus/route interruption (CF-2F5), explicit pause/seek/navigation (CF-2G), queue/repeat/shuffle mutations (CF-2H), playback resumption (CF-2H3G) and service teardown (`closeCrossfadeGraph`).
+
+The next boundaries are separate: dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
 
 ## In progress
 

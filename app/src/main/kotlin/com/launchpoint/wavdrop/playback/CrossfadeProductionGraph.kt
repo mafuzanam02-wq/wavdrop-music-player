@@ -273,3 +273,49 @@ internal val CONTROLLER_DISCONNECTED_CANCEL_REASON = CrossfadeCancelReason.Contr
 internal fun recoverCrossfadeFromControllerDisconnected(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(CONTROLLER_DISCONNECTED_CANCEL_REASON)
 }
+
+/** CF-2F5: which Media3-authoritative interruption (if any) a primary callback reports. */
+internal enum class PrimaryPlaybackInterruption {
+    None,
+    AudioFocus,
+    AudioRoute,
+}
+
+/**
+ * CF-2F5: classifies `Player.Listener.onPlayWhenReadyChanged(playWhenReady, reason)`. Only a pause whose Media3 reason is
+ * AUDIO_FOCUS_LOSS or AUDIO_BECOMING_NOISY is an interruption. USER_REQUEST stays with CF-2G1; REMOTE, END_OF_MEDIA_ITEM,
+ * SUPPRESSED_TOO_LONG and any resume (`playWhenReady == true`) are not classified.
+ */
+internal fun classifyPrimaryPlayWhenReadyInterruption(playWhenReady: Boolean, reason: Int): PrimaryPlaybackInterruption {
+    if (playWhenReady) return PrimaryPlaybackInterruption.None
+    return when (reason) {
+        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> PrimaryPlaybackInterruption.AudioFocus
+        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY -> PrimaryPlaybackInterruption.AudioRoute
+        else -> PrimaryPlaybackInterruption.None
+    }
+}
+
+/**
+ * CF-2F5: classifies `Player.Listener.onPlaybackSuppressionReasonChanged(reason)`. TRANSIENT_AUDIO_FOCUS_LOSS is audio focus;
+ * UNSUITABLE_AUDIO_ROUTE and UNSUITABLE_AUDIO_OUTPUT are route interruptions. NONE (suppression lifted) and SCRUBBING are not
+ * interruptions.
+ */
+internal fun classifyPrimarySuppressionInterruption(suppressionReason: Int): PrimaryPlaybackInterruption =
+    when (suppressionReason) {
+        Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS -> PrimaryPlaybackInterruption.AudioFocus
+        Player.PLAYBACK_SUPPRESSION_REASON_UNSUITABLE_AUDIO_ROUTE,
+        Player.PLAYBACK_SUPPRESSION_REASON_UNSUITABLE_AUDIO_OUTPUT -> PrimaryPlaybackInterruption.AudioRoute
+        else -> PrimaryPlaybackInterruption.None
+    }
+
+/** CF-2F5: the cancel reason of a Media3 audio-focus / route interruption (existing Pause; the primary was paused/suppressed). */
+internal val PRIMARY_INTERRUPTION_CANCEL_REASON = CrossfadeCancelReason.Pause
+
+/**
+ * CF-2F5: key-less, synchronous cleanup when Media3 reports an audio-focus or route interruption of the authoritative
+ * primary. Makes the snapshot `!isPlaying -> Pause` fallback synchronous for these signals only. No resurrection when focus
+ * or the route returns. The timing driver is left running; a null runtime (gate false) is a no-op.
+ */
+internal fun recoverCrossfadeFromPrimaryInterruption(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(PRIMARY_INTERRUPTION_CANCEL_REASON)
+}

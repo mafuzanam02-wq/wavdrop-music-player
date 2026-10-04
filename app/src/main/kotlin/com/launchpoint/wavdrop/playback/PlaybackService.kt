@@ -239,6 +239,19 @@ class PlaybackService : MediaLibraryService() {
                 recoverCrossfadeFromPrimaryPlaybackError(crossfadePreparation)
             }
 
+            // CF-2F5: Media3-authoritative interruption signals only (never generic isPlaying == false, never buffering).
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (classifyPrimaryPlayWhenReadyInterruption(playWhenReady, reason) != PrimaryPlaybackInterruption.None) {
+                    recoverCrossfadeFromPrimaryInterruption(crossfadePreparation)
+                }
+            }
+
+            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+                if (classifyPrimarySuppressionInterruption(playbackSuppressionReason) != PrimaryPlaybackInterruption.None) {
+                    recoverCrossfadeFromPrimaryInterruption(crossfadePreparation)
+                }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged=$isPlaying")
