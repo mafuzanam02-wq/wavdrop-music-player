@@ -147,6 +147,12 @@ internal sealed interface CrossfadeHandoffFailure {
     data object PrimaryReconciliationException : CrossfadeHandoffFailure
     data object PrimaryGainRestoreFailed : CrossfadeHandoffFailure
     data object SecondaryAbandonFailed : CrossfadeHandoffFailure
+
+    /** CF-2L2: a secondary gain write during the soft ownership transfer (or its abort) failed. */
+    data object SecondaryGainWriteFailed : CrossfadeHandoffFailure
+
+    /** CF-2L2: a primary gain write during the soft ownership transfer (or its abort) failed. */
+    data object PrimaryGainWriteFailed : CrossfadeHandoffFailure
 }
 
 /** Result of [CrossfadePreparationRuntime.executeHandoff]. */
@@ -217,8 +223,14 @@ internal class CrossfadePreparationRuntime(
     private var handoffSeekLeadMs = 0L
     private var handoffSeekTargetMs: Long? = null
 
+    // CF-2L2: monotonic start of the internal soft ownership transfer (secondary B -> primary B); null while not transferring.
+    private var transferStartMs: Long? = null
+
     /** CF-2L1: true when production wiring supplied the natural-AUTO handoff seams (a pending handoff then waits on real state). */
     val usesNaturalHandoff: Boolean get() = naturalHandoff != null
+
+    /** CF-2L2: true while the short soft ownership-transfer envelope is running (the driver then evaluates at a finer cadence). */
+    val isNaturalTransferInProgress: Boolean get() = transferStartMs != null
 
     private fun ownershipLoss(snapshot: CrossfadeRuntimeSnapshot, key: CrossfadeTransitionKey): CrossfadeCancelReason? =
         crossfadeOwnershipLossReason(snapshot, key, naturalTransition = naturalObservedKey == key)
@@ -227,6 +239,7 @@ internal class CrossfadePreparationRuntime(
         naturalObservedKey = null
         handoffSeekLeadMs = 0L
         handoffSeekTargetMs = null
+        transferStartMs = null
     }
 
     private val secondary = CrossfadeSecondaryPlayer(
@@ -554,8 +567,10 @@ internal class CrossfadePreparationRuntime(
      * CF-2L1: the natural-AUTO terminal handoff. The terminal fade left primary gain 0 and secondary gain 1; the secondary
      * stays alive and audible until the primary is genuinely usable on the target. Waits (no effects) for: the exact AUTO
      * transition; the primary physically on the target occurrence in READY; and, after a same-item reposition onto a FRESH
-     * secondary position, the primary landing near it. Only then: primary gain restored, secondary abandoned, success.
-     * Readiness is read from real player facts, never from a returned command or a fixed delay.
+     * secondary position, the primary landing within [NATURAL_TRANSFER_ENTRY_TOLERANCE_MS]. Only then (CF-2L2) does the short
+     * internal soft ownership transfer run (see [beginTransfer]/[continueTransfer]/[completeTransfer]); the secondary is silenced
+     * before it is abandoned, and success follows only the completed transfer. Readiness is read from real player facts, never
+     * from a returned command or a fixed delay.
      */
     private fun executeNaturalHandoff(
         pending: CrossfadeState.HandoffPending,
@@ -571,11 +586,14 @@ internal class CrossfadePreparationRuntime(
             null
         }
         if (facts == null || facts.physicalIndex != key.toPlaybackIndex || !facts.isReady) {
+            // A primary that stops being a valid READY target mid-transfer must not keep gaining: return authority to the secondary.
+            if (transferStartMs != null) return abortTransfer(pending, snapshot, seams, "primary-not-ready", null, CrossfadeHandoffWait.PrimaryReady)
             return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimaryReady)
         }
         val fresh = secondary.handoffSnapshot(key) // FRESH: the terminal snapshot is stale once the secondary keeps playing
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
         if (fresh == null) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondarySnapshotUnavailable)
+        if (transferStartMs != null) return continueTransfer(pending, snapshot, seams, facts, fresh)
         when (val decision = decideNaturalTakeover(facts, fresh.positionMs, handoffSeekTargetMs, handoffSeekLeadMs)) {
             NaturalTakeoverDecision.AwaitSeekLanding ->
                 return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
@@ -606,7 +624,124 @@ internal class CrossfadePreparationRuntime(
                 }
                 return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
             }
-            NaturalTakeoverDecision.TakeOver -> return completeHandoff(pending, snapshot)
+            NaturalTakeoverDecision.TakeOver -> return beginTransfer(seams, facts, fresh)
+        }
+    }
+
+    /**
+     * CF-2L2: the primary is qualified (exact AUTO + occurrence + READY + fresh snapshot + within the entry tolerance). Starts the
+     * internal transfer envelope WITHOUT touching a gain or a player: primary is still 0 and secondary still 1. Ticks follow only
+     * through later driver evaluations.
+     */
+    private fun beginTransfer(
+        seams: CrossfadeNaturalHandoffSeams,
+        facts: PrimaryTakeoverFacts,
+        fresh: SecondaryHandoffSnapshot,
+    ): CrossfadeHandoffExecutionResult {
+        transferStartMs = seams.nowElapsedRealtimeMs()
+        logTransfer(seams, "TRANSFER_START key=${(state as CrossfadeState.HandoffPending).key} ${positions(facts, fresh)}")
+        return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer)
+    }
+
+    /**
+     * CF-2L2: one transfer evaluation (ownership, real primary facts and a fresh secondary snapshot were already revalidated by the
+     * caller). A divergence beyond [NATURAL_TRANSFER_ABORT_TOLERANCE_MS] aborts back to the secondary; progress >= 1 completes;
+     * otherwise the complementary equal-power pair is applied SECONDARY first, then PRIMARY only if that succeeded.
+     */
+    private fun continueTransfer(
+        pending: CrossfadeState.HandoffPending,
+        snapshot: CrossfadeRuntimeSnapshot,
+        seams: CrossfadeNaturalHandoffSeams,
+        facts: PrimaryTakeoverFacts,
+        fresh: SecondaryHandoffSnapshot,
+    ): CrossfadeHandoffExecutionResult {
+        val key = pending.key
+        val start = transferStartMs ?: return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
+        val deltaMs = fresh.positionMs - facts.positionMs
+        if (kotlin.math.abs(deltaMs) > NATURAL_TRANSFER_ABORT_TOLERANCE_MS) {
+            return abortTransfer(pending, snapshot, seams, "divergence", deltaMs, CrossfadeHandoffWait.PrimarySeek)
+        }
+        val progress = naturalTransferProgress(start, seams.nowElapsedRealtimeMs())
+        if (progress >= 1f) return completeTransfer(pending, snapshot, seams, facts, fresh)
+
+        val gains = naturalTransferGains(progress)
+        if (!secondary.setGain(key, gains.secondary)) {
+            if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+            return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryGainWriteFailed)
+        }
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!primaryGain.apply(key, gains.primary)) {
+            if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+            return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryGainWriteFailed)
+        }
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        logTransfer(
+            seams,
+            "TRANSFER_TICK progress=$progress primaryGain=${gains.primary} secondaryGain=${gains.secondary} ${positions(facts, fresh)}",
+        )
+        return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer)
+    }
+
+    /**
+     * CF-2L2: final ownership change, only after the envelope ended. Order: secondary silenced (gain exactly 0) -> primary
+     * restored to 1 (releases primary-gain ownership) -> writes verified -> secondary abandoned (already silent) -> coordinator
+     * HandoffSucceeded. Never primary 1 together with an audible secondary being reset, and never an intentional 0/0 gap.
+     */
+    private fun completeTransfer(
+        pending: CrossfadeState.HandoffPending,
+        snapshot: CrossfadeRuntimeSnapshot,
+        seams: CrossfadeNaturalHandoffSeams,
+        facts: PrimaryTakeoverFacts,
+        fresh: SecondaryHandoffSnapshot,
+    ): CrossfadeHandoffExecutionResult {
+        val key = pending.key
+        val silenced = secondary.setGain(key, 0f)
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!silenced) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryGainWriteFailed)
+        val restored = primaryGain.restore(key)
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!restored) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryGainRestoreFailed)
+        logTransfer(seams, "TRANSFER_COMPLETE ${positions(facts, fresh)}")
+        val abandoned = secondary.abandon(key) // secondary is silent (gain 0) before it is reset
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!abandoned) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryAbandonFailed)
+        applyReduction(reduceCrossfade(state, CrossfadeEvent.HandoffSucceeded(key)), snapshot)
+        return CrossfadeHandoffExecutionResult.Succeeded
+    }
+
+    /**
+     * CF-2L2: leaves the transfer WITHOUT completing: the secondary is returned to full audible authority first, then the primary to
+     * silence. The runtime stays HandoffPending (reconciliation resumes), nothing is abandoned and the audible B timeline is never
+     * moved. [waitingFor] is what the aborted evaluation reports.
+     */
+    private fun abortTransfer(
+        pending: CrossfadeState.HandoffPending,
+        snapshot: CrossfadeRuntimeSnapshot,
+        seams: CrossfadeNaturalHandoffSeams,
+        reason: String,
+        deltaMs: Long?,
+        waitingFor: CrossfadeHandoffWait,
+    ): CrossfadeHandoffExecutionResult {
+        val key = pending.key
+        transferStartMs = null
+        logTransfer(seams, "TRANSFER_ABORT reason=$reason deltaMs=${deltaMs ?: "n/a"}")
+        val secondaryBack = secondary.setGain(key, 1f)
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!secondaryBack) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryGainWriteFailed)
+        val primaryBack = primaryGain.apply(key, 0f)
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (!primaryBack) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryGainWriteFailed)
+        return CrossfadeHandoffExecutionResult.Awaiting(waitingFor)
+    }
+
+    private fun positions(facts: PrimaryTakeoverFacts, fresh: SecondaryHandoffSnapshot): String =
+        "primaryPositionMs=${facts.positionMs} secondaryPositionMs=${fresh.positionMs} deltaMs=${fresh.positionMs - facts.positionMs}"
+
+    private fun logTransfer(seams: CrossfadeNaturalHandoffSeams, message: String) {
+        try {
+            seams.transferLog?.invoke(message)
+        } catch (e: Exception) {
+            Log.w(TAG, "transfer log failed", e)
         }
     }
 

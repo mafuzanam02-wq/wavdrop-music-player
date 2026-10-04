@@ -35,6 +35,9 @@ internal enum class CrossfadeHandoffWait {
 
     /** A same-item reposition was issued and the primary has not landed at the requested position yet. */
     PrimarySeek,
+
+    /** CF-2L2: the short internal soft ownership transfer (secondary B -> primary B) is in progress; the secondary stays the audible authority until it completes. */
+    OwnershipTransfer,
 }
 
 /**
@@ -45,14 +48,63 @@ internal enum class CrossfadeHandoffWait {
 internal class CrossfadeNaturalHandoffSeams(
     val primaryFacts: () -> PrimaryTakeoverFacts?,
     val reconciler: CrossfadePrimaryReconciler,
+    // CF-2L2: the same monotonic crossfade clock the timing driver uses; the soft transfer's progress is derived from it.
+    val nowElapsedRealtimeMs: () -> Long = { 0L },
+    // CF-2L2: DEBUG-only concise transfer observability (null in release). Never carries file names or paths.
+    val transferLog: ((String) -> Unit)? = null,
 )
 
 /**
- * Largest tolerated gap between the primary and the FRESH secondary position at takeover. A same-item seek always costs
- * some latency, so the primary lags the still-playing secondary by roughly that latency; this bound only decides whether to
- * reposition again, and is a position comparison, not a delay.
+ * Reconciliation bound (NOT permission to mix two copies of B): a landed same-item reposition counts as landed when the
+ * primary is within this distance of the requested target, and a Pause-style cancellation only carries the fresh secondary
+ * position when the silent primary is further than this away. It never authorises audible ownership transfer; that needs
+ * [NATURAL_TRANSFER_ENTRY_TOLERANCE_MS].
  */
 internal const val NATURAL_TAKEOVER_MAX_LAG_MS = 350L
+
+/**
+ * CF-2L2: maximum |primary - FRESH secondary| position difference at which the soft ownership-transfer envelope may BEGIN.
+ * A primary outside it never becomes audible; reconciliation simply continues (no retry count or elapsed time bypasses it).
+ * An engineering starting point, not a product promise.
+ */
+internal const val NATURAL_TRANSFER_ENTRY_TOLERANCE_MS = 80L
+
+/**
+ * CF-2L2: once the transfer has begun, a primary/secondary difference beyond this ABORTS it (secondary back to full authority,
+ * primary back to silent, reconciliation resumes). Larger than the entry tolerance to avoid oscillation; it is never a success
+ * permission: entry is always the stricter [NATURAL_TRANSFER_ENTRY_TOLERANCE_MS].
+ */
+internal const val NATURAL_TRANSFER_ABORT_TOLERANCE_MS = 200L
+
+/**
+ * CF-2L2: duration of the INTERNAL gain envelope that hands audible authority from the secondary B to the primary B (equal
+ * power, reusing [CrossfadeGainCurve]). A gain envelope advanced by driver evaluations on the monotonic clock: never a wait,
+ * never the user's crossfade duration, never a setting.
+ */
+internal const val NATURAL_TAKEOVER_TRANSFER_DURATION_MS = 150L
+
+/** Gains of the two copies of B during the soft ownership transfer. */
+internal data class NaturalTransferGains(val primary: Float, val secondary: Float)
+
+/** Normalized transfer progress in 0..1 from the monotonic clock; a clock that went backwards counts as progress 0. */
+internal fun naturalTransferProgress(startElapsedRealtimeMs: Long, nowElapsedRealtimeMs: Long): Float {
+    val elapsed = nowElapsedRealtimeMs - startElapsedRealtimeMs
+    if (elapsed <= 0L) return 0f
+    if (elapsed >= NATURAL_TAKEOVER_TRANSFER_DURATION_MS) return 1f
+    return elapsed.toFloat() / NATURAL_TAKEOVER_TRANSFER_DURATION_MS.toFloat()
+}
+
+/**
+ * Complementary equal-power gains for transfer [progress] on the SAME [CrossfadeGainCurve] as the musical crossfade (primary =
+ * incoming rising 0 -> 1, secondary = outgoing falling 1 -> 0). The endpoints are exact: the raw curve ends at ~6e-17, never an
+ * exact 0, and completion must hand over a truly silent secondary.
+ */
+internal fun naturalTransferGains(progress: Float): NaturalTransferGains {
+    if (progress.isNaN() || progress <= 0f) return NaturalTransferGains(primary = 0f, secondary = 1f)
+    if (progress >= 1f) return NaturalTransferGains(primary = 1f, secondary = 0f)
+    val g = CrossfadeGainCurve.equalPower(progress)
+    return NaturalTransferGains(primary = g.incoming, secondary = g.outgoing)
+}
 
 /**
  * Cap on the learned reposition lead. A same-item seek costs latency during which the still-playing secondary moves on; when a
@@ -68,7 +120,10 @@ internal sealed interface NaturalTakeoverDecision {
     /** Reposition the (already current, silent) primary to the fresh secondary position. */
     data class SeekPrimary(val positionMs: Long, val leadMs: Long) : NaturalTakeoverDecision
 
-    /** The primary is on the target, READY and positioned with the secondary: restore it and abandon the secondary. */
+    /**
+     * The primary is on the target, READY and within [NATURAL_TRANSFER_ENTRY_TOLERANCE_MS] of the fresh secondary: it is qualified
+     * to BEGIN the soft ownership transfer (CF-2L2). It is never an instant restore-and-abandon any more.
+     */
     data object TakeOver : NaturalTakeoverDecision
 }
 
@@ -78,7 +133,7 @@ internal sealed interface NaturalTakeoverDecision {
  * [seekTargetMs] is the position of the last issued reposition, if any, and [seekLeadMs] the lead it carried.
  *
  * Hard continuity invariant: [NaturalTakeoverDecision.TakeOver] only when the primary is within
- * [NATURAL_TAKEOVER_MAX_LAG_MS] of the fresh secondary position; nothing (no retry count, no elapsed time) can authorise a
+ * [NATURAL_TRANSFER_ENTRY_TOLERANCE_MS] of the fresh secondary position; nothing (no retry count, no elapsed time) can authorise a
  * takeover that would move the audible timeline backward (or jump it forward). Otherwise the primary is repositioned, one
  * reposition at a time: while an issued one has not landed the decision is to wait (no seek spam), and once it landed but is
  * still outside tolerance the next one leads by the observed lag so it converges.
@@ -93,7 +148,7 @@ internal fun decideNaturalTakeover(
         return NaturalTakeoverDecision.AwaitSeekLanding
     }
     val lagMs = secondaryPositionMs - facts.positionMs
-    if (kotlin.math.abs(lagMs) <= NATURAL_TAKEOVER_MAX_LAG_MS) return NaturalTakeoverDecision.TakeOver
+    if (kotlin.math.abs(lagMs) <= NATURAL_TRANSFER_ENTRY_TOLERANCE_MS) return NaturalTakeoverDecision.TakeOver
     val leadMs = if (seekTargetMs == null) 0L else (seekLeadMs + lagMs).coerceIn(0L, NATURAL_TAKEOVER_MAX_LEAD_MS)
     return NaturalTakeoverDecision.SeekPrimary(secondaryPositionMs + leadMs, leadMs)
 }

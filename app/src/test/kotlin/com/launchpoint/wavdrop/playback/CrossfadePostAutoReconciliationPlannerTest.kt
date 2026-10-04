@@ -115,13 +115,16 @@ class CrossfadePostAutoReconciliationPlannerTest {
     }
 
     @Test fun closeEnoughTakesOverWithoutASeek() {
-        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(7_000L), 7_250L, null, 0L))
-        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(7_600L), 7_250L, null, 0L))
+        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(7_170L), 7_250L, null, 0L)) // 80 ms behind
+        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(7_330L), 7_250L, null, 0L)) // 80 ms ahead
+        // CF-2L2: the old 350 ms bound is no longer permission to begin the ownership transfer
+        assertTrue(decideNaturalTakeover(facts(7_169L), 7_250L, null, 0L) is NaturalTakeoverDecision.SeekPrimary)
+        assertTrue(decideNaturalTakeover(facts(6_900L), 7_250L, null, 0L) is NaturalTakeoverDecision.SeekPrimary)
     }
 
     @Test fun seekInFlightWaitsUntilThePrimaryLands() {
         assertEquals(NaturalTakeoverDecision.AwaitSeekLanding, decideNaturalTakeover(facts(150L), 7_300L, 7_250L, 0L))
-        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(7_250L), 7_400L, 7_250L, 0L))
+        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(7_250L), 7_300L, 7_250L, 0L))
     }
 
     @Test fun outsideToleranceAfterLandingNeverTakesOverAndRepositionsAheadByTheObservedLag() {
@@ -142,7 +145,7 @@ class CrossfadePostAutoReconciliationPlannerTest {
     }
 
     @Test fun leadConvergesAndIsCapped() {
-        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(10_750L), 11_000L, 10_750L, 1_750L))
+        assertEquals(NaturalTakeoverDecision.TakeOver, decideNaturalTakeover(facts(10_950L), 11_000L, 10_750L, 1_750L))
         val capped = decideNaturalTakeover(facts(0L + 1_000L), 90_000L, 1_000L, 0L) as NaturalTakeoverDecision.SeekPrimary
         assertEquals(NATURAL_TAKEOVER_MAX_LEAD_MS, capped.leadMs)
     }

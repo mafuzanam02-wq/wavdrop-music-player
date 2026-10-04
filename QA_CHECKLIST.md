@@ -426,6 +426,8 @@ Minimum initial validation target: at least one real Android device covering spe
 
 **Recorded physical result (first run, gate-enabled debug validation build; CF-2K2A):** crossfade 6 seconds, EQ off, Repeat off, Shuffle off. The secondary started correctly and the 6-second overlap was audible and balanced, but there was a roughly 1-2 second audible stutter at the final primary takeover, after which track B continued. Core overlap: **PARTIAL / blocker observed**; production enablement is blocked pending the CF-2L1 natural AUTO handoff correction and a physical retest of this section. This is not a pass; `physicalCorePlaybackValidated` remains not satisfied.
 
+**Recorded physical result (second run, CF-2L1 gate-enabled debug validation build):** Second physical run (CF-2L1 gate-enabled debug build, same settings: 6 s crossfade, EQ off, Repeat off, Shuffle off, ordinary natural A to B): B no longer restarted from zero, B did not audibly rewind and the musical crossfade worked, but a small, clearly audible stutter remained at the final ownership transfer from the secondary B to the primary B. CF-2L1 materially improved continuity but did not make the primary takeover inaudible. Core overlap stays **PARTIAL / blocker observed**. CF-2L2 (continuity-qualified soft natural ownership transfer) is implemented and a new real-device retest of this section is required; it is NOT yet done, and CF-2L2 is not claimed to fix the phone behaviour. During the retest, DEBUG builds log `TRANSFER_START` / `TRANSFER_TICK` / `TRANSFER_ABORT` / `TRANSFER_COMPLETE` under the `WavdropCrossfade` tag (positions, deltas and gains only) to correlate any remaining audible artefact with the ownership transfer.
+
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
 | In a validation build, open Settings → Playback. | A Transitions section with a Crossfade row is visible. (Never visible in a build with the gate disabled.) | |
@@ -525,7 +527,7 @@ Production enablement requires every row below to be Pass on the intended releas
 |---|---|
 | Automated JVM suite green | |
 | Release APK assembled | |
-| Crossfade core overlap passed | PARTIAL - ~1-2 s final handoff stutter observed in the first run; retest after CF-2L1 |
+| Crossfade core overlap passed | PARTIAL - ~1-2 s final handoff stutter in the first run; after CF-2L1 no rewind but a small takeover stutter remained; retest after CF-2L2 |
 | Repeat eligibility passed | |
 | Duplicate occurrence passed | |
 | Manual interaction cancellation passed | |

@@ -173,13 +173,19 @@ internal class CrossfadeTimingDriver(
     private fun nextDelayFor(state: CrossfadeState): Long? = when (state) {
         is CrossfadeState.Fading -> FADE_TICK_INTERVAL_MS
         // A natural handoff keeps re-evaluating real player state (no effects until ready); the legacy immediate handoff never waits.
-        is CrossfadeState.HandoffPending -> if (runtime.usesNaturalHandoff) FADE_TICK_INTERVAL_MS else null
+        // CF-2L2: while the short soft ownership transfer envelope runs it is advanced at a finer cadence so its gain steps are small.
+        is CrossfadeState.HandoffPending -> when {
+            !runtime.usesNaturalHandoff -> null
+            runtime.isNaturalTransferInProgress -> TRANSFER_TICK_INTERVAL_MS
+            else -> FADE_TICK_INTERVAL_MS
+        }
         else -> PRE_FADE_POLL_INTERVAL_MS
     }
 
     internal companion object {
         const val PRE_FADE_POLL_INTERVAL_MS = 250L
         const val FADE_TICK_INTERVAL_MS = 50L
+        const val TRANSFER_TICK_INTERVAL_MS = 16L
         private const val TAG = "WavdropCrossfade"
     }
 }

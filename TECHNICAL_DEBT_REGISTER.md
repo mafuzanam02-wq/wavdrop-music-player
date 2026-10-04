@@ -516,6 +516,8 @@ AUTO, and let the discontinuity callback only refresh state.
 **Notes:** Distinct from crossfade feature work, which is tracked in the backlog, not here.
 **CF-2L1 update:** the crossfade-owned portion of this debt became a demonstrated blocker (a physical validation run showed a ~1-2 s stutter at the final crossfade handoff) and is owned by CF-2L1, which observes the authoritative Media3 AUTO transition for the exact transition key and defers the primary takeover until the primary is READY on the target. It adds no stats or persistence notification and does not change the two-callback ownership described above; that broader cleanup remains open.
 
+**CF-2L2 update:** the final natural-AUTO ownership seam is now a continuity-qualified soft transfer (internal 150 ms equal-power gain envelope while still `HandoffPending`) instead of an instant primary restore plus secondary reset; it keeps the same ownership model, adds no stats or persistence notification and does not change the two-callback ownership described above. The broader cleanup remains open.
+
 ---
 
 ## Guiding Principles — When Should Technical Debt Be Paid?

@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2L1 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2L2 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -352,6 +352,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     showed a ~1-2 s stutter at the final handoff): the secondary stays audible until the authoritative Media3 AUTO transition lands the primary
     on the exact target, READY, repositioned (same-item seek) to a FRESH secondary position; then primary gain is restored and the secondary
     abandoned. State-driven, no delays; takeover requires position continuity within tolerance (retry exhaustion never permits a stale-position takeover; a Pause carries the fresh position to a primary materially behind or ahead so resume does not rewind or skip B); stale/non-AUTO/wrong-index/cancelled facts are inert; positional identity (Repeat All wrap, duplicates).
+  - **CF-2L2** continuity-qualified soft natural ownership transfer (second physical run: B no longer rewound but the instant secondary-to-primary swap
+    still produced a small audible stutter): after the CF-2L1 qualification the primary must also be within 80 ms of the fresh secondary position to
+    begin; a short (150 ms) internal equal-power gain envelope (single curve, secondary written first, driver-evaluated on the monotonic clock, no delays)
+    hands audible authority from the secondary to the primary; divergence beyond 200 ms or a non-READY primary aborts back to the secondary; the secondary is
+    silenced (exactly 0) before it is abandoned and success follows only the completed transfer. Internal, no setting, gate false, physical retest pending.
     Awaiting physical retest. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
@@ -640,13 +645,14 @@ items are validated.
 8. Production enablement:
    a. CF-2K1 - rollout safeguards + physical QA contract - complete.
    b. Physical validation - blocked: the first 6 s overlap works, but a ~1-2 s final handoff stutter was observed.
-   c. CF-2L1 natural AUTO handoff correction - implemented / awaiting physical retest.
-   d. Final gate flip after passed validation - pending.
+   c. CF-2L1 natural AUTO handoff correction - implemented; second physical run: rewind fixed, but a small audible takeover stutter remained.
+   d. CF-2L2 continuity-qualified soft natural ownership transfer - implemented / awaiting physical retest.
+   e. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 
 ### Playback hardening (engineering)
 
-- **Natural AUTO-transition callback ownership** (TD-018): the crossfade-owned portion became a demonstrated blocker (physical handoff stutter) and is owned by CF-2L1; the broader callback-ownership cleanup stays a dedicated slice.
+- **Natural AUTO-transition callback ownership** (TD-018): the crossfade-owned portion became a demonstrated blocker (physical handoff stutter) and is owned by CF-2L1 and CF-2L2; the broader callback-ownership cleanup stays a dedicated slice.
 
 ### Beta 9.x (stabilization)
 

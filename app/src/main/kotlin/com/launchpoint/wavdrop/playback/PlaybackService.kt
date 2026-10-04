@@ -165,6 +165,8 @@ class PlaybackService : MediaLibraryService() {
                 reconcilePrimaryAfterNaturalTransition = { key, snapshot ->
                     playerController.reconcileCrossfadePrimaryAfterNaturalTransition(key, snapshot)
                 },
+                // CF-2L2: concise DEBUG-only transfer evidence (no file names or paths); null in release.
+                naturalTransferLog = if (BuildConfig.DEBUG) { message -> Log.d("WavdropCrossfade", message) } else null,
                 // CF-2I1: read-only session observability only; no EQ is attached to the secondary.
                 primaryAudioSessionId = { player.audioSessionId },
                 audioSessionObserver = CrossfadeAudioSessionObserver { key, primaryId, secondaryId ->

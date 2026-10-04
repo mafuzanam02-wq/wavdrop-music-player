@@ -26,8 +26,14 @@ class CrossfadeNaturalHandoffTest {
         fun runNext() { val p = activeNow.single(); p.active = false; p.block() }
     }
 
+    private val order = mutableListOf<String>() // CF-2L2: ordered gain/reset log across both players
+    private val transferLogs = mutableListOf<String>()
+    private var primaryWriteResult = true
+
     private inner class FakeBackend : SecondaryPlayerBackend {
         val prepared = mutableListOf<Long>()
+        val gains = mutableListOf<Float>()
+        var setGainResult = true
         var callbacks: SecondaryBackendCallbacks? = null
         var resets = 0
         var snapshotPositionMs = 6_000L
@@ -36,9 +42,9 @@ class CrossfadeNaturalHandoffTest {
             this.callbacks = callbacks
         }
         override fun start(initialGain: Float): Boolean = true
-        override fun setGain(gain: Float): Boolean = true
+        override fun setGain(gain: Float): Boolean { gains += gain; order += "sg:$gain"; return setGainResult }
         override fun handoffSnapshot(): SecondaryHandoffSnapshot? = SecondaryHandoffSnapshot(snapshotPositionMs, 180_000L)
-        override fun reset() { resets++; events += "s:reset" }
+        override fun reset() { resets++; events += "s:reset"; order += "reset" }
         override fun release() {}
         fun ready() = callbacks!!.onReady(prepared.last(), 180_000L)
     }
@@ -74,13 +80,14 @@ class CrossfadeNaturalHandoffTest {
         },
         backendFactory = { backend },
         mediaItemFactory = { MediaItem.Builder().setMediaId(it.id.toString()).build() },
-        primaryGainBackend = PrimaryGainBackend { primaryWrites += it; events += "p:$it"; true },
+        primaryGainBackend = PrimaryGainBackend { primaryWrites += it; events += "p:$it"; order += "pg:$it"; primaryWriteResult },
         reconcilePrimary = { _, _ -> error("legacy cross-item reconciliation must not run in the natural handoff") },
         scheduler = scheduler,
         clock = { clockNow },
         configuredDurationMsProvider = { 6_000L },
         primaryDurationMs = { 200_000L },
         primaryPositionMs = { position },
+        naturalTransferLog = { transferLogs += it },
         primaryTakeoverFacts = { facts },
         reconcilePrimaryAfterNaturalTransition = { k, s ->
             reconcileCalls += k to s
@@ -110,6 +117,24 @@ class CrossfadeNaturalHandoffTest {
             runtime.executeHandoff(key),
         )
         events.clear()
+        order.clear()
+        backend.gains.clear()
+    }
+
+    /** CF-2L2: lets the whole internal envelope elapse on the monotonic clock and runs the final driver-style evaluation. */
+    private fun finishTransfer() {
+        clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
+        assertEquals(CrossfadeHandoffExecutionResult.Succeeded, runtime.executeHandoff(key))
+    }
+
+    /** Qualifies the primary [deltaMs] behind the fresh secondary (6_100) so the soft transfer has just begun. */
+    private fun beginTransfer(deltaMs: Long = 0L) {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L - deltaMs)
+        auto(2)
+        assertTrue(runtime.isNaturalTransferInProgress)
     }
 
     private fun auto(index: Int) = observeCrossfadeNaturalTransition(runtime, index, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
@@ -253,7 +278,10 @@ class CrossfadeNaturalHandoffTest {
 
         backend.snapshotPositionMs = 7_320L
         primaryOnTarget(positionMs = 7_260L) // the reposition landed
-        advanceCrossfadeHandoff(runtime) // e.g. the READY callback
+        advanceCrossfadeHandoff(runtime) // e.g. the READY callback: only BEGINS the soft transfer
+        assertEquals(listOf("seek:7250"), events)
+        assertTrue(runtime.isNaturalTransferInProgress)
+        finishTransfer()
         assertEquals(listOf("seek:7250", "p:1.0", "s:reset"), events)
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(1, reconcileCalls.size) // no second reposition
@@ -303,10 +331,11 @@ class CrossfadeNaturalHandoffTest {
         primaryOnTarget(positionMs = 7_250L)
         assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek), runtime.executeHandoff(key))
         assertTrue(runtime.state is CrossfadeState.HandoffPending)
-        // later: fresh secondary 9150, primary 9050 -> within tolerance -> success allowed
-        backend.snapshotPositionMs = 9_150L
+        // later: fresh secondary 9100, primary 9050 -> within the entry tolerance -> the soft transfer may begin
+        backend.snapshotPositionMs = 9_100L
         primaryOnTarget(positionMs = 9_050L)
-        assertEquals(CrossfadeHandoffExecutionResult.Succeeded, runtime.executeHandoff(key))
+        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer), runtime.executeHandoff(key))
+        finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
     }
 
@@ -393,9 +422,11 @@ class CrossfadeNaturalHandoffTest {
     @Test fun alreadyPositionedPrimaryTakesOverWithoutASeek() {
         toHandoffPending()
         backend.snapshotPositionMs = 6_100L
-        primaryOnTarget(positionMs = 6_000L)
+        primaryOnTarget(positionMs = 6_050L)
         auto(2)
         assertTrue(reconcileCalls.isEmpty())
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        finishTransfer()
         assertEquals(listOf("p:1.0", "s:reset"), events)
         assertEquals(CrossfadeState.Idle, runtime.state)
     }
@@ -428,9 +459,10 @@ class CrossfadeNaturalHandoffTest {
 
     @Test fun staleHandoffAfterSuccessIsInactive() {
         toHandoffPending()
-        primaryOnTarget(positionMs = 6_000L)
+        primaryOnTarget(positionMs = 6_050L)
         backend.snapshotPositionMs = 6_100L
         auto(2)
+        finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
         val resets = backend.resets
         val writes = primaryWrites.size
@@ -450,7 +482,8 @@ class CrossfadeNaturalHandoffTest {
         assertEquals(FadeTickExecutionResult.HandoffPending, runtime.executeFadeTick(key, clockNow + 6_000L))
         backend.snapshotPositionMs = 6_050L
         primaryOnTarget(positionMs = 6_000L)
-        assertEquals(CrossfadeHandoffExecutionResult.Succeeded, runtime.executeHandoff(key))
+        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer), runtime.executeHandoff(key))
+        finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
     }
 
@@ -485,8 +518,10 @@ class CrossfadeNaturalHandoffTest {
         toHandoffPending()
         logicalIndex = 0
         backend.snapshotPositionMs = 6_100L
-        primaryOnTarget(positionMs = 6_000L)
+        primaryOnTarget(positionMs = 6_050L)
         auto(0)
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(listOf("p:1.0", "s:reset"), events)
     }
@@ -502,7 +537,9 @@ class CrossfadeNaturalHandoffTest {
         )
         logicalIndex = 2
         backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_050L)
         auto(2)
+        finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
     }
 
@@ -519,12 +556,343 @@ class CrossfadeNaturalHandoffTest {
         assertTrue(runtime.state is CrossfadeState.HandoffPending)
         assertTrue(events.isEmpty())
         backend.snapshotPositionMs = 6_100L
-        primaryOnTarget(positionMs = 6_000L)
-        auto(2) // AUTO observed and the primary is ready: takeover happens immediately, event driven
+        primaryOnTarget(positionMs = 6_050L)
+        auto(2) // AUTO observed and the primary is ready and continuous: the soft transfer BEGINS (event driven)
+        assertTrue(runtime.isNaturalTransferInProgress)
+        assertTrue(events.isEmpty()) // nothing written, nothing reset yet
+        scheduler.runNext() // the pending pulse now runs at the finer transfer cadence
+        assertEquals(CrossfadeTimingDriver.TRANSFER_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
+        clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
+        scheduler.runNext() // final evaluation completes the transfer
         assertEquals(CrossfadeState.Idle, runtime.state)
-        assertEquals(listOf("p:1.0", "s:reset"), events)
-        scheduler.runNext() // the already-pending pulse now resumes the pre-fade cadence
+        assertEquals(listOf("p:1.0", "s:reset"), events.takeLast(2))
         assertEquals(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS, scheduler.activeNow.single().delayMs)
+    }
+
+    // ── CF-2L2: continuity-qualified soft ownership transfer ────────────────────
+
+    private fun assertNoTransferAtDelta(delta: Long) {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L - delta)
+        auto(2)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(backend.gains.isEmpty()) // neither side's gain touched: primary stays silent
+        assertEquals(0f, primaryWrites.last(), 1e-6f)
+        assertEquals(1, reconcileCalls.size) // reconciliation continues instead
+    }
+
+    @Test fun noTransferStartsWhenThePrimaryIsBehindBeyondTheEntryTolerance() =
+        assertNoTransferAtDelta(NATURAL_TRANSFER_ENTRY_TOLERANCE_MS + 1)
+
+    @Test fun noTransferStartsWhenThePrimaryIsAheadBeyondTheEntryTolerance() =
+        assertNoTransferAtDelta(-(NATURAL_TRANSFER_ENTRY_TOLERANCE_MS + 1))
+
+    @Test fun theOldThreeHundredFiftyMsBoundIsNotTransferPermission() = assertNoTransferAtDelta(NATURAL_TAKEOVER_MAX_LAG_MS)
+
+    private fun assertTransferStartsAtDelta(delta: Long) {
+        beginTransfer(delta)
+        assertTrue(reconcileCalls.isEmpty())
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+    }
+
+    @Test fun transferStartsWhenAligned() = assertTransferStartsAtDelta(0L)
+
+    @Test fun transferStartsAtTheEntryToleranceBehind() = assertTransferStartsAtDelta(NATURAL_TRANSFER_ENTRY_TOLERANCE_MS)
+
+    @Test fun transferStartsAtTheEntryToleranceAhead() = assertTransferStartsAtDelta(-NATURAL_TRANSFER_ENTRY_TOLERANCE_MS)
+
+    @Test fun transferBeginsFromPrimarySilentAndSecondaryFullWithoutResettingEitherPlayer() {
+        beginTransfer(40L)
+        assertEquals(
+            CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer),
+            runtime.executeHandoff(key),
+        ) // same instant: progress 0
+        assertTrue(backend.gains.all { it == 1f })
+        assertEquals(0f, primaryWrites.last(), 1e-6f)
+        assertEquals(0, backend.resets)
+        assertTrue(transferLogs.first().startsWith("TRANSFER_START"))
+        assertTrue(transferLogs.first().contains("deltaMs=40"))
+        assertTrue(transferLogs.first().contains("primaryPositionMs=6060"))
+    }
+
+    @Test fun midpointUsesComplementaryEqualPowerGainsSecondaryWrittenFirst() {
+        beginTransfer()
+        clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS / 2
+        assertEquals(
+            CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer),
+            runtime.executeHandoff(key),
+        )
+        val mid = CrossfadeGainCurve.equalPower(0.5f)
+        assertEquals(mid.outgoing, backend.gains.last(), 1e-6f) // secondary falls on the outgoing curve
+        assertEquals(mid.incoming, primaryWrites.last(), 1e-6f) // primary rises on the incoming curve
+        assertEquals(1.0, (backend.gains.last() * backend.gains.last() + primaryWrites.last() * primaryWrites.last()).toDouble(), 1e-5)
+        assertEquals(listOf("sg:${mid.outgoing}", "pg:${mid.incoming}"), order) // secondary FIRST, then primary
+        assertTrue(transferLogs.any { it.startsWith("TRANSFER_TICK") && it.contains("progress=0.5") })
+    }
+
+    @Test fun completionSilencesSecondaryBeforeRestoringPrimaryAndAbandoningIt() {
+        beginTransfer()
+        finishTransfer()
+        assertEquals(listOf("sg:0.0", "pg:1.0", "reset"), order) // never 1/1 then reset, never an intentional 0/0
+        assertEquals(0f, backend.gains.last(), 0f) // exactly silent before reset
+        assertEquals(1f, primaryWrites.last(), 0f)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(transferLogs.last().startsWith("TRANSFER_COMPLETE"))
+    }
+
+    @Test fun secondaryIsNeverAbandonedWhileStillAudibleAndSuccessOnlyFollowsTheCompletedTransfer() {
+        beginTransfer()
+        var elapsed = 0L
+        while (elapsed < NATURAL_TAKEOVER_TRANSFER_DURATION_MS - 10L) {
+            elapsed += 10L
+            clockNow += 10L
+            val result = runtime.executeHandoff(key)
+            assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer), result)
+            assertEquals(0, backend.resets) // not reset mid-transfer
+            assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        }
+        assertTrue(backend.gains.last() > 0f) // still audible when the last tick ran
+        finishTransfer()
+        assertEquals("reset", order.last())
+        assertEquals(0f, backend.gains.last(), 0f)
+        // monotone envelope: the secondary never rises and the primary never falls while transferring
+        val sec = backend.gains
+        val pri = primaryWrites.takeLast(sec.size)
+        assertTrue(sec.zipWithNext().all { (a, b) -> b <= a })
+        assertTrue(pri.zipWithNext().all { (a, b) -> b >= a })
+    }
+
+    @Test fun primaryIsNotAudibleBeforeAutoReadyExactOccurrenceAndContinuity() {
+        toHandoffPending()
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        advanceCrossfadeHandoff(runtime) // no AUTO yet
+        assertFalse(runtime.isNaturalTransferInProgress)
+        logicalIndex = 2
+        primaryOnTarget(ready = false, positionMs = 6_100L)
+        auto(2) // AUTO but not READY
+        assertFalse(runtime.isNaturalTransferInProgress)
+        facts = PrimaryTakeoverFacts(physicalIndex = 3, isReady = true, positionMs = 6_100L)
+        advanceCrossfadeHandoff(runtime) // READY but the wrong occurrence
+        assertFalse(runtime.isNaturalTransferInProgress)
+        primaryOnTarget(positionMs = 3_000L)
+        advanceCrossfadeHandoff(runtime) // right occurrence, READY, not continuous
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(backend.gains.isEmpty())
+        assertEquals(0f, primaryWrites.last(), 1e-6f)
+    }
+
+    @Test fun divergenceDuringTransferReturnsAuthorityToTheSecondaryAndNeverSucceeds() {
+        beginTransfer()
+        clockNow += 75L
+        runtime.executeHandoff(key) // mid transfer, both partially audible
+        order.clear()
+        primaryOnTarget(positionMs = 6_100L - NATURAL_TRANSFER_ABORT_TOLERANCE_MS - 1L) // the primary jumped away
+        assertEquals(
+            CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek),
+            runtime.executeHandoff(key),
+        )
+        assertEquals(listOf("sg:1.0", "pg:0.0"), order) // secondary back to full FIRST, then primary silent
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertEquals(0, backend.resets)
+        assertTrue(transferLogs.any { it.startsWith("TRANSFER_ABORT reason=divergence") })
+        // reconciliation resumes (a reposition is issued) and even a lot of elapsed time cannot complete anything
+        reconcileCalls.clear()
+        clockNow += 10_000L
+        assertTrue(runtime.executeHandoff(key) is CrossfadeHandoffExecutionResult.Awaiting)
+        assertEquals(1, reconcileCalls.size)
+        assertEquals(0, backend.resets)
+    }
+
+    @Test fun smallDriftDuringTheEnvelopeDoesNotAbort() {
+        beginTransfer()
+        clockNow += 75L
+        primaryOnTarget(positionMs = 6_100L - NATURAL_TRANSFER_ABORT_TOLERANCE_MS) // at the abort tolerance, not beyond it
+        assertEquals(
+            CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer),
+            runtime.executeHandoff(key),
+        )
+        assertTrue(runtime.isNaturalTransferInProgress)
+    }
+
+    @Test fun primaryNoLongerReadyMidTransferReturnsAuthorityToTheSecondary() {
+        beginTransfer()
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        order.clear()
+        primaryOnTarget(ready = false)
+        assertEquals(
+            CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimaryReady),
+            runtime.executeHandoff(key),
+        )
+        assertEquals(listOf("sg:1.0", "pg:0.0"), order)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(0, backend.resets)
+    }
+
+    @Test fun noRetryHistoryOrElapsedTimeBypassesContinuity() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 9_000L
+        primaryOnTarget(positionMs = 7_000L)
+        auto(2)
+        repeat(20) {
+            clockNow += 60_000L
+            primaryOnTarget(positionMs = if (it % 2 == 0) 7_000L else 8_700L) // in flight, then landed-but-behind: never within the entry tolerance
+            assertTrue(runtime.executeHandoff(key) is CrossfadeHandoffExecutionResult.Awaiting)
+            assertFalse(runtime.isNaturalTransferInProgress)
+        }
+        assertTrue(backend.gains.isEmpty())
+        assertEquals(0f, primaryWrites.last(), 1e-6f)
+        assertEquals(0, backend.resets)
+    }
+
+    @Test fun duplicateOccurrenceTransfersOnlyForTheExactPosition() {
+        queue = listOf(song(1), song(2), song(2), song(4))
+        toHandoffPending()
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        auto(1) // same song id, wrong occurrence
+        assertFalse(runtime.isNaturalTransferInProgress)
+        logicalIndex = 2
+        auto(2)
+        assertTrue(runtime.isNaturalTransferInProgress)
+        finishTransfer()
+        assertEquals(CrossfadeState.Idle, runtime.state)
+    }
+
+    @Test fun repeatAllWrapTransfersOntoTheFirstOccurrence() {
+        repeat = RepeatMode.ALL
+        logicalIndex = 3
+        key = CrossfadeTransitionKey(5L, 3, 0)
+        toHandoffPending()
+        logicalIndex = 0
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        auto(0)
+        assertTrue(runtime.isNaturalTransferInProgress)
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        finishTransfer()
+        assertEquals("reset", order.last())
+        assertEquals(CrossfadeState.Idle, runtime.state)
+    }
+
+    @Test fun staleGenerationDuringTransferCannotComplete() {
+        beginTransfer()
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        generation = 6L
+        clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
+        assertEquals(
+            CrossfadeHandoffExecutionResult.Cancelled(CrossfadeCancelReason.QueueMutation),
+            runtime.executeHandoff(key),
+        )
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(1f, primaryWrites.last(), 0f) // not stuck lowered
+        assertEquals(1, backend.resets) // no ghost secondary
+    }
+
+    private fun assertCancellationDuringTransferIsClean(reason: CrossfadeCancelReason) {
+        beginTransfer()
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        val resetsBefore = backend.resets
+        runtime.cancel(reason)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(1f, primaryWrites.last(), 0f)
+        assertEquals(resetsBefore + 1, backend.resets)
+        assertEquals(listOf("pg:1.0", "reset"), order.takeLast(2)) // primary restored, then secondary reset
+    }
+
+    @Test fun manualNavigationDuringTransferIsClean() = assertCancellationDuringTransferIsClean(CrossfadeCancelReason.ManualNavigation)
+
+    @Test fun queueMutationDuringTransferIsClean() = assertCancellationDuringTransferIsClean(CrossfadeCancelReason.QueueMutation)
+
+    @Test fun repeatChangeDuringTransferIsClean() = assertCancellationDuringTransferIsClean(CrossfadeCancelReason.RepeatChanged)
+
+    @Test fun pauseDuringTransferCarriesAMateriallyDivergentPrimaryToTheAudiblePosition() {
+        beginTransfer()
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        primaryOnTarget(positionMs = 6_100L - NATURAL_TAKEOVER_MAX_LAG_MS - 100L) // far behind, not yet re-evaluated
+        reconcileCalls.clear()
+        events.clear()
+        recoverCrossfadeFromExplicitPause(runtime)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, reconcileCalls.size)
+        assertEquals(6_100L, reconcileCalls.single().second.positionMs) // B never rewinds because the owner changed
+        assertEquals(listOf("seek:6100", "p:1.0", "s:reset"), events)
+    }
+
+    @Test fun pauseDuringTransferWithAContinuousPrimaryDoesNotSeek() {
+        beginTransfer(30L)
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        reconcileCalls.clear()
+        recoverCrossfadeFromExplicitPause(runtime)
+        assertTrue(reconcileCalls.isEmpty())
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1f, primaryWrites.last(), 0f)
+    }
+
+    @Test fun secondaryGainWriteFailureDuringTransferFailsClosedWithoutSilencingThePrimary() {
+        beginTransfer()
+        backend.setGainResult = false
+        clockNow += 75L
+        val result = runtime.executeHandoff(key)
+        assertEquals(CrossfadeHandoffExecutionResult.Failed(CrossfadeHandoffFailure.SecondaryGainWriteFailed), result)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1f, primaryWrites.last(), 0f) // the primary was never lowered further and ends restored
+        assertEquals(1, backend.resets)
+        assertFalse(runtime.isNaturalTransferInProgress)
+    }
+
+    @Test fun primaryGainWriteFailureDuringTransferFailsClosed() {
+        beginTransfer()
+        primaryWriteResult = false
+        clockNow += 75L
+        val result = runtime.executeHandoff(key)
+        assertEquals(CrossfadeHandoffExecutionResult.Failed(CrossfadeHandoffFailure.PrimaryGainWriteFailed), result)
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals(1, backend.resets)
+    }
+
+    @Test fun driverAdvancesTheEnvelopeThroughEvaluationsOnlyAtTheFinerCadence() {
+        toFading()
+        clockNow += 6_000L
+        scheduler.runNext() // terminal tick -> HandoffPending
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        logicalIndex = 2
+        auto(2)
+        assertTrue(runtime.isNaturalTransferInProgress)
+        scheduler.runNext()
+        assertEquals(CrossfadeTimingDriver.TRANSFER_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        clockNow += 80L
+        scheduler.runNext()
+        assertTrue(backend.gains.last() in 0.01f..0.99f) // mid-envelope, driven by the driver evaluation
+        assertEquals(0, backend.resets)
+        clockNow += 80L
+        scheduler.runNext()
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertEquals("reset", order.last())
+    }
+
+    @Test fun transferLogsCarryNoPathsOrTitles() {
+        beginTransfer(10L)
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        finishTransfer()
+        assertTrue(transferLogs.isNotEmpty())
+        assertTrue(transferLogs.none { it.contains("content://") || it.contains("S2") })
     }
 
     @Test fun productionRolloutGateRemainsFalse() {
