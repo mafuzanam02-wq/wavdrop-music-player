@@ -152,6 +152,11 @@ class PlaybackService : MediaLibraryService() {
                 configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
                 primaryDurationMs = { player.duration },
                 primaryPositionMs = { player.currentPosition },
+                // CF-2I1: read-only session observability only; no EQ is attached to the secondary.
+                primaryAudioSessionId = { player.audioSessionId },
+                audioSessionObserver = CrossfadeAudioSessionObserver { key, primaryId, secondaryId ->
+                    if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, formatCrossfadeAudioSessionObservation(key, primaryId, secondaryId))
+                },
             )
             crossfadePreparation = graph.runtime
             crossfadeTimingDriver = graph.timingDriver

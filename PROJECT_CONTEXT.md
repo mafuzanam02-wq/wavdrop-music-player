@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2F5. Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-CF-2I1. Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3G, CF-2F2, CF-2F3, CF-2F4 and CF-2F5 (below).
+- Crossfade engineering foundations CF-1 to CF-2H3G, CF-2F2, CF-2F3, CF-2F4, CF-2F5 and CF-2I1 (below).
 
 ## Crossfade - current state
 
@@ -78,6 +78,7 @@ Completed, internal-only foundations:
 | CF-2F3 | secondary terminal playback-state recovery (unexpected secondary `STATE_IDLE`/`STATE_ENDED` fails the exact attempt through the existing `SecondaryError` path) |
 | CF-2F4 | authoritative MediaController-disconnection crossfade recovery (`ControllerDisconnected` cancel, notified before the controller reference is cleared) |
 | CF-2F5 | primary audio-focus / route interruption crossfade recovery (Media3 `onPlayWhenReadyChanged` + `onPlaybackSuppressionReasonChanged`, existing `Pause` cancel) |
+| CF-2I1 | secondary audio-session observability (read-only, exact-key; no EQ attached, no eligibility change) |
 | CF-2G1 | manual (explicit) pause crossfade cancellation (`Pause` cancel before the primary pause is forwarded) |
 | CF-2G2 | explicit same-track seek crossfade cancellation (`Seek` cancel from the app seek and from external-controller scrubs) |
 | CF-2G3 | explicit next/previous crossfade cancellation (`ManualNavigation` cancel from app skipToNext/skipToPrevious and from external-controller next/previous, including previous restart-current) |
@@ -158,7 +159,9 @@ CF-2F5 (fifth and final slice of failure/cancel recovery): media3 1.11.1. The pr
 
 Failure / cancel recovery during audible overlap is complete: primary error (CF-2F1), primary terminal state (CF-2F2), secondary error and terminal state (CF-2F3), controller disconnect (CF-2F4), audio-focus/route interruption (CF-2F5), explicit pause/seek/navigation (CF-2G), queue/repeat/shuffle mutations (CF-2H), playback resumption (CF-2H3G) and service teardown (`closeCrossfadeGraph`).
 
-The next boundaries are separate: dual-player EQ/audio-session validation, user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
+CF-2I1 (secondary audio-session observability foundation; first slice of item 6, dual-player Equalizer / audio-session validation): the secondary player's real ExoPlayer audio-session id is now observable under the existing exact transition-key and attempt ownership, and nothing else changes. Primary EQ is unchanged: the Android Equalizer stays bound to the primary ExoPlayer's audio session through the existing `AudioEnhancementController` (attach / onAudioSessionIdChanged / release), which remains the sole EQ capability authority. The secondary stays a separate ExoPlayer with NO Equalizer attached by WavDrop, no MediaSession and no audio focus. New: `SecondaryAudioSessionSnapshot(audioSessionId)`, `validSecondaryAudioSessionId` (> 0 valid; 0 and negatives unavailable; ids are never synthesized), a read-only `SecondaryPlayerBackend.audioSessionSnapshot()` (default null; `ExoSecondaryPlayerBackend` reads `player.audioSessionId` and never forces a session, prepares or starts), `CrossfadeSecondaryPlayer.audioSessionSnapshot(key)` (non-null only for the exact live key in Preparing, Prepared or Started, with a valid id; released, stale, abandoned, failed, throwing or invalid-id reads are null) and `CrossfadePreparationRuntime.secondaryAudioSessionSnapshot(key)` (null when closed or when the key is not the owned transition; never mutates state or cancels). A pure `compareCrossfadeAudioSessions(primaryId, secondaryId?)` reports Unavailable / Shared / Distinct as a diagnostic only, not an EQ-compatibility verdict, and no code asserts that the sessions must differ. An injectable `CrossfadeAudioSessionObserver` (default no-op) fires once per exact preparation at the Ready boundary with the key and both ids; `PlaybackService` supplies the primary id provider and a DEBUG-only log line (key, ids, relationship; no titles, URIs or metadata). A missing session is observation only: it never cancels, retries or recreates the player. The Android audio-session id is NOT occurrence identity: ownership stays the transition key plus the attempt token, so a reused session id cannot revive an old transition. CF-2I1 does not decide whether a future production crossfade mirrors EQ to the secondary, blocks crossfade while EQ is enabled, or uses another effects strategy (CF-2I2, open). CF-1 eligibility, Settings UI, the timing driver and the hard gate (`false`) are unchanged. JVM-validated only: no physical device claim is made about the secondary's actual session id, EQ audibility or Bluetooth behaviour.
+
+The next boundaries are separate: the remaining dual-player EQ compatibility / mirroring policy (CF-2I2), user-facing Settings UI, production enablement, and physical Bluetooth/background validation.
 
 ## In progress
 

@@ -180,6 +180,8 @@ internal class CrossfadePreparationRuntime(
     mediaItemFactory: (Song) -> MediaItem = { it.toPlaybackMediaItem() },
     primaryGainBackend: PrimaryGainBackend = PrimaryGainBackend.Unavailable,
     private val primaryReconciler: CrossfadePrimaryReconciler = CrossfadePrimaryReconciler.Unavailable,
+    private val primaryAudioSessionId: () -> Int = { 0 },
+    private val audioSessionObserver: CrossfadeAudioSessionObserver = CrossfadeAudioSessionObserver.NoOp,
 ) {
     private val primaryGain = CrossfadePrimaryGainController(primaryGainBackend)
 
@@ -482,6 +484,18 @@ internal class CrossfadePreparationRuntime(
         return CrossfadeHandoffExecutionResult.Failed(failure)
     }
 
+    /**
+     * CF-2I1: pure, exact-key observation of the secondary's audio-session id. Null when closed, when [key] is not the
+     * currently owned transition, or when the secondary has no valid session. Never mutates state and never cancels:
+     * an absent session is observational, not a crossfade failure.
+     */
+    fun secondaryAudioSessionSnapshot(key: CrossfadeTransitionKey): SecondaryAudioSessionSnapshot? {
+        if (closed) return null
+        val active = state as? CrossfadeState.Active ?: return null
+        if (active.key != key) return null
+        return secondary.audioSessionSnapshot(key)
+    }
+
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */
     fun cancel(reason: CrossfadeCancelReason) {
         if (closed) return
@@ -521,6 +535,17 @@ internal class CrossfadePreparationRuntime(
             return
         }
         applyReduction(reduceCrossfade(state, CrossfadeEvent.SecondaryReady(key)), snapshot)
+        observeSecondarySession(key)
+    }
+
+    /** CF-2I1: one read-only observation per exact preparation, only if that key now owns Ready. Failures are swallowed. */
+    private fun observeSecondarySession(key: CrossfadeTransitionKey) {
+        if (closed || (state as? CrossfadeState.Ready)?.key != key) return
+        try {
+            audioSessionObserver.onSecondarySessionObserved(key, primaryAudioSessionId(), secondary.audioSessionSnapshot(key)?.audioSessionId)
+        } catch (e: Exception) {
+            Log.w(TAG, "audio-session observation failed", e)
+        }
     }
 
     private fun handleSecondaryFailed(key: CrossfadeTransitionKey) {

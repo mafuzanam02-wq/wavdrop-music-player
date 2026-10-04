@@ -340,8 +340,8 @@ class CrossfadePreparationRuntimeTest {
     // ── Commands / safety ───────────────────────────────────────────────────────
 
     @Test fun secondaryBackendHasOnlyPrepareStartResetRelease() {
-        val names = SecondaryPlayerBackend::class.java.declaredMethods.map { it.name }.toSet()
-        assertEquals(setOf("prepare", "start", "setGain", "handoffSnapshot", "reset", "release"), names)
+        val names = SecondaryPlayerBackend::class.java.declaredMethods.filterNot { it.isSynthetic }.map { it.name }.toSet()
+        assertEquals(setOf("prepare", "start", "setGain", "handoffSnapshot", "audioSessionSnapshot", "reset", "release"), names)
     }
 
     @Test fun runtimeHoldsNoPrimaryPlayerReference() {

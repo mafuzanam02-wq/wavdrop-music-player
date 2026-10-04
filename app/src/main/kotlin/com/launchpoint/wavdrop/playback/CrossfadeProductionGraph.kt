@@ -32,6 +32,8 @@ internal fun createCrossfadeProductionGraph(
     configuredDurationMsProvider: () -> Long,
     primaryDurationMs: () -> Long,
     primaryPositionMs: () -> Long,
+    primaryAudioSessionId: () -> Int = { 0 },
+    audioSessionObserver: CrossfadeAudioSessionObserver = CrossfadeAudioSessionObserver.NoOp,
     mediaItemFactory: (com.launchpoint.wavdrop.data.model.Song) -> MediaItem = { it.toPlaybackMediaItem() },
 ): CrossfadeProductionGraph {
     val runtime = CrossfadePreparationRuntime(
@@ -40,6 +42,8 @@ internal fun createCrossfadeProductionGraph(
         mediaItemFactory = mediaItemFactory,
         primaryGainBackend = primaryGainBackend,
         primaryReconciler = crossfadePrimaryReconciler(reconcilePrimary),
+        primaryAudioSessionId = primaryAudioSessionId,
+        audioSessionObserver = audioSessionObserver,
     )
     val driver = CrossfadeTimingDriver(
         runtime = runtime,

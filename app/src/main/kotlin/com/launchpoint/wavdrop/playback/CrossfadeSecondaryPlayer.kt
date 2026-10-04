@@ -85,6 +85,13 @@ internal interface SecondaryPlayerBackend {
      */
     fun handoffSnapshot(): SecondaryHandoffSnapshot?
 
+    /**
+     * CF-2I1: read-only observation of this backend's audio-session id, or null when none is assigned yet (0) or the
+     * id is invalid. Never prepares, starts, resets, changes gain, takes audio focus, or creates a session or an EQ.
+     * The default fails closed so a backend that cannot observe a session simply reports none.
+     */
+    fun audioSessionSnapshot(): SecondaryAudioSessionSnapshot? = null
+
     /** Stops, clears media, and leaves the player silent (volume 0, playWhenReady false). */
     fun reset()
 
@@ -199,6 +206,21 @@ internal class CrossfadeSecondaryPlayer(
         if (released || activeKey != key || phase != Phase.Started) return null
         return try {
             backend?.handoffSnapshot()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * CF-2I1: observational, exact-key audio-session snapshot. Non-null only when not released, [key] is the active key,
+     * a preparation is live (Preparing, Prepared or Started) and the backend reports a valid positive id. A null result
+     * (including a backend exception) never changes ownership, phase or notifies the listener. The session id is not
+     * identity: a reused id cannot revive an old key. Song ids play no role.
+     */
+    fun audioSessionSnapshot(key: CrossfadeTransitionKey): SecondaryAudioSessionSnapshot? {
+        if (released || activeKey != key || phase == Phase.None) return null
+        return try {
+            backend?.audioSessionSnapshot()?.let { s -> validSecondaryAudioSessionId(s.audioSessionId)?.let { SecondaryAudioSessionSnapshot(it) } }
         } catch (_: Exception) {
             null
         }
@@ -355,6 +377,9 @@ internal class ExoSecondaryPlayerBackend(
         positionMs = player.currentPosition,
         durationMs = player.duration,
     )
+
+    override fun audioSessionSnapshot(): SecondaryAudioSessionSnapshot? =
+        validSecondaryAudioSessionId(player.audioSessionId)?.let { SecondaryAudioSessionSnapshot(it) }
 
     override fun reset() {
         detachListener()
