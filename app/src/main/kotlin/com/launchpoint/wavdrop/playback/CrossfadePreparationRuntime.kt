@@ -232,6 +232,16 @@ internal class CrossfadePreparationRuntime(
     // CF-2L3: same-item reconciliation seeks issued for the current transition (diagnostic accounting; cleared with the rest).
     private var naturalReconcileRequests = 0
 
+    // CF-2L4: one bounded monotonic projected position clock per stream (transition-owned, cleared with the rest).
+    private val primaryClock = NaturalHandoffPositionClock()
+    private val secondaryClock = NaturalHandoffPositionClock()
+    private var primaryDecision = PositionSampleDecision.Stale
+    private var secondaryDecision = PositionSampleDecision.Stale
+    private var primaryExpiredLogged = false
+    private var secondaryExpiredLogged = false
+    private var primaryNotAdvancingLogged = false
+    private var secondaryNotAdvancingLogged = false
+
     /** CF-2L1: true when production wiring supplied the natural-AUTO handoff seams (a pending handoff then waits on real state). */
     val usesNaturalHandoff: Boolean get() = naturalHandoff != null
 
@@ -247,6 +257,14 @@ internal class CrossfadePreparationRuntime(
         handoffSeekTargetMs = null
         transferStartMs = null
         naturalReconcileRequests = 0
+        primaryClock.invalidate()
+        secondaryClock.invalidate()
+        primaryDecision = PositionSampleDecision.Stale
+        secondaryDecision = PositionSampleDecision.Stale
+        primaryExpiredLogged = false
+        secondaryExpiredLogged = false
+        primaryNotAdvancingLogged = false
+        secondaryNotAdvancingLogged = false
     }
 
     /** CF-2L3: read-only proof of what this runtime still holds (see [isCrossfadeFullySettled]). Never exposes a player. */
@@ -261,6 +279,7 @@ internal class CrossfadePreparationRuntime(
         secondaryStarted = secondary.isStarted,
         closed = closed,
         reconcileRequestCount = naturalReconcileRequests,
+        positionClocksActive = primaryClock.hasAnchor || secondaryClock.hasAnchor,
     )
 
     private val secondary = CrossfadeSecondaryPlayer(
@@ -570,7 +589,7 @@ internal class CrossfadePreparationRuntime(
     private fun settledLine(key: CrossfadeTransitionKey, s: CrossfadeSettlementSnapshot): String =
         "HANDOFF_SETTLED key=$key state=${crossfadeStateName(s.state)} transferActive=${s.transferActive} " +
             "seekTargetPresent=${s.hasSeekTarget} seekLeadMs=${s.seekLeadMs} primaryGainOwned=${s.primaryGainOwnerKey != null} " +
-            "secondaryOwned=${s.secondaryOwned} settled=${isCrossfadeFullySettled(s)}"
+            "secondaryOwned=${s.secondaryOwned} positionClocksActive=${s.positionClocksActive} settled=${isCrossfadeFullySettled(s)}"
 
     /**
      * CF-2L1: an authoritative primary media-item transition fact. Qualifies only while Fading or HandoffPending, only for
@@ -612,10 +631,13 @@ internal class CrossfadePreparationRuntime(
      * CF-2L1: the natural-AUTO terminal handoff. The terminal fade left primary gain 0 and secondary gain 1; the secondary
      * stays alive and audible until the primary is genuinely usable on the target. Waits (no effects) for: the exact AUTO
      * transition; the primary physically on the target occurrence in READY; and, after a same-item reposition onto a FRESH
-     * secondary position, the primary landing within [NATURAL_TRANSFER_ENTRY_TOLERANCE_MS]. Only then (CF-2L2) does the short
-     * internal soft ownership transfer run (see [beginTransfer]/[continueTransfer]/[completeTransfer]); the secondary is silenced
-     * before it is abandoned, and success follows only the completed transfer. Readiness is read from real player facts, never
-     * from a returned command or a fixed delay.
+     * secondary position, trustworthy evidence that the primary is within [NATURAL_TRANSFER_ENTRY_TOLERANCE_MS]. Only then (CF-2L2)
+     * does the short internal soft ownership transfer run (see [beginTransfer]/[continueTransfer]/[completeTransfer]); the
+     * secondary is silenced before it is abandoned, and success follows only the completed transfer.
+     *
+     * CF-2L4: continuity is judged on PROJECTED positions (see [NaturalHandoffPositionClock]), one clock per stream fed from ONE shared
+     * monotonic reading per evaluation, because raw `currentPosition` is frozen between sparse updates and comparing raw samples
+     * manufactured false divergences. Readiness is read from real player facts, never from a returned command or a fixed delay.
      */
     private fun executeNaturalHandoff(
         pending: CrossfadeState.HandoffPending,
@@ -624,6 +646,7 @@ internal class CrossfadePreparationRuntime(
     ): CrossfadeHandoffExecutionResult {
         val key = pending.key
         if (naturalObservedKey != key) return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.NaturalTransition)
+        val now = seams.nowElapsedRealtimeMs() // ONE shared monotonic reading for this whole evaluation
         val facts = try {
             seams.primaryFacts()
         } catch (e: Exception) {
@@ -631,15 +654,36 @@ internal class CrossfadePreparationRuntime(
             null
         }
         if (facts == null || facts.physicalIndex != key.toPlaybackIndex || !facts.isReady) {
+            primaryClock.invalidate() // a primary that is not a valid READY target has no meaningful position
             // A primary that stops being a valid READY target mid-transfer must not keep gaining: return authority to the secondary.
-            if (transferStartMs != null) return abortTransfer(pending, snapshot, seams, "primary-not-ready", null, CrossfadeHandoffWait.PrimaryReady)
+            if (transferStartMs != null) return abortTransfer(pending, snapshot, seams, "primary-not-ready", "", CrossfadeHandoffWait.PrimaryReady)
             return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimaryReady)
         }
         val fresh = secondary.handoffSnapshot(key) // FRESH: the terminal snapshot is stale once the secondary keeps playing
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
         if (fresh == null) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondarySnapshotUnavailable)
-        if (transferStartMs != null) return continueTransfer(pending, snapshot, seams, facts, fresh)
-        when (val decision = decideNaturalTakeover(facts, fresh.positionMs, handoffSeekTargetMs, handoffSeekLeadMs)) {
+        observePositions(seams, facts, fresh, now)
+        if (transferStartMs != null) return continueTransfer(pending, snapshot, seams, facts, fresh, now)
+        // CF-2L4 correction: a stream that is not currently advancing (BUFFERING, paused, suppressed) has no projection to trust, so
+        // nothing is decided on it: no transfer entry and no seek on its frozen raw position (a pending reposition still reports itself).
+        if (!facts.isAdvancing || !fresh.isAdvancing) {
+            val landing = handoffSeekTargetMs != null && facts.positionMs < (handoffSeekTargetMs ?: 0L) - NATURAL_TAKEOVER_MAX_LAG_MS
+            return CrossfadeHandoffExecutionResult.Awaiting(if (landing) CrossfadeHandoffWait.PrimarySeek else CrossfadeHandoffWait.PositionConfidence)
+        }
+
+        // Continuity is decided on projected positions when both clocks are trustworthy; otherwise only a GROSS raw mismatch (beyond
+        // anything sampling granularity can explain) may reposition, and anything finer waits for credible evidence (no seek).
+        val confident = primaryClock.isConfident(now) && secondaryClock.isConfident(now)
+        val primaryPos = if (confident) primaryClock.projectedMs(now) ?: facts.positionMs else facts.positionMs
+        val secondaryPos = if (confident) secondaryClock.projectedMs(now) ?: fresh.positionMs else fresh.positionMs
+        val decision = decideNaturalTakeover(facts.copy(positionMs = primaryPos), secondaryPos, handoffSeekTargetMs, handoffSeekLeadMs)
+        if (!confident) {
+            val grossRaw = kotlin.math.abs(fresh.positionMs - facts.positionMs) > NATURAL_TAKEOVER_MAX_LAG_MS
+            if (decision == NaturalTakeoverDecision.TakeOver || (decision is NaturalTakeoverDecision.SeekPrimary && !grossRaw)) {
+                return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PositionConfidence)
+            }
+        }
+        when (decision) {
             NaturalTakeoverDecision.AwaitSeekLanding ->
                 return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
             is NaturalTakeoverDecision.SeekPrimary -> {
@@ -649,11 +693,10 @@ internal class CrossfadePreparationRuntime(
                 handoffSeekTargetMs = seekTo
                 handoffSeekLeadMs = decision.leadMs
                 naturalReconcileRequests++
-                logTransfer(
-                    seams,
+                logTransfer(seams) {
                     "RECONCILE_REQUEST key=$key n=$naturalReconcileRequests stage=${if (previousTarget == null) "initial" else "reseek"} " +
-                        "requestedPositionMs=$seekTo primaryPositionMs=${facts.positionMs} secondaryPositionMs=${fresh.positionMs} leadMs=${decision.leadMs}",
-                )
+                        "requestedPositionMs=$seekTo leadMs=${decision.leadMs} confident=$confident ${positionsLine(facts, fresh, now)}"
+                }
                 val reconciliation = try {
                     seams.reconciler.reconcile(key, fresh.copy(positionMs = seekTo))
                 } catch (e: Exception) {
@@ -662,13 +705,12 @@ internal class CrossfadePreparationRuntime(
                     return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationException)
                 }
                 if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
-                logTransfer(
-                    seams,
+                logTransfer(seams) {
                     "RECONCILE_RESULT key=$key n=$naturalReconcileRequests " + when (reconciliation) {
                         is CrossfadePrimaryReconciliationResult.Rejected -> "rejected reason=${reconciliation.reason}"
                         else -> "succeeded"
-                    },
-                )
+                    }
+                }
                 if (reconciliation is CrossfadePrimaryReconciliationResult.Rejected) {
                     val notPropagatedYet = reconciliation.reason == CrossfadePrimaryReconciliationRejection.PhysicalIndexMismatch ||
                         reconciliation.reason == CrossfadePrimaryReconciliationRejection.CurrentOccurrenceMismatch
@@ -680,31 +722,101 @@ internal class CrossfadePreparationRuntime(
                     }
                     return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationRejected(reconciliation.reason))
                 }
+                // A primary seek is a REAL discontinuity: never project the primary through it. The secondary keeps its clock.
+                primaryClock.invalidate()
+                primaryExpiredLogged = false
                 return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
             }
-            NaturalTakeoverDecision.TakeOver -> return beginTransfer(seams, facts, fresh)
+            NaturalTakeoverDecision.TakeOver -> return beginTransfer(seams, facts, fresh, now)
         }
     }
 
     /**
-     * CF-2L2: the primary is qualified (exact AUTO + occurrence + READY + fresh snapshot + within the entry tolerance). Starts the
-     * internal transfer envelope WITHOUT touching a gain or a player: primary is still 0 and secondary still 1. Ticks follow only
-     * through later driver evaluations.
+     * CF-2L4: feeds both raw observations into their projected clocks with the SAME [now], and emits the bounded projection events.
+     * Never mutates anything but the two clocks and their log flags.
+     */
+    private fun observePositions(
+        seams: CrossfadeNaturalHandoffSeams,
+        facts: PrimaryTakeoverFacts,
+        fresh: SecondaryHandoffSnapshot,
+        now: Long,
+    ) {
+        // A stream that is not advancing must never be projected through elapsed time: its clock is dropped (untrusted) and must
+        // re-anchor and re-earn confidence from real physical movement once it advances again. Never mistaken for a seek.
+        if (facts.isAdvancing) {
+            primaryNotAdvancingLogged = false
+            primaryDecision = primaryClock.observe(facts.positionMs, now, fresh.durationMs)
+        } else {
+            primaryDecision = PositionSampleDecision.Stale
+            if (primaryClock.hasAnchor || !primaryNotAdvancingLogged) logNotAdvancing(seams, "primary", facts.positionMs, primaryNotAdvancingLogged)
+            primaryNotAdvancingLogged = true
+            primaryClock.invalidate()
+        }
+        if (fresh.isAdvancing) {
+            secondaryNotAdvancingLogged = false
+            secondaryDecision = secondaryClock.observe(fresh.positionMs, now, fresh.durationMs)
+        } else {
+            secondaryDecision = PositionSampleDecision.Stale
+            if (secondaryClock.hasAnchor || !secondaryNotAdvancingLogged) logNotAdvancing(seams, "secondary", fresh.positionMs, secondaryNotAdvancingLogged)
+            secondaryNotAdvancingLogged = true
+            secondaryClock.invalidate()
+        }
+        if (facts.isAdvancing) logPositionDecision(seams, "primary", primaryDecision, facts.positionMs, primaryClock.projectedMs(now))
+        if (fresh.isAdvancing) logPositionDecision(seams, "secondary", secondaryDecision, fresh.positionMs, secondaryClock.projectedMs(now))
+        primaryExpiredLogged = logExpiry(seams, "primary", primaryClock, now, primaryExpiredLogged)
+        secondaryExpiredLogged = logExpiry(seams, "secondary", secondaryClock, now, secondaryExpiredLogged)
+    }
+
+    private fun logNotAdvancing(seams: CrossfadeNaturalHandoffSeams, stream: String, rawMs: Long, alreadyLogged: Boolean) {
+        if (!alreadyLogged) logTransfer(seams) { "POSITION_NOT_ADVANCING stream=$stream rawMs=$rawMs" }
+    }
+
+    private fun logPositionDecision(seams: CrossfadeNaturalHandoffSeams, stream: String, decision: PositionSampleDecision, raw: Long, projected: Long?) {
+        // Bounded: anchors, calibrations and discontinuities always; routine stale/refresh samples only inside the short transfer window.
+        val routine = decision == PositionSampleDecision.Stale || decision == PositionSampleDecision.Refreshed
+        if (routine && transferStartMs == null) return
+        val event = when (decision) {
+            PositionSampleDecision.Anchored -> "POSITION_ANCHOR"
+            PositionSampleDecision.Calibrated, PositionSampleDecision.Refreshed -> "POSITION_REFRESH"
+            PositionSampleDecision.Stale -> "POSITION_STALE_RAW"
+            PositionSampleDecision.ForwardDiscontinuity, PositionSampleDecision.BackwardDiscontinuity, PositionSampleDecision.Invalid -> "POSITION_DISCONTINUITY"
+        }
+        logTransfer(seams) { "$event stream=$stream decision=$decision rawMs=$raw projectedMs=${projected ?: "n/a"}" }
+    }
+
+    private fun logExpiry(
+        seams: CrossfadeNaturalHandoffSeams,
+        stream: String,
+        clock: NaturalHandoffPositionClock,
+        now: Long,
+        alreadyLogged: Boolean,
+    ): Boolean {
+        val expired = clock.isExpired(now)
+        if (expired && !alreadyLogged) logTransfer(seams) { "POSITION_EXPIRED stream=$stream ageMs=${clock.ageMs(now)}" }
+        return expired
+    }
+
+    /**
+     * CF-2L2: the primary is qualified (exact AUTO + occurrence + READY + fresh snapshot + both position clocks confident + within the
+     * entry tolerance on PROJECTED positions). Starts the internal transfer envelope WITHOUT touching a gain or a player: primary is
+     * still 0 and secondary still 1. Ticks follow only through later driver evaluations.
      */
     private fun beginTransfer(
         seams: CrossfadeNaturalHandoffSeams,
         facts: PrimaryTakeoverFacts,
         fresh: SecondaryHandoffSnapshot,
+        now: Long,
     ): CrossfadeHandoffExecutionResult {
-        transferStartMs = seams.nowElapsedRealtimeMs()
-        logTransfer(seams, "TRANSFER_START key=${(state as CrossfadeState.HandoffPending).key} ${positions(facts, fresh)}")
+        transferStartMs = now
+        logTransfer(seams) { "TRANSFER_START key=${(state as CrossfadeState.HandoffPending).key} ${positionsLine(facts, fresh, now)}" }
         return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer)
     }
 
     /**
      * CF-2L2: one transfer evaluation (ownership, real primary facts and a fresh secondary snapshot were already revalidated by the
-     * caller). A divergence beyond [NATURAL_TRANSFER_ABORT_TOLERANCE_MS] aborts back to the secondary; progress >= 1 completes;
-     * otherwise the complementary equal-power pair is applied SECONDARY first, then PRIMARY only if that succeeded.
+     * caller, and both clocks were fed at [now]). A raw discontinuity, an expired/untrusted projection, or a PROJECTED difference
+     * beyond [NATURAL_TRANSFER_ABORT_TOLERANCE_MS] aborts back to the secondary; progress >= 1 completes (only with both clocks still
+     * confident); otherwise the complementary equal-power pair is applied SECONDARY first, then PRIMARY only if that succeeded.
      */
     private fun continueTransfer(
         pending: CrossfadeState.HandoffPending,
@@ -712,15 +824,30 @@ internal class CrossfadePreparationRuntime(
         seams: CrossfadeNaturalHandoffSeams,
         facts: PrimaryTakeoverFacts,
         fresh: SecondaryHandoffSnapshot,
+        now: Long,
     ): CrossfadeHandoffExecutionResult {
         val key = pending.key
         val start = transferStartMs ?: return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
-        val deltaMs = fresh.positionMs - facts.positionMs
-        if (kotlin.math.abs(deltaMs) > NATURAL_TRANSFER_ABORT_TOLERANCE_MS) {
-            return abortTransfer(pending, snapshot, seams, "divergence", deltaMs, CrossfadeHandoffWait.PrimarySeek)
+        val line = { positionsLine(facts, fresh, now) }
+        // CF-2L4 correction: a stream that stopped advancing (BUFFERING, pause, suppression, stall) cannot carry the transfer: return to
+        // the secondary, never complete on a projected timeline across a real stall.
+        if (!fresh.isAdvancing) return abortTransfer(pending, snapshot, seams, "secondary_not_advancing", line(), CrossfadeHandoffWait.PositionConfidence)
+        if (!facts.isAdvancing) return abortTransfer(pending, snapshot, seams, "primary_not_advancing", line(), CrossfadeHandoffWait.PositionConfidence)
+        if (primaryDecision.isDiscontinuity || secondaryDecision.isDiscontinuity) {
+            val reason = if (primaryDecision == PositionSampleDecision.Invalid || secondaryDecision == PositionSampleDecision.Invalid) "position_invalid" else "raw_discontinuity"
+            return abortTransfer(pending, snapshot, seams, reason, line(), CrossfadeHandoffWait.PositionConfidence)
         }
-        val progress = naturalTransferProgress(start, seams.nowElapsedRealtimeMs())
-        if (progress >= 1f) return completeTransfer(pending, snapshot, seams, facts, fresh)
+        val projectedPrimary = primaryClock.projectedMs(now)
+        val projectedSecondary = secondaryClock.projectedMs(now)
+        if (!primaryClock.isConfident(now) || !secondaryClock.isConfident(now) || projectedPrimary == null || projectedSecondary == null) {
+            return abortTransfer(pending, snapshot, seams, "position_projection_expired", line(), CrossfadeHandoffWait.PositionConfidence)
+        }
+        val projectedDelta = projectedSecondary - projectedPrimary
+        if (kotlin.math.abs(projectedDelta) > NATURAL_TRANSFER_ABORT_TOLERANCE_MS) {
+            return abortTransfer(pending, snapshot, seams, "projected_divergence", line(), CrossfadeHandoffWait.PrimarySeek)
+        }
+        val progress = naturalTransferProgress(start, now)
+        if (progress >= 1f) return completeTransfer(pending, snapshot, seams, facts, fresh, now)
 
         val gains = naturalTransferGains(progress)
         if (!secondary.setGain(key, gains.secondary)) {
@@ -733,17 +860,17 @@ internal class CrossfadePreparationRuntime(
             return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryGainWriteFailed)
         }
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
-        logTransfer(
-            seams,
-            "TRANSFER_TICK progress=$progress primaryGain=${gains.primary} secondaryGain=${gains.secondary} ${positions(facts, fresh)}",
-        )
+        logTransfer(seams) {
+            "TRANSFER_TICK progress=$progress primaryGain=${gains.primary} secondaryGain=${gains.secondary} ${positionsLine(facts, fresh, now)}"
+        }
         return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer)
     }
 
     /**
-     * CF-2L2: final ownership change, only after the envelope ended. Order: secondary silenced (gain exactly 0) -> primary
-     * restored to 1 (releases primary-gain ownership) -> writes verified -> secondary abandoned (already silent) -> coordinator
-     * HandoffSucceeded. Never primary 1 together with an audible secondary being reset, and never an intentional 0/0 gap.
+     * CF-2L2: final ownership change, only after the envelope ended and both position clocks are still confident. Order: secondary
+     * silenced (gain exactly 0) -> primary restored to 1 (releases primary-gain ownership) -> writes verified -> secondary abandoned
+     * (already silent) -> coordinator HandoffSucceeded. Never primary 1 together with an audible secondary being reset, and never an
+     * intentional 0/0 gap.
      */
     private fun completeTransfer(
         pending: CrossfadeState.HandoffPending,
@@ -751,6 +878,7 @@ internal class CrossfadePreparationRuntime(
         seams: CrossfadeNaturalHandoffSeams,
         facts: PrimaryTakeoverFacts,
         fresh: SecondaryHandoffSnapshot,
+        now: Long,
     ): CrossfadeHandoffExecutionResult {
         val key = pending.key
         val silenced = secondary.setGain(key, 0f)
@@ -759,7 +887,7 @@ internal class CrossfadePreparationRuntime(
         val restored = primaryGain.restore(key)
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
         if (!restored) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryGainRestoreFailed)
-        logTransfer(seams, "TRANSFER_COMPLETE ${positions(facts, fresh)}")
+        logTransfer(seams) { "TRANSFER_COMPLETE ${positionsLine(facts, fresh, now)}" }
         val abandoned = secondary.abandon(key) // secondary is silent (gain 0) before it is reset
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
         if (!abandoned) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryAbandonFailed)
@@ -770,19 +898,19 @@ internal class CrossfadePreparationRuntime(
     /**
      * CF-2L2: leaves the transfer WITHOUT completing: the secondary is returned to full audible authority first, then the primary to
      * silence. The runtime stays HandoffPending (reconciliation resumes), nothing is abandoned and the audible B timeline is never
-     * moved. [waitingFor] is what the aborted evaluation reports.
+     * moved. [waitingFor] is what the aborted evaluation reports; [evidence] is the DEBUG positions line.
      */
     private fun abortTransfer(
         pending: CrossfadeState.HandoffPending,
         snapshot: CrossfadeRuntimeSnapshot,
         seams: CrossfadeNaturalHandoffSeams,
         reason: String,
-        deltaMs: Long?,
+        evidence: String,
         waitingFor: CrossfadeHandoffWait,
     ): CrossfadeHandoffExecutionResult {
         val key = pending.key
         transferStartMs = null
-        logTransfer(seams, "TRANSFER_ABORT reason=$reason deltaMs=${deltaMs ?: "n/a"}")
+        logTransfer(seams) { "TRANSFER_ABORT reason=$reason $evidence" }
         val secondaryBack = secondary.setGain(key, 1f)
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
         if (!secondaryBack) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondaryGainWriteFailed)
@@ -792,8 +920,18 @@ internal class CrossfadePreparationRuntime(
         return CrossfadeHandoffExecutionResult.Awaiting(waitingFor)
     }
 
-    private fun positions(facts: PrimaryTakeoverFacts, fresh: SecondaryHandoffSnapshot): String =
-        "primaryPositionMs=${facts.positionMs} secondaryPositionMs=${fresh.positionMs} deltaMs=${fresh.positionMs - facts.positionMs}"
+    /** DEBUG evidence line: RAW and PROJECTED positions, ages and the per-stream sample decisions (no titles, ids or paths). */
+    private fun positionsLine(facts: PrimaryTakeoverFacts, fresh: SecondaryHandoffSnapshot, now: Long): String {
+        val projectedPrimary = primaryClock.projectedMs(now)
+        val projectedSecondary = secondaryClock.projectedMs(now)
+        val projectedDelta = if (projectedPrimary != null && projectedSecondary != null) projectedSecondary - projectedPrimary else null
+        return "primaryPositionMs=${facts.positionMs} secondaryPositionMs=${fresh.positionMs} deltaMs=${fresh.positionMs - facts.positionMs} " +
+            "rawPrimaryMs=${facts.positionMs} rawSecondaryMs=${fresh.positionMs} projectedPrimaryMs=${projectedPrimary ?: "n/a"} " +
+            "projectedSecondaryMs=${projectedSecondary ?: "n/a"} rawDeltaMs=${fresh.positionMs - facts.positionMs} " +
+            "projectedDeltaMs=${projectedDelta ?: "n/a"} primaryProjectionAgeMs=${primaryClock.ageMs(now) ?: "n/a"} " +
+            "secondaryProjectionAgeMs=${secondaryClock.ageMs(now) ?: "n/a"} primaryAdvancing=${facts.isAdvancing} secondaryAdvancing=${fresh.isAdvancing} " +
+            "positionDecision=primary:$primaryDecision/secondary:$secondaryDecision"
+    }
 
     private fun logTransfer(seams: CrossfadeNaturalHandoffSeams, message: String) {
         try {
@@ -803,6 +941,15 @@ internal class CrossfadePreparationRuntime(
         }
     }
 
+    /** Lazy variant: the message is only built when a DEBUG sink exists (nothing is allocated in release or without a sink). */
+    private inline fun logTransfer(seams: CrossfadeNaturalHandoffSeams, message: () -> String) {
+        val sink = seams.transferLog ?: return
+        try {
+            sink(message())
+        } catch (e: Exception) {
+            Log.w(TAG, "transfer log failed", e)
+        }
+    }
 
     private fun failHandoff(
         pending: CrossfadeState.HandoffPending,

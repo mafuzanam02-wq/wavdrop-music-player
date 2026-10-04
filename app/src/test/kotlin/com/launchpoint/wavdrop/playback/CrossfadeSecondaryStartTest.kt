@@ -587,7 +587,8 @@ class CrossfadeSecondaryStartTest {
     @Test fun readyAndBufferingAreValid() {
         assertEquals(SecondaryHandoffSnapshot(6_000L, 180_000L), valid())
         assertEquals(
-            SecondaryHandoffSnapshot(6_000L, 180_000L),
+            // valid OWNED snapshot while BUFFERING (lifecycle unchanged) but explicitly NOT eligible for position projection
+            SecondaryHandoffSnapshot(6_000L, 180_000L, isAdvancing = false),
             valid(state = androidx.media3.common.Player.STATE_BUFFERING),
         )
         assertEquals(SecondaryHandoffSnapshot(0L, 1L), valid(position = 0L, duration = 1L))

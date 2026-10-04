@@ -23,7 +23,20 @@ internal data class PrimaryTakeoverFacts(
     val physicalIndex: Int,
     val isReady: Boolean,
     val positionMs: Long,
+    /**
+     * CF-2L4 correction: the primary's media clock is known to be progressing right now (see [isPrimaryPlaybackAdvancing]). Only
+     * while this holds may its coarse raw position be projected forward; READY alone is not proof (it can be paused or suppressed).
+     */
+    val isAdvancing: Boolean,
 )
+
+/**
+ * The narrowest truthful "the media clock is advancing" fact for the authoritative primary: READY, playWhenReady, and no playback
+ * suppression. This is exactly Media3's `Player.isPlaying` definition, computed from the three raw facts so the rule is
+ * JVM-testable and BUFFERING, a pause, an audio-focus/route suppression or an ended/idle player can never be projected through.
+ */
+internal fun isPrimaryPlaybackAdvancing(playbackState: Int, playWhenReady: Boolean, playbackSuppressionReason: Int): Boolean =
+    playbackState == Player.STATE_READY && playWhenReady && playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE
 
 /** What a terminal fade (HandoffPending) is still waiting for. All waits are state driven, never timed. */
 internal enum class CrossfadeHandoffWait {
@@ -38,6 +51,9 @@ internal enum class CrossfadeHandoffWait {
 
     /** CF-2L2: the short internal soft ownership transfer (secondary B -> primary B) is in progress; the secondary stays the audible authority until it completes. */
     OwnershipTransfer,
+
+    /** CF-2L4: a stream's projected position is not (yet) trustworthy (first sample, no raw change seen, a discontinuity or an expired projection); the secondary stays audible and nothing is sought. */
+    PositionConfidence,
 }
 
 /**

@@ -38,14 +38,20 @@ class CrossfadeNaturalHandoffTest {
         var setGainResult = true
         var callbacks: SecondaryBackendCallbacks? = null
         var resets = 0
-        var snapshotPositionMs = 6_000L
+        // CF-2L4: a physically realistic secondary: its raw position advances 1 ms per monotonic ms unless frozen (or a coarse model overrides it).
+        private var secondaryBaseMs = 6_000L
+        private var secondaryBaseAtMs = clockNow
+        var snapshotPositionMs: Long
+            get() = coarseSecondary?.invoke() ?: (secondaryBaseMs + if (positionsFrozen || secondaryStalled) 0L else clockNow - secondaryBaseAtMs)
+            set(value) { secondaryBaseMs = value; secondaryBaseAtMs = clockNow }
         override fun prepare(attempt: Long, item: MediaItem, callbacks: SecondaryBackendCallbacks) {
             prepared += attempt
             this.callbacks = callbacks
         }
         override fun start(initialGain: Float): Boolean = true
         override fun setGain(gain: Float): Boolean { gains += gain; order += "sg:$gain"; return setGainResult }
-        override fun handoffSnapshot(): SecondaryHandoffSnapshot? = SecondaryHandoffSnapshot(snapshotPositionMs, 180_000L)
+        override fun handoffSnapshot(): SecondaryHandoffSnapshot? =
+            SecondaryHandoffSnapshot(snapshotPositionMs, 180_000L, isAdvancing = !secondaryStalled)
         override fun reset() { resets++; events += "s:reset"; order += "reset" }
         override fun release() {}
         fun ready() = callbacks!!.onReady(prepared.last(), 180_000L)
@@ -67,7 +73,37 @@ class CrossfadeNaturalHandoffTest {
     private val scheduler = FakeScheduler()
     private val backend = FakeBackend()
     private val primaryWrites = mutableListOf<Float>()
-    private var facts: PrimaryTakeoverFacts? = null
+    // CF-2L4: the primary's raw position is live too (advances with the monotonic clock) unless frozen or overridden by a coarse model.
+    private var factsBase: PrimaryTakeoverFacts? = null
+    private var factsBaseAtMs = 0L
+    private var positionsFrozen = false
+    private var primaryFrozen = false
+
+    // CF-2L4 correction: a BUFFERING / stalled stream keeps a valid snapshot but its raw position freezes and it is not advancing.
+    private var primaryStalled = false
+    private var secondaryStalled = false
+
+    private fun stallPrimary() { facts = facts; primaryStalled = true }
+    private fun resumePrimary() { facts = facts; primaryStalled = false }
+    private fun stallSecondary() { backend.snapshotPositionMs = backend.snapshotPositionMs; secondaryStalled = true }
+    private fun resumeSecondary() { backend.snapshotPositionMs = backend.snapshotPositionMs; secondaryStalled = false }
+
+    /** Freezes a stream at its CURRENT raw value (it keeps reporting that same position while monotonic time passes). */
+    private fun freezePositions() {
+        facts = facts
+        backend.snapshotPositionMs = backend.snapshotPositionMs
+        positionsFrozen = true
+    }
+    private var coarseSecondary: (() -> Long)? = null
+    private var coarsePrimary: (() -> Long)? = null
+    private var facts: PrimaryTakeoverFacts?
+        get() = factsBase?.let { base ->
+            base.copy(
+                positionMs = coarsePrimary?.invoke() ?: (base.positionMs + if (positionsFrozen || primaryFrozen || primaryStalled) 0L else clockNow - factsBaseAtMs),
+                isAdvancing = base.isAdvancing && !primaryStalled,
+            )
+        }
+        set(value) { factsBase = value; factsBaseAtMs = clockNow }
     private val reconcileCalls = mutableListOf<Pair<CrossfadeTransitionKey, SecondaryHandoffSnapshot>>()
     private var reconcileResult: CrossfadePrimaryReconciliationResult = CrossfadePrimaryReconciliationResult.Succeeded
     private var key = CrossfadeTransitionKey(5L, 1, 2)
@@ -136,13 +172,29 @@ class CrossfadeNaturalHandoffTest {
         backend.snapshotPositionMs = 6_100L
         primaryOnTarget(positionMs = 6_100L - deltaMs)
         auto(2)
+        confirmClocks()
         assertTrue(runtime.isNaturalTransferInProgress)
+    }
+
+    /**
+     * CF-2L4: the first evaluation only anchors both position clocks (provisional); the next one, after the monotonic clock moved and
+     * both raw positions advanced, calibrates them and is the first that can trust a projected comparison.
+     */
+    private fun confirmClocks(stepMs: Long = 20L) {
+        clockNow += stepMs
+        runtime.executeHandoff(key)
+    }
+
+    /** CF-2L4: after a primary reposition the primary clock was invalidated, so it needs one more evaluation to calibrate. */
+    private fun confirmClocksAfterSeek(stepMs: Long = 20L) {
+        confirmClocks(stepMs)
+        confirmClocks(stepMs)
     }
 
     private fun auto(index: Int) = observeCrossfadeNaturalTransition(runtime, index, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
 
     private fun primaryOnTarget(ready: Boolean = true, positionMs: Long = 100L) {
-        facts = PrimaryTakeoverFacts(physicalIndex = key.toPlaybackIndex, isReady = ready, positionMs = positionMs)
+        facts = PrimaryTakeoverFacts(physicalIndex = key.toPlaybackIndex, isReady = ready, positionMs = positionMs, isAdvancing = ready)
     }
 
     // ── waiting without effects ─────────────────────────────────────────────────
@@ -174,7 +226,7 @@ class CrossfadeNaturalHandoffTest {
     @Test fun primaryStillOnSourceIsNotReady() {
         toHandoffPending()
         auto(2)
-        facts = PrimaryTakeoverFacts(physicalIndex = 1, isReady = true, positionMs = 193_000L)
+        facts = PrimaryTakeoverFacts(physicalIndex = 1, isReady = true, positionMs = 193_000L, isAdvancing = true)
         assertEquals(
             CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimaryReady),
             runtime.executeHandoff(key),
@@ -280,7 +332,7 @@ class CrossfadeNaturalHandoffTest {
 
         backend.snapshotPositionMs = 7_320L
         primaryOnTarget(positionMs = 7_260L) // the reposition landed
-        advanceCrossfadeHandoff(runtime) // e.g. the READY callback: only BEGINS the soft transfer
+        confirmClocksAfterSeek() // the primary clock re-calibrates after the seek; only then may the soft transfer BEGIN
         assertEquals(listOf("seek:7250"), events)
         assertTrue(runtime.isNaturalTransferInProgress)
         finishTransfer()
@@ -336,7 +388,8 @@ class CrossfadeNaturalHandoffTest {
         // later: fresh secondary 9100, primary 9050 -> within the entry tolerance -> the soft transfer may begin
         backend.snapshotPositionMs = 9_100L
         primaryOnTarget(positionMs = 9_050L)
-        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer), runtime.executeHandoff(key))
+        confirmClocksAfterSeek()
+        assertTrue(runtime.isNaturalTransferInProgress)
         finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
     }
@@ -426,6 +479,7 @@ class CrossfadeNaturalHandoffTest {
         backend.snapshotPositionMs = 6_100L
         primaryOnTarget(positionMs = 6_050L)
         auto(2)
+        confirmClocks()
         assertTrue(reconcileCalls.isEmpty())
         assertTrue(runtime.state is CrossfadeState.HandoffPending)
         finishTransfer()
@@ -464,6 +518,7 @@ class CrossfadeNaturalHandoffTest {
         primaryOnTarget(positionMs = 6_050L)
         backend.snapshotPositionMs = 6_100L
         auto(2)
+        confirmClocks()
         finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
         val resets = backend.resets
@@ -484,7 +539,9 @@ class CrossfadeNaturalHandoffTest {
         assertEquals(FadeTickExecutionResult.HandoffPending, runtime.executeFadeTick(key, clockNow + 6_000L))
         backend.snapshotPositionMs = 6_050L
         primaryOnTarget(positionMs = 6_000L)
-        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer), runtime.executeHandoff(key))
+        runtime.executeHandoff(key) // anchors both clocks
+        confirmClocks()
+        assertTrue(runtime.isNaturalTransferInProgress)
         finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
     }
@@ -522,6 +579,7 @@ class CrossfadeNaturalHandoffTest {
         backend.snapshotPositionMs = 6_100L
         primaryOnTarget(positionMs = 6_050L)
         auto(0)
+        confirmClocks()
         assertTrue(runtime.state is CrossfadeState.HandoffPending)
         finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
@@ -541,6 +599,7 @@ class CrossfadeNaturalHandoffTest {
         backend.snapshotPositionMs = 6_100L
         primaryOnTarget(positionMs = 6_050L)
         auto(2)
+        confirmClocks()
         finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
     }
@@ -559,10 +618,12 @@ class CrossfadeNaturalHandoffTest {
         assertTrue(events.isEmpty())
         backend.snapshotPositionMs = 6_100L
         primaryOnTarget(positionMs = 6_050L)
-        auto(2) // AUTO observed and the primary is ready and continuous: the soft transfer BEGINS (event driven)
-        assertTrue(runtime.isNaturalTransferInProgress)
+        auto(2) // AUTO observed: both position clocks are only anchored (provisional), so nothing may begin yet
+        assertFalse(runtime.isNaturalTransferInProgress)
         assertTrue(events.isEmpty()) // nothing written, nothing reset yet
-        scheduler.runNext() // the pending pulse now runs at the finer transfer cadence
+        clockNow += 20L
+        scheduler.runNext() // the pulse calibrates both clocks and the soft transfer BEGINS at the finer cadence
+        assertTrue(runtime.isNaturalTransferInProgress)
         assertEquals(CrossfadeTimingDriver.TRANSFER_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
         clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
         scheduler.runNext() // final evaluation completes the transfer
@@ -579,6 +640,9 @@ class CrossfadeNaturalHandoffTest {
         backend.snapshotPositionMs = 6_100L
         primaryOnTarget(positionMs = 6_100L - delta)
         auto(2)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(reconcileCalls.isEmpty()) // unconfirmed clocks never seek on a sub-granularity difference
+        confirmClocks() // both clocks are now trustworthy: the PROJECTED difference is real
         assertFalse(runtime.isNaturalTransferInProgress)
         assertTrue(backend.gains.isEmpty()) // neither side's gain touched: primary stays silent
         assertEquals(0f, primaryWrites.last(), 1e-6f)
@@ -614,9 +678,10 @@ class CrossfadeNaturalHandoffTest {
         assertTrue(backend.gains.all { it == 1f })
         assertEquals(0f, primaryWrites.last(), 1e-6f)
         assertEquals(0, backend.resets)
-        assertTrue(transferLogs.first().startsWith("TRANSFER_START"))
-        assertTrue(transferLogs.first().contains("deltaMs=40"))
-        assertTrue(transferLogs.first().contains("primaryPositionMs=6060"))
+        val start = transferLogs.first { it.startsWith("TRANSFER_START") }
+        assertTrue(start.contains("rawDeltaMs=40") && start.contains("projectedDeltaMs=40"))
+        assertTrue(start.contains("rawPrimaryMs=6080") && start.contains("projectedPrimaryMs=6080"))
+        assertTrue(start.contains("positionDecision=primary:Calibrated/secondary:Calibrated"))
     }
 
     @Test fun midpointUsesComplementaryEqualPowerGainsSecondaryWrittenFirst() {
@@ -678,7 +743,7 @@ class CrossfadeNaturalHandoffTest {
         primaryOnTarget(ready = false, positionMs = 6_100L)
         auto(2) // AUTO but not READY
         assertFalse(runtime.isNaturalTransferInProgress)
-        facts = PrimaryTakeoverFacts(physicalIndex = 3, isReady = true, positionMs = 6_100L)
+        facts = PrimaryTakeoverFacts(physicalIndex = 3, isReady = true, positionMs = 6_100L, isAdvancing = true)
         advanceCrossfadeHandoff(runtime) // READY but the wrong occurrence
         assertFalse(runtime.isNaturalTransferInProgress)
         primaryOnTarget(positionMs = 3_000L)
@@ -695,14 +760,14 @@ class CrossfadeNaturalHandoffTest {
         order.clear()
         primaryOnTarget(positionMs = 6_100L - NATURAL_TRANSFER_ABORT_TOLERANCE_MS - 1L) // the primary jumped away
         assertEquals(
-            CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek),
+            CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PositionConfidence),
             runtime.executeHandoff(key),
         )
         assertEquals(listOf("sg:1.0", "pg:0.0"), order) // secondary back to full FIRST, then primary silent
         assertFalse(runtime.isNaturalTransferInProgress)
         assertTrue(runtime.state is CrossfadeState.HandoffPending)
         assertEquals(0, backend.resets)
-        assertTrue(transferLogs.any { it.startsWith("TRANSFER_ABORT reason=divergence") })
+        assertTrue(transferLogs.any { it.startsWith("TRANSFER_ABORT reason=raw_discontinuity") })
         // reconciliation resumes (a reposition is issued) and even a lot of elapsed time cannot complete anything
         reconcileCalls.clear()
         clockNow += 10_000L
@@ -714,7 +779,7 @@ class CrossfadeNaturalHandoffTest {
     @Test fun smallDriftDuringTheEnvelopeDoesNotAbort() {
         beginTransfer()
         clockNow += 75L
-        primaryOnTarget(positionMs = 6_100L - NATURAL_TRANSFER_ABORT_TOLERANCE_MS) // at the abort tolerance, not beyond it
+        primaryOnTarget(positionMs = 6_100L + 20L + 75L - 90L) // a slightly stale raw (inside the agreement window): coarse, not divergent
         assertEquals(
             CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.OwnershipTransfer),
             runtime.executeHandoff(key),
@@ -763,6 +828,7 @@ class CrossfadeNaturalHandoffTest {
         assertFalse(runtime.isNaturalTransferInProgress)
         logicalIndex = 2
         auto(2)
+        confirmClocks()
         assertTrue(runtime.isNaturalTransferInProgress)
         finishTransfer()
         assertEquals(CrossfadeState.Idle, runtime.state)
@@ -777,6 +843,7 @@ class CrossfadeNaturalHandoffTest {
         backend.snapshotPositionMs = 6_100L
         primaryOnTarget(positionMs = 6_100L)
         auto(0)
+        confirmClocks()
         assertTrue(runtime.isNaturalTransferInProgress)
         clockNow += 75L
         runtime.executeHandoff(key)
@@ -830,8 +897,8 @@ class CrossfadeNaturalHandoffTest {
         recoverCrossfadeFromExplicitPause(runtime)
         assertEquals(CrossfadeState.Idle, runtime.state)
         assertEquals(1, reconcileCalls.size)
-        assertEquals(6_100L, reconcileCalls.single().second.positionMs) // B never rewinds because the owner changed
-        assertEquals(listOf("seek:6100", "p:1.0", "s:reset"), events)
+        assertEquals(6_195L, reconcileCalls.single().second.positionMs) // B never rewinds because the owner changed
+        assertEquals(listOf("seek:6195", "p:1.0", "s:reset"), events)
     }
 
     @Test fun pauseDuringTransferWithAContinuousPrimaryDoesNotSeek() {
@@ -875,8 +942,9 @@ class CrossfadeNaturalHandoffTest {
         primaryOnTarget(positionMs = 6_100L)
         logicalIndex = 2
         auto(2)
+        clockNow += 20L
+        scheduler.runNext() // the pulse calibrates both clocks and begins the transfer
         assertTrue(runtime.isNaturalTransferInProgress)
-        scheduler.runNext()
         assertEquals(CrossfadeTimingDriver.TRANSFER_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
         assertTrue(runtime.state is CrossfadeState.HandoffPending)
         clockNow += 80L
@@ -919,7 +987,7 @@ class CrossfadeNaturalHandoffTest {
         assertTrue(mid.hasSeekTarget && mid.hasNaturalObservedKey && mid.primaryGainOwnerKey != null && mid.secondaryOwned && mid.secondaryStarted)
         backend.snapshotPositionMs = 7_300L
         primaryOnTarget(positionMs = 7_260L)
-        advanceCrossfadeHandoff(runtime)
+        confirmClocksAfterSeek()
         assertTrue(runtime.settlementSnapshot().transferActive)
         finishTransfer()
         val s = runtime.settlementSnapshot()
@@ -932,6 +1000,7 @@ class CrossfadeNaturalHandoffTest {
         assertFalse(s.secondaryOwned)
         assertFalse(s.secondaryStarted)
         assertEquals(0, s.reconcileRequestCount)
+        assertFalse(s.positionClocksActive)
         assertTrue(isCrossfadeFullySettled(s))
         assertTrue(transferLogs.last().startsWith("HANDOFF_SETTLED"))
         assertTrue(transferLogs.last().contains("settled=true"))
@@ -965,7 +1034,8 @@ class CrossfadeNaturalHandoffTest {
         primaryOnTarget(positionMs = 6_100L)
         logicalIndex = 2
         auto(2)
-        scheduler.runNext() // transfer evaluation at progress 0
+        clockNow += 20L
+        scheduler.runNext() // calibrates both clocks and begins the transfer
         clockNow += NATURAL_TAKEOVER_TRANSFER_DURATION_MS
         scheduler.runNext() // completes
         assertEquals(CrossfadeState.Idle, runtime.state)
@@ -996,9 +1066,10 @@ class CrossfadeNaturalHandoffTest {
         }
         assertEquals(1, reconcileCalls.size)
         assertEquals(1, runtime.settlementSnapshot().reconcileRequestCount)
-        assertTrue(transferLogs.first().startsWith("RECONCILE_REQUEST"))
-        assertTrue(transferLogs.first().contains("stage=initial") && transferLogs.first().contains("requestedPositionMs=7250"))
-        assertTrue(transferLogs[1].startsWith("RECONCILE_RESULT") && transferLogs[1].endsWith("succeeded"))
+        val request = transferLogs.first { it.startsWith("RECONCILE_REQUEST") }
+        assertTrue(request.contains("stage=initial") && request.contains("requestedPositionMs=7250"))
+        assertTrue(request.contains("rawPrimaryMs=100") && request.contains("rawSecondaryMs=7250"))
+        assertTrue(transferLogs.first { it.startsWith("RECONCILE_RESULT") }.endsWith("succeeded"))
     }
 
     @Test fun rejectedReconciliationIsLoggedWithItsReason() {
@@ -1018,7 +1089,7 @@ class CrossfadeNaturalHandoffTest {
         primaryOnTarget(positionMs = 100L)
         auto(2) // seek issued
         primaryOnTarget(positionMs = 6_100L) // landed and aligned
-        advanceCrossfadeHandoff(runtime)
+        confirmClocksAfterSeek()
         assertTrue(runtime.isNaturalTransferInProgress)
         val seeks = reconcileCalls.size
         repeat(5) {
@@ -1038,7 +1109,7 @@ class CrossfadeNaturalHandoffTest {
         assertFalse(s.transferActive) // cleared first
         assertEquals(0, s.reconcileRequestCount) // and the abort itself issued no seek
         assertTrue(s.state is CrossfadeState.HandoffPending)
-        runtime.executeHandoff(key) // reconciliation resumes on the next evaluation
+        confirmClocks() // reconciliation resumes once the clocks are trustworthy again
         assertEquals(1, runtime.settlementSnapshot().reconcileRequestCount)
     }
 
@@ -1052,8 +1123,9 @@ class CrossfadeNaturalHandoffTest {
         primaryOnTarget(positionMs = 6_100L)
         logicalIndex = 2
         auto(2)
+        clockNow += 20L
+        scheduler.runNext() // the pulse calibrates both clocks and begins the transfer (at most one callback ever pending)
         assertTrue(runtime.isNaturalTransferInProgress)
-        scheduler.runNext() // at most one callback ever pending
         assertEquals(CrossfadeTimingDriver.TRANSFER_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
     }
 
@@ -1157,6 +1229,384 @@ class CrossfadeNaturalHandoffTest {
         finishTransfer()
         assertFalse(runtime.settlementSnapshot().secondaryOwned)
         assertFalse(runtime.settlementSnapshot().secondaryStarted)
+    }
+
+    // ── CF-2L4: bounded monotonic projected position clock ──────────────────────────────────────────
+
+    private fun logCount(prefix: String) = transferLogs.count { it.startsWith(prefix) }
+
+    /**
+     * Synthetic model of the CF-2L2 PHYSICAL failure CLASS (not any user media): both players genuinely advance 1 ms per ms, but their
+     * raw positions are frozen between sparse updates (a coarse refresh every ~250 ms with different phases), the primary is 10 ms ahead
+     * of the secondary in truth, and the driver evaluates every 16 ms. Raw position of a stream = its true position at its last update.
+     */
+    private fun installCoarseClocks(t0: Long, secondaryStepMs: Long, secondaryFirstUpdateAfterT0Ms: Long, primaryStepMs: Long, primaryFirstUpdateAfterT0Ms: Long) {
+        val trueSecondary = 6_000L // true secondary position at t0
+        val truePrimary = trueSecondary + 10L
+        fun lastUpdate(now: Long, step: Long, firstAfter: Long): Long {
+            val firstUpdate = t0 + firstAfter
+            return if (now < firstUpdate) firstUpdate - step else firstUpdate + ((now - firstUpdate) / step) * step
+        }
+        coarseSecondary = { trueSecondary + (lastUpdate(clockNow, secondaryStepMs, secondaryFirstUpdateAfterT0Ms) - t0) }
+        coarsePrimary = { truePrimary + (lastUpdate(clockNow, primaryStepMs, primaryFirstUpdateAfterT0Ms) - t0) }
+    }
+
+    @Test fun coarseRawRefreshesAt16msCadenceCompleteOneTransferWithoutAnAbortOrASeekStorm() {
+        toFading()
+        clockNow += 6_000L
+        scheduler.runNext() // terminal tick -> HandoffPending
+        val t0 = clockNow
+        logicalIndex = 2
+        primaryOnTarget(positionMs = 6_010L)
+        installCoarseClocks(t0, secondaryStepMs = 250L, secondaryFirstUpdateAfterT0Ms = 20L, primaryStepMs = 260L, primaryFirstUpdateAfterT0Ms = 240L)
+        auto(2) // AUTO at t0: both raw positions are stale and only anchored (provisional)
+        var maxRawDelta = 0L
+        var evaluations = 0
+        while (runtime.state is CrossfadeState.HandoffPending && evaluations < 200) {
+            clockNow += 16L
+            evaluations++
+            scheduler.runNext() // one driver evaluation
+            if (runtime.isNaturalTransferInProgress) maxRawDelta = maxOf(maxRawDelta, kotlin.math.abs(coarseSecondary!!() - coarsePrimary!!()))
+            assertTrue(scheduler.activeNow.size <= 1)
+        }
+        // the physical pattern reproduced: a naive RAW comparison would exceed even the abort tolerance
+        assertTrue("raw delta $maxRawDelta", maxRawDelta > NATURAL_TRANSFER_ABORT_TOLERANCE_MS)
+        // ... yet the projected comparison stayed continuous: one start, no abort, no reseek, completion, settlement
+        assertEquals(1, logCount("TRANSFER_START"))
+        assertEquals(0, logCount("TRANSFER_ABORT"))
+        assertEquals(1, logCount("TRANSFER_COMPLETE"))
+        assertTrue(reconcileCalls.isEmpty()) // no repeated reconciliation: START/ABORT/SEEK can no longer cycle
+        assertEquals(0, logCount("RECONCILE_REQUEST"))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(settled())
+        // the entry decision used PROJECTED, not raw, positions
+        val start = transferLogs.first { it.startsWith("TRANSFER_START") }
+        val rawDelta = Regex("rawDeltaMs=(-?\\d+)").find(start)!!.groupValues[1].toLong()
+        val projectedDelta = Regex("projectedDeltaMs=(-?\\d+)").find(start)!!.groupValues[1].toLong()
+        assertTrue("raw $rawDelta", kotlin.math.abs(rawDelta) > NATURAL_TRANSFER_ENTRY_TOLERANCE_MS)
+        assertTrue("projected $projectedDelta", kotlin.math.abs(projectedDelta) <= NATURAL_TRANSFER_ENTRY_TOLERANCE_MS)
+        assertEquals(0, logCount("POSITION_DISCONTINUITY"))
+    }
+
+    @Test fun aRefreshArrivingMidTransferIsAbsorbedNotTreatedAsDivergence() {
+        // the secondary refreshes (+250 coarse step) a few ms after the transfer started: the old raw comparison aborted here
+        toFading()
+        clockNow += 6_000L
+        scheduler.runNext()
+        val t0 = clockNow
+        logicalIndex = 2
+        primaryOnTarget(positionMs = 6_010L)
+        installCoarseClocks(t0, secondaryStepMs = 250L, secondaryFirstUpdateAfterT0Ms = 20L, primaryStepMs = 260L, primaryFirstUpdateAfterT0Ms = 240L)
+        auto(2)
+        var refreshedDuringTransfer = false
+        var guard = 0
+        while (runtime.state is CrossfadeState.HandoffPending && guard++ < 200) {
+            clockNow += 16L
+            scheduler.runNext()
+            if (runtime.isNaturalTransferInProgress && transferLogs.any { it.startsWith("POSITION_REFRESH stream=secondary decision=Refreshed") }) refreshedDuringTransfer = true
+        }
+        assertTrue(refreshedDuringTransfer)
+        assertEquals(0, logCount("TRANSFER_ABORT"))
+        assertEquals(CrossfadeState.Idle, runtime.state)
+    }
+
+    @Test fun primaryProjectionIsInvalidatedOnTheReconciliationSeekAndTheSecondaryKeepsItsClock() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 7_250L
+        primaryOnTarget(positionMs = 100L)
+        auto(2) // evaluation 1: both anchored; the primary is grossly behind so ONE reposition is issued and the primary clock dropped
+        assertEquals(1, reconcileCalls.size)
+        assertEquals(1, logCount("POSITION_ANCHOR stream=primary"))
+        assertEquals(1, logCount("POSITION_ANCHOR stream=secondary"))
+        primaryOnTarget(positionMs = 7_270L) // the seek landed
+        confirmClocks() // evaluation 2
+        assertEquals(2, logCount("POSITION_ANCHOR stream=primary")) // re-anchored after the seek, never projected through it
+        assertEquals(1, logCount("POSITION_ANCHOR stream=secondary")) // the continuous secondary kept its clock
+        assertTrue(transferLogs.any { it.startsWith("POSITION_REFRESH stream=secondary decision=Calibrated") })
+    }
+
+    @Test fun anUnconfirmedPrimaryNeverSeeksOnASubGranularityDifference() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 6_300L
+        primaryOnTarget(positionMs = 6_100L) // 200 ms apart: inside anything coarse sampling can explain
+        auto(2)
+        assertTrue(reconcileCalls.isEmpty())
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PositionConfidence), runtime.executeHandoff(key))
+    }
+
+    @Test fun aPinnedPrimaryThatNeverAdvancesNeverBecomesAudible() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        primaryFrozen = true // the primary reports the same position forever (not rendering) while time passes
+        auto(2)
+        repeat(60) {
+            clockNow += 50L
+            runtime.executeHandoff(key)
+        }
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(backend.gains.isEmpty())
+        assertEquals(0f, primaryWrites.last(), 1e-6f)
+        assertTrue(reconcileCalls.size <= 1) // only a GROSS (>350 ms) lag may reposition, once, then it waits for the landing: never a storm
+        assertEquals(0, backend.resets)
+    }
+
+    @Test fun projectedDivergenceBeyondTheAbortToleranceStillAbortsEvenWhenEveryRawSampleLooksPlausible() {
+        beginTransfer()
+        // the primary decoder runs fast: each raw refresh is only +90 ms ahead of the timeline (inside the agreement window),
+        // but the PROJECTED difference keeps growing until it exceeds the unchanged 200 ms abort tolerance
+        var aborted = false
+        var step = 0
+        while (!aborted && step++ < 20) {
+            clockNow += 10L
+            facts = facts!!.copy(positionMs = facts!!.positionMs + 90L)
+            runtime.executeHandoff(key)
+            aborted = transferLogs.any { it.startsWith("TRANSFER_ABORT reason=projected_divergence") }
+        }
+        assertTrue(aborted)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(0, backend.resets)
+        val line = transferLogs.first { it.startsWith("TRANSFER_ABORT reason=projected_divergence") }
+        val projectedDelta = Regex("projectedDeltaMs=(-?\\d+)").find(line)!!.groupValues[1].toLong()
+        assertTrue(kotlin.math.abs(projectedDelta) > NATURAL_TRANSFER_ABORT_TOLERANCE_MS)
+    }
+
+    @Test fun anExpiredProjectionAbortsTheTransferAndCanNeverCompleteTheHandoff() {
+        beginTransfer()
+        freezePositions() // no raw refresh from either stream any more
+        clockNow += NATURAL_HANDOFF_MAX_PROJECTION_AGE_MS + NATURAL_TAKEOVER_TRANSFER_DURATION_MS + 1L // far past both the envelope and the age
+        val result = runtime.executeHandoff(key)
+        assertTrue(result is CrossfadeHandoffExecutionResult.Awaiting)
+        assertFalse(result == CrossfadeHandoffExecutionResult.Succeeded)
+        assertTrue(transferLogs.any { it.startsWith("TRANSFER_ABORT reason=position_projection_expired") })
+        assertTrue(transferLogs.any { it.startsWith("POSITION_EXPIRED") })
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(0, backend.resets)
+        assertEquals(1f, backend.gains.last(), 0f) // the secondary is the audible authority again
+        assertEquals(0f, primaryWrites.last(), 1e-6f)
+    }
+
+    @Test fun positionClocksAreClearedBySuccessCancellationAndFailure() {
+        beginTransfer()
+        assertTrue(runtime.settlementSnapshot().positionClocksActive)
+        finishTransfer()
+        assertFalse(runtime.settlementSnapshot().positionClocksActive) // success
+    }
+
+    @Test fun positionClocksAreClearedByCancellation() {
+        beginTransfer()
+        assertTrue(runtime.settlementSnapshot().positionClocksActive)
+        runtime.cancel(CrossfadeCancelReason.ManualNavigation)
+        assertFalse(runtime.settlementSnapshot().positionClocksActive)
+        assertTrue(settled())
+    }
+
+    @Test fun positionClocksAreClearedByHandoffFailureCleanup() {
+        beginTransfer()
+        backend.setGainResult = false
+        clockNow += 75L
+        assertTrue(runtime.executeHandoff(key) is CrossfadeHandoffExecutionResult.Failed)
+        assertFalse(runtime.settlementSnapshot().positionClocksActive)
+        assertTrue(settled())
+    }
+
+    @Test fun positionClocksAreClearedOnCloseAndStaleCallbacksCannotReviveThem() {
+        beginTransfer()
+        finishTransfer()
+        auto(2)
+        advanceCrossfadeHandoff(runtime)
+        runtime.executeHandoff(key)
+        assertFalse(runtime.settlementSnapshot().positionClocksActive) // late AUTO / READY / pulse never re-anchor a dead transition
+        runtime.close()
+        assertFalse(runtime.settlementSnapshot().positionClocksActive)
+        assertTrue(settled())
+    }
+
+    @Test fun aLaterDistinctTransitionStartsFromFreshPositionAnchors() {
+        beginTransfer()
+        finishTransfer()
+        assertEquals(1, logCount("POSITION_ANCHOR stream=primary"))
+        assertEquals(1, logCount("POSITION_ANCHOR stream=secondary"))
+        // the next transition (2 -> 3): arm, ready, fade, hand off - with its own brand-new clocks
+        logicalIndex = 2
+        key = CrossfadeTransitionKey(5L, 2, 3)
+        position = 1_000L
+        scheduler.runNext() // pre-fade pulse arms 2 -> 3
+        assertTrue(runtime.state is CrossfadeState.Armed)
+        backend.ready()
+        position = 194_000L + 1_000L
+        scheduler.runNext() // Ready -> fade window due
+        clockNow += 6_000L
+        scheduler.runNext() // fade ticks -> terminal -> HandoffPending (waiting for AUTO)
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertFalse(runtime.settlementSnapshot().positionClocksActive) // nothing inherited from 1 -> 2
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        logicalIndex = 3
+        auto(3)
+        assertEquals(2, logCount("POSITION_ANCHOR stream=primary"))
+        assertEquals(2, logCount("POSITION_ANCHOR stream=secondary"))
+        confirmClocks()
+        assertTrue(runtime.isNaturalTransferInProgress)
+    }
+
+    @Test fun pauseCarryStillUsesTheExistingPhysicalComparison() {
+        // CF-2L1 Pause carry is intentionally unchanged: raw physical positions, 350 ms threshold, one same-item seek
+        beginTransfer()
+        clockNow += 75L
+        runtime.executeHandoff(key)
+        primaryOnTarget(positionMs = 6_195L - NATURAL_TAKEOVER_MAX_LAG_MS - 1L)
+        reconcileCalls.clear()
+        recoverCrossfadeFromExplicitPause(runtime)
+        assertEquals(1, reconcileCalls.size)
+        assertEquals(6_195L, reconcileCalls.single().second.positionMs)
+    }
+
+    // ── CF-2L4 correction: projection requires current advancement eligibility ─────────────────────
+
+    private fun assertAbortReason(reason: String) = assertTrue(transferLogs.any { it.startsWith("TRANSFER_ABORT reason=$reason") })
+
+    @Test fun aSecondaryThatBeginsBufferingMidTransferAbortsAndNeverCompletes() {
+        beginTransfer()
+        clockNow += 40L
+        runtime.executeHandoff(key) // mid transfer, healthy
+        order.clear()
+        stallSecondary() // BUFFERING: still a valid owned snapshot, raw position frozen, not advancing
+        clockNow += 40L
+        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PositionConfidence), runtime.executeHandoff(key))
+        assertAbortReason("secondary_not_advancing")
+        assertEquals(listOf("sg:1.0", "pg:0.0"), order) // the secondary is the audible authority again
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertEquals(0, backend.resets) // never abandoned
+        // its projection was DROPPED, not carried forward through the stall
+        assertTrue(transferLogs.last { it.startsWith("TRANSFER_ABORT") }.contains("projectedSecondaryMs=n/a"))
+        assertTrue(transferLogs.any { it.startsWith("POSITION_NOT_ADVANCING stream=secondary") })
+    }
+
+    @Test fun aPrimaryThatStopsAdvancingMidTransferAbortsAndNeverCompletes() {
+        beginTransfer()
+        clockNow += 40L
+        runtime.executeHandoff(key)
+        order.clear()
+        stallPrimary()
+        clockNow += 40L
+        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PositionConfidence), runtime.executeHandoff(key))
+        assertAbortReason("primary_not_advancing")
+        assertEquals(listOf("sg:1.0", "pg:0.0"), order)
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertEquals(0, backend.resets)
+        assertTrue(transferLogs.last { it.startsWith("TRANSFER_ABORT") }.contains("projectedPrimaryMs=n/a"))
+        assertTrue(transferLogs.any { it.startsWith("POSITION_NOT_ADVANCING stream=primary") })
+    }
+
+    @Test fun aStalledSecondaryCannotReachHandoffSucceededNoMatterHowMuchTimePasses() {
+        beginTransfer()
+        stallSecondary()
+        repeat(40) {
+            clockNow += 25L
+            assertFalse(runtime.executeHandoff(key) == CrossfadeHandoffExecutionResult.Succeeded)
+        }
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertEquals(0, backend.resets)
+        assertEquals(0, logCount("TRANSFER_COMPLETE"))
+        assertEquals(0, logCount("HANDOFF_SETTLED"))
+    }
+
+    @Test fun aStalledPrimaryCannotReachHandoffSucceededEither() {
+        beginTransfer()
+        stallPrimary()
+        repeat(40) {
+            clockNow += 25L
+            assertFalse(runtime.executeHandoff(key) == CrossfadeHandoffExecutionResult.Succeeded)
+        }
+        assertTrue(runtime.state is CrossfadeState.HandoffPending)
+        assertEquals(0, backend.resets)
+        assertEquals(0, logCount("TRANSFER_COMPLETE"))
+    }
+
+    @Test fun aTransferCannotBeginWhileTheSecondaryIsNotAdvancing() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        stallSecondary()
+        auto(2)
+        repeat(6) { confirmClocks() }
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(backend.gains.isEmpty())
+        assertEquals(0f, primaryWrites.last(), 1e-6f)
+        assertTrue(reconcileCalls.isEmpty()) // no seek merely because it is not advancing
+        assertEquals(1, logCount("POSITION_NOT_ADVANCING stream=secondary")) // bounded: logged once per loss
+        assertEquals(CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PositionConfidence), runtime.executeHandoff(key))
+    }
+
+    @Test fun aTransferCannotBeginWhileThePrimaryIsNotAdvancing() {
+        toHandoffPending()
+        logicalIndex = 2
+        backend.snapshotPositionMs = 6_100L
+        primaryOnTarget(positionMs = 6_100L)
+        stallPrimary() // READY-looking but not progressing
+        auto(2)
+        repeat(6) { confirmClocks() }
+        assertFalse(runtime.isNaturalTransferInProgress)
+        assertTrue(backend.gains.isEmpty())
+        assertTrue(reconcileCalls.isEmpty())
+        assertEquals(1, logCount("POSITION_NOT_ADVANCING stream=primary"))
+    }
+
+    @Test fun afterAdvancementResumesTheAffectedClockReanchorsAndReearnsConfidenceFromRealMovement() {
+        beginTransfer()
+        assertEquals(1, logCount("POSITION_ANCHOR stream=secondary"))
+        stallSecondary()
+        clockNow += 20L
+        runtime.executeHandoff(key) // abort: the secondary clock is dropped
+        assertFalse(runtime.isNaturalTransferInProgress)
+        clockNow += 20L
+        resumeSecondary() // advancing again (a short stall, so the streams are still within the entry tolerance)
+        runtime.executeHandoff(key)
+        assertEquals(2, logCount("POSITION_ANCHOR stream=secondary")) // a FRESH provisional anchor, not the old projection
+        assertFalse(runtime.isNaturalTransferInProgress) // no transfer on a provisional anchor
+        confirmClocks() // real raw movement observed: calibrated, confidence regained
+        assertTrue(runtime.isNaturalTransferInProgress)
+        assertEquals(2, logCount("TRANSFER_START"))
+    }
+
+    @Test fun anAdvancingPairStillCompletesTheCoarseClockRegressionWithoutAnyNotAdvancingEvent() {
+        toFading()
+        clockNow += 6_000L
+        scheduler.runNext()
+        val t0 = clockNow
+        logicalIndex = 2
+        primaryOnTarget(positionMs = 6_010L)
+        installCoarseClocks(t0, secondaryStepMs = 250L, secondaryFirstUpdateAfterT0Ms = 20L, primaryStepMs = 260L, primaryFirstUpdateAfterT0Ms = 240L)
+        auto(2)
+        var guard = 0
+        while (runtime.state is CrossfadeState.HandoffPending && guard++ < 200) {
+            clockNow += 16L
+            scheduler.runNext()
+        }
+        assertEquals(1, logCount("TRANSFER_START"))
+        assertEquals(0, logCount("TRANSFER_ABORT"))
+        assertEquals(0, logCount("POSITION_NOT_ADVANCING"))
+        assertTrue(reconcileCalls.isEmpty())
+        assertEquals(CrossfadeState.Idle, runtime.state)
+        assertTrue(settled())
+    }
+
+    @Test fun advancementBookkeepingIsClearedBySettlement() {
+        beginTransfer()
+        stallSecondary()
+        clockNow += 20L
+        runtime.executeHandoff(key)
+        runtime.cancel(CrossfadeCancelReason.ManualNavigation)
+        assertTrue(settled())
+        assertFalse(runtime.settlementSnapshot().positionClocksActive)
     }
 
     @Test fun productionRolloutGateRemainsFalse() {

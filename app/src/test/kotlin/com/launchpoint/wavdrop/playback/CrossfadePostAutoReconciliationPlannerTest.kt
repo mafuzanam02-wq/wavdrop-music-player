@@ -105,7 +105,7 @@ class CrossfadePostAutoReconciliationPlannerTest {
 
     // ── takeover decision ───────────────────────────────────────────────────────
 
-    private fun facts(position: Long) = PrimaryTakeoverFacts(physicalIndex = 2, isReady = true, positionMs = position)
+    private fun facts(position: Long) = PrimaryTakeoverFacts(physicalIndex = 2, isReady = true, positionMs = position, isAdvancing = true)
 
     @Test fun farBehindThePrimarySeeksToTheFreshSecondaryPosition() {
         assertEquals(

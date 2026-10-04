@@ -18,6 +18,8 @@ internal data class CrossfadeSettlementSnapshot(
     val closed: Boolean,
     /** Reconciliation (same-item) seeks issued for the CURRENT transition; reset whenever the transition ends. */
     val reconcileRequestCount: Int = 0,
+    /** CF-2L4: a projected position clock still holds an anchor (it is transition-owned and must be gone once settled). */
+    val positionClocksActive: Boolean = false,
 )
 
 /**
@@ -33,7 +35,8 @@ internal fun isCrossfadeFullySettled(snapshot: CrossfadeSettlementSnapshot): Boo
         !snapshot.transferActive &&
         snapshot.primaryGainOwnerKey == null &&
         !snapshot.secondaryOwned &&
-        snapshot.reconcileRequestCount == 0
+        snapshot.reconcileRequestCount == 0 &&
+        !snapshot.positionClocksActive
 
 /** Coordinator phase name only (no keys beyond what the caller adds, no media identity). */
 internal fun crossfadeStateName(state: CrossfadeState): String = when (state) {
@@ -52,5 +55,6 @@ internal fun formatCrossfadeSettlementSummary(snapshot: CrossfadeSettlementSnaps
         "crossfade=${crossfadeStateName(snapshot.state)} transferActive=${snapshot.transferActive} " +
             "seekTargetPresent=${snapshot.hasSeekTarget} seekLeadMs=${snapshot.seekLeadMs} " +
             "primaryGainOwned=${snapshot.primaryGainOwnerKey != null} secondaryOwned=${snapshot.secondaryOwned} " +
+            "positionClocksActive=${snapshot.positionClocksActive} " +
             "settled=${isCrossfadeFullySettled(snapshot)}"
     }

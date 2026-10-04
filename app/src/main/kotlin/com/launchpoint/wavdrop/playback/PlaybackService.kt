@@ -160,6 +160,8 @@ class PlaybackService : MediaLibraryService() {
                         physicalIndex = player.currentMediaItemIndex,
                         isReady = player.playbackState == Player.STATE_READY,
                         positionMs = player.currentPosition,
+                        // CF-2L4: projection may only bridge sampling granularity while the clock really advances.
+                        isAdvancing = isPrimaryPlaybackAdvancing(player.playbackState, player.playWhenReady, player.playbackSuppressionReason),
                     )
                 },
                 reconcilePrimaryAfterNaturalTransition = { key, snapshot ->

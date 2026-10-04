@@ -36,6 +36,7 @@ class CrossfadeSettlementTest {
             settled().copy(primaryGainOwnerKey = key),
             settled().copy(secondaryOwned = true),
             settled().copy(reconcileRequestCount = 1),
+            settled().copy(positionClocksActive = true),
         )
         leftovers.forEachIndexed { i, s ->
             assertEquals(CrossfadeState.Idle, s.state)

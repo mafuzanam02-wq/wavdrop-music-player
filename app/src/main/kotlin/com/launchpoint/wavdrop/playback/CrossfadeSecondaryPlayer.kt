@@ -29,6 +29,12 @@ internal interface CrossfadeSecondaryListener {
 internal data class SecondaryHandoffSnapshot(
     val positionMs: Long,
     val durationMs: Long,
+    /**
+     * CF-2L4 correction: the secondary's media clock is progressing right now (READY and actually playing). A BUFFERING secondary is
+     * still a valid OWNED snapshot (lifecycle) but is NOT eligible for linear position projection. The only production constructor
+     * ([validatedSecondaryHandoffSnapshot]) always passes the real fact; the default exists only for test fakes that always advance.
+     */
+    val isAdvancing: Boolean = true,
 )
 
 /**
@@ -42,11 +48,13 @@ internal fun validatedSecondaryHandoffSnapshot(
     playbackState: Int,
     positionMs: Long,
     durationMs: Long,
+    isPlaying: Boolean = playbackState == Player.STATE_READY,
 ): SecondaryHandoffSnapshot? {
     if (mediaItemCount != 1 || !playWhenReady) return null
     if (playbackState != Player.STATE_READY && playbackState != Player.STATE_BUFFERING) return null
     if (durationMs <= 0L || positionMs < 0L || positionMs > durationMs) return null
-    return SecondaryHandoffSnapshot(positionMs, durationMs)
+    // Valid ownership is not progression: only READY and actually playing may be projected through elapsed time.
+    return SecondaryHandoffSnapshot(positionMs, durationMs, isAdvancing = isPlaying && playbackState == Player.STATE_READY)
 }
 
 /** Callbacks from a backend, tagged with the preparation attempt that produced them. */
@@ -382,6 +390,7 @@ internal class ExoSecondaryPlayerBackend(
         playbackState = player.playbackState,
         positionMs = player.currentPosition,
         durationMs = player.duration,
+        isPlaying = player.isPlaying,
     )
 
     override fun audioSessionSnapshot(): SecondaryAudioSessionSnapshot? =
