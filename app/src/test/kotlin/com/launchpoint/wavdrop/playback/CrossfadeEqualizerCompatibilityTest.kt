@@ -220,6 +220,6 @@ class CrossfadeEqualizerCompatibilityTest {
     }
 
     @Test fun gateStaysFalse() {
-        assertFalse(PlaybackService.CROSSFADE_SECONDARY_RUNTIME_ENABLED)
+        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
     }
 }

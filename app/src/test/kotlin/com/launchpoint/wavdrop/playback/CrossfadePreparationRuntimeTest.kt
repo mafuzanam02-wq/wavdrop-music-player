@@ -554,6 +554,6 @@ class CrossfadePreparationRuntimeTest {
     // ── Production gate ─────────────────────────────────────────────────────────
 
     @Test fun productionGateRemainsFalse() {
-        assertFalse(PlaybackService.CROSSFADE_SECONDARY_RUNTIME_ENABLED)
+        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
     }
 }

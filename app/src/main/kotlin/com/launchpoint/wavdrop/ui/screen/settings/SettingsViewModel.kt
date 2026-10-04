@@ -36,6 +36,7 @@ import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.data.settings.WrappedVisualStyle
+import com.launchpoint.wavdrop.playback.CrossfadeRules
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -233,6 +234,14 @@ class SettingsViewModel @Inject constructor(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = NotificationControlsSetting.STANDARD,
+        )
+
+    /** CF-2J1: the persisted crossfade duration (canonical milliseconds); the UI never reads DataStore directly. */
+    val crossfadeDurationMs: StateFlow<Long> =
+        appSettingsRepository.crossfadeDurationMs.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = CrossfadeRules.OFF_MS,
         )
 
     val previousButtonBehavior: StateFlow<PreviousButtonBehavior> =
@@ -494,6 +503,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationControlsSetting(setting: NotificationControlsSetting) {
         viewModelScope.launch { appSettingsRepository.setNotificationControlsSetting(setting) }
+    }
+
+    fun setCrossfadeDurationMs(durationMs: Long) {
+        viewModelScope.launch { appSettingsRepository.setCrossfadeDurationMs(durationMs) }
     }
 
     fun setPreviousButtonBehavior(behavior: PreviousButtonBehavior) {

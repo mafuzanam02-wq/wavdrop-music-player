@@ -68,7 +68,7 @@ class CrossfadeSecondaryPlayerTest {
     private fun attemptOf(index: Int) = backend.prepared[index].attempt
 
     @Test fun gateDefaultsToFalse() {
-        assertFalse(PlaybackService.CROSSFADE_SECONDARY_RUNTIME_ENABLED)
+        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
     }
 
     @Test fun backendIsNotCreatedUntilFirstPrepare() {

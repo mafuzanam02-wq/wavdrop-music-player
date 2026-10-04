@@ -35,6 +35,7 @@ import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
 import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
+import com.launchpoint.wavdrop.playback.CrossfadeRolloutPolicy
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.ui.components.SleepTimerDialog
@@ -52,11 +53,16 @@ fun SettingsPlaybackScreen(
     val previousButtonBehavior      by viewModel.previousButtonBehavior.collectAsStateWithLifecycle()
     val searchTapBehavior           by viewModel.searchTapBehavior.collectAsStateWithLifecycle()
     val timeDisplayMode             by viewModel.nowPlayingTimeDisplayMode.collectAsStateWithLifecycle()
+    val crossfadeDurationMs         by viewModel.crossfadeDurationMs.collectAsStateWithLifecycle()
+    val equalizerEnabled            by viewModel.eqEnabled.collectAsStateWithLifecycle()
+    // CF-2J1: one rollout authority; hidden while the runtime is not available, disabled (saved value kept) while EQ is on.
+    val crossfadeUi = buildCrossfadeSettingUiState(CrossfadeRolloutPolicy.RUNTIME_ENABLED, equalizerEnabled, crossfadeDurationMs)
     var showStartupDialog       by remember { mutableStateOf(false) }
     var showPreviousDialog      by remember { mutableStateOf(false) }
     var showSleepTimerDialog    by remember { mutableStateOf(false) }
     var showSearchTapDialog     by remember { mutableStateOf(false) }
     var showTimeDisplayDialog   by remember { mutableStateOf(false) }
+    var showCrossfadeDialog     by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -126,6 +132,19 @@ fun SettingsPlaybackScreen(
             }
             item { SectionDivider() }
 
+            if (crossfadeUi.visible) {
+                item { SectionHeader("Transitions") }
+                item {
+                    ClickableSettingsRow(
+                        title    = "Crossfade",
+                        subtitle = crossfadeUi.summary,
+                        enabled  = crossfadeUi.enabled,
+                        onClick  = { showCrossfadeDialog = true },
+                    )
+                }
+                item { SectionDivider() }
+            }
+
             item { SectionHeader("Search") }
             item {
                 ClickableSettingsRow(
@@ -174,6 +193,16 @@ fun SettingsPlaybackScreen(
         }
     }
 
+    if (showCrossfadeDialog && crossfadeUi.visible && crossfadeUi.enabled) {
+        CrossfadeDurationDialog(
+            selected  = selectedCrossfadeOption(crossfadeDurationMs),
+            onSelect  = { option ->
+                viewModel.setCrossfadeDurationMs(option.durationMs)
+                showCrossfadeDialog = false
+            },
+            onDismiss = { showCrossfadeDialog = false },
+        )
+    }
     if (showTimeDisplayDialog) {
         TimeDisplayDialog(
             selected  = timeDisplayMode,
@@ -228,6 +257,45 @@ fun SettingsPlaybackScreen(
             onDismiss = { showSleepTimerDialog = false },
         )
     }
+}
+
+@Composable
+private fun CrossfadeDurationDialog(
+    selected: CrossfadeDurationOption?,
+    onSelect: (CrossfadeDurationOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title            = { Text("Crossfade") },
+        text             = {
+            Column {
+                CROSSFADE_DURATION_OPTIONS.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(option) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = option == selected,
+                            onClick  = { onSelect(option) },
+                        )
+                        Text(
+                            text     = option.label,
+                            style    = MaterialTheme.typography.bodyLarge,
+                            color    = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

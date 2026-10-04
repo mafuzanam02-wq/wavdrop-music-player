@@ -855,6 +855,6 @@ class CrossfadeFadeWindowTest {
     }
 
     @Test fun productionGateRemainsFalse() {
-        org.junit.Assert.assertFalse(PlaybackService.CROSSFADE_SECONDARY_RUNTIME_ENABLED)
+        org.junit.Assert.assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
     }
 }

@@ -72,7 +72,7 @@ class PlaybackService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
-    // CF-2B2/2B3/2E1: only ever constructed behind CROSSFADE_SECONDARY_RUNTIME_ENABLED (false). Owns the silent
+    // CF-2B2/2B3/2E1: only ever constructed behind CrossfadeRolloutPolicy.RUNTIME_ENABLED (false). Owns the silent
     // secondary player (single release owner); not a session player. The timing driver below is built over this
     // exact runtime but is never started (dormant).
     private var crossfadePreparation: CrossfadePreparationRuntime? = null
@@ -132,7 +132,7 @@ class PlaybackService : MediaLibraryService() {
             .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
             .setHandleAudioBecomingNoisy(true)
             .build()
-        if (CROSSFADE_SECONDARY_RUNTIME_ENABLED) {
+        if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) {
             // CF-2E1/2E2: composition only. The graph does not start the driver; the persisted-duration observer below
             // (CF-2E2 activation policy) starts/stops it. Shipping stays inert because this whole block is gated off.
             val graph = createCrossfadeProductionGraph(
@@ -172,7 +172,7 @@ class PlaybackService : MediaLibraryService() {
                 .collect { duration ->
                     val previous = lastObservedCrossfadeDurationMs
                     crossfadeConfiguredDurationMs = duration
-                    if (CROSSFADE_SECONDARY_RUNTIME_ENABLED) {
+                    if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) {
                         applyCrossfadeConfiguredDurationChange(previous, duration, crossfadePreparation, crossfadeTimingDriver)
                     }
                     lastObservedCrossfadeDurationMs = duration
@@ -836,9 +836,6 @@ class PlaybackService : MediaLibraryService() {
     }
 
     companion object {
-        // Hard gate for the secondary crossfade player (CF-2B2). Must stay false until audible crossfade is enabled.
-        internal const val CROSSFADE_SECONDARY_RUNTIME_ENABLED = false
-
         const val ACTION_AUDIO_OUTPUT_CONNECTED = "com.launchpoint.wavdrop.ACTION_AUDIO_OUTPUT_CONNECTED"
         const val EXTRA_AUDIO_OUTPUT_KIND = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
         const val OUTPUT_BLUETOOTH = "bluetooth"

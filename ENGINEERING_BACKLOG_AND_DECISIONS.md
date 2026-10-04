@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2I2 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2J1 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -153,7 +153,7 @@ A catalogue of significant, durable decisions. Status reflects the current phase
 | D-23 | **Playback errors recover by bypassing the failing item** | On a Media3 `PlaybackException`, advance to the next valid queue item (or stop cleanly), without fabricating stats or mutating identity; one transient `PlaybackUserMessage` per episode | Active (Wave B WB-01; user message shipped post-beta9) |
 | D-24 | **Song identity is not queue-occurrence identity** | The same song can occupy several queue positions; the current occurrence is positional and bound to `queueGeneration`; ambiguous song-id fallback fails closed; no persistent occurrence UUIDs | Active (OH-1 hardening) |
 | D-25 | **The Media3 queue is the hydration authority** | Whether the player is "hydrated" is inferred from the physical Media3 queue (never from a stale logical queue or a boolean claim); hydration never decides autoplay; external playback is never overwritten | Active (implemented) |
-| D-26 | **Crossfade is gated and primary-authoritative** | The primary player/MediaSession stays the sole system-visible authority; the secondary player has no session and no audio focus; transitions are keyed by `CrossfadeTransitionKey`; `CROSSFADE_SECONDARY_RUNTIME_ENABLED` stays `false` until a validated integration exists | Active |
+| D-26 | **Crossfade is gated and primary-authoritative** | The primary player/MediaSession stays the sole system-visible authority; the secondary player has no session and no audio focus; transitions are keyed by `CrossfadeTransitionKey`; `CrossfadeRolloutPolicy.RUNTIME_ENABLED` stays `false` until a validated integration exists | Active |
 | D-27 | **Explicit transport beats automatic playback** | Automatic Bluetooth/wired resume requests carry authority tokens; an explicit user play/pause or route loss voids them | Active (implemented) |
 
 ---
@@ -338,6 +338,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     it into the snapshot; an OFF->ON change cancels an owned transition via the existing `PlanInvalidated` (primary restored, then
     secondary abandoned); ON->OFF does not resurrect. No setting is mutated, no secondary Equalizer, mirroring not implemented and
     revisitable after physical validation. Driver keeps running. Gate `false`.
+  - **CF-2J1** rollout-gated Crossfade Settings UI foundation (internal; first slice of item 7): the persisted
+    `crossfadeDurationMs` is wired through `SettingsViewModel` to a Transitions section in Playback Settings (Off, 2-12 s radio
+    dialog) behind the single rollout authority `CrossfadeRolloutPolicy.RUNTIME_ENABLED` (`false`, so hidden in production). A pure
+    presentation policy hides the row when rollout is off, and when on disables it with "Unavailable while Equalizer is on" while EQ is
+    enabled (saved duration preserved). UI persists only; it never drives the runtime. Not in backups. No audible crossfade.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -569,7 +574,7 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
 Foundations CF-1..CF-2H3G are complete (§5). The following remain, and must **not** be combined into one
-implementation item. All are gated behind `CROSSFADE_SECONDARY_RUNTIME_ENABLED = false` until the final
+implementation item. All are gated behind `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false` until the final
 items are validated.
 
 1. Continuous fade progression / timing integration:
@@ -619,7 +624,9 @@ items are validated.
    a. CF-2I1 - secondary audio-session observability foundation - complete.
    b. CF-2I2 - EQ compatibility policy: crossfade unavailable while EQ is enabled - complete.
    c. Physical dual-session EQ validation / possible future mirroring (revisit the policy only if a secondary session reliably owns a mirrored Equalizer with correct preset/capability behaviour, safe session churn and stable Bluetooth/wired behaviour) - open.
-7. User-facing Settings UI / product exposure of the crossfade preference (the persisted internal preference exists since CF-2E2).
+7. User-facing Settings UI / product exposure:
+   a. CF-2J1 - rollout-gated Playback Settings UI foundation - complete (hidden while rollout is false).
+   b. Final exposure with production enablement - pending item 8.
 8. Production enablement (flipping the gate, with rollout safeguards).
 9. Physical Bluetooth / background / EQ validation.
 
