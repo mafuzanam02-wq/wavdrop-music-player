@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2I1 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2I2 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -332,6 +332,12 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     relationship helper (Unavailable/Shared/Distinct) and a once-per-preparation observer with a DEBUG log. No Equalizer is
     attached to the secondary, `AudioEnhancementController` and EQ capability authority are unchanged, an absent session never
     cancels, and the session id is not occurrence identity. JVM-validated only. Driver keeps running. Gate `false`.
+  - **CF-2I2** Equalizer compatibility policy (internal; decision: EQ takes precedence over crossfade): the Equalizer lives on the
+    primary session only, so while EQ is enabled crossfade is unavailable (`CrossfadeUnavailableReason.EqualizerEnabled`, precedence
+    after NotPlaying and before RepeatOne) and native primary playback continues. `PlaybackService` caches `eqEnabled` and composes
+    it into the snapshot; an OFF->ON change cancels an owned transition via the existing `PlanInvalidated` (primary restored, then
+    secondary abandoned); ON->OFF does not resurrect. No setting is mutated, no secondary Equalizer, mirroring not implemented and
+    revisitable after physical validation. Driver keeps running. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -611,7 +617,8 @@ items are validated.
    `HydrationAuthority` tests, not a device test; reopen if a hydration path is shown to run against a non-empty primary.
 6. Dual-player Equalizer / audio-session validation:
    a. CF-2I1 - secondary audio-session observability foundation - complete.
-   b. Remaining EQ compatibility / mirroring policy (CF-2I2: mirror EQ to the secondary, block crossfade while EQ is enabled, or another strategy; plus physical-device validation) - open.
+   b. CF-2I2 - EQ compatibility policy: crossfade unavailable while EQ is enabled - complete.
+   c. Physical dual-session EQ validation / possible future mirroring (revisit the policy only if a secondary session reliably owns a mirrored Equalizer with correct preset/capability behaviour, safe session churn and stable Bluetooth/wired behaviour) - open.
 7. User-facing Settings UI / product exposure of the crossfade preference (the persisted internal preference exists since CF-2E2).
 8. Production enablement (flipping the gate, with rollout safeguards).
 9. Physical Bluetooth / background / EQ validation.

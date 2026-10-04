@@ -323,3 +323,17 @@ internal val PRIMARY_INTERRUPTION_CANCEL_REASON = CrossfadeCancelReason.Pause
 internal fun recoverCrossfadeFromPrimaryInterruption(runtime: CrossfadePreparationRuntime?) {
     runtime?.cancel(PRIMARY_INTERRUPTION_CANCEL_REASON)
 }
+
+/** CF-2I2: only an OFF -> ON Equalizer change terminates an owned crossfade; ON -> OFF never resurrects or cancels. */
+internal fun shouldCancelCrossfadeForEqualizerChange(previousEnabled: Boolean, newEnabled: Boolean): Boolean =
+    !previousEnabled && newEnabled
+
+/**
+ * CF-2I2: key-less, synchronous cleanup when the Equalizer becomes enabled. The primary alone carries the Equalizer, so an
+ * Armed/Ready preparation is abandoned and an audible Fading/HandoffPending overlap restores the primary then abandons the
+ * secondary (existing PlanInvalidated cancellation; no new reason). The timing driver is left running and nothing is
+ * resurrected when EQ is disabled again; a null runtime (gate false) is a no-op.
+ */
+internal fun recoverCrossfadeFromEqualizerEnabled(runtime: CrossfadePreparationRuntime?) {
+    runtime?.cancel(CrossfadeCancelReason.PlanInvalidated)
+}

@@ -16,6 +16,8 @@ internal fun crossfadeOwnershipLossReason(
     snapshot.isExternalPlayback -> CrossfadeCancelReason.ExternalPlayback
     snapshot.playerQueueNeedsSync -> CrossfadeCancelReason.QueueBecameDirty
     !snapshot.isPlaying -> CrossfadeCancelReason.Pause
+    // CF-2I2: EQ became enabled; an overlap would mix processed and unprocessed audio (defensive fallback to the service seam).
+    snapshot.equalizerEnabled -> CrossfadeCancelReason.PlanInvalidated
     snapshot.queueGeneration != key.queueGeneration -> CrossfadeCancelReason.QueueMutation
     snapshot.currentPlaybackIndex != key.fromPlaybackIndex -> CrossfadeCancelReason.ManualNavigation
     key.fromPlaybackIndex !in snapshot.playbackQueue.indices ||
@@ -601,6 +603,7 @@ internal class CrossfadePreparationRuntime(
         CrossfadeUnavailableReason.ExternalPlayback -> CrossfadeCancelReason.ExternalPlayback
         CrossfadeUnavailableReason.PlayerQueueNeedsSync -> CrossfadeCancelReason.QueueBecameDirty
         CrossfadeUnavailableReason.NotPlaying -> CrossfadeCancelReason.Pause
+        CrossfadeUnavailableReason.EqualizerEnabled -> CrossfadeCancelReason.PlanInvalidated
         CrossfadeUnavailableReason.RepeatOne,
         CrossfadeUnavailableReason.NoNextOccurrence -> CrossfadeCancelReason.RepeatChanged
         else -> CrossfadeCancelReason.PlanInvalidated

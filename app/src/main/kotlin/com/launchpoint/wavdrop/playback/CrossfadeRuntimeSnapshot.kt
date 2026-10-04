@@ -21,6 +21,8 @@ internal data class CrossfadeRuntimeSnapshot(
     val isExternalPlayback: Boolean,
     val playerQueueNeedsSync: Boolean,
     val controllerConnected: Boolean,
+    /** CF-2I2: runtime compatibility fact only (the service composes it; the controller never owns EQ settings). */
+    val equalizerEnabled: Boolean = false,
 )
 
 /** Delegates to CF-1 [planCrossfadeTransition]; an unknown occurrence maps to an invalid index. */
@@ -36,6 +38,7 @@ internal fun planCrossfadeFromRuntimeSnapshot(
     isPlaying = snapshot.isPlaying,
     isExternalPlayback = snapshot.isExternalPlayback,
     playerQueueNeedsSync = snapshot.playerQueueNeedsSync,
+    equalizerEnabled = snapshot.equalizerEnabled,
     currentDurationMs = currentDurationOverrideMs,
 )
 

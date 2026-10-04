@@ -26,6 +26,7 @@ class CrossfadeRuntimeSnapshotTest {
         external: Boolean = false,
         dirty: Boolean = false,
         connected: Boolean = true,
+        eq: Boolean = false,
     ) = CrossfadeRuntimeSnapshot(
         queueGeneration = generation,
         playbackQueue = queue,
@@ -36,6 +37,7 @@ class CrossfadeRuntimeSnapshotTest {
         isExternalPlayback = external,
         playerQueueNeedsSync = dirty,
         controllerConnected = connected,
+        equalizerEnabled = eq,
     )
 
     private fun plan(s: CrossfadeRuntimeSnapshot, configured: Long = 6_000L, override: Long? = null) =
@@ -54,7 +56,7 @@ class CrossfadeRuntimeSnapshotTest {
 
     @Test fun matchesDirectCf1Call() {
         val s = snap(index = 2, repeat = RepeatMode.ALL)
-        val direct = planCrossfadeTransition(6_000L, queue, 2, RepeatMode.ALL, true, false, false, 90_000L)
+        val direct = planCrossfadeTransition(6_000L, queue, 2, RepeatMode.ALL, true, false, false, currentDurationMs = 90_000L)
         assertEquals(direct, plan(s, override = 90_000L))
     }
 
@@ -187,5 +189,19 @@ class CrossfadeRuntimeSnapshotTest {
         val s = snap(queue = listOf(same, same), index = 0)
         assertEquals(CrossfadeTransitionKey(5L, 0, 1), bindCrossfadeTransition(s, eligible(s)))
         assertTrue(s.ownsCrossfadeSource(CrossfadeTransitionKey(5L, 0, 1)))
+    }
+
+    // ── CF-2I2 ──────────────────────────────────────────────────────────────────
+
+    @Test fun equalizerFlagIsCarriedFalseAndTrue() {
+        assertEquals(false, snap().equalizerEnabled)
+        assertEquals(true, snap(eq = true).equalizerEnabled)
+        assertEquals(CrossfadeTransitionPlan.Eligible(2, 6_000L, 194_000L), plan(snap(eq = false)))
+        assertEquals(unavailable(CrossfadeUnavailableReason.EqualizerEnabled), plan(snap(eq = true)))
+    }
+
+    @Test fun bindingDoesNotInferEqualizerState() {
+        val s = snap(eq = true)
+        assertEquals(CrossfadeTransitionKey(5L, 1, 2), bindCrossfadeTransition(s, CrossfadeTransitionPlan.Eligible(2, 6_000L, 194_000L)))
     }
 }

@@ -79,6 +79,8 @@ class PlaybackService : MediaLibraryService() {
     private var crossfadeTimingDriver: CrossfadeTimingDriver? = null
     // CF-2E2: main-thread cached, already-normalized persisted duration read synchronously by the driver provider.
     private var crossfadeConfiguredDurationMs: Long = CrossfadeRules.OFF_MS
+    // CF-2I2: cached EQ-enabled compatibility fact for the crossfade snapshot (conservative default = persisted default).
+    private var crossfadeEqualizerEnabled: Boolean = false
     private var lastObservedCrossfadeDurationMs: Long? = null
     private var previousRestartThresholdMs: Long =
         PreviousButtonBehavior.DEFAULT.previousRestartThresholdMs()
@@ -134,7 +136,7 @@ class PlaybackService : MediaLibraryService() {
             // CF-2E1/2E2: composition only. The graph does not start the driver; the persisted-duration observer below
             // (CF-2E2 activation policy) starts/stops it. Shipping stays inert because this whole block is gated off.
             val graph = createCrossfadeProductionGraph(
-                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot() },
+                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerEnabled) },
                 backendFactory = { ExoSecondaryPlayerBackend(this, audioAttributes) },
                 // Narrow local seam to the authoritative primary ExoPlayer; never routed through a controller/session.
                 primaryGainBackend = PrimaryGainBackend { gain ->
@@ -174,6 +176,19 @@ class PlaybackService : MediaLibraryService() {
                         applyCrossfadeConfiguredDurationChange(previous, duration, crossfadePreparation, crossfadeTimingDriver)
                     }
                     lastObservedCrossfadeDurationMs = duration
+                }
+        }
+        // CF-2I2: one narrow collector of the persisted EQ-enabled flag. The cache is updated first; only OFF->ON cancels.
+        serviceScope.launch {
+            audioEnhancementsRepository.settings
+                .map { it.eqEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    val previous = crossfadeEqualizerEnabled
+                    crossfadeEqualizerEnabled = enabled
+                    if (shouldCancelCrossfadeForEqualizerChange(previous, enabled)) {
+                        recoverCrossfadeFromEqualizerEnabled(crossfadePreparation)
+                    }
                 }
         }
         // CF-2G2: app UI position seeks notify this lifecycle-scoped callback (cleared in onDestroy).

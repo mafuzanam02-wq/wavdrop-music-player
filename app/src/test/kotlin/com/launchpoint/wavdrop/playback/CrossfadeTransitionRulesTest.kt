@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.playback
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.playback.CrossfadeUnavailableReason.Disabled
 import com.launchpoint.wavdrop.playback.CrossfadeUnavailableReason.DurationTooShort
+import com.launchpoint.wavdrop.playback.CrossfadeUnavailableReason.EqualizerEnabled
 import com.launchpoint.wavdrop.playback.CrossfadeUnavailableReason.ExternalPlayback
 import com.launchpoint.wavdrop.playback.CrossfadeUnavailableReason.InvalidCurrentIndex
 import com.launchpoint.wavdrop.playback.CrossfadeUnavailableReason.NoNextOccurrence
@@ -35,6 +36,7 @@ class CrossfadeTransitionRulesTest {
         playing: Boolean = true,
         external: Boolean = false,
         dirty: Boolean = false,
+        eq: Boolean = false,
         currentDurationMs: Long? = null,
     ) = planCrossfadeTransition(
         configuredDurationMs = configuredMs,
@@ -44,6 +46,7 @@ class CrossfadeTransitionRulesTest {
         isPlaying = playing,
         isExternalPlayback = external,
         playerQueueNeedsSync = dirty,
+        equalizerEnabled = eq,
         currentDurationMs = currentDurationMs,
     )
 
@@ -305,5 +308,36 @@ class CrossfadeTransitionRulesTest {
             previousOutgoing = g.outgoing
             previousIncoming = g.incoming
         }
+    }
+
+    // ── CF-2I2: Equalizer compatibility ─────────────────────────────────────────
+
+    @Test fun `eq disabled and otherwise eligible stays eligible`() {
+        assertTrue(plan(eq = false) is CrossfadeTransitionPlan.Eligible)
+    }
+
+    @Test fun `eq enabled and otherwise eligible is unavailable for EqualizerEnabled`() {
+        assertUnavailable(EqualizerEnabled, plan(eq = true))
+    }
+
+    @Test fun `eq enabled with crossfade off is Disabled`() {
+        assertUnavailable(Disabled, plan(configuredMs = 0L, eq = true))
+    }
+
+    @Test fun `eq enabled with external playback is ExternalPlayback`() {
+        assertUnavailable(ExternalPlayback, plan(external = true, eq = true))
+    }
+
+    @Test fun `eq enabled with dirty queue is PlayerQueueNeedsSync`() {
+        assertUnavailable(PlayerQueueNeedsSync, plan(dirty = true, eq = true))
+    }
+
+    @Test fun `eq enabled while not playing is NotPlaying`() {
+        assertUnavailable(NotPlaying, plan(playing = false, eq = true))
+    }
+
+    @Test fun `eq enabled with repeat one is EqualizerEnabled because EQ outranks repeat`() {
+        assertUnavailable(EqualizerEnabled, plan(repeat = RepeatMode.ONE, eq = true))
+        assertUnavailable(RepeatOne, plan(repeat = RepeatMode.ONE, eq = false))
     }
 }

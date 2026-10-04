@@ -38,6 +38,8 @@ internal enum class CrossfadeUnavailableReason {
     ExternalPlayback,
     PlayerQueueNeedsSync,
     NotPlaying,
+    /** CF-2I2: the WavDrop Equalizer is enabled on the primary session only, so an overlap would mix processed and unprocessed audio. */
+    EqualizerEnabled,
     RepeatOne,
     QueueTooShort,
     InvalidCurrentIndex,
@@ -83,6 +85,7 @@ internal fun planCrossfadeTransition(
     isPlaying: Boolean,
     isExternalPlayback: Boolean,
     playerQueueNeedsSync: Boolean,
+    equalizerEnabled: Boolean = false,
     currentDurationMs: Long? = null,
 ): CrossfadeTransitionPlan {
     fun unavailable(reason: CrossfadeUnavailableReason) = CrossfadeTransitionPlan.Unavailable(reason)
@@ -93,6 +96,9 @@ internal fun planCrossfadeTransition(
     // A crossfade must never start against a physical playlist whose occurrence order is not authoritative.
     if (playerQueueNeedsSync) return unavailable(CrossfadeUnavailableReason.PlayerQueueNeedsSync)
     if (!isPlaying) return unavailable(CrossfadeUnavailableReason.NotPlaying)
+    // CF-2I2: precedence Disabled > ExternalPlayback > PlayerQueueNeedsSync > NotPlaying > EqualizerEnabled > RepeatOne > queue/duration.
+    // The primary alone carries the Equalizer and the secondary has none, so EQ takes precedence over crossfade.
+    if (equalizerEnabled) return unavailable(CrossfadeUnavailableReason.EqualizerEnabled)
     if (repeatMode == RepeatMode.ONE) return unavailable(CrossfadeUnavailableReason.RepeatOne)
     if (playbackQueue.size < 2) return unavailable(CrossfadeUnavailableReason.QueueTooShort)
     if (currentPlaybackIndex !in playbackQueue.indices) {
