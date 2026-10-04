@@ -657,7 +657,8 @@ items are validated.
    d. CF-2L2 continuity-qualified soft natural ownership transfer - implemented / awaiting physical retest.
    e. CF-2L3 lifecycle settlement + diagnostics - implemented.
    f. CF-2L4 projected natural-handoff position clock - implemented / awaiting physical retest.
-   g. Final gate flip after passed validation - pending.
+   g. CF-2M1 promotable dual-player architecture feasibility (design only, proposed; gate unchanged): `docs/architecture/CROSSFADE-PROMOTION-FEASIBILITY.md`.
+   h. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 
 ### Playback hardening (engineering)
