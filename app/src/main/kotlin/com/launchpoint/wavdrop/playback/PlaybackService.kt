@@ -154,6 +154,17 @@ class PlaybackService : MediaLibraryService() {
                 configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
                 primaryDurationMs = { player.duration },
                 primaryPositionMs = { player.currentPosition },
+                // CF-2L1: natural-AUTO handoff seams. Real primary facts (never "a command returned") and a same-item reposition.
+                primaryTakeoverFacts = {
+                    PrimaryTakeoverFacts(
+                        physicalIndex = player.currentMediaItemIndex,
+                        isReady = player.playbackState == Player.STATE_READY,
+                        positionMs = player.currentPosition,
+                    )
+                },
+                reconcilePrimaryAfterNaturalTransition = { key, snapshot ->
+                    playerController.reconcileCrossfadePrimaryAfterNaturalTransition(key, snapshot)
+                },
                 // CF-2I1: read-only session observability only; no EQ is attached to the secondary.
                 primaryAudioSessionId = { player.audioSessionId },
                 audioSessionObserver = CrossfadeAudioSessionObserver { key, primaryId, secondaryId ->
@@ -294,6 +305,8 @@ class PlaybackService : MediaLibraryService() {
                 if (isPrimaryTerminalPlaybackState(playbackState)) {
                     recoverCrossfadeFromPrimaryTerminalState(crossfadePreparation)
                 }
+                // CF-2L1: READY is real readiness evidence for a pending natural handoff (inert when none is pending).
+                if (playbackState == Player.STATE_READY) advanceCrossfadeHandoff(crossfadePreparation)
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
                 if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged=$playbackState")
                 if (playbackState == Player.STATE_IDLE) {
@@ -313,6 +326,8 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // CF-2L1: authoritative transition fact for the crossfade owner (only a genuine AUTO onto the exact target counts).
+                observeCrossfadeNaturalTransition(crossfadePreparation, player.currentMediaItemIndex, reason)
                 if (BuildConfig.DEBUG) {
                     // One concise line per transition for physical gapless validation (no position ticks,
                     // no file names): reason, indexes, player state and audio session.

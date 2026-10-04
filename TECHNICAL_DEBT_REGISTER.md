@@ -514,6 +514,7 @@ detection) with tests for gapless and repeat-one boundaries.
 **Possible Future Solution:** Make `onMediaItemTransition` the sole owner of the song transition for
 AUTO, and let the discontinuity callback only refresh state.
 **Notes:** Distinct from crossfade feature work, which is tracked in the backlog, not here.
+**CF-2L1 update:** the crossfade-owned portion of this debt became a demonstrated blocker (a physical validation run showed a ~1-2 s stutter at the final crossfade handoff) and is owned by CF-2L1, which observes the authoritative Media3 AUTO transition for the exact transition key and defers the primary takeover until the primary is READY on the target. It adds no stats or persistence notification and does not change the two-callback ownership described above; that broader cleanup remains open.
 
 ---
 

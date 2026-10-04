@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2K1 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2L1 (post-beta9).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -348,6 +348,11 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     policy; all required, fail closed) and a rewritten `QA_CHECKLIST.md` section 32 (staged physical procedure, device-evidence record,
     minimum device scope, sign-off table). Contract: `CrossfadeRolloutPolicy.RUNTIME_ENABLED` flips only after the automated gate has passed and every required
     physical condition is physically verified on the intended release build/device set; no env/build/remote override. Gate `false`; nothing visible or audible.
+  - **CF-2L1** natural AUTO-transition ownership / deferred primary takeover (internal correction after the first physical validation
+    showed a ~1-2 s stutter at the final handoff): the secondary stays audible until the authoritative Media3 AUTO transition lands the primary
+    on the exact target, READY, repositioned (same-item seek) to a FRESH secondary position; then primary gain is restored and the secondary
+    abandoned. State-driven, no delays; takeover requires position continuity within tolerance (retry exhaustion never permits a stale-position takeover; a Pause carries the fresh position to a primary materially behind or ahead so resume does not rewind or skip B); stale/non-AUTO/wrong-index/cancelled facts are inert; positional identity (Repeat All wrap, duplicates).
+    Awaiting physical retest. Gate `false`.
   Remaining work is in §11 (Crossfade runtime integration).
 
 - **Resume / Session.** `PlaybackSessionRepository` + `PlaybackSessionRules` persist last-played
@@ -634,14 +639,14 @@ items are validated.
    b. Final exposure with production enablement - pending item 8.
 8. Production enablement:
    a. CF-2K1 - rollout safeguards + physical QA contract - complete.
-   b. Physical validation against that contract - pending.
-   c. Final gate flip after passed validation - pending.
+   b. Physical validation - blocked: the first 6 s overlap works, but a ~1-2 s final handoff stutter was observed.
+   c. CF-2L1 natural AUTO handoff correction - implemented / awaiting physical retest.
+   d. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 
 ### Playback hardening (engineering)
 
-- **Natural AUTO-transition callback ownership** (TD-018): own it in a dedicated slice before or
-  independently of crossfade unless it becomes a demonstrated blocker.
+- **Natural AUTO-transition callback ownership** (TD-018): the crossfade-owned portion became a demonstrated blocker (physical handoff stutter) and is owned by CF-2L1; the broader callback-ownership cleanup stays a dedicated slice.
 
 ### Beta 9.x (stabilization)
 

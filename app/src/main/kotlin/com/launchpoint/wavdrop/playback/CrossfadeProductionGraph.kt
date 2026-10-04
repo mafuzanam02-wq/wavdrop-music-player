@@ -34,6 +34,9 @@ internal fun createCrossfadeProductionGraph(
     primaryPositionMs: () -> Long,
     primaryAudioSessionId: () -> Int = { 0 },
     audioSessionObserver: CrossfadeAudioSessionObserver = CrossfadeAudioSessionObserver.NoOp,
+    // CF-2L1: both supplied -> natural-AUTO handoff (secondary stays audible until the primary is READY on the target).
+    primaryTakeoverFacts: (() -> PrimaryTakeoverFacts?)? = null,
+    reconcilePrimaryAfterNaturalTransition: ((CrossfadeTransitionKey, SecondaryHandoffSnapshot) -> CrossfadePrimaryReconciliationResult)? = null,
     mediaItemFactory: (com.launchpoint.wavdrop.data.model.Song) -> MediaItem = { it.toPlaybackMediaItem() },
 ): CrossfadeProductionGraph {
     val runtime = CrossfadePreparationRuntime(
@@ -44,6 +47,11 @@ internal fun createCrossfadeProductionGraph(
         primaryReconciler = crossfadePrimaryReconciler(reconcilePrimary),
         primaryAudioSessionId = primaryAudioSessionId,
         audioSessionObserver = audioSessionObserver,
+        naturalHandoff = if (primaryTakeoverFacts != null && reconcilePrimaryAfterNaturalTransition != null) {
+            CrossfadeNaturalHandoffSeams(primaryTakeoverFacts, crossfadePrimaryReconciler(reconcilePrimaryAfterNaturalTransition))
+        } else {
+            null
+        },
     )
     val driver = CrossfadeTimingDriver(
         runtime = runtime,

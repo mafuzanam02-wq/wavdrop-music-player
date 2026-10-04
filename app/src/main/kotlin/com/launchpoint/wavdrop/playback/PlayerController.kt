@@ -3632,6 +3632,37 @@ class PlayerController @Inject constructor(
         )
     }
 
+    /**
+     * CF-2L1: repositions the authoritative primary, which has ALREADY naturally transitioned onto the key's target occurrence,
+     * to the secondary's FRESH [snapshot] position with a same-current-item seek (see [planCrossfadePostAutoReconciliation]).
+     * Exact generation/occurrence only; no queue rebuild, no cross-item seek, no song-id fallback. Deliberately installs no
+     * NowPlaying state and notifies no stats: the natural AUTO transition already moved logical state and counted the target
+     * once, so this cannot double-count it.
+     */
+    internal fun reconcileCrossfadePrimaryAfterNaturalTransition(
+        key: CrossfadeTransitionKey,
+        snapshot: SecondaryHandoffSnapshot,
+    ): CrossfadePrimaryReconciliationResult {
+        val controller = mediaController
+        val connected = controller != null && controllerConnectionState == ControllerConnectionState.Connected
+        val plan = planCrossfadePostAutoReconciliation(
+            key = key,
+            snapshot = snapshot,
+            queueGeneration = queueGeneration,
+            playbackQueueSize = playbackQueue.size,
+            currentPlaybackIndex = currentPlaybackIndex(),
+            physicalCurrentIndex = controller?.currentMediaItemIndex,
+            repeatMode = repeatMode,
+            playerQueueNeedsSync = playerQueueNeedsSync,
+            controllerAvailable = connected,
+        )
+        if (controller == null) return executeCrossfadePrimaryReconciliation(plan) { _, _ -> }
+        return executeCrossfadePrimaryReconciliation(
+            plan = plan,
+            seekTo = { _, positionMs -> controller.seekTo(positionMs) },
+        )
+    }
+
     private fun currentPlaybackIndex(): Int? {
         val controller = mediaController
         val controllerIndex = controller?.currentMediaItemIndex

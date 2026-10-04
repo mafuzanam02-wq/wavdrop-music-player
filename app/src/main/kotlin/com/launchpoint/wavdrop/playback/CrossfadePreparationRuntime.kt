@@ -11,15 +11,19 @@ import com.launchpoint.wavdrop.data.model.Song
 internal fun crossfadeOwnershipLossReason(
     snapshot: CrossfadeRuntimeSnapshot,
     key: CrossfadeTransitionKey,
+    // CF-2L1: true once the authoritative AUTO transition to the key's target was observed. The primary may then legitimately
+    // sit on the target occurrence and be BUFFERING while it repositions (isPlaying false), without losing ownership.
+    naturalTransition: Boolean = false,
 ): CrossfadeCancelReason? = when {
     !snapshot.controllerConnected -> CrossfadeCancelReason.ControllerDisconnected
     snapshot.isExternalPlayback -> CrossfadeCancelReason.ExternalPlayback
     snapshot.playerQueueNeedsSync -> CrossfadeCancelReason.QueueBecameDirty
-    !snapshot.isPlaying -> CrossfadeCancelReason.Pause
+    !snapshot.isPlaying && !naturalTransition -> CrossfadeCancelReason.Pause
     // CF-2I2: EQ became enabled; an overlap would mix processed and unprocessed audio (defensive fallback to the service seam).
     snapshot.equalizerEnabled -> CrossfadeCancelReason.PlanInvalidated
     snapshot.queueGeneration != key.queueGeneration -> CrossfadeCancelReason.QueueMutation
-    snapshot.currentPlaybackIndex != key.fromPlaybackIndex -> CrossfadeCancelReason.ManualNavigation
+    snapshot.currentPlaybackIndex != key.fromPlaybackIndex &&
+        !(naturalTransition && snapshot.currentPlaybackIndex == key.toPlaybackIndex) -> CrossfadeCancelReason.ManualNavigation
     key.fromPlaybackIndex !in snapshot.playbackQueue.indices ||
         key.toPlaybackIndex !in snapshot.playbackQueue.indices -> CrossfadeCancelReason.QueueMutation
     // The repeat semantics must still resolve the key's EXACT automatic target (covers Repeat ONE, and e.g.
@@ -158,6 +162,12 @@ internal sealed interface CrossfadeHandoffExecutionResult {
 
     /** Failed closed through the coordinator's HandoffFailed (restore + abandon, Idle). */
     data class Failed(val failure: CrossfadeHandoffFailure) : CrossfadeHandoffExecutionResult
+
+    /**
+     * CF-2L1 natural handoff only: the runtime stays HandoffPending, the secondary stays audible at gain 1 and the primary
+     * stays at gain 0 while [waitingFor] has not happened. Nothing was reset, restored or abandoned.
+     */
+    data class Awaiting(val waitingFor: CrossfadeHandoffWait) : CrossfadeHandoffExecutionResult
 }
 
 /**
@@ -184,6 +194,7 @@ internal class CrossfadePreparationRuntime(
     private val primaryReconciler: CrossfadePrimaryReconciler = CrossfadePrimaryReconciler.Unavailable,
     private val primaryAudioSessionId: () -> Int = { 0 },
     private val audioSessionObserver: CrossfadeAudioSessionObserver = CrossfadeAudioSessionObserver.NoOp,
+    private val naturalHandoff: CrossfadeNaturalHandoffSeams? = null,
 ) {
     private val primaryGain = CrossfadePrimaryGainController(primaryGainBackend)
 
@@ -200,6 +211,23 @@ internal class CrossfadePreparationRuntime(
     // duration/start) is a fresh window. Cleared whenever the state leaves Ready.
     private data class DueMark(val key: CrossfadeTransitionKey, val effectiveDurationMs: Long, val startAtPositionMs: Long)
     private var dueMark: DueMark? = null
+
+    // CF-2L1 natural-AUTO handoff bookkeeping. Only meaningful while Fading/HandoffPending (cleared otherwise), one transition at a time.
+    private var naturalObservedKey: CrossfadeTransitionKey? = null
+    private var handoffSeekLeadMs = 0L
+    private var handoffSeekTargetMs: Long? = null
+
+    /** CF-2L1: true when production wiring supplied the natural-AUTO handoff seams (a pending handoff then waits on real state). */
+    val usesNaturalHandoff: Boolean get() = naturalHandoff != null
+
+    private fun ownershipLoss(snapshot: CrossfadeRuntimeSnapshot, key: CrossfadeTransitionKey): CrossfadeCancelReason? =
+        crossfadeOwnershipLossReason(snapshot, key, naturalTransition = naturalObservedKey == key)
+
+    private fun clearNaturalHandoff() {
+        naturalObservedKey = null
+        handoffSeekLeadMs = 0L
+        handoffSeekTargetMs = null
+    }
 
     private val secondary = CrossfadeSecondaryPlayer(
         backendFactory = backendFactory,
@@ -225,7 +253,7 @@ internal class CrossfadePreparationRuntime(
         // explicit OFF can end them; either cancels and returns (no same-call re-arm). Otherwise the exact
         // active state is retained, so enabled duration / current-duration changes wait for the next transition.
         (state as? CrossfadeState.Active)?.takeIf { it.isAudible() }?.let { audible ->
-            val lost = crossfadeOwnershipLossReason(snapshot, audible.key)
+            val lost = ownershipLoss(snapshot, audible.key)
             when {
                 lost != null -> cancel(lost, snapshot)
                 !CrossfadeRules.isEnabled(configuredDurationMs) -> cancel(CrossfadeCancelReason.ConfigurationDisabled, snapshot)
@@ -382,7 +410,7 @@ internal class CrossfadePreparationRuntime(
         if (fading.key != key) return FadeTickExecutionResult.Inactive
 
         val snapshot = snapshotProvider()
-        crossfadeOwnershipLossReason(snapshot, key)?.let {
+        ownershipLoss(snapshot, key)?.let {
             cancel(it, snapshot)
             return FadeTickExecutionResult.Cancelled(it)
         }
@@ -442,10 +470,11 @@ internal class CrossfadePreparationRuntime(
         if (pending.key != key) return CrossfadeHandoffExecutionResult.Inactive
 
         val snapshot = snapshotProvider()
-        crossfadeOwnershipLossReason(snapshot, key)?.let {
+        ownershipLoss(snapshot, key)?.let {
             cancel(it, snapshot)
             return CrossfadeHandoffExecutionResult.Cancelled(it)
         }
+        if (naturalHandoff != null) return executeNaturalHandoff(pending, snapshot, naturalHandoff)
 
         val handoff = secondary.handoffSnapshot(key)
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
@@ -463,6 +492,15 @@ internal class CrossfadePreparationRuntime(
             return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationRejected(reconciliation.reason))
         }
 
+        return completeHandoff(pending, snapshot)
+    }
+
+    /** Primary restored BEFORE the secondary is silenced, then the coordinator success (no cleanup commands). */
+    private fun completeHandoff(
+        pending: CrossfadeState.HandoffPending,
+        snapshot: CrossfadeRuntimeSnapshot,
+    ): CrossfadeHandoffExecutionResult {
+        val key = pending.key
         val restored = primaryGain.restore(key)
         if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
         if (!restored) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryGainRestoreFailed)
@@ -475,6 +513,103 @@ internal class CrossfadePreparationRuntime(
         applyReduction(reduceCrossfade(state, CrossfadeEvent.HandoffSucceeded(key)), snapshot)
         return CrossfadeHandoffExecutionResult.Succeeded
     }
+
+    /**
+     * CF-2L1: an authoritative primary media-item transition fact. Qualifies only while Fading or HandoffPending, only for
+     * Media3's genuine AUTO reason, only onto the exact [CrossfadeTransitionKey.toPlaybackIndex], and only while live
+     * ownership (generation, clean queue, controller, bounds) still holds; anything else is inert (a wrong index or a stale
+     * fact changes nothing, and real divergence is still cancelled by the ownership rules). Accepted facts are remembered for
+     * this one exact key only (a bounded single observation: it may arrive just before the terminal tick) and, when already
+     * HandoffPending, immediately re-evaluate the takeover. No stats, gain or secondary effect happens here by itself.
+     */
+    fun onPrimaryNaturalTransition(observation: CrossfadeNaturalTransitionObservation) {
+        if (closed) return
+        val active = state as? CrossfadeState.Active ?: return
+        if (!active.isAudible()) return
+        if (!isNaturalAutoTransition(observation.reason)) return
+        val key = active.key
+        if (observation.mediaItemIndex != key.toPlaybackIndex) return
+        val snapshot = snapshotProvider()
+        if (state != active) return
+        crossfadeOwnershipLossReason(snapshot, key, naturalTransition = true)?.let {
+            cancel(it, snapshot)
+            return
+        }
+        if (key.toPlaybackIndex !in snapshot.playbackQueue.indices) {
+            cancel(CrossfadeCancelReason.QueueMutation, snapshot)
+            return
+        }
+        naturalObservedKey = key
+        if (active is CrossfadeState.HandoffPending) executeHandoff(key)
+    }
+
+    /** CF-2L1: re-evaluates a pending natural handoff after an authoritative primary state change. Inert otherwise. */
+    fun advancePendingHandoff() {
+        if (closed) return
+        val pending = state as? CrossfadeState.HandoffPending ?: return
+        executeHandoff(pending.key)
+    }
+
+    /**
+     * CF-2L1: the natural-AUTO terminal handoff. The terminal fade left primary gain 0 and secondary gain 1; the secondary
+     * stays alive and audible until the primary is genuinely usable on the target. Waits (no effects) for: the exact AUTO
+     * transition; the primary physically on the target occurrence in READY; and, after a same-item reposition onto a FRESH
+     * secondary position, the primary landing near it. Only then: primary gain restored, secondary abandoned, success.
+     * Readiness is read from real player facts, never from a returned command or a fixed delay.
+     */
+    private fun executeNaturalHandoff(
+        pending: CrossfadeState.HandoffPending,
+        snapshot: CrossfadeRuntimeSnapshot,
+        seams: CrossfadeNaturalHandoffSeams,
+    ): CrossfadeHandoffExecutionResult {
+        val key = pending.key
+        if (naturalObservedKey != key) return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.NaturalTransition)
+        val facts = try {
+            seams.primaryFacts()
+        } catch (e: Exception) {
+            Log.w(TAG, "primary takeover facts failed", e)
+            null
+        }
+        if (facts == null || facts.physicalIndex != key.toPlaybackIndex || !facts.isReady) {
+            return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimaryReady)
+        }
+        val fresh = secondary.handoffSnapshot(key) // FRESH: the terminal snapshot is stale once the secondary keeps playing
+        if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+        if (fresh == null) return failHandoff(pending, snapshot, CrossfadeHandoffFailure.SecondarySnapshotUnavailable)
+        when (val decision = decideNaturalTakeover(facts, fresh.positionMs, handoffSeekTargetMs, handoffSeekLeadMs)) {
+            NaturalTakeoverDecision.AwaitSeekLanding ->
+                return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
+            is NaturalTakeoverDecision.SeekPrimary -> {
+                val previousTarget = handoffSeekTargetMs
+                val previousLead = handoffSeekLeadMs
+                val seekTo = decision.positionMs.coerceAtMost(fresh.durationMs)
+                handoffSeekTargetMs = seekTo
+                handoffSeekLeadMs = decision.leadMs
+                val reconciliation = try {
+                    seams.reconciler.reconcile(key, fresh.copy(positionMs = seekTo))
+                } catch (e: Exception) {
+                    Log.w(TAG, "post-AUTO primary reconciliation threw", e)
+                    if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+                    return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationException)
+                }
+                if (state != pending) return CrossfadeHandoffExecutionResult.Inactive
+                if (reconciliation is CrossfadePrimaryReconciliationResult.Rejected) {
+                    val notPropagatedYet = reconciliation.reason == CrossfadePrimaryReconciliationRejection.PhysicalIndexMismatch ||
+                        reconciliation.reason == CrossfadePrimaryReconciliationRejection.CurrentOccurrenceMismatch
+                    if (notPropagatedYet) {
+                        // The controller has not caught up with the player's AUTO transition: nothing was sought; retry.
+                        handoffSeekTargetMs = previousTarget
+                        handoffSeekLeadMs = previousLead
+                        return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimaryReady)
+                    }
+                    return failHandoff(pending, snapshot, CrossfadeHandoffFailure.PrimaryReconciliationRejected(reconciliation.reason))
+                }
+                return CrossfadeHandoffExecutionResult.Awaiting(CrossfadeHandoffWait.PrimarySeek)
+            }
+            NaturalTakeoverDecision.TakeOver -> return completeHandoff(pending, snapshot)
+        }
+    }
+
 
     private fun failHandoff(
         pending: CrossfadeState.HandoffPending,
@@ -498,9 +633,36 @@ internal class CrossfadePreparationRuntime(
         return secondary.audioSessionSnapshot(key)
     }
 
+    /**
+     * CF-2L1 continuity: a Pause-style cancellation while B is already audible on the secondary must not leave the primary
+     * (now the logical track) materially out of alignment with that audible timeline, or resume would rewind or skip B merely
+     * because crossfade ownership ended. If the silent primary is materially behind OR ahead of the FRESH secondary position,
+     * perform one best-effort same-item reconciliation (one seek; commands are ordered) to the fresh secondary position before
+     * the normal restore/abandon cleanup. Only the Pause reason, only after the exact AUTO transition, only when materially out
+     * of alignment in either direction; never throws.
+     */
+    private fun carryNaturalPositionBeforePauseCleanup(reason: CrossfadeCancelReason) {
+        if (reason != CrossfadeCancelReason.Pause) return
+        val seams = naturalHandoff ?: return
+        val pending = state as? CrossfadeState.HandoffPending ?: return
+        val key = pending.key
+        if (naturalObservedKey != key) return
+        try {
+            val facts = seams.primaryFacts() ?: return
+            if (facts.physicalIndex != key.toPlaybackIndex) return
+            val fresh = secondary.handoffSnapshot(key) ?: return
+            // Symmetric: a materially AHEAD silent primary would also skip B forward on resume. (Positions are non-negative.)
+            if (kotlin.math.abs(fresh.positionMs - facts.positionMs) <= NATURAL_TAKEOVER_MAX_LAG_MS) return
+            seams.reconciler.reconcile(key, fresh)
+        } catch (e: Exception) {
+            Log.w(TAG, "pause continuity carry failed", e)
+        }
+    }
+
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */
     fun cancel(reason: CrossfadeCancelReason) {
         if (closed) return
+        carryNaturalPositionBeforePauseCleanup(reason)
         cancel(reason, snapshotProvider())
     }
 
@@ -511,6 +673,7 @@ internal class CrossfadePreparationRuntime(
         closed = true
         state = CrossfadeState.Idle
         dueMark = null
+        clearNaturalHandoff()
         // Restore the primary FIRST (the caller keeps the primary player alive until this returns); needs no snapshot.
         primaryGain.ownerKey?.let { if (!primaryGain.restore(it)) Log.w(TAG, "primary gain restore failed on close") }
         if (toCancel is CrossfadeState.Active) {
@@ -561,6 +724,7 @@ internal class CrossfadePreparationRuntime(
     internal fun applyReduction(reduction: CrossfadeReduction, snapshot: CrossfadeRuntimeSnapshot) {
         state = reduction.state
         if (state !is CrossfadeState.Ready) dueMark = null
+        if (state !is CrossfadeState.Fading && state !is CrossfadeState.HandoffPending) clearNaturalHandoff()
         for (command in reduction.commands) {
             when (command) {
                 is CrossfadeCommand.AbandonSecondary -> secondary.abandon(command.key)

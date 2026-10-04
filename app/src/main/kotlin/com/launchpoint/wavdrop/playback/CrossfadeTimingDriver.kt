@@ -158,6 +158,8 @@ internal class CrossfadeTimingDriver(
             haltAfterHandoffFailure()
             null
         }
+        // CF-2L1: still waiting on the natural AUTO transition / primary readiness; keep re-evaluating real state (no effects).
+        is CrossfadeHandoffExecutionResult.Awaiting -> nextDelayFor(runtime.state)
         is CrossfadeHandoffExecutionResult.Cancelled,
         CrossfadeHandoffExecutionResult.Inactive -> nextDelayFor(runtime.state)
     }
@@ -170,7 +172,8 @@ internal class CrossfadeTimingDriver(
 
     private fun nextDelayFor(state: CrossfadeState): Long? = when (state) {
         is CrossfadeState.Fading -> FADE_TICK_INTERVAL_MS
-        is CrossfadeState.HandoffPending -> null
+        // A natural handoff keeps re-evaluating real player state (no effects until ready); the legacy immediate handoff never waits.
+        is CrossfadeState.HandoffPending -> if (runtime.usesNaturalHandoff) FADE_TICK_INTERVAL_MS else null
         else -> PRE_FADE_POLL_INTERVAL_MS
     }
 

@@ -424,6 +424,8 @@ Minimum initial validation target: at least one real Android device covering spe
 
 ### 32.2 Basic overlap
 
+**Recorded physical result (first run, gate-enabled debug validation build; CF-2K2A):** crossfade 6 seconds, EQ off, Repeat off, Shuffle off. The secondary started correctly and the 6-second overlap was audible and balanced, but there was a roughly 1-2 second audible stutter at the final primary takeover, after which track B continued. Core overlap: **PARTIAL / blocker observed**; production enablement is blocked pending the CF-2L1 natural AUTO handoff correction and a physical retest of this section. This is not a pass; `physicalCorePlaybackValidated` remains not satisfied.
+
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
 | In a validation build, open Settings → Playback. | A Transitions section with a Crossfade row is visible. (Never visible in a build with the gate disabled.) | |
@@ -523,7 +525,7 @@ Production enablement requires every row below to be Pass on the intended releas
 |---|---|
 | Automated JVM suite green | |
 | Release APK assembled | |
-| Crossfade core overlap passed | |
+| Crossfade core overlap passed | PARTIAL - ~1-2 s final handoff stutter observed in the first run; retest after CF-2L1 |
 | Repeat eligibility passed | |
 | Duplicate occurrence passed | |
 | Manual interaction cancellation passed | |
