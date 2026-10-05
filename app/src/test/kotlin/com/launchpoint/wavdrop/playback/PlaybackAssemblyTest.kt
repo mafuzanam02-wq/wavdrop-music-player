@@ -20,7 +20,7 @@ import java.io.File
 /**
  * CF-2M3: gate-bound topology. Real ExoPlayers (Robolectric) prove the shipping path stays single-player and the gated path
  * builds exactly two, sharing one audio-session id assigned before any prepare. Source scans prove production never swaps
- * roles, prepares NEXT or builds a third (CF-2L) player.
+ * roles, prepares NEXT or builds a third player.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -56,7 +56,7 @@ class PlaybackAssemblyTest {
         val assembly = assemblePlayback(
             RuntimeEnvironment.getApplication(), true, AudioAttributes.DEFAULT, counting(constructed), { SHARED_SESSION_ID },
         )
-        assertEquals("exactly two physical players (no third CF-2L secondary)", 2, constructed.size)
+        assertEquals("exactly two physical players (no third crossfade player)", 2, constructed.size)
         assertTrue(constructed.none { it.handleFocus || it.handleNoisy })
         val engine = assembly.engine!!
         assertEquals(setOf(constructed[0].player, constructed[1].player), setOf(engine.currentPlayer, engine.nextPlayer))
@@ -81,17 +81,6 @@ class PlaybackAssemblyTest {
         assertFalse(engine.nextPlayer.playWhenReady)
         assertEquals(1f, engine.nextPlayer.volume, 0f)
         engine.release()
-    }
-
-    @Test fun neitherTopologyConstructsTheLegacyCrossfadeGraph() {
-        assertFalse(PlaybackTopology.SINGLE_PLAYER.constructsLegacyCrossfadeGraph)
-        assertFalse(PlaybackTopology.TWO_SLOT_ENGINE.constructsLegacyCrossfadeGraph)
-        // The legacy builder is only reachable through the topology flag in the service.
-        val service = source("PlaybackService.kt")
-        val guard = service.indexOf("assembly.topology.constructsLegacyCrossfadeGraph")
-        val build = service.indexOf("createCrossfadeProductionGraph(")
-        assertTrue(guard in 0 until build)
-        assertEquals("the graph builder is called exactly once, behind the guard", 1, Regex("createCrossfadeProductionGraph\\(").findAll(service).count())
     }
 
     @Test fun realExoPlayerEngineSessionStaysUsableThroughTheFacade() {

@@ -43,9 +43,8 @@ internal class PreviousBehaviorPlayer(
     // AVRCP) before it is forwarded. The app-marked controller is inert here: app commands (incl. the custom
     // CYCLE_REPEAT command, which calls PlayerController.cycleRepeatMode) already notified in PlayerController.
     private val onExplicitRepeatChange: () -> Unit,
-    // CF-2L3: DEBUG-only transport diagnostics (null in release). Logging never issues or alters transport.
+    // DEBUG-only transport diagnostics (null in release). Logging never issues or alters transport.
     private val transportLog: ((String) -> Unit)? = null,
-    private val crossfadeSummary: () -> String = { "" },
 ) : ForwardingPlayer(player) {
 
     private fun logTransport(name: String) {
@@ -54,7 +53,7 @@ internal class PreviousBehaviorPlayer(
             log(
                 "$name t=${android.os.SystemClock.elapsedRealtime()} external=${isExternalUserTransportRequest()} " +
                     "hasMedia=${currentMediaItem != null || mediaItemCount > 0} index=$currentMediaItemIndex " +
-                    "playbackState=$playbackState playWhenReady=$playWhenReady isPlaying=$isPlaying ${crossfadeSummary()}",
+                    "playbackState=$playbackState playWhenReady=$playWhenReady isPlaying=$isPlaying",
             )
         } catch (_: Exception) {
             // diagnostics must never affect transport

@@ -190,14 +190,8 @@ class CrossfadePromotionRuntimeTest {
         assertTrue(r.runtime.state is PromotionOverlapState.Overlap)
     }
 
-    @Test fun endMarginIsANamedIndependentConstantAndNoRetiredHandoffConstantIsUsed() {
+    @Test fun endMarginIsTheNamedConstantAt500ms() {
         assertEquals(500L, CrossfadePromotionTiming.END_MARGIN_MS)
-        val retired = listOf("NATURAL_TAKEOVER_MAX_LAG_MS", "NATURAL_TRANSFER_ENTRY_TOLERANCE_MS", "NATURAL_TRANSFER_ABORT_TOLERANCE_MS", "NATURAL_TAKEOVER_TRANSFER_DURATION_MS", "NATURAL_TAKEOVER_MAX_LEAD_MS", "NATURAL_HANDOFF_MAX_PROJECTION_AGE_MS", "NATURAL_HANDOFF_RAW_AGREEMENT_MS", "NaturalHandoffPositionClock", "HandoffPending", "CrossfadeNaturalHandoffSeams", "reconcilePrimary", "PrimaryTakeoverFacts")
-        for (file in listOf("CrossfadePromotionRuntime.kt", "PlayerEngine.kt")) {
-            val code = File("src/main/kotlin/com/launchpoint/wavdrop/playback/$file").readLines()
-                .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("//") || it.trimStart().startsWith("/*") }.joinToString("\n")
-            retired.forEach { assertFalse("$file must not use `$it` (CF-2L handoff machinery)", code.contains(it)) }
-        }
     }
 
     // ── full successful overlap through the scheduler ───────────────────────────────────────────────────────────────────
@@ -209,7 +203,7 @@ class CrossfadePromotionRuntimeTest {
         check(runtime.state is PromotionOverlapState.Overlap) { runtime.state }
         var guard = 0
         while (runtime.state is PromotionOverlapState.Overlap) {
-            assertEquals(CrossfadeTimingDriver.FADE_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
+            assertEquals(CrossfadeCadence.FADE_TICK_INTERVAL_MS, scheduler.activeNow.single().delayMs)
             now += 50
             scheduler.runNext()
             check(guard++ < 1000)
@@ -240,7 +234,7 @@ class CrossfadePromotionRuntimeTest {
         assertEquals(SHARED_SESSION_ID, r.p2.audioSessionId)
         assertEquals(SHARED_SESSION_ID, r.engine.audioSessionId)
         // polling resumes at the pre-fade cadence
-        assertEquals(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS, r.scheduler.activeNow.single().delayMs)
+        assertEquals(CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS, r.scheduler.activeNow.single().delayMs)
         // no logical transition at fade end
         assertEquals(1, r.base.f.events.events.count { it.startsWith("transition(") })
     }

@@ -149,3 +149,6 @@ internal object CrossfadeGainCurve {
         )
     }
 }
+
+/** A crossfade gain must be finite and within 0..1; ownership layers never clamp, they fail closed. */
+internal fun isValidCrossfadeGain(gain: Float): Boolean = gain.isFinite() && gain in 0f..1f

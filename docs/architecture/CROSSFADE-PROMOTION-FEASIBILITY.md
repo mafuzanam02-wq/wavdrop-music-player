@@ -1,6 +1,6 @@
 # ADR: Crossfade promotion architecture (CF-2M1 feasibility)
 
-- Status: **Proposed**; the session-façade question was **verified by CF-2M2** (section 25). CF-2M1 itself changed no production code, test or gate.
+- Status: **ACCEPTED** (physically validated by CF-2M7, section 30). The CF-2L natural-handoff architecture is **RETIRED** and was deleted by CF-2M8. The session-façade question was verified by CF-2M2 (section 25); the rollout gate is still false.
 - Date: 2026-10-04
 - Baseline: `1d320a1` ("Project crossfade handoff positions safely"), `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false`.
 - Scope: can WavDrop promote the already-playing incoming physical ExoPlayer to be the logical current player,
@@ -337,25 +337,21 @@ fade-gain ticks, one queue graft per arming, façade state derivation.
 
 | Slice | Content | Checkpoint |
 |---|---|---|
-| **CF-2M2** | Stable `SessionFacade : ForwardingSimpleBasePlayer` over a **single** physical. Behaviour parity only. Moves widget listener onto the façade. Port `PreviousBehaviorPlayer` hooks (`handleSeek`, `handleSetPlayWhenReady`, external-controller detection, max-seek-previous). **First task: parity spike with hand-written fakes + Robolectric looper** to settle the "to verify" items (event fidelity, `controllerForCurrentRequest` inside `handle*`). | JVM tests + device parity (notification, BT, lock screen, widget) |
-| **CF-2M3** | `PlayerEngine` + slot roles (two ExoPlayers, engine-owned `AudioFocusManager`, shared audio-session id at construction, noisy-handling owner). No crossfade behaviour; façade `setPlayer` swap proven with fakes. | JVM tests, no behaviour change |
-| **CF-2M4** | NEXT-slot lifecycle: prepare `[B]`, graft, invalidate on queue mutation (reuses CF-2H cancels), measure graft cost (`WavdropQueuePerf`). Generalise `CrossfadeSecondaryPlayer` and the gain controller. | tests + graft measurement |
-| **CF-2M5** | Promotion at fade start, overlap gain execution, tail strip, fade-end margin, retire/recycle, façade event pinning (AUTO + AUTO_TRANSITION, `isPlaying` constant), stats/persistence parity tests. | JVM tests |
-| **CF-2M6** | Overlap lifecycle policy: pause/seek/next/previous/focus/noisy/error/physical-death (section 11 & 16), settlement. | JVM tests |
-| **CF-2M7** | Temporary physical validation build (same procedure as prior validation APKs). | device evidence |
-| **CF-2M8** | After a physical pass: delete the CF-2L natural-handoff stack (section 9), reconcile docs. After a physical **fail**: delete the promotion code instead. | tests + docs |
-| **CF-2M9** (optional) | Shared-session EQ validation; decide whether to lift the EQ restriction. | device evidence |
+| **CF-2M2** (complete) | Stable `SessionFacade : ForwardingSimpleBasePlayer` over a **single** physical. Behaviour parity only. Moves widget listener onto the façade. Port `PreviousBehaviorPlayer` hooks (`handleSeek`, `handleSetPlayWhenReady`, external-controller detection, max-seek-previous). **First task: parity spike with hand-written fakes + Robolectric looper** to settle the "to verify" items (event fidelity, `controllerForCurrentRequest` inside `handle*`). | JVM tests + device parity (notification, BT, lock screen, widget) |
+| **CF-2M3** (complete) | `PlayerEngine` + slot roles (two ExoPlayers, engine-owned `AudioFocusManager`, shared audio-session id at construction, noisy-handling owner). No crossfade behaviour; façade `setPlayer` swap proven with fakes. | JVM tests, no behaviour change |
+| **CF-2M4** (complete) | NEXT-slot lifecycle on `PlayerEngine`'s NEXT physical: prepare `[B]`, graft the logical queue around it (chunked across looper turns), invalidate on queue mutation (reuses CF-2H cancels), and measure graft cost. | tests + graft measurement |
+| **CF-2M5** (complete) | Promotion at fade start, overlap gain execution, tail strip, fade-end margin, retire/recycle, façade event pinning (AUTO + AUTO_TRANSITION, `isPlaying` constant), stats/persistence parity tests. | JVM tests |
+| **CF-2M6** (complete) | Overlap lifecycle policy: pause/seek/next/previous/focus/noisy/error/physical-death (section 11 & 16), settlement. | JVM tests |
+| **CF-2M7** (PHYSICAL PASS) | Temporary physical validation build (same procedure as prior validation APKs). Passed: see section 30. | device evidence |
+| **CF-2M8** (current cleanup) | The physical pass selected the promotion architecture: the CF-2L natural-handoff stack (section 9) is deleted and the docs reconciled. See section 30. | tests + docs |
+| **CF-2M9** (optional, not started) | Shared-session EQ validation; decide whether to lift the EQ restriction. | device evidence |
 
 ## 20. Build beside vs refactor in place
 
-**Recommend A: build the promotion engine beside CF-2L, then delete the old handoff.** CF-2L4 is unshipped and gated; its
-cancel/eligibility/planning layers are reused by the new design, but its handoff core cannot be incrementally morphed into
-promotion (different ownership model, different states). Building beside keeps the CF-2L4 tests as a regression oracle
-for the shared layers, and the single rollout gate (`RUNTIME_ENABLED`) stays the only switch: the new construction path is
-selected behind the existing gate, not a new flag. To avoid carrying two permanent architectures, **CF-2M8 is mandatory
-and tied to the physical result**: pass -> remove CF-2L handoff; fail -> remove the promotion code. The façade is constructed
-only when the gate is true during CF-2M2..CF-2M8 (as the crossfade graph is today), so shipping behaviour is untouched
-until rollout; at rollout the façade becomes the unconditional session player.
+**Resolved.** The promotion engine was built beside CF-2L (CF-2M2..CF-2M6) behind the single rollout gate, validated physically (CF-2M7, section 30) and the CF-2L natural-handoff
+stack was then deleted (CF-2M8). The promotion architecture is the only crossfade implementation in source; `RUNTIME_ENABLED` remains the only switch and is still false. The
+shared layers (eligibility, planning, occurrence identity, duration rules, gain curve, cancellation reasons) were kept; the handoff core (secondary B, natural-AUTO handoff,
+reconciliation, soft transfer) was not morphed but removed.
 
 ## 21. Lessons used / not used
 
@@ -741,3 +737,28 @@ there is no hidden B->A rollback and no physical rebuild (a later hardening slic
 tests cannot produce A's natural ENDED/error because Robolectric freezes the playback clock; those paths are proven on the scripted physicals. (4) Interruption-resume entitlement itself
 (Bluetooth/wired) is existing PlayerController behaviour and was not changed or re-tested here. (5) No mutation testing of the new boundaries was done. CF-2M7 owns device validation
 and END_MARGIN tuning.
+
+## 30. CF-2M7 physical result and CF-2M8 retirement of CF-2L
+
+**CF-2M7 (physical validation): PASSED.** A temporary debug build of the committed CF-2M6 architecture (gate temporarily true, restored false afterwards) was installed and
+tested by the user on a device. Reported evidence: ordinary transitions and **extended 10 s and 12 s crossfades**; the old final takeover stutter/restart is **gone**; B stays
+clean through the overlap and the transition is clean. Observed and **intentional**: at fade start the UI/session moves to track B while A fades out and B fades in, because logical
+ownership moves at promotion. This section claims only what was reported: `END_MARGIN_MS` stayed at 500 ms during the test and is not tuned; shared-session EQ was **not**
+validated (the EQ restriction stands, CF-2M9 is optional and separate); the rollout gate remains false; no claim is made that all future tuning is finished.
+
+**Decision.** CF-2L natural-handoff architecture: **RETIRED** after the CF-2M7 physical pass. CF-2M promotion architecture: **ACCEPTED baseline.** The losing design required B to
+become audible on one physical player and later transfer ownership to another representation of B; that final ownership seam caused the audible problem. The accepted design
+starts B once on the physical player that remains authoritative, promotes it immediately, fades the retiring A out and recycles it.
+
+**CF-2M8 deleted (current ownership, not history):** the secondary-player system (`CrossfadeSecondaryPlayer`, `ExoSecondaryPlayerBackend`, backend/callback interfaces), the CF-2L
+runtime (`CrossfadePreparationRuntime`, its Armed/Ready/Fading/HandoffPending lifecycle and `CrossfadeState`/`CrossfadeCoordinator` state machine), the natural-handoff, takeover-fact and
+position-projection machinery (`CrossfadeNaturalHandoff`, `CrossfadePositionClock`), primary reconciliation (`CrossfadePrimaryReconciliation` and the two `PlayerController`
+reconcile methods), the soft secondary->primary transfer envelope and every handoff tolerance constant, the primary gain controller, secondary audio-session observation, the
+settlement diagnostics, the timing driver and the production graph, plus the `constructsLegacyCrossfadeGraph` topology flag and the service wiring. **Kept:** transition key and cancel
+reasons, ownership check, eligibility/planning, duration rules, `CrossfadeGainCurve`, the reason-aware cancellation hooks (now `CrossfadeCancellation.kt`), the monotonic clock and
+scheduler seams and cadence (`CrossfadeTiming.kt`), the rollout gate and readiness model, `PlayerEngine`, `SessionFacade`, `NextSlotPreparation(Driver)` and
+`CrossfadePromotionRuntime`. Obsolete CF-2L tests were deleted; the retained suites (planning, rules, gains, cancellation, NEXT preparation/graft, promotion, overlap interaction,
+focus/noisy, quarantine, façade/session parity) are the regression oracle. A small source guard (`CrossfadeLegacyRetirementTest`) keeps the retired concepts out of production code.
+Historical CF-2L descriptions above (sections 2, 4, 9, 18) describe the **retired** architecture.
+
+**Not changed by CF-2M8:** the rollout gate (false), the EQ restriction, the Now Playing timing (UI moves to B at promotion by design), `END_MARGIN_MS`, any feature scope.

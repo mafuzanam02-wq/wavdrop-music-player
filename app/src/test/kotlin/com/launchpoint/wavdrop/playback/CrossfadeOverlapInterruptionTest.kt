@@ -293,7 +293,7 @@ class CrossfadeOverlapInterruptionTest {
         assertTrue("the logical play intent survives a transient loss", r.facade.playWhenReady)
         val aCommands = r.p1.commands.toList()
         r.now += 20_000L
-        r.scheduler.activeNow.forEach { assertEquals(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS, it.delayMs) } // no fade tick survives
+        r.scheduler.activeNow.forEach { assertEquals(CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS, it.delayMs) } // no fade tick survives
         r.focus(AudioManager.AUDIOFOCUS_GAIN)
         assertTrue("focus regain resumes B", r.p2.playWhenReady)
         assertEquals(Player.PLAYBACK_SUPPRESSION_REASON_NONE, r.facade.playbackSuppressionReason)

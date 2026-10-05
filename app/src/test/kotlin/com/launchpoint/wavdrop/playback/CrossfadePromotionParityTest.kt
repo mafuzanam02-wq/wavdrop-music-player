@@ -180,7 +180,7 @@ class CrossfadePromotionParityTest {
     @Test fun noThirdPlayerAndNoNewRolloutFlag() {
         val builders = File("src/main/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }
             .filter { it.readText().contains("ExoPlayer.Builder(") }.map { it.name }.toSet()
-        assertEquals("only the assembly (two physicals) and the dormant CF-2L secondary construct ExoPlayers", setOf("PlaybackAssembly.kt", "CrossfadeSecondaryPlayer.kt"), builders)
+        assertEquals("only the assembly constructs ExoPlayers (the two engine physicals); there is no secondary-player system", setOf("PlaybackAssembly.kt"), builders)
         val policy = source("CrossfadeRolloutPolicy.kt")
         assertEquals("exactly one rollout constant", 1, Regex("const val").findAll(policy).count())
         assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
@@ -191,10 +191,8 @@ class CrossfadePromotionParityTest {
         val writers = File("src/main/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }
             .filter { f -> f.readLines().any { l -> (l.contains(".volume = ") || l.contains("setVolume(")) && !l.trimStart().startsWith("*") && !l.trimStart().startsWith("//") } }
             .map { it.name }.toSet()
-        assertEquals("PlayerEngine is the only writer in the M topology; the others are the dormant CF-2L paths", setOf("PlayerEngine.kt", "CrossfadeSecondaryPlayer.kt", "PlaybackService.kt"), writers - setOf("PlayerControllerVolume.kt"))
+        assertEquals("PlayerEngine is the only physical volume writer", setOf("PlayerEngine.kt"), writers - setOf("PlayerControllerVolume.kt"))
         assertEquals(1, Regex("[.]volume = ").findAll(code("PlayerEngine.kt")).count())
-        val service = source("PlaybackService.kt")
-        assertTrue("the service volume write lives only in the legacy graph block", service.indexOf("player.volume = gain") > service.indexOf("constructsLegacyCrossfadeGraph"))
     }
 
     @Test fun gateFalseTopologyIsUnchangedAndHasNoPromotionMachinery() {

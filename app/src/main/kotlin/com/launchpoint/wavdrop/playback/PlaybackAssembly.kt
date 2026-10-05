@@ -8,22 +8,19 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 
 /**
- * CF-2M3: how many physical players exist for a given rollout-gate value, and who owns the legacy CF-2L secondary.
+ * How many physical players exist for a given rollout-gate value.
  *
- * Coexistence decision (option A): the gated two-slot path's NEXT physical player is the single resource future promotion
- * (CF-2M4/2M5) will use. The legacy CF-2L secondary graph stays structurally present in source (CF-2M8 deletes the losing
- * architecture) but is never constructed in EITHER topology, so CURRENT + engine NEXT + a CF-2L secondary can never coexist.
+ * The gated two-slot path owns exactly two physical players (CURRENT + NEXT); there is no other crossfade player.
  */
 internal enum class PlaybackTopology(
     val physicalPlayerCount: Int,
     val usesPlayerEngine: Boolean,
-    val constructsLegacyCrossfadeGraph: Boolean,
 ) {
     /** Shipping (gate false): one physical ExoPlayer with its own focus + noisy handling, exactly as before CF-2M3. */
-    SINGLE_PLAYER(physicalPlayerCount = 1, usesPlayerEngine = false, constructsLegacyCrossfadeGraph = false),
+    SINGLE_PLAYER(physicalPlayerCount = 1, usesPlayerEngine = false),
 
     /** Gated (gate true): [PlayerEngine] with two physical slots, one focus owner, one noisy owner, one session id. */
-    TWO_SLOT_ENGINE(physicalPlayerCount = 2, usesPlayerEngine = true, constructsLegacyCrossfadeGraph = false),
+    TWO_SLOT_ENGINE(physicalPlayerCount = 2, usesPlayerEngine = true),
     ;
 
     companion object {

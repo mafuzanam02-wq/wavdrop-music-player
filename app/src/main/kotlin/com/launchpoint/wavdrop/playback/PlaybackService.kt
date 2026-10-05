@@ -71,21 +71,17 @@ class PlaybackService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
-    // CF-2B2/2B3/2E1: only ever constructed behind CrossfadeRolloutPolicy.RUNTIME_ENABLED (false). Owns the silent
-    // secondary player (single release owner); not a session player. The timing driver below is built over this
-    // exact runtime but is never started (dormant).
+    // The ONE crossfade architecture (CF-2M, gate-bound): PlaybackAssembly builds the PlayerEngine (CURRENT + NEXT physical
+    // players + SessionFacade) only when CrossfadeRolloutPolicy.RUNTIME_ENABLED is true; the two owners below are null otherwise.
     private var playbackAssembly: PlaybackAssembly? = null
-    private var crossfadePreparation: CrossfadePreparationRuntime? = null
-    private var crossfadeTimingDriver: CrossfadeTimingDriver? = null
-    // CF-2M4: gate true only. Decides when the engine NEXT slot is prepared; never starts B. Null with the gate false.
+    // Decides when the engine NEXT slot is prepared (prepare B, graft the queue); never starts B.
     private var nextSlotDriver: NextSlotPreparationDriver? = null
-    // CF-2M5: gate true only. Promotes the Ready NEXT at the fade window and runs the overlap. Null with the gate false.
+    // Promotes the Ready NEXT at the fade window, runs the equal-power overlap and recycles the retiring player.
     private var promotionRuntime: CrossfadePromotionRuntime<ExoPlayer>? = null
 
-    // CF-2M4: the ONE explicit-cancellation lifecycle point. Every recoverCrossfadeFrom... call goes through it and it ends
-    // whichever owner exists (the legacy CF-2L runtime, never built now, and the engine NEXT preparation).
+    // The ONE explicit-cancellation lifecycle point. Every recoverCrossfadeFrom... call goes through it: before a promotion it
+    // invalidates the NEXT preparation; during an overlap it settles to B (CF-2M6).
     private val crossfadeCancelSink = CrossfadeCancelSink { reason ->
-        crossfadePreparation?.cancel(reason)
         nextSlotDriver?.cancel(reason)
         promotionRuntime?.cancel(reason)
     }
@@ -148,55 +144,6 @@ class PlaybackService : MediaLibraryService() {
         // CF-2M5: `player` is the INITIAL physical player (the only one when the gate is false). It must never be read where the
         // LOGICAL CURRENT is meant: after a promotion that physical may be the retiring/NEXT slot. Use assembly.currentPlayer.
         val player = assembly.primaryPlayer
-        if (assembly.topology.constructsLegacyCrossfadeGraph) {
-            // CF-2M3 coexistence (option A): the legacy CF-2L graph (and its secondary player) is never constructed in either
-            // topology, so CURRENT + engine NEXT + a CF-2L secondary cannot coexist. CF-2M8 deletes this block.
-            // CF-2E1/2E2: composition only. The graph does not start the driver; the persisted-duration observer below
-            // (CF-2E2 activation policy) starts/stops it. Shipping stays inert because this whole block is gated off.
-            val graph = createCrossfadeProductionGraph(
-                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerEnabled) },
-                backendFactory = { ExoSecondaryPlayerBackend(this, audioAttributes) },
-                // Narrow local seam to the authoritative primary ExoPlayer; never routed through a controller/session.
-                primaryGainBackend = PrimaryGainBackend { gain ->
-                    try {
-                        player.volume = gain
-                        true
-                    } catch (e: Exception) {
-                        Log.w(AUDIO_SESSION_TAG, "primary crossfade gain write failed", e)
-                        false
-                    }
-                },
-                reconcilePrimary = { key, snapshot -> playerController.reconcileCrossfadePrimary(key, snapshot) },
-                scheduler = MainLooperCrossfadeTimingScheduler(),
-                clock = ElapsedRealtimeCrossfadeClock,
-                configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
-                primaryDurationMs = { player.duration },
-                primaryPositionMs = { player.currentPosition },
-                // CF-2L1: natural-AUTO handoff seams. Real primary facts (never "a command returned") and a same-item reposition.
-                primaryTakeoverFacts = {
-                    PrimaryTakeoverFacts(
-                        physicalIndex = player.currentMediaItemIndex,
-                        isReady = player.playbackState == Player.STATE_READY,
-                        positionMs = player.currentPosition,
-                        // CF-2L4: projection may only bridge sampling granularity while the clock really advances.
-                        isAdvancing = isPrimaryPlaybackAdvancing(player.playbackState, player.playWhenReady, player.playbackSuppressionReason),
-                    )
-                },
-                reconcilePrimaryAfterNaturalTransition = { key, snapshot ->
-                    playerController.reconcileCrossfadePrimaryAfterNaturalTransition(key, snapshot)
-                },
-                // CF-2L2: concise DEBUG-only transfer evidence (no file names or paths); null in release.
-                naturalTransferLog = if (BuildConfig.DEBUG) { message -> Log.d("WavdropCrossfade", message) } else null,
-                // CF-2I1: read-only session observability only; no EQ is attached to the secondary.
-                primaryAudioSessionId = { player.audioSessionId },
-                audioSessionObserver = CrossfadeAudioSessionObserver { key, primaryId, secondaryId ->
-                    if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, formatCrossfadeAudioSessionObservation(key, primaryId, secondaryId))
-                },
-            )
-            crossfadePreparation = graph.runtime
-            crossfadeTimingDriver = graph.timingDriver
-            // Intentionally no start() here: only the activation policy (initial-enabled / OFF->enabled) starts it.
-        }
         assembly.engine?.let { engine ->
             // CF-2M4: NEXT preparation owner. Reuses the existing plan/key/ownership rules; started by the same persisted-duration
             // activation policy below. Nothing starts or promotes B.
@@ -205,7 +152,7 @@ class PlaybackService : MediaLibraryService() {
                 snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerEnabled) },
                 materialize = { songs -> playerController.materializePlaybackMediaItemsForCrossfade(songs) },
                 configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
-                currentDurationMsProvider = { usableCrossfadePrimaryDuration(engine.currentPlayer.duration) },
+                currentDurationMsProvider = { engine.currentPlayer.duration.takeIf { it > 0L } },
                 scheduler = MainLooperCrossfadeTimingScheduler(),
             )
             promotionRuntime = CrossfadePromotionRuntime(
@@ -226,7 +173,6 @@ class PlaybackService : MediaLibraryService() {
                     val previous = lastObservedCrossfadeDurationMs
                     crossfadeConfiguredDurationMs = duration
                     if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) {
-                        applyCrossfadeConfiguredDurationChange(previous, duration, crossfadePreparation, crossfadeTimingDriver)
                         applyNextSlotConfiguredDurationChange(previous, duration, nextSlotDriver)
                         applyPromotionConfiguredDurationChange(previous, duration, promotionRuntime)
                     }
@@ -288,9 +234,8 @@ class PlaybackService : MediaLibraryService() {
             onExplicitSeek = { recoverCrossfadeFromExplicitSeek(crossfadeCancelSink) },
             onExplicitNavigation = { recoverCrossfadeFromExplicitNavigation(crossfadeCancelSink) },
             onExplicitRepeatChange = { recoverCrossfadeFromRepeatChange(crossfadeCancelSink) },
-            // CF-2L3: DEBUG-only evidence of REAL transport commands (distinct from Media3 state changes caused by seeking/buffering).
+            // DEBUG-only evidence of REAL transport commands (distinct from Media3 state changes caused by seeking/buffering).
             transportLog = if (BuildConfig.DEBUG) { message -> Log.d(CROSSFADE_TAG, message) } else null,
-            crossfadeSummary = { formatCrossfadeSettlementSummary(crossfadePreparation?.settlementSnapshot()) },
         )
 
         if (BuildConfig.DEBUG) {
@@ -344,24 +289,18 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                logCrossfadePrimaryState(assembly.currentPlayer, "PRIMARY_IS_PLAYING value=$isPlaying")
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${assembly.currentPlayer.audioSessionId} ts=${System.currentTimeMillis()}")
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                logCrossfadePrimaryState(assembly.currentPlayer, "PRIMARY_STATE playbackState=$playbackState")
                 // CF-2F2: synchronous, before any asynchronous widget work. BUFFERING and READY never cancel.
                 if (isPrimaryTerminalPlaybackState(playbackState)) {
                     recoverCrossfadeFromPrimaryTerminalState(crossfadeCancelSink)
                 }
-                // CF-2L1: READY is real readiness evidence for a pending natural handoff (inert when none is pending).
-                if (playbackState == Player.STATE_READY) advanceCrossfadeHandoff(crossfadePreparation)
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${assembly.currentPlayer.audioSessionId} ts=${System.currentTimeMillis()}")
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                // CF-2L1: authoritative transition fact for the crossfade owner (only a genuine AUTO onto the exact target counts).
-                observeCrossfadeNaturalTransition(crossfadePreparation, assembly.currentPlayer.currentMediaItemIndex, reason)
                 if (BuildConfig.DEBUG) {
                     // One concise line per transition for physical gapless validation (no position ticks,
                     // no file names): reason, indexes, player state and audio session.
@@ -527,16 +466,11 @@ class PlaybackService : MediaLibraryService() {
         // Cancel the settings observer before releasing the player to avoid
         // calling setHandleAudioBecomingNoisy on a released ExoPlayer instance.
         serviceScope.cancel()
-        // CF-2E1: invalidate timing callbacks first (the driver owns them), then CF-2C6: restore any crossfade-lowered
-        // primary gain while the primary player is still alive, then
-        // release the secondary. Must precede the primary player release below.
+        // Close the crossfade owners first (they cancel their pending ticks and settle any overlap), then release the engine below.
         promotionRuntime?.close()
         promotionRuntime = null
         nextSlotDriver?.close()
         nextSlotDriver = null
-        closeCrossfadeGraph(crossfadeTimingDriver, crossfadePreparation)
-        crossfadeTimingDriver = null
-        crossfadePreparation = null
         // Release audio effects before the player so the session is still valid during cleanup.
         enhancementController?.release()
         enhancementController = null
@@ -751,21 +685,6 @@ class PlaybackService : MediaLibraryService() {
 
     private fun logResume(message: String) {
         if (BuildConfig.DEBUG) Log.d(RESUME_TAG, message)
-    }
-
-    /**
-     * CF-2L3: DEBUG-only primary state-churn evidence, emitted ONLY while a crossfade is Active (never forever, no timer). The
-     * settlement line at handoff completion closes the picture. No titles, paths or ids are logged.
-     */
-    private fun logCrossfadePrimaryState(player: Player, event: String) {
-        if (!BuildConfig.DEBUG) return
-        val settlement = crossfadePreparation?.settlementSnapshot() ?: return
-        if (settlement.state == CrossfadeState.Idle) return
-        Log.d(
-            CROSSFADE_TAG,
-            "$event index=${player.currentMediaItemIndex} playWhenReady=${player.playWhenReady} isPlaying=${player.isPlaying} " +
-                formatCrossfadeSettlementSummary(settlement),
-        )
     }
 
     companion object {

@@ -172,7 +172,7 @@ class NextSlotInvalidationTest {
         assertEquals(0L, h.scheduler.activeNow.single().delayMs)
         h.scheduler.runNext()
         assertTrue(h.prep.state is NextSlotState.PreparingTarget)
-        assertEquals(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS, h.scheduler.activeNow.single().delayMs)
+        assertEquals(CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS, h.scheduler.activeNow.single().delayMs)
         h.driver.stop()
         assertTrue(h.scheduler.activeNow.isEmpty())
     }
@@ -252,12 +252,6 @@ class NextSlotInvalidationTest {
         families.forEach { (_, hook) -> hook(null) }
     }
 
-    @Test fun theLegacyRuntimeStillSatisfiesTheSinkWidening() {
-        // CrossfadePreparationRuntime is a CrossfadeCancelSink: existing call sites that pass a runtime keep compiling.
-        val sink: CrossfadeCancelSink? = null as CrossfadePreparationRuntime?
-        recoverCrossfadeFromExplicitSeek(sink)
-    }
-
     // ── service wiring (source guards) ──────────────────────────────────────────────────────────────────────────────────
 
     private fun service(): String =
@@ -270,10 +264,10 @@ class NextSlotInvalidationTest {
         assertTrue("these hooks bypass the shared sink: $offenders", offenders.isEmpty())
     }
 
-    @Test fun theSharedSinkEndsBothTheLegacyRuntimeAndTheEngineNextPreparation() {
+    @Test fun theSharedSinkEndsTheNextPreparationAndSettlesThePromotionOverlap() {
         val s = service()
         val sink = s.substringAfter("private val crossfadeCancelSink").substringBefore("\n    }\n")
-        assertTrue(sink.contains("crossfadePreparation?.cancel(reason)"))
+        assertTrue(sink.contains("promotionRuntime?.cancel(reason)"))
         assertTrue(sink.contains("nextSlotDriver?.cancel(reason)"))
     }
 

@@ -5,8 +5,8 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 
 /**
- * CF-2M5 timing: the one new constant of the promotion path. It is NOT one of the retired CF-2L handoff tolerances
- * (80/150/200/350 ms) and nothing here reuses or reinterprets them.
+ * CF-2M5 timing: the one timing constant of the promotion path. It is independent of the retired CF-2L handoff tolerances
+ * (80/150/200/350 ms), which no longer exist in source.
  */
 internal object CrossfadePromotionTiming {
     /**
@@ -183,7 +183,7 @@ internal class CrossfadePromotionRuntime<P : Player>(
             abortOverlap("pulse failure")
         }
         if (bound == generation && started && !closed) {
-            schedule(if (state is PromotionOverlapState.Overlap) CrossfadeTimingDriver.FADE_TICK_INTERVAL_MS else CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS)
+            schedule(if (state is PromotionOverlapState.Overlap) CrossfadeCadence.FADE_TICK_INTERVAL_MS else CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS)
         }
     }
 
@@ -248,7 +248,7 @@ internal class CrossfadePromotionRuntime<P : Player>(
                     abortOverlap("tail strip failure")
                     return
                 }
-                if (started) schedule(CrossfadeTimingDriver.FADE_TICK_INTERVAL_MS)
+                if (started) schedule(CrossfadeCadence.FADE_TICK_INTERVAL_MS)
             }
         }
     }
@@ -285,7 +285,7 @@ internal class CrossfadePromotionRuntime<P : Player>(
         state = PromotionOverlapState.Idle
         generation++
         debug("RETIRE_COMPLETE", overlap.key, "recycled=$recycled")
-        if (started && !closed) schedule(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS)
+        if (started && !closed) schedule(CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS)
     }
 
     /**
@@ -344,7 +344,7 @@ internal class CrossfadePromotionRuntime<P : Player>(
             }
             debug("OVERLAP_SETTLE", key, "reason=$label $slots recycled=$recycled")
         }
-        if (started && !closed) schedule(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS)
+        if (started && !closed) schedule(CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS)
     }
 
     private fun debug(event: String, key: CrossfadeTransitionKey, extra: String, sampled: Boolean = false) {

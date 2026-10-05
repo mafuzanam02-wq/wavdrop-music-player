@@ -36,11 +36,10 @@ class PlayerEngineNextSlotTest {
         assembly.primaryPlayer.release()
     }
 
-    @Test fun gatedTopologyStillHasExactlyTwoPlayersAndNoLegacyGraph() {
+    @Test fun gatedTopologyStillHasExactlyTwoPlayers() {
         val assembly = assemblePlayback(RuntimeEnvironment.getApplication(), true, AudioAttributes.DEFAULT, sessionIdProvider = { SHARED_SESSION_ID })
         val engine = assembly.engine!!
         assertEquals(2, assembly.topology.physicalPlayerCount)
-        assertFalse(assembly.topology.constructsLegacyCrossfadeGraph)
         assertEquals(NextSlotState.Idle, engine.nextPreparation.state)
         engine.release()
     }

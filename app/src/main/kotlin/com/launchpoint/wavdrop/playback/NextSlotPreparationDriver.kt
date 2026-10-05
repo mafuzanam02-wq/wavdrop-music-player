@@ -7,9 +7,9 @@ import com.launchpoint.wavdrop.data.model.Song
 /**
  * CF-2M4: decides WHEN the engine's NEXT slot should be prepared, reusing the existing CF-1/CF-2 planning verbatim
  * ([planCrossfadeFromRuntimeSnapshot] + [bindCrossfadeTransition] + [crossfadeOwnershipLossReason]); there is no second rule
- * for "what is B". It does not start the old CF-2L runtime or secondary, and it never starts B.
+ * for "what is B". It never starts B.
  *
- * Trigger: a main-looper poll at [CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS] (the cadence the CF-2L runtime used), plus
+ * Trigger: a main-looper poll at [CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS], plus
  * the synchronous explicit-cancellation hook ([cancel], the shared [CrossfadeCancelSink] lifecycle point). Preparation is
  * therefore armed as soon as an eligible exact transition exists while playing, NOT at the fade-start instant, so a large
  * NEXT queue is grafted well before it is needed.
@@ -111,7 +111,7 @@ internal class NextSlotPreparationDriver(
             Log.w(TAG, "next-slot preparation pulse failed", e)
             preparation.invalidate(CrossfadeCancelReason.PlanInvalidated)
         }
-        if (bound == generation && started && !closed) schedule(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS)
+        if (bound == generation && started && !closed) schedule(CrossfadeCadence.PRE_FADE_POLL_INTERVAL_MS)
     }
 
     private companion object {

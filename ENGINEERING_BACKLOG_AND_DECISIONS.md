@@ -1,7 +1,7 @@
 # ENGINEERING BACKLOG & DECISIONS
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Durable decisions and engineering backlog. Last reconciled after CF-2L4 (post-beta9).
+> Durable decisions and engineering backlog. Last reconciled after CF-2M8 (CF-2L handoff retired).
 > Current state: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); current
 > architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -153,7 +153,7 @@ A catalogue of significant, durable decisions. Status reflects the current phase
 | D-23 | **Playback errors recover by bypassing the failing item** | On a Media3 `PlaybackException`, advance to the next valid queue item (or stop cleanly), without fabricating stats or mutating identity; one transient `PlaybackUserMessage` per episode | Active (Wave B WB-01; user message shipped post-beta9) |
 | D-24 | **Song identity is not queue-occurrence identity** | The same song can occupy several queue positions; the current occurrence is positional and bound to `queueGeneration`; ambiguous song-id fallback fails closed; no persistent occurrence UUIDs | Active (OH-1 hardening) |
 | D-25 | **The Media3 queue is the hydration authority** | Whether the player is "hydrated" is inferred from the physical Media3 queue (never from a stale logical queue or a boolean claim); hydration never decides autoplay; external playback is never overwritten | Active (implemented) |
-| D-26 | **Crossfade is gated and primary-authoritative** | The primary player/MediaSession stays the sole system-visible authority; the secondary player has no session and no audio focus; transitions are keyed by `CrossfadeTransitionKey`; `CrossfadeRolloutPolicy.RUNTIME_ENABLED` stays `false` until a validated integration exists | Active |
+| D-26 | **Crossfade is gated; the promotion architecture is accepted** | Crossfade runs only through the CF-2M promotion architecture (prepared NEXT started once, promoted at fade start, retiring A faded out and recycled) behind `CrossfadeRolloutPolicy.RUNTIME_ENABLED`, which stays `false` until an explicit rollout decision. Physically validated by CF-2M7; the CF-2L secondary-player natural-handoff design (the earlier D-26 wording) is RETIRED and was deleted by CF-2M8. Transitions are keyed by `CrossfadeTransitionKey`; the EQ restriction stands | Active |
 | D-27 | **Explicit transport beats automatic playback** | Automatic Bluetooth/wired resume requests carry authority tokens; an explicit user play/pause or route loss voids them | Active (implemented) |
 
 ---
@@ -185,7 +185,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
 - **Automatic backup via WorkManager (post-beta9).** A unique periodic (24 h) WorkManager check calls
   `AutoBackupRepository.runIfDue()`; wording remains truthful about best-effort scheduling.
 
-- **Crossfade foundations CF-1 .. CF-2H3G (post-beta9, internal, gated off).** Engineering foundation
+- **Crossfade foundations CF-1 .. CF-2H3G (post-beta9, internal, gated off).** (Entries naming a secondary player, HandoffPending, handoff or reconciliation describe the RETIRED CF-2L implementation, deleted by CF-2M8; kept as history.) Engineering foundation
   only - not user-facing, not enabled. Completed:
   - **CF-1** pure planning/rules (`CrossfadeTransitionRules`, equal-power gain curve).
   - **CF-2A** pure lifecycle coordinator (`reduceCrossfade`).
@@ -663,6 +663,7 @@ items are validated.
       CF-2M4 NEXT-slot preparation + occurrence-safe queue graft (prepare B alone, graft the queue around it, invalidate through the shared cancellation point; gate-bound, never starts B; JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 27.
       CF-2M5 promote prepared NEXT + equal-power overlap (B started once, role swap + AUTO facade swap, tail-stripped retiring A recycled as NEXT, fade x duck composer, uid-alias fix; gate-bound, JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 28.
       CF-2M6 overlap interaction + error policy (reason-aware settle-to-B seam: A cut for pause/seek/navigation/repeat/shuffle/queue edits/focus loss/noisy/errors/OFF/EQ/disconnect/teardown, duck preserved; engine + facade command boundaries; gate-bound, JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 29.
+      CF-2M7 PHYSICAL PASS (10 s / 12 s crossfades, no takeover stutter; promotion architecture ACCEPTED, gate still false, EQ restriction and END_MARGIN unchanged); CF-2M8 retires and deletes the CF-2L natural-handoff implementation: see the same document, section 30.
    h. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 
