@@ -384,7 +384,7 @@ cold resumption and settings architecture.
 
 1. ~~Does `ForwardingSimpleBasePlayer.setPlayer` + an overridden `getState()` produce exactly one `onMediaItemTransition(AUTO)` and one
    `AUTO_TRANSITION` discontinuity with `isPlaying` unchanged?~~ **Answered yes in CF-2M2 (section 25).**
-2. Is `androidx.media3.common.audio.AudioFocusManager` (`@UnstableApi`, verified) safe to drive from an engine outside ExoPlayer?
+2. ~~Is `androidx.media3.common.audio.AudioFocusManager` (`@UnstableApi`, verified) safe to drive from an engine outside ExoPlayer?~~ **Answered yes in CF-2M3 (section 26), with a caveat: the engine must own the logical playWhenReady/suppression state.**
 3. Measured graft cost for a large queue; graft vs persistent mirror.
 4. Value of `END_MARGIN` and the retiring-player tail-strip behaviour on real files.
 5. Product decision on A's listened-time accounting at promotion.
@@ -448,3 +448,62 @@ reported by Media3 as an `INTERNAL` discontinuity; real players supply live posi
 
 **Verdict for CF-2M3: GO.** Every CF-2M2 go criterion was met in JVM/Robolectric tests; none of the no-go conditions occurred.
 Residual limits (device, real ExoPlayer swap, system UI) stay as CF-2M7 evidence.
+
+## 26. CF-2M3 results (two-slot ownership foundation)
+
+JVM/Robolectric only; **no device**. The gate is still false and nothing here is user-visible. No NEXT preparation, queue graft,
+promotion, overlap, gain ramp or tail strip exists; CF-2L is not deleted.
+
+**Pre-change ownership (CF-2M2 code):** `PlaybackService.onCreate` built one raw `ExoPlayer` (`handleAudioFocus=true`,
+`handleAudioBecomingNoisy=true`) and the same instance was the focus owner, noisy owner, audio-session owner, EQ attach target,
+widget/crossfade physical listener target, session player (via `SessionFacade` only when gated, then `PreviousBehaviorPlayer`) and
+the release target (`mediaSession.player.release()`). The only other physical player was the CF-2L `CrossfadeSecondaryPlayer`
+(`handleAudioFocus=false`, own session id), built inside `createCrossfadeProductionGraph` behind the gate.
+
+**Implemented (production):**
+
+| Piece | Responsibility |
+|---|---|
+| `PlayerSlots.kt` | `PlayerSlotRole {CURRENT, NEXT}`, `PlayerSlot` (permanent id + player), `PlayerSlotTable` (pure role swap; no playback). |
+| `PlayerEngine<P : Player>` | Owns two physicals by role, the `SessionFacade` (delegate = CURRENT), one `AudioFocusManager`, one noisy receiver, the shared session id, and the only release path. Exposes `currentPlayer/nextPlayer/currentSlot/nextSlot`; `swapRolesForTest()` is the only role swap and nothing in production calls it. |
+| `PlaybackAssembly.kt` | `PlaybackTopology` (gate -> 1 or 2 physicals), `assemblePlayback`, factory/session-id seams. Gate false builds exactly the old single player. Gate true builds two with `handleAudioFocus=false`, `handleAudioBecomingNoisy=false`, assigns ONE `AudioManager.generateAudioSessionId()` to both before either is prepared, then builds the engine. |
+| `SessionFacade` | Gains an optional `LogicalPlayWhenReadyOwner`: with an owner bound, `playWhenReady`, its change reason and the suppression reason come from the owner and `setPlayWhenReady` is routed to it. Everything else is still forwarded from the physical delegate. Unbound (CF-2M2 shape) it is unchanged. |
+| `PlaybackService` | Uses `assemblePlayback`; `PreviousBehaviorPlayer` still wraps the façade outside the engine; gate-true release goes through `PlayerEngine.release()` only (the session player is not also released). |
+
+**Audio focus (the risky part).** Verified against Media3 1.11.1 with the real `AudioFocusManager` and Robolectric's `AudioManager`:
+it is public, usable outside ExoPlayer, requests focus only for non-IDLE state, returns `PLAY_WHEN_READY` for a user pause (focus is
+kept until IDLE), delivers transient loss as `WAIT_FOR_CALLBACK`, permanent loss as `DO_NOT_PLAY`, duck as a volume multiplier
+(0.2) not a command, regain as `PLAY_WHEN_READY`, a denied request as `DO_NOT_PLAY`, and release abandons held focus. **Caveat that
+corrects the CF-2M1 sketch:** in 1.11.1 the focus -> state mapping lives in `ExoPlayerImplInternal`, not in a public API, so a physical
+player with `handleAudioFocus=false` can never report `AUDIO_FOCUS_LOSS` or `TRANSIENT_AUDIO_FOCUS_LOSS`. The engine therefore owns the
+logical playWhenReady/reason/suppression state and ports that mapping verbatim (`updatePlayWhenReadyWithAudioFocus`,
+`updatePlayWhenReadyChangeReason`, `updatePlaybackSuppressionReason`, read from the 1.11.1 bytecode): DO_NOT_PLAY -> playWhenReady false +
+`AUDIO_FOCUS_LOSS`; WAIT -> suppression `TRANSIENT_AUDIO_FOCUS_LOSS` (playWhenReady stays true, physical held paused); PLAY ->
+suppression NONE. The façade presents that state, so the CF-2F5 classifiers see the same reasons. The state is re-evaluated on the
+logical CURRENT's playback-state changes (IDLE -> BUFFERING requests focus). Duck is written to the logical CURRENT's `volume`; NEXT stays
+at 1.0. CF-2M5 must compose this with fade gains: it is the only volume writer today.
+
+**Noisy:** physicals do not register; the engine registers ONE `ACTION_AUDIO_BECOMING_NOISY` receiver (`setHandleAudioBecomingNoisy`, the existing
+"pause on audio disconnect" preference). One event -> one logical pause with `AUDIO_BECOMING_NOISY`, one physical write to CURRENT.
+
+**Session id:** both slots hold the same id from construction; the engine rejects mismatched players. Stable across the test swap.
+The façade reports the delegate's id. EQ restriction unchanged; no device EQ claim (CF-2M9).
+
+**Release:** `PlayerEngine.release()` releases CURRENT, NEXT, the focus owner (abandons exactly once) and the noisy receiver; a second call is a
+no-op; commands after release do nothing. The façade never releases a delegate.
+
+**Coexistence with CF-2L (option A):** the engine's NEXT is the physical resource future promotion will use. The CF-2L graph (and its
+secondary player) is still in source but its only call site is now guarded by `PlaybackTopology.constructsLegacyCrossfadeGraph`, which is
+false for BOTH topologies, so CURRENT + engine NEXT + a CF-2L secondary can never coexist. Consequence: with the gate true, the old CF-2L overlap
+no longer runs (it was gated off for shipping anyway). CF-2M8 deletes the losing architecture.
+
+**CF-2M1 open questions now answered:** #2 (AudioFocusManager outside ExoPlayer: yes, with the logical-state caveat above). Still open: #3-#7.
+
+**Residual limits:** expectations for the focus mapping come from the 1.11.1 bytecode and the real `AudioFocusManager`, not from a live
+ExoPlayer parity run (a real decoding ExoPlayer is not practical in JVM tests); device behaviour of focus loss, ducking, noisy, notification and
+Android Auto remains CF-2M7 evidence. Release-counting for the focus owner uses an engine counter, not an `AudioManager` spy.
+
+**Remaining for CF-2M4:** NEXT lifecycle (prepare B, graft/mirror queue, invalidation on queue mutation, graft cost), generalising the secondary/gain
+controller onto the NEXT slot, and composing fade gain with the duck multiplier.
+
+**Verdict for CF-2M4: GO.**

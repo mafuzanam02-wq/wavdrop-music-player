@@ -659,6 +659,7 @@ items are validated.
    f. CF-2L4 projected natural-handoff position clock - implemented / awaiting physical retest.
    g. CF-2M1 promotable dual-player architecture feasibility (design only, proposed; gate unchanged): `docs/architecture/CROSSFADE-PROMOTION-FEASIBILITY.md`.
       CF-2M2 stable session facade parity spike (single physical player, gate-bound, verified by JVM/Robolectric tests; no device): see the same document, section 25.
+      CF-2M3 two-slot PlayerEngine ownership foundation (two physical players, one focus/noisy/session-id owner, gate-bound, NEXT inert; JVM/Robolectric only, no device): see the same document, section 26.
    h. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 

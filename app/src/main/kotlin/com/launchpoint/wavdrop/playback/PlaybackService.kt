@@ -74,6 +74,7 @@ class PlaybackService : MediaLibraryService() {
     // CF-2B2/2B3/2E1: only ever constructed behind CrossfadeRolloutPolicy.RUNTIME_ENABLED (false). Owns the silent
     // secondary player (single release owner); not a session player. The timing driver below is built over this
     // exact runtime but is never started (dormant).
+    private var playbackAssembly: PlaybackAssembly? = null
     private var crossfadePreparation: CrossfadePreparationRuntime? = null
     private var crossfadeTimingDriver: CrossfadeTimingDriver? = null
     // CF-2E2: main-thread cached, already-normalized persisted duration read synchronously by the driver provider.
@@ -127,11 +128,15 @@ class PlaybackService : MediaLibraryService() {
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
-        val player = ExoPlayer.Builder(this)
-            .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
-            .setHandleAudioBecomingNoisy(true)
-            .build()
-        if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) {
+        // CF-2M3: gate false (shipping) = ONE physical ExoPlayer with its own focus + noisy handling, exactly as before.
+        // Gate true = PlayerEngine: two physical slots, one logical focus owner, one noisy owner, one shared audio-session id,
+        // one stable SessionFacade. The engine never prepares NEXT, swaps roles or promotes in this slice.
+        val assembly = assemblePlayback(this, CrossfadeRolloutPolicy.RUNTIME_ENABLED, audioAttributes)
+        playbackAssembly = assembly
+        val player = assembly.primaryPlayer
+        if (assembly.topology.constructsLegacyCrossfadeGraph) {
+            // CF-2M3 coexistence (option A): the legacy CF-2L graph (and its secondary player) is never constructed in either
+            // topology, so CURRENT + engine NEXT + a CF-2L secondary cannot coexist. CF-2M8 deletes this block.
             // CF-2E1/2E2: composition only. The graph does not start the driver; the persisted-duration observer below
             // (CF-2E2 activation policy) starts/stops it. Shipping stays inert because this whole block is gated off.
             val graph = createCrossfadeProductionGraph(
@@ -231,7 +236,7 @@ class PlaybackService : MediaLibraryService() {
         // ONLY behind the single rollout gate (no second flag): with the gate false (shipping) the chain is exactly the
         // pre-CF-2M2 ExoPlayer -> PreviousBehaviorPlayer, so shipping behaviour and rollback surface are unchanged. The
         // façade never swaps delegates here (one physical player); its swap seam is exercised only by tests.
-        val logicalPlayer: Player = if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) SessionFacade(player) else player
+        val logicalPlayer: Player = assembly.logicalPlayer
         val sessionPlayer = PreviousBehaviorPlayer(
             player = logicalPlayer,
             thresholdProvider = { previousRestartThresholdMs },
@@ -376,7 +381,7 @@ class PlaybackService : MediaLibraryService() {
         // the first emission even if the coroutine hasn't fired yet.
         serviceScope.launch {
             resumeBehaviorRepository.settings.collect { settings ->
-                player.setHandleAudioBecomingNoisy(settings.pauseOnAudioDisconnect)
+                assembly.setHandleAudioBecomingNoisy(settings.pauseOnAudioDisconnect)
             }
         }
 
@@ -495,8 +500,13 @@ class PlaybackService : MediaLibraryService() {
         // Release audio effects before the player so the session is still valid during cleanup.
         enhancementController?.release()
         enhancementController = null
+        // CF-2M3: with the engine, PlayerEngine.release() is the ONLY physical release (both slots, focus, noisy receiver);
+        // the session player (façade) must not release a delegate as well. Shipping path is unchanged.
+        val engine = playbackAssembly?.engine
+        playbackAssembly = null
+        engine?.release()
         mediaSession?.run {
-            player.release()
+            if (engine == null) player.release()
             release()
         }
         mediaSession = null

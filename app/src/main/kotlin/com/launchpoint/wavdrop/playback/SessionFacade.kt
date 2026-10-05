@@ -4,6 +4,21 @@ import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+
+/**
+ * CF-2M3: the owner of the logical play-when-ready state behind a [SessionFacade]. Implemented only by [PlayerEngine].
+ * Reads must be cheap and side-effect free (they run inside `getState`).
+ */
+internal interface LogicalPlayWhenReadyOwner {
+    val logicalPlayWhenReady: Boolean
+    val logicalPlayWhenReadyChangeReason: Int
+    val logicalPlaybackSuppressionReason: Int
+
+    /** A logical user/session request. The owner decides what the physical player must do. */
+    fun requestPlayWhenReady(playWhenReady: Boolean)
+}
 
 /**
  * CF-2M2: the stable session-facing [Player] identity. It forwards every command to, and derives its whole state (real
@@ -30,6 +45,23 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
 
     // Set only for the duration of one replaceDelegate(..., presentAsAutoTransition = true) call (see getState).
     private var pinnedAutoTransitionPositionMs: Long? = null
+
+    // CF-2M3: optional logical play-when-ready owner (the PlayerEngine). Null (CF-2M2 shape) means a pure forwarder.
+    private var playWhenReadyOwner: LogicalPlayWhenReadyOwner? = null
+
+    /**
+     * CF-2M3: binds the single owner of the LOGICAL play-when-ready / suppression state. With physical players that do not
+     * handle audio focus themselves, only the engine knows "playWhenReady is true but suppressed by a transient focus loss",
+     * so the façade presents the owner's state for exactly those three fields and routes `setPlayWhenReady` to it. Every
+     * other field still comes from the physical delegate. Pass null to unbind.
+     */
+    fun bindPlayWhenReadyOwner(owner: LogicalPlayWhenReadyOwner?) {
+        playWhenReadyOwner = owner
+        invalidateState()
+    }
+
+    /** Re-reads the bound owner's state and notifies listeners of the real diff (called by the owner after it changes). */
+    fun invalidateLogicalState() = invalidateState()
 
     /** The physical player this façade currently forwards to. Read-only; for diagnostics and tests. */
     val delegatePlayer: Player get() = getPlayer()
@@ -60,8 +92,19 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
         }
     }
 
+    override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        val owner = playWhenReadyOwner ?: return super.handleSetPlayWhenReady(playWhenReady)
+        owner.requestPlayWhenReady(playWhenReady)
+        return Futures.immediateVoidFuture()
+    }
+
     override fun getState(): SimpleBasePlayer.State {
-        val base = super.getState()
+        val physical = super.getState()
+        val owner = playWhenReadyOwner
+        val base = if (owner == null) physical else physical.buildUpon()
+            .setPlayWhenReady(owner.logicalPlayWhenReady, owner.logicalPlayWhenReadyChangeReason)
+            .setPlaybackSuppressionReason(owner.logicalPlaybackSuppressionReason)
+            .build()
         val pinnedPositionMs = pinnedAutoTransitionPositionMs ?: return base
         return base.buildUpon()
             .setPositionDiscontinuity(Player.DISCONTINUITY_REASON_AUTO_TRANSITION, pinnedPositionMs)

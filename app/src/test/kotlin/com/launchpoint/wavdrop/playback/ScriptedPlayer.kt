@@ -27,10 +27,11 @@ internal class ScriptedPlayer(
     state: Int = Player.STATE_READY,
     // false only for a player that lives on a different looper (its first access must then happen on that thread).
     eagerInit: Boolean = true,
+    audioSessionId: Int = androidx.media3.common.C.AUDIO_SESSION_ID_UNSET,
 ) : SimpleBasePlayer(looper) {
 
     val commands = mutableListOf<String>()
-    private var current: State = buildState(titles, index, positionMs, playing, state)
+    private var current: State = buildState(titles, index, positionMs, playing, state, audioSessionId)
 
     // SimpleBasePlayer snapshots its state lazily on first access; force it NOW so later mutate() calls produce real diffs.
     init { if (eagerInit) playbackState }
@@ -64,6 +65,12 @@ internal class ScriptedPlayer(
         return Futures.immediateVoidFuture()
     }
 
+    override fun handleSetVolume(volume: Float, volumeCommand: Int): ListenableFuture<*> {
+        commands += "$name.setVolume($volume)"
+        current = current.buildUpon().setVolume(volume).build()
+        return Futures.immediateVoidFuture()
+    }
+
     override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
         commands += "$name.setRepeatMode($repeatMode)"
         current = current.buildUpon().setRepeatMode(repeatMode).build()
@@ -82,7 +89,7 @@ internal class ScriptedPlayer(
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
             .build()
 
-        fun buildState(titles: List<String>, index: Int, positionMs: Long, playing: Boolean, state: Int): SimpleBasePlayer.State {
+        fun buildState(titles: List<String>, index: Int, positionMs: Long, playing: Boolean, state: Int, audioSessionId: Int = androidx.media3.common.C.AUDIO_SESSION_ID_UNSET): SimpleBasePlayer.State {
             val items = titles.map {
                 SimpleBasePlayer.MediaItemData.Builder(it)
                     .setMediaItem(mediaItem(it))
@@ -97,6 +104,7 @@ internal class ScriptedPlayer(
                 .setPlaybackState(state)
                 .setPlayWhenReady(playing, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
                 .setContentPositionMs(positionMs)
+                .setAudioSessionId(audioSessionId)
                 .build()
         }
     }
@@ -128,6 +136,10 @@ internal class EventRecorder : Player.Listener {
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         events += "playWhenReady($playWhenReady,$reason)"
+    }
+
+    override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+        events += "suppression($playbackSuppressionReason)"
     }
 
     override fun onRepeatModeChanged(repeatMode: Int) {
