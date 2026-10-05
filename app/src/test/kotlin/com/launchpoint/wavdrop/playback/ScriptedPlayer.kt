@@ -158,8 +158,8 @@ internal class ScriptedPlayer(
             .build()
 
         fun buildState(titles: List<String>, index: Int, positionMs: Long, playing: Boolean, state: Int, audioSessionId: Int = androidx.media3.common.C.AUDIO_SESSION_ID_UNSET): SimpleBasePlayer.State {
-            val items = titles.map {
-                SimpleBasePlayer.MediaItemData.Builder(it)
+            val items = titles.mapIndexed { position, it ->
+                SimpleBasePlayer.MediaItemData.Builder("$it#$position")
                     .setMediaItem(mediaItem(it))
                     .setDurationUs(180_000_000L)
                     .setIsSeekable(true)

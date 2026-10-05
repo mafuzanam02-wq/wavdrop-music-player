@@ -610,3 +610,67 @@ early, off the fade-start critical path. Scaling stays roughly linear in the cac
 
 **Remaining for CF-2M5:** start the already-prepared B (guard on `Ready` + exact key + live ownership), promote (role swap + façade `replaceDelegate` with AUTO presentation),
 overlap gain execution composed with the duck multiplier, tail strip / fade-end margin, retire and recycle the old CURRENT, and stats/persistence parity at promotion.
+
+## 28. CF-2M5 results (promote the prepared NEXT + equal-power overlap)
+
+JVM/Robolectric only, including structural proofs on **real ExoPlayers** (codec-free source); **no device, no claim about audible smoothness**
+(CF-2M7). The gate is still false. CF-2L is not deleted; the engine topology never executes it.
+
+**Promotion state model** (`CrossfadePromotionRuntime`): `Idle`, `Starting(key, outSlot, inSlot)` (synchronous), `Overlap(key, outSlot, inSlot, startedAtMs, durationMs)`,
+`Retiring(key, outSlot, inSlot)` (synchronous). There is no handoff state: B is authoritative from the moment of promotion. Only one overlap owns the engine; slot ids are explicit; a
+tick scheduled for an earlier overlap is stale (generation guard) and cannot act on a later one.
+
+**Exact operation order (successful path):** (1) all preconditions verified, nothing mutated (engine live, no overlap, NEXT preparation `Ready` for the EXACT live key, CURRENT index
+== from, NEXT index == to, equal timeline size and equal mediaId at both anchors, NEXT READY and paused, CURRENT logically playing and READY; the runtime additionally re-checks live
+ownership, plan eligibility and that the bound key equals the Ready key); (2) `consumeReadyForPromotion(key)`; (3) incoming fade component = 0; (4) `incoming.playWhenReady = true` (the one
+and only start); (5) role table swap; (6) CURRENT physical observers move to B; (7) `SessionFacade.replaceDelegate(B, presentAsAutoTransition = true)`; (8) A becomes RETIRING; (9) A's future
+tail is stripped and its repeat set OFF; (10) equal-power ticks; (11) terminal gains forced to exactly A = 0, B = 1; (12) A stopped, emptied, repeat OFF; (13) A is the empty reusable NEXT (not
+released); (14) overlap -> Idle. Nothing seeks, re-prepares, reloads or replaces B. A later ordinary M4 poll may prepare the following transition on the recycled player; retirement never prepares C.
+
+**Production role swap:** `PlayerEngine.promoteReadyNext(key)` coordinates the role table, the CURRENT physical observer move (`addCurrentPlayerListener` listeners follow the role), the façade
+replacement, the preparation consumption and the gain composer. `swapRolesForTest()` remains as a bare test-only seam; production does not call it (source-guarded).
+
+**Preparation consumption:** requires `Ready` for the exact key, drops pending graft turns, detaches the observer, kills the token and returns the player with its prepared contents untouched (no
+clear, reset, seek or re-prepare). Unlike `invalidate`, it never resets NEXT. A stale M4 callback cannot mutate the consumed player. While a retiring player occupies NEXT, `accepting` is false:
+preparation requests are refused and the M4 driver does not plan or materialize.
+
+**Timeline uid alias (finding + constrained fix):** two physical ExoPlayers describe the same logical queue with different private window/period uids, so the first real swap published a
+`timeline(PLAYLIST_CHANGED)` that a native gapless transition never produces (the CF-2M2 spike used equal uids). `SessionFacade` now aliases the new delegate's uids to the already-presented
+uids ONLY when the new delegate's queue is structurally equivalent (same size and an equal MediaItem at every index, compared positionally). A different queue, count, order, or the same id
+multiset in another order is NOT aliased and still emits the genuine timeline change; inserts/removals on the new delegate after the swap still propagate. Tests cover each boundary.
+
+**Event result:** at the controller, one promotion + overlap equals one native AUTO transition: `discontinuity(.., AUTO_TRANSITION)`, `transition(B, AUTO)`, `metadata(B)`; no timeline event, no
+`isPlaying`/`playWhenReady` edge, nothing more at fade end or retirement; session object and token unchanged; the widget follows B exactly as for the native transition. Real ExoPlayer:
+B's player emits no discontinuity, no transition and never IDLE; A's tail strip emits none either.
+
+**Gain composition:** one writer, `PlayerEngine.applyVolumes()`: `physicalVolume = duck x fade(slot)` (no separate global gain exists). The duck applies to every audible slot (CURRENT and, during an
+overlap, the retiring slot); an idle NEXT stays neutral. Fade ticks change only the fade component and focus callbacks only the duck, each recomputed from the other's current value. Tests: duck 1 =
+pure fade; duck < 1 attenuates both; changing the duck mid-overlap recomputes both without resetting the fade; ticks do not erase the duck; after retirement CURRENT = duck x 1 and the recycled
+NEXT is neutral. A source guard shows the only production `.volume =` writers are the engine and the dormant CF-2L paths.
+
+**Timing:** progress = monotonic elapsed / effective duration (never tick counting); a late tick clamps to 1; a clock reading earlier than the start clamps to 0. `CrossfadePromotionTiming.END_MARGIN_MS = 500`
+is a new, independent constant (not derived from or reusing the retired 80/150/200/350 ms tolerances). Window: fade starts when `position >= duration - plannedFade - END_MARGIN`; a late observation
+shortens the fade to `duration - position - END_MARGIN`; if that is below the 1 s minimum the transition is skipped and its preparation invalidated (not retried). 500 ms is a conservative initial structural
+margin (tick jitter, position-vs-audible latency, stop/clear), NOT device-tuned; CF-2M7 owns tuning. The fade therefore always ends at least END_MARGIN before A's natural end.
+
+**Tail strip:** after promotion the retiring player's items after A are removed and its repeat is turned OFF (so repeat-all cannot wrap into its own B). Proven: A stays current, no seek, no discontinuity or
+transition on A, no logical event, P2's queue untouched, A has no next item. (Robolectric freezes the playback clock, so A's natural ENDED could not be awaited on the real player; its absence of a next item is
+asserted instead, and a retiring player's ENDED is shown to be invisible to the session and to cut the overlap on the scripted player.)
+
+**Stats / NowPlaying / persistence:** no promotion-specific calls. The controller sees exactly one AUTO transition (the event that already drives StatsTracker, NowPlayingState and session persistence for native
+gapless), the index becomes the exact target (duplicate occurrences stay positional), there is no fake pause/play and no second selection at fade end. **A's logical listened time ends at promotion** (fade
+start), because B becomes the session item then; A's overlap tail is not counted (bounded by the effective crossfade duration). No overlap accounting was invented.
+
+**Service role-awareness audit:** the physical observer is now registered with `assembly.addCurrentPlayerListener` and reads `assembly.currentPlayer` (a retiring player's events never reach it); the NEXT driver and
+promotion runtime read `engine.currentPlayer`; the permanent initial `player` remains only for the legacy graph block (never built), the non-engine topology and init-time logging; EQ attaches by the shared audio-session id;
+release goes through the engine. Source guards pin the observer and the runtime wiring.
+
+**Injected failures (small `promotionStepHook` seam):** B start, consume boundary, incoming-gain write, role swap, façade replacement, tail strip, fade-gain write and retiring clear each settle deterministically: before the
+swap A stays the one authoritative player and B is stopped/emptied (a stale Ready preparation is invalidated); a failure with the façade already on B keeps B and cuts A; strip/gain failures cut A with B authoritative;
+a failed retiring cleanup leaves A silent (fade 0) and quarantined (no further promotion or preparation). In every case there is no dual full-volume playback, no repeated promotion, no seek or B-to-B reconciliation,
+and at most one logical transition.
+
+**Old handoff:** the engine topology never executes `CrossfadeNaturalHandoff`, the position clock, reconciliation or the 80/150/200/350 logic (source-guarded).
+
+**Evidence limits / remaining for CF-2M6:** the interaction and error matrix is deliberately NOT implemented: pause, seek, next/previous, repeat/shuffle mutation, focus loss, noisy, incoming/retiring errors and
+physical death during an overlap. M5 only fails closed: the shared cancel hook cuts A immediately and B (already the logical CURRENT) continues alone. CF-2M7 owns device validation of audible seams, END_MARGIN tuning and jank.

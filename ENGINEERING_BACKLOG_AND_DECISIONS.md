@@ -661,6 +661,7 @@ items are validated.
       CF-2M2 stable session facade parity spike (single physical player, gate-bound, verified by JVM/Robolectric tests; no device): see the same document, section 25.
       CF-2M3 two-slot PlayerEngine ownership foundation (two physical players, one focus/noisy/session-id owner, gate-bound, NEXT inert; JVM/Robolectric only, no device): see the same document, section 26.
       CF-2M4 NEXT-slot preparation + occurrence-safe queue graft (prepare B alone, graft the queue around it, invalidate through the shared cancellation point; gate-bound, never starts B; JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 27.
+      CF-2M5 promote prepared NEXT + equal-power overlap (B started once, role swap + AUTO facade swap, tail-stripped retiring A recycled as NEXT, fade x duck composer, uid-alias fix; gate-bound, JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 28.
    h. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 

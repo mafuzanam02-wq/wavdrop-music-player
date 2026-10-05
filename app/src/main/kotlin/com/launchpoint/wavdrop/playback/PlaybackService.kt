@@ -79,12 +79,15 @@ class PlaybackService : MediaLibraryService() {
     private var crossfadeTimingDriver: CrossfadeTimingDriver? = null
     // CF-2M4: gate true only. Decides when the engine NEXT slot is prepared; never starts B. Null with the gate false.
     private var nextSlotDriver: NextSlotPreparationDriver? = null
+    // CF-2M5: gate true only. Promotes the Ready NEXT at the fade window and runs the overlap. Null with the gate false.
+    private var promotionRuntime: CrossfadePromotionRuntime<ExoPlayer>? = null
 
     // CF-2M4: the ONE explicit-cancellation lifecycle point. Every recoverCrossfadeFrom... call goes through it and it ends
     // whichever owner exists (the legacy CF-2L runtime, never built now, and the engine NEXT preparation).
     private val crossfadeCancelSink = CrossfadeCancelSink { reason ->
         crossfadePreparation?.cancel(reason)
         nextSlotDriver?.cancel(reason)
+        promotionRuntime?.cancel(reason)
     }
     // CF-2E2: main-thread cached, already-normalized persisted duration read synchronously by the driver provider.
     private var crossfadeConfiguredDurationMs: Long = CrossfadeRules.OFF_MS
@@ -142,6 +145,8 @@ class PlaybackService : MediaLibraryService() {
         // one stable SessionFacade. The engine never prepares NEXT, swaps roles or promotes in this slice.
         val assembly = assemblePlayback(this, CrossfadeRolloutPolicy.RUNTIME_ENABLED, audioAttributes)
         playbackAssembly = assembly
+        // CF-2M5: `player` is the INITIAL physical player (the only one when the gate is false). It must never be read where the
+        // LOGICAL CURRENT is meant: after a promotion that physical may be the retiring/NEXT slot. Use assembly.currentPlayer.
         val player = assembly.primaryPlayer
         if (assembly.topology.constructsLegacyCrossfadeGraph) {
             // CF-2M3 coexistence (option A): the legacy CF-2L graph (and its secondary player) is never constructed in either
@@ -203,6 +208,14 @@ class PlaybackService : MediaLibraryService() {
                 currentDurationMsProvider = { usableCrossfadePrimaryDuration(engine.currentPlayer.duration) },
                 scheduler = MainLooperCrossfadeTimingScheduler(),
             )
+            promotionRuntime = CrossfadePromotionRuntime(
+                engine = engine,
+                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerEnabled) },
+                configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
+                scheduler = MainLooperCrossfadeTimingScheduler(),
+                clock = ElapsedRealtimeCrossfadeClock,
+                debugLog = if (BuildConfig.DEBUG) { message -> Log.d("WavdropCrossfade", message) } else null,
+            )
         }
         // CF-2E2: persisted duration -> cached value + explicit driver lifecycle policy. A persisted value is NOT
         // rollout permission: with the hard gate false there is no graph, so this only updates the cache.
@@ -215,6 +228,7 @@ class PlaybackService : MediaLibraryService() {
                     if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) {
                         applyCrossfadeConfiguredDurationChange(previous, duration, crossfadePreparation, crossfadeTimingDriver)
                         applyNextSlotConfiguredDurationChange(previous, duration, nextSlotDriver)
+                        applyPromotionConfiguredDurationChange(previous, duration, promotionRuntime)
                     }
                     lastObservedCrossfadeDurationMs = duration
                 }
@@ -304,10 +318,10 @@ class PlaybackService : MediaLibraryService() {
         )
 
         // PHYSICAL / crossfade observer (raw ExoPlayer only).
-        player.addListener(object : Player.Listener {
+        assembly.addCurrentPlayerListener(object : Player.Listener {
 
             // DEBUG-only: previous media item index, for the WavdropGapless transition line.
-            private var lastGaplessIndex = player.currentMediaItemIndex
+            private var lastGaplessIndex = assembly.currentPlayer.currentMediaItemIndex
 
             // CF-2F1: the authoritative primary reported a real playback error. Synchronously cancel any owned
             // crossfade (key-less). PlayerController keeps owning bad-media queue recovery; the timing driver is
@@ -330,47 +344,47 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                logCrossfadePrimaryState(player, "PRIMARY_IS_PLAYING value=$isPlaying")
-                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
+                logCrossfadePrimaryState(assembly.currentPlayer, "PRIMARY_IS_PLAYING value=$isPlaying")
+                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${assembly.currentPlayer.audioSessionId} ts=${System.currentTimeMillis()}")
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                logCrossfadePrimaryState(player, "PRIMARY_STATE playbackState=$playbackState")
+                logCrossfadePrimaryState(assembly.currentPlayer, "PRIMARY_STATE playbackState=$playbackState")
                 // CF-2F2: synchronous, before any asynchronous widget work. BUFFERING and READY never cancel.
                 if (isPrimaryTerminalPlaybackState(playbackState)) {
                     recoverCrossfadeFromPrimaryTerminalState(crossfadeCancelSink)
                 }
                 // CF-2L1: READY is real readiness evidence for a pending natural handoff (inert when none is pending).
                 if (playbackState == Player.STATE_READY) advanceCrossfadeHandoff(crossfadePreparation)
-                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
+                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${assembly.currentPlayer.audioSessionId} ts=${System.currentTimeMillis()}")
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 // CF-2L1: authoritative transition fact for the crossfade owner (only a genuine AUTO onto the exact target counts).
-                observeCrossfadeNaturalTransition(crossfadePreparation, player.currentMediaItemIndex, reason)
+                observeCrossfadeNaturalTransition(crossfadePreparation, assembly.currentPlayer.currentMediaItemIndex, reason)
                 if (BuildConfig.DEBUG) {
                     // One concise line per transition for physical gapless validation (no position ticks,
                     // no file names): reason, indexes, player state and audio session.
-                    val newIndex = player.currentMediaItemIndex
+                    val newIndex = assembly.currentPlayer.currentMediaItemIndex
                     Log.d(
                         GAPLESS_TAG,
                         "transition reason=${classifyMediaItemTransition(reason)} oldIndex=$lastGaplessIndex" +
-                            " newIndex=$newIndex state=${player.playbackState}" +
-                            " playWhenReady=${player.playWhenReady} isPlaying=${player.isPlaying}" +
-                            " sessionId=${player.audioSessionId} ts=${SystemClock.elapsedRealtime()}",
+                            " newIndex=$newIndex state=${assembly.currentPlayer.playbackState}" +
+                            " playWhenReady=${assembly.currentPlayer.playWhenReady} isPlaying=${assembly.currentPlayer.isPlaying}" +
+                            " sessionId=${assembly.currentPlayer.audioSessionId} ts=${SystemClock.elapsedRealtime()}",
                     )
                     lastGaplessIndex = newIndex
                 }
-                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onMediaItemTransition reason=$reason sessionId=${player.audioSessionId} title=${mediaItem?.mediaMetadata?.title} ts=${System.currentTimeMillis()}")
+                if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onMediaItemTransition reason=$reason sessionId=${assembly.currentPlayer.audioSessionId} title=${mediaItem?.mediaMetadata?.title} ts=${System.currentTimeMillis()}")
             }
 
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 if (BuildConfig.DEBUG) {
-                    val item = player.currentMediaItem
+                    val item = assembly.currentPlayer.currentMediaItem
                     Log.d(
                         AUDIO_SESSION_TAG,
                         "[changed] audioSessionId=$audioSessionId" +
-                            " playbackState=${player.playbackState}" +
+                            " playbackState=${assembly.currentPlayer.playbackState}" +
                             " songId=${item?.mediaId}" +
                             " title=${item?.mediaMetadata?.title}" +
                             " ts=${System.currentTimeMillis()}",
@@ -384,7 +398,7 @@ class PlaybackService : MediaLibraryService() {
         if (BuildConfig.DEBUG) {
             Log.d(
                 AUDIO_SESSION_TAG,
-                "[post-listener] audioSessionId=${player.audioSessionId} playbackState=${player.playbackState} ts=${System.currentTimeMillis()}"
+                "[post-listener] audioSessionId=${assembly.currentPlayer.audioSessionId} playbackState=${assembly.currentPlayer.playbackState} ts=${System.currentTimeMillis()}"
             )
         }
 
@@ -516,6 +530,8 @@ class PlaybackService : MediaLibraryService() {
         // CF-2E1: invalidate timing callbacks first (the driver owns them), then CF-2C6: restore any crossfade-lowered
         // primary gain while the primary player is still alive, then
         // release the secondary. Must precede the primary player release below.
+        promotionRuntime?.close()
+        promotionRuntime = null
         nextSlotDriver?.close()
         nextSlotDriver = null
         closeCrossfadeGraph(crossfadeTimingDriver, crossfadePreparation)

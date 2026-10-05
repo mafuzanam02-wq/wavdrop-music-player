@@ -60,6 +60,8 @@ internal class NextSlotPreparationDriver(
     /** One evaluation: end stale ownership, then (idempotently) request the exact eligible transition. */
     fun evaluate() {
         if (closed) return
+        // CF-2M5: a retiring player occupies NEXT during an overlap; do not plan or materialize anything until it is recycled.
+        if (!preparation.accepting) return
         val snapshot = snapshotProvider()
 
         val active = preparation.state.key

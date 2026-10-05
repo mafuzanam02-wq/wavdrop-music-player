@@ -43,13 +43,24 @@ internal fun interface AudioSessionIdProvider {
 
 internal class PlaybackAssembly(
     val topology: PlaybackTopology,
-    /** The physical player services read/attach effects to: the only player (shipping) or the engine's CURRENT. */
+    /** The INITIAL physical player (shipping: the only player; engine: the first CURRENT). Not role-aware: see [currentPlayer]. */
     val primaryPlayer: ExoPlayer,
     /** Non-null only in [PlaybackTopology.TWO_SLOT_ENGINE]. */
     val engine: PlayerEngine<ExoPlayer>?,
     /** What the widget listener and PreviousBehaviorPlayer wrap: the façade (engine) or the physical player (shipping). */
     val logicalPlayer: Player,
 ) {
+    /**
+     * The physical player that is the LOGICAL CURRENT right now. In the engine topology this changes at promotion, so anything
+     * that means "the current player" must read this (or the façade), never the initial [primaryPlayer].
+     */
+    val currentPlayer: ExoPlayer get() = engine?.currentPlayer ?: primaryPlayer
+
+    /** Registers a PHYSICAL observer that follows the logical CURRENT across promotions (a retiring player never reaches it). */
+    fun addCurrentPlayerListener(listener: Player.Listener) {
+        if (engine != null) engine.addCurrentPlayerListener(listener) else primaryPlayer.addListener(listener)
+    }
+
     /** The user's "pause on audio disconnect" preference, routed to the single noisy owner of this topology. */
     @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
     fun setHandleAudioBecomingNoisy(enabled: Boolean) {

@@ -19,8 +19,11 @@ internal class PlayerEngineFixture(
     noisy: Boolean = true,
     context: Context = RuntimeEnvironment.getApplication(),
     graftScheduler: NextSlotGraftScheduler? = null,
+    p1Titles: List<String> = listOf("A", "B"),
+    p1Index: Int = 0,
+    promotionHook: ((PromotionStep) -> Unit)? = null,
 ) {
-    val p1 = ScriptedPlayer("P1", titles = listOf("A", "B"), playing = false, state = Player.STATE_READY, audioSessionId = SHARED_SESSION_ID)
+    val p1 = ScriptedPlayer("P1", titles = p1Titles, index = p1Index, playing = false, state = Player.STATE_READY, audioSessionId = SHARED_SESSION_ID)
     val p2 = ScriptedPlayer("P2", titles = emptyList(), playing = false, state = Player.STATE_IDLE, audioSessionId = SHARED_SESSION_ID)
     val releases = mutableListOf<String>()
 
@@ -33,6 +36,7 @@ internal class PlayerEngineFixture(
         handleAudioBecomingNoisy = noisy,
         releasePlayer = { releases += it.name },
         nextSlotGraftScheduler = graftScheduler,
+        promotionStepHook = promotionHook,
     )
     val facade: SessionFacade get() = engine.facade
 

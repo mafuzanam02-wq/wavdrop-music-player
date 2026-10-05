@@ -39,6 +39,12 @@ internal interface LogicalPlayWhenReadyOwner {
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(delegate) {
 
+    // CF-2M5: stable timeline identity across a delegate swap (see getState). Declared BEFORE the init block below, which reads state.
+    private var lastPresentedPlaylist: List<SimpleBasePlayer.MediaItemData>? = null
+    private var aliasPending = false
+    private var windowAlias: Map<Any, Any> = emptyMap()
+    private var periodAlias: Map<Any, Any> = emptyMap()
+
     // SimpleBasePlayer snapshots its state lazily on first access. Take the snapshot at construction so every later physical
     // change (even before the first session read) is a real diff against a known state, never silently folded into the first read.
     init { playbackState }
@@ -84,6 +90,7 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
                 "replacement=${newDelegate.applicationLooper})"
         }
         pinnedAutoTransitionPositionMs = if (presentAsAutoTransition) newDelegate.currentPosition else null
+        aliasPending = true // the next state evaluation (setPlayer invalidates synchronously) establishes the uid aliases
         try {
             setPlayer(newDelegate)
         } finally {
@@ -101,13 +108,77 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
     override fun getState(): SimpleBasePlayer.State {
         val physical = super.getState()
         val owner = playWhenReadyOwner
-        val base = if (owner == null) physical else physical.buildUpon()
+        val withOwner = if (owner == null) physical else physical.buildUpon()
             .setPlayWhenReady(owner.logicalPlayWhenReady, owner.logicalPlayWhenReadyChangeReason)
             .setPlaybackSuppressionReason(owner.logicalPlaybackSuppressionReason)
             .build()
+        val base = withStableTimelineIdentity(withOwner)
         val pinnedPositionMs = pinnedAutoTransitionPositionMs ?: return base
         return base.buildUpon()
             .setPositionDiscontinuity(Player.DISCONTINUITY_REASON_AUTO_TRANSITION, pinnedPositionMs)
             .build()
+    }
+
+    /**
+     * CF-2M5: two physical players describe the SAME logical queue with different internal Timeline uids (every ExoPlayer owns
+     * its own media-source holders), so a delegate swap would otherwise surface a `timeline(PLAYLIST_CHANGED)` that a native
+     * gapless transition never produces. When the new delegate mirrors the previously presented queue (same size and an equal
+     * MediaItem at every index) its window/period uids are aliased to the uids already presented, so the Timeline the controllers
+     * hold is unchanged and only the real AUTO transition remains. A queue that does not match is NOT aliased: Media3 then
+     * reports the genuine timeline change. Uids of items inserted afterwards are never aliased.
+     */
+    private fun withStableTimelineIdentity(state: SimpleBasePlayer.State): SimpleBasePlayer.State {
+        val playlist = state.playlist
+        if (aliasPending) {
+            aliasPending = false
+            val previous = lastPresentedPlaylist
+            if (previous != null) establishAliases(previous, playlist) else clearAliases()
+        }
+        if (windowAlias.isEmpty() && periodAlias.isEmpty()) {
+            lastPresentedPlaylist = playlist
+            return state
+        }
+        val presented = playlist.map { item ->
+            val window = windowAlias[item.uid]
+            val periodsNeedAlias = item.periods.any { periodAlias.containsKey(it.uid) }
+            if (window == null && !periodsNeedAlias) {
+                item
+            } else {
+                val builder = item.buildUpon()
+                if (window != null) builder.setUid(window)
+                if (periodsNeedAlias) {
+                    builder.setPeriods(item.periods.map { p -> periodAlias[p.uid]?.let { p.buildUpon().setUid(it).build() } ?: p })
+                }
+                builder.build()
+            }
+        }
+        lastPresentedPlaylist = presented
+        return state.buildUpon().setPlaylist(presented).build()
+    }
+
+    private fun clearAliases() {
+        windowAlias = emptyMap()
+        periodAlias = emptyMap()
+    }
+
+    private fun establishAliases(previous: List<SimpleBasePlayer.MediaItemData>, next: List<SimpleBasePlayer.MediaItemData>) {
+        if (previous.size != next.size || next.indices.any { previous[it].mediaItem != next[it].mediaItem }) {
+            clearAliases()
+            return
+        }
+        val windows = HashMap<Any, Any>()
+        val periods = HashMap<Any, Any>()
+        for (i in next.indices) {
+            val old = previous[i]
+            val new = next[i]
+            if (old.uid != new.uid) windows[new.uid] = old.uid
+            if (old.periods.size == new.periods.size) {
+                for (j in new.periods.indices) {
+                    if (old.periods[j].uid != new.periods[j].uid) periods[new.periods[j].uid] = old.periods[j].uid
+                }
+            }
+        }
+        windowAlias = windows
+        periodAlias = periods
     }
 }

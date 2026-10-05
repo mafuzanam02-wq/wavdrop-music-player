@@ -139,6 +139,11 @@ internal class NextSlotPreparation<P : Player>(
     private val perfLog: ((String) -> Unit)? = null,
     /** Looper-turn scheduler for graft chunks. Default: a Handler on the NEXT player's application looper. */
     graftScheduler: NextSlotGraftScheduler? = null,
+    /**
+     * CF-2M5: false while the engine owns NEXT for something else (a retiring player during an overlap, or after release).
+     * A request is then refused and the state is left as it is; nothing is prepared on a retiring physical.
+     */
+    private val canAccept: () -> Boolean = { true },
 ) {
     private val scheduler: NextSlotGraftScheduler by lazy {
         graftScheduler ?: LooperNextSlotGraftScheduler(nextPlayerProvider().applicationLooper)
@@ -155,6 +160,8 @@ internal class NextSlotPreparation<P : Player>(
     var preparationsStarted: Int = 0
         private set
     var graftsCompleted: Int = 0
+        private set
+    var promotionsConsumed: Int = 0
         private set
     var invalidations: Int = 0
         private set
@@ -205,8 +212,12 @@ internal class NextSlotPreparation<P : Player>(
      * prepare, no retry storm). A different key supersedes: the old ownership (and every pending graft turn) is invalidated
      * first and a fresh token is assigned.
      */
+    /** CF-2M5: whether a preparation request would currently be accepted (false while a retiring player occupies NEXT). */
+    val accepting: Boolean get() = !released && canAccept()
+
     fun request(request: NextSlotRequest): NextSlotState {
         if (released) return state
+        if (!canAccept()) return state
         if (state.key == request.key) return state
         if (state !is NextSlotState.Idle) invalidate(null)
         val player = nextPlayerProvider()
@@ -237,6 +248,27 @@ internal class NextSlotPreparation<P : Player>(
             ended.player.removeListener(ended)
             resetPhysical(ended.player)
         }
+    }
+
+    /**
+     * CF-2M5: hands the READY-and-fully-grafted NEXT player to promotion. Verifies the exact [key] is `Ready`, then ends this
+     * owner's involvement WITHOUT touching the player: the observer is detached, pending turns are dropped, the token dies and
+     * the state becomes Idle, but the player keeps its prepared contents. Returns the player, or null when [key] is not the
+     * Ready preparation (stale key, not Ready, released). Unlike [invalidate] this never resets NEXT.
+     */
+    fun consumeReadyForPromotion(key: CrossfadeTransitionKey): P? {
+        if (released) return null
+        val ready = state as? NextSlotState.Ready ?: return null
+        if (ready.key != key) return null
+        val a = attempt ?: return null
+        if (a.token != ready.token) return null
+        token++
+        cancelPendingTurns()
+        a.player.removeListener(a)
+        attempt = null
+        state = NextSlotState.Idle
+        promotionsConsumed++
+        return a.player
     }
 
     /** Engine teardown: detach the observer, drop pending turns and stop owning anything. The engine releases the player. */

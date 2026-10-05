@@ -60,7 +60,7 @@ class PlayerEngineNextSlotTest {
         val users = File("src/main/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }
             .filter { val t = it.readText(); t.contains("nextPreparation") || t.contains("NextSlotPreparation") }
             .map { it.name }.toSet()
-        assertEquals(setOf("PlayerEngine.kt", "NextSlotPreparation.kt", "NextSlotPreparationDriver.kt", "PlaybackService.kt"), users)
+        assertEquals(setOf("PlayerEngine.kt", "NextSlotPreparation.kt", "NextSlotPreparationDriver.kt", "PlaybackService.kt", "CrossfadePromotionRuntime.kt"), users)
     }
 
     @Test fun productionStillNeverSwapsRolesInCf2m4() {
