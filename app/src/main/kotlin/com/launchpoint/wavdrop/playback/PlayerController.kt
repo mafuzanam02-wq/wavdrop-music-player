@@ -3574,6 +3574,14 @@ class PlayerController @Inject constructor(
     }
 
     /**
+     * CF-2M4: read-only Song -> MediaItem materialization for the engine NEXT slot. Same representation and cache as CURRENT
+     * (identical mediaId, URI and metadata). Mutates no queue, bumps no generation, writes no stats or session state and
+     * sends no controller command; it only reuses (and may populate) the existing media-item cache.
+     */
+    internal fun materializePlaybackMediaItemsForCrossfade(songs: List<Song>): List<MediaItem> =
+        materializeMediaItems(songs).mediaItems
+
+    /**
      * Read-only snapshot of the logical playback state for the future crossfade engine (CF-2B1).
      * No side effects: reads in-memory state and the existing occurrence resolution only.
      */

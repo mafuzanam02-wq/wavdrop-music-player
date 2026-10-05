@@ -506,4 +506,107 @@ Android Auto remains CF-2M7 evidence. Release-counting for the focus owner uses 
 **Remaining for CF-2M4:** NEXT lifecycle (prepare B, graft/mirror queue, invalidation on queue mutation, graft cost), generalising the secondary/gain
 controller onto the NEXT slot, and composing fade gain with the duck multiplier.
 
-**Verdict for CF-2M4: GO.**
+**Verdict for CF-2M4: GO.** (Delivered in section 27.)
+
+## 27. CF-2M4 results (NEXT-slot preparation + occurrence-safe queue graft)
+
+JVM/Robolectric only, including graft behaviour on a **real ExoPlayer** (codec-free test source); **no device**. The gate is still
+false. Nothing starts, promotes, fades or swaps; CF-2L is not deleted.
+
+**Pre-change NEXT:** CF-2M3's inert second physical (empty, idle, paused, neutral volume). Nothing loaded it; the CF-2L planning/ownership
+rules existed only for the legacy runtime, which is not built in the engine topology.
+
+**Seams reused (no parallel queue model):** `planCrossfadeFromRuntimeSnapshot` + `bindCrossfadeTransition` (the one rule for "what is B" and
+the `CrossfadeTransitionKey(queueGeneration, from, to)`), `crossfadeOwnershipLossReason` (defensive ownership check), the persisted-duration
+activation policy (`decideCrossfadeDriverActivation`), the CF-2G/2H/2I `recoverCrossfadeFrom...` cancellation family, and PlayerController's
+media-item cache (`materializeMediaItems`).
+
+**Implemented (production):**
+
+| Piece | Responsibility |
+|---|---|
+| `NextSlotPreparation<P>` (`NextSlotPreparation.kt`) | Owns ONLY NEXT's media lifecycle: one requested key, a monotonic token, the explicit state, prepare B alone, graft, physical READY/error observation, invalidate/reset. Drives the NEXT physical only; never CURRENT, the façade, focus, volume, session or queue planning. Owned by `PlayerEngine.nextPreparation`. |
+| `NextSlotRequest` | Immutable: key + the FULL playback-order `List<MediaItem>` of one generation + the repeat mode to mirror. Validates target/source indices. |
+| `NextSlotPreparationDriver` | The "when": a main-looper poll at the existing `PRE_FADE_POLL_INTERVAL_MS` (250 ms) plus the synchronous cancel hook. Captures ONE snapshot per pulse and materializes that snapshot's own `playbackQueue`, so target selection and graft describe the same generation. Idempotent per key. |
+| `CrossfadeCancelSink` | One-method interface now implemented by the legacy `CrossfadePreparationRuntime` AND the driver. All 17 `recoverCrossfadeFrom...` functions take `CrossfadeCancelSink?` (source-compatible for existing callers). `PlaybackService` routes every call through one `crossfadeCancelSink` that ends whichever owner exists. No second set of mutation hooks. |
+| `PlayerController.materializePlaybackMediaItemsForCrossfade(songs)` | Read-only: same media-item representation and cache as CURRENT; no queue mutation, generation bump, stats, persistence or controller command. |
+
+**State model:** `Idle`, `PreparingTarget(key, token)`, `TargetReady`, `Grafting`, `Ready(key, token)`, `Failed(key, reason)`. `TargetReady` is transient and synchronous with the READY observation; `Grafting` now spans multiple looper turns (progress: phase, before/after inserted, verified) and is never usable. Failure reasons: `PrepareError`, `EndedBeforeReady`, `GraftError`,
+`TimelineMismatch`. Only `Ready` is usable by promotion (CF-2M5).
+
+**Preparation trigger:** the driver's poll evaluates the existing plan every 250 ms while the persisted crossfade duration is enabled (started and
+stopped by `applyNextSlotConfiguredDurationChange`, the NEXT-slot analogue of the CF-2E2 policy). The first evaluation that finds an eligible, exact,
+playing A -> B transition requests preparation. That is as soon as the transition exists, **not** at the fade-start instant, so a large graft happens
+long before it is needed. Fade timing is not changed.
+
+**Target-first sequence:** reset NEXT to inert -> `setMediaItem(B)` (B only) -> `playWhenReady` stays false -> `prepare()` -> wait for READY -> graft.
+The full queue is never installed first with a seek to B.
+
+**Graft (chunked across looper turns):** the READY callback turn does no insertion; it moves to `Grafting` and posts the first turn. Each turn does ONE bounded
+unit on the NEXT player's application looper (a `Handler` post; never a background thread), then yields:
+(1) BEFORE phase: chunk k of `queue[0 until to]` is `addMediaItems(beforeInserted, chunk)`, i.e. inserted at a growing index immediately before B (which shifts right).
+Inserting every chunk at index 0 would reverse the chunk order; this forward-at-growing-index form keeps the original order and is asserted exactly
+(`addMediaItems(0,256)`, `(256,256)`, `(512,88)`...). (2) AFTER phase: chunks of `queue[to+1 until end]` are appended in order. (3) VERIFY phase: per-index `mediaId`
+diagnostics in slices of `VERIFY_SLICE_SIZE` (1,024), then the final checks. Only the final successful verification sets `Ready`; a partially grafted NEXT is
+`Grafting` and never usable. After the last chunk the repeat mode is mirrored (Media3 shuffle is never enabled; WavDrop's logical `playbackOrder` stays authoritative).
+Final checks (fail closed to `Failed(TimelineMismatch)`): `mediaItemCount == queue.size`, `currentMediaItemIndex == toPlaybackIndex`, `playWhenReady == false`, and
+per-index `mediaId` equality (diagnostic only; identity is positional). Before every chunk the turn also checks that NEXT still holds exactly `1 + beforeInserted + afterInserted`
+items with B at `beforeInserted` (an external timeline change fails closed).
+
+**Chunk size:** `NextSlotPreparation.GRAFT_CHUNK_SIZE = 256`. Evidence (real Media3, production `DefaultMediaSourceFactory`, JVM, median): one insertion of 64/128/256/512/1,024/2,048/4,000 items
+into a small playlist costs 0.38/0.46/0.83/1.19/2.30/4.09/8.94 ms (about 2-3 us/item). 256 was selected because these JVM measurements typically keep individual insertions small while limiting a 12,288-item queue to 48 insertion turns. In the graft runs a typical chunk was roughly 1-5 ms on the JVM (each insertion
+re-derives Media3's playlist timeline, so a chunk's cost rises mildly with the current playlist size), with occasional larger outliers (about 49 ms at most in the 12,288-item run, possibly GC-related but not isolated). This is not a frame-budget or
+device-performance guarantee; no physical device was tested, and CF-2M7 must validate physical jank/GC behaviour.
+
+**Stale-work protection:** every scheduled turn is bound to the attempt token and, before touching the player, checks: owner not released, token unchanged, state is `Grafting` for that same
+token, and the attempt's player is still the engine's NEXT player (a mismatch invalidates). Independently, invalidation, supersession, failure and `release()` call the scheduler's `cancelAll()`
+(`Handler.removeCallbacksAndMessages`), so no pending turn holds the player or service after closure; the token check makes any survivor inert. Progress counters live in the attempt object,
+so a superseded graft can never contaminate the next request. The same cancellation is reached by the shared `CrossfadeCancelSink`, driver `close()`, the configuration-disable policy and
+engine release. A chunk that throws fails only this preparation (`GraftError`): remaining turns cancelled, NEXT reset to inert, CURRENT and the façade untouched.
+
+**Proven on a real ExoPlayer (including a multi-chunk graft of 1,800 items, 8 chunks):** after the graft B keeps the same physical window uid, the player emits **no** position discontinuity, **no** media-item
+transition and never leaves READY/BUFFERING; `currentPosition` stays 0; the index shifts to `toPlaybackIndex`; the timeline order equals the logical queue;
+no seek command is issued. Boundary targets (first, last) and repeat OFF/ALL mirroring pass. Duplicate-heavy `[A, B, A, B, A]` queues keep the exact
+later occurrence by position for every target index (real player and scripted player).
+
+**Staleness / supersession:** same key while Preparing/Ready/Failed is a no-op (no duplicate prepare, no retry storm for a Failed key). A different key
+invalidates first and takes a fresh token. Physical callbacks arrive through a per-attempt observer carrying its token; a stale token does nothing, and an ended
+attempt's observer is removed. A READY additionally must agree with the live physical facts (READY, one item, paused) before it grafts.
+
+**Failure:** transition-local. CURRENT continues untouched (no command, no seek, no queue change), NEXT returns to inert, the façade sees no error event,
+nothing is skipped. A bounded `lastFailure` is recorded.
+
+**Invalidation (result of any cancel):** `Idle`, token dead, NEXT stopped, emptied, paused and repeat OFF; CURRENT, the façade and the logical queue untouched; no
+logical event. Covered through the shared sink: playback error, explicit pause, seek, next/previous, repeat, shuffle, play-next, add-to-queue, reorder, removal,
+library deletion, whole-queue replacement, adopted resumption, terminal primary state, controller disconnect, audio-focus/route interruption, EQ enabled. The
+driver also re-checks ownership each poll (generation change, current index change, repeat no longer resolving the key's target, controller loss, ineligible plan).
+A natural advance of CURRENT supersedes the old key with the next occurrence. The role-swap test seam ends preparation before roles move.
+
+**Isolation unchanged from CF-2M3:** NEXT never requests focus, changes the duck state, registers a noisy receiver or changes the session id (asserted before and after
+prepare + graft); `SessionFacade` still delegates CURRENT and listens only to CURRENT; no third player; gate false builds the single shipping player and none of this.
+Source guards assert the preparation code contains no `play`, `seekTo`, role swap, façade, focus or volume access and that production never swaps roles.
+
+
+**Large-queue measurement (chunked graft)** (real ExoPlayer, Robolectric JVM; median of several runs; **not device latency**; a `WavdropQueuePerf`-style `next_graft` line is available through the engine's `nextSlotPerfLog`). Production-factory variant (every item except B is built by Media3's real `DefaultMediaSourceFactory`):
+
+| Queue size | chunks | total graft completion (ms, includes yields) | typical (median) chunk (ms) | max single chunk (ms) | verify total (ms) |
+|---|---|---|---|---|---|
+| 2 | 1 | 2.25 | 1.06 | 1.06 | 0.02 |
+| 10 | 2 | 4.40 | 1.58 | 1.58 | 0.03 |
+| 100 | 2 | 5.67 | 2.21 | 2.21 | 0.10 |
+| 1,000 | 4 | 27.40 | 6.85 | 7.45 | 0.59 |
+| 5,000 | 20 | 103.54 | 4.57 | 6.31 | 2.49 |
+| 12,288 | 48 | 349.31 | 3.09 | 49.23 | 5.63 |
+
+Trackless-source variant: 1,000 = 5.36 ms total / 1.89 max chunk / 4 chunks; 5,000 = 28.60 / 3.23 / 20; 12,288 = 146.93 / 30.15 / 48. Size 1 is not a valid transition (QueueTooShort); the smallest measured queue is 2.
+Each chunk is bounded to 256 insertions (asserted from the recorded `addMediaItems` calls), so no single Media3 insertion performs the whole 5k/12k mutation (before chunking: 71.6 ms at 5,000 and ~160 ms at 12,288 in one turn).
+The 12,288 per-chunk series is 1-6 ms for almost every chunk, rising mildly with playlist size, with a few isolated outliers (about 30-50 ms) whose positions differ between runs and variants; they look like JVM garbage-collection pauses rather than a
+chunk-size effect, but that was not isolated. Total completion time is larger than the unchunked 100-160 ms because the work yields and each insertion re-derives the timeline for the current playlist (about O(items x chunks)); the cost is paid once,
+early, off the fade-start critical path. Scaling stays roughly linear in the cache bound (12,288/1,000 total ratio well below the ~151 of a quadratic).
+
+**Verdict: GRAFT ACCEPTABLE FOR M5 with chunked insertion.** Chunked graft stays the selected design; a persistent mirror is not required.
+
+**Residual limits:** real-device decoding, large real files, GC behaviour and device main-thread jank are CF-2M7 evidence. The real-player tests use a codec-free source.
+
+**Remaining for CF-2M5:** start the already-prepared B (guard on `Ready` + exact key + live ownership), promote (role swap + façade `replaceDelegate` with AUTO presentation),
+overlap gain execution composed with the duck multiplier, tail strip / fade-end margin, retire and recycle the old CURRENT, and stats/persistence parity at promotion.

@@ -660,6 +660,7 @@ items are validated.
    g. CF-2M1 promotable dual-player architecture feasibility (design only, proposed; gate unchanged): `docs/architecture/CROSSFADE-PROMOTION-FEASIBILITY.md`.
       CF-2M2 stable session facade parity spike (single physical player, gate-bound, verified by JVM/Robolectric tests; no device): see the same document, section 25.
       CF-2M3 two-slot PlayerEngine ownership foundation (two physical players, one focus/noisy/session-id owner, gate-bound, NEXT inert; JVM/Robolectric only, no device): see the same document, section 26.
+      CF-2M4 NEXT-slot preparation + occurrence-safe queue graft (prepare B alone, graft the queue around it, invalidate through the shared cancellation point; gate-bound, never starts B; JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 27.
    h. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 

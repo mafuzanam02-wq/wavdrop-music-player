@@ -204,7 +204,7 @@ internal class CrossfadePreparationRuntime(
     private val primaryAudioSessionId: () -> Int = { 0 },
     private val audioSessionObserver: CrossfadeAudioSessionObserver = CrossfadeAudioSessionObserver.NoOp,
     private val naturalHandoff: CrossfadeNaturalHandoffSeams? = null,
-) {
+) : CrossfadeCancelSink {
     private val primaryGain = CrossfadePrimaryGainController(primaryGainBackend)
 
     var state: CrossfadeState = CrossfadeState.Idle
@@ -1000,7 +1000,7 @@ internal class CrossfadePreparationRuntime(
     }
 
     /** Synchronous cancellation from the owner of playback state. Harmless when idle. */
-    fun cancel(reason: CrossfadeCancelReason) {
+    override fun cancel(reason: CrossfadeCancelReason) {
         if (closed) return
         carryNaturalPositionBeforePauseCleanup(reason)
         cancel(reason, snapshotProvider())

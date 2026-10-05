@@ -44,6 +44,8 @@ internal class PlayerEngine<P : Player>(
     audioAttributes: AudioAttributes,
     handleAudioBecomingNoisy: Boolean = true,
     private val releasePlayer: (P) -> Unit = { it.release() },
+    nextSlotPerfLog: ((String) -> Unit)? = null,
+    nextSlotGraftScheduler: NextSlotGraftScheduler? = null,
 ) {
     private val appContext: Context = context.applicationContext ?: context
     private val table: PlayerSlotTable<P>
@@ -72,6 +74,12 @@ internal class PlayerEngine<P : Player>(
 
     /** The ONE stable session-facing player. Its delegate is CURRENT. */
     val facade: SessionFacade = SessionFacade(first)
+
+    /**
+     * CF-2M4: the ONLY owner of NEXT's media lifecycle (prepare B alone, graft, invalidate). It drives the NEXT physical
+     * player only; it never starts it, promotes it, requests focus or touches the façade.
+     */
+    val nextPreparation: NextSlotPreparation<P> = NextSlotPreparation({ nextPlayer }, nextSlotPerfLog, nextSlotGraftScheduler)
 
     // ── logical play-when-ready state (the façade presents it) ────────────────────────────────────────────────────────────
 
@@ -258,6 +266,8 @@ internal class PlayerEngine<P : Player>(
     @VisibleForTesting
     internal fun swapRolesForTest() {
         check(!released) { "engine released" }
+        // NEXT's preparation belongs to the NEXT physical of the OLD roles: end it before the roles move.
+        nextPreparation.invalidate(null)
         val oldCurrent = currentPlayer
         table.swapRoles()
         oldCurrent.removeListener(currentObserver)
@@ -273,6 +283,7 @@ internal class PlayerEngine<P : Player>(
         if (released) return
         released = true
         unregisterNoisyReceiver()
+        nextPreparation.release()
         currentPlayer.removeListener(currentObserver)
         focus.release()
         focusReleaseCount++

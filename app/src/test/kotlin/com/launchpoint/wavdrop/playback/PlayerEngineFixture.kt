@@ -18,6 +18,7 @@ internal const val SHARED_SESSION_ID = 4242
 internal class PlayerEngineFixture(
     noisy: Boolean = true,
     context: Context = RuntimeEnvironment.getApplication(),
+    graftScheduler: NextSlotGraftScheduler? = null,
 ) {
     val p1 = ScriptedPlayer("P1", titles = listOf("A", "B"), playing = false, state = Player.STATE_READY, audioSessionId = SHARED_SESSION_ID)
     val p2 = ScriptedPlayer("P2", titles = emptyList(), playing = false, state = Player.STATE_IDLE, audioSessionId = SHARED_SESSION_ID)
@@ -31,10 +32,42 @@ internal class PlayerEngineFixture(
         audioAttributes = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
         handleAudioBecomingNoisy = noisy,
         releasePlayer = { releases += it.name },
+        nextSlotGraftScheduler = graftScheduler,
     )
     val facade: SessionFacade get() = engine.facade
 
     val events = EventRecorder().also { engine.facade.addListener(it) }
 
     init { idleMainLooper() }
+}
+
+/**
+ * CF-2M4 correction: a manual looper-turn scheduler so a test can step the chunked graft one turn at a time, observe progress
+ * between turns, invalidate at an exact point, and then deliberately run a STALE turn that survived (see [snapshot]).
+ */
+internal class ManualGraftScheduler : NextSlotGraftScheduler {
+    private val turns = ArrayDeque<() -> Unit>()
+    var cancelCalls = 0
+        private set
+
+    val pending: Int get() = turns.size
+
+    override fun post(block: () -> Unit) { turns.addLast(block) }
+
+    override fun cancelAll() { cancelCalls++; turns.clear() }
+
+    /** Runs exactly one pending turn; false when none. */
+    fun runNext(): Boolean {
+        val turn = turns.removeFirstOrNull() ?: return false
+        turn()
+        return true
+    }
+
+    fun runAll(maxTurns: Int = 100_000) {
+        var n = 0
+        while (runNext()) check(++n < maxTurns) { "graft did not terminate" }
+    }
+
+    /** Copies the pending turns so a test can run them AFTER a cancellation (the token guard must make them inert). */
+    fun snapshot(): List<() -> Unit> = turns.toList()
 }

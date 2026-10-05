@@ -77,6 +77,15 @@ class PlaybackService : MediaLibraryService() {
     private var playbackAssembly: PlaybackAssembly? = null
     private var crossfadePreparation: CrossfadePreparationRuntime? = null
     private var crossfadeTimingDriver: CrossfadeTimingDriver? = null
+    // CF-2M4: gate true only. Decides when the engine NEXT slot is prepared; never starts B. Null with the gate false.
+    private var nextSlotDriver: NextSlotPreparationDriver? = null
+
+    // CF-2M4: the ONE explicit-cancellation lifecycle point. Every recoverCrossfadeFrom... call goes through it and it ends
+    // whichever owner exists (the legacy CF-2L runtime, never built now, and the engine NEXT preparation).
+    private val crossfadeCancelSink = CrossfadeCancelSink { reason ->
+        crossfadePreparation?.cancel(reason)
+        nextSlotDriver?.cancel(reason)
+    }
     // CF-2E2: main-thread cached, already-normalized persisted duration read synchronously by the driver provider.
     private var crossfadeConfiguredDurationMs: Long = CrossfadeRules.OFF_MS
     // CF-2I2: cached EQ-enabled compatibility fact for the crossfade snapshot (conservative default = persisted default).
@@ -183,6 +192,18 @@ class PlaybackService : MediaLibraryService() {
             crossfadeTimingDriver = graph.timingDriver
             // Intentionally no start() here: only the activation policy (initial-enabled / OFF->enabled) starts it.
         }
+        assembly.engine?.let { engine ->
+            // CF-2M4: NEXT preparation owner. Reuses the existing plan/key/ownership rules; started by the same persisted-duration
+            // activation policy below. Nothing starts or promotes B.
+            nextSlotDriver = NextSlotPreparationDriver(
+                preparation = engine.nextPreparation,
+                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerEnabled) },
+                materialize = { songs -> playerController.materializePlaybackMediaItemsForCrossfade(songs) },
+                configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
+                currentDurationMsProvider = { usableCrossfadePrimaryDuration(engine.currentPlayer.duration) },
+                scheduler = MainLooperCrossfadeTimingScheduler(),
+            )
+        }
         // CF-2E2: persisted duration -> cached value + explicit driver lifecycle policy. A persisted value is NOT
         // rollout permission: with the hard gate false there is no graph, so this only updates the cache.
         serviceScope.launch {
@@ -193,6 +214,7 @@ class PlaybackService : MediaLibraryService() {
                     crossfadeConfiguredDurationMs = duration
                     if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) {
                         applyCrossfadeConfiguredDurationChange(previous, duration, crossfadePreparation, crossfadeTimingDriver)
+                        applyNextSlotConfiguredDurationChange(previous, duration, nextSlotDriver)
                     }
                     lastObservedCrossfadeDurationMs = duration
                 }
@@ -206,32 +228,32 @@ class PlaybackService : MediaLibraryService() {
                     val previous = crossfadeEqualizerEnabled
                     crossfadeEqualizerEnabled = enabled
                     if (shouldCancelCrossfadeForEqualizerChange(previous, enabled)) {
-                        recoverCrossfadeFromEqualizerEnabled(crossfadePreparation)
+                        recoverCrossfadeFromEqualizerEnabled(crossfadeCancelSink)
                     }
                 }
         }
         // CF-2G2: app UI position seeks notify this lifecycle-scoped callback (cleared in onDestroy).
-        playerController.setExplicitSeekListener { recoverCrossfadeFromExplicitSeek(crossfadePreparation) }
+        playerController.setExplicitSeekListener { recoverCrossfadeFromExplicitSeek(crossfadeCancelSink) }
         // CF-2G3: app skipToNext/skipToPrevious notify this lifecycle-scoped callback (cleared in onDestroy).
-        playerController.setExplicitNavigationListener { recoverCrossfadeFromExplicitNavigation(crossfadePreparation) }
+        playerController.setExplicitNavigationListener { recoverCrossfadeFromExplicitNavigation(crossfadeCancelSink) }
         // CF-2H1: app cycleRepeatMode notifies this lifecycle-scoped callback (cleared in onDestroy).
-        playerController.setExplicitRepeatChangeListener { recoverCrossfadeFromRepeatChange(crossfadePreparation) }
+        playerController.setExplicitRepeatChangeListener { recoverCrossfadeFromRepeatChange(crossfadeCancelSink) }
         // CF-2H2: app toggleShuffle (UI and custom notification command) notifies this callback (cleared in onDestroy).
-        playerController.setExplicitShuffleChangeListener { recoverCrossfadeFromShuffleChange(crossfadePreparation) }
+        playerController.setExplicitShuffleChangeListener { recoverCrossfadeFromShuffleChange(crossfadeCancelSink) }
         // CF-2H3A: explicit playNext/playAllNext/moveToPlayNext notify this callback (cleared in onDestroy).
-        playerController.setExplicitPlayNextMutationListener { recoverCrossfadeFromPlayNextMutation(crossfadePreparation) }
+        playerController.setExplicitPlayNextMutationListener { recoverCrossfadeFromPlayNextMutation(crossfadeCancelSink) }
         // CF-2H3B: explicit addToQueue/addAllToQueue notify this callback (cleared in onDestroy).
-        playerController.setExplicitAddToQueueMutationListener { recoverCrossfadeFromAddToQueueMutation(crossfadePreparation) }
+        playerController.setExplicitAddToQueueMutationListener { recoverCrossfadeFromAddToQueueMutation(crossfadeCancelSink) }
         // CF-2H3C: explicit moveQueueItemUp/Down/To notify this callback (cleared in onDestroy).
-        playerController.setExplicitQueueReorderListener { recoverCrossfadeFromQueueReorder(crossfadePreparation) }
+        playerController.setExplicitQueueReorderListener { recoverCrossfadeFromQueueReorder(crossfadeCancelSink) }
         // CF-2H3D: explicit removeFromQueue/clearEarlierQueue/clearUpNext notify this callback (cleared in onDestroy).
-        playerController.setExplicitQueueRemovalListener { recoverCrossfadeFromQueueRemoval(crossfadePreparation) }
+        playerController.setExplicitQueueRemovalListener { recoverCrossfadeFromQueueRemoval(crossfadeCancelSink) }
         // CF-2H3E: handleSongDeleted notifies this callback (cleared in onDestroy).
-        playerController.setExplicitLibraryDeletionListener { recoverCrossfadeFromLibraryDeletion(crossfadePreparation) }
+        playerController.setExplicitLibraryDeletionListener { recoverCrossfadeFromLibraryDeletion(crossfadeCancelSink) }
         // CF-2H3F: explicit whole-queue playback starts notify this callback (cleared in onDestroy).
-        playerController.setExplicitQueueReplacementListener { recoverCrossfadeFromQueueReplacement(crossfadePreparation) }
+        playerController.setExplicitQueueReplacementListener { recoverCrossfadeFromQueueReplacement(crossfadeCancelSink) }
         // CF-2F4: an authoritative MediaController disconnect notifies this callback (cleared in onDestroy).
-        playerController.setControllerDisconnectedListener { recoverCrossfadeFromControllerDisconnected(crossfadePreparation) }
+        playerController.setControllerDisconnectedListener { recoverCrossfadeFromControllerDisconnected(crossfadeCancelSink) }
         // CF-2M2: physical ExoPlayer -> SessionFacade -> PreviousBehaviorPlayer -> MediaLibrarySession. The façade is bound
         // ONLY behind the single rollout gate (no second flag): with the gate false (shipping) the chain is exactly the
         // pre-CF-2M2 ExoPlayer -> PreviousBehaviorPlayer, so shipping behaviour and rollback surface are unchanged. The
@@ -248,10 +270,10 @@ class PlaybackService : MediaLibraryService() {
             songsProvider = { songRepository.songs.first() },
             logResume = ::logResume,
             sessionProvider = { mediaSession },
-            onExplicitPause = { recoverCrossfadeFromExplicitPause(crossfadePreparation) },
-            onExplicitSeek = { recoverCrossfadeFromExplicitSeek(crossfadePreparation) },
-            onExplicitNavigation = { recoverCrossfadeFromExplicitNavigation(crossfadePreparation) },
-            onExplicitRepeatChange = { recoverCrossfadeFromRepeatChange(crossfadePreparation) },
+            onExplicitPause = { recoverCrossfadeFromExplicitPause(crossfadeCancelSink) },
+            onExplicitSeek = { recoverCrossfadeFromExplicitSeek(crossfadeCancelSink) },
+            onExplicitNavigation = { recoverCrossfadeFromExplicitNavigation(crossfadeCancelSink) },
+            onExplicitRepeatChange = { recoverCrossfadeFromRepeatChange(crossfadeCancelSink) },
             // CF-2L3: DEBUG-only evidence of REAL transport commands (distinct from Media3 state changes caused by seeking/buffering).
             transportLog = if (BuildConfig.DEBUG) { message -> Log.d(CROSSFADE_TAG, message) } else null,
             crossfadeSummary = { formatCrossfadeSettlementSummary(crossfadePreparation?.settlementSnapshot()) },
@@ -291,19 +313,19 @@ class PlaybackService : MediaLibraryService() {
             // crossfade (key-less). PlayerController keeps owning bad-media queue recovery; the timing driver is
             // neither stopped nor restarted here.
             override fun onPlayerError(error: PlaybackException) {
-                recoverCrossfadeFromPrimaryPlaybackError(crossfadePreparation)
+                recoverCrossfadeFromPrimaryPlaybackError(crossfadeCancelSink)
             }
 
             // CF-2F5: Media3-authoritative interruption signals only (never generic isPlaying == false, never buffering).
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (classifyPrimaryPlayWhenReadyInterruption(playWhenReady, reason) != PrimaryPlaybackInterruption.None) {
-                    recoverCrossfadeFromPrimaryInterruption(crossfadePreparation)
+                    recoverCrossfadeFromPrimaryInterruption(crossfadeCancelSink)
                 }
             }
 
             override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
                 if (classifyPrimarySuppressionInterruption(playbackSuppressionReason) != PrimaryPlaybackInterruption.None) {
-                    recoverCrossfadeFromPrimaryInterruption(crossfadePreparation)
+                    recoverCrossfadeFromPrimaryInterruption(crossfadeCancelSink)
                 }
             }
 
@@ -316,7 +338,7 @@ class PlaybackService : MediaLibraryService() {
                 logCrossfadePrimaryState(player, "PRIMARY_STATE playbackState=$playbackState")
                 // CF-2F2: synchronous, before any asynchronous widget work. BUFFERING and READY never cancel.
                 if (isPrimaryTerminalPlaybackState(playbackState)) {
-                    recoverCrossfadeFromPrimaryTerminalState(crossfadePreparation)
+                    recoverCrossfadeFromPrimaryTerminalState(crossfadeCancelSink)
                 }
                 // CF-2L1: READY is real readiness evidence for a pending natural handoff (inert when none is pending).
                 if (playbackState == Player.STATE_READY) advanceCrossfadeHandoff(crossfadePreparation)
@@ -494,6 +516,8 @@ class PlaybackService : MediaLibraryService() {
         // CF-2E1: invalidate timing callbacks first (the driver owns them), then CF-2C6: restore any crossfade-lowered
         // primary gain while the primary player is still alive, then
         // release the secondary. Must precede the primary player release below.
+        nextSlotDriver?.close()
+        nextSlotDriver = null
         closeCrossfadeGraph(crossfadeTimingDriver, crossfadePreparation)
         crossfadeTimingDriver = null
         crossfadePreparation = null
@@ -616,7 +640,7 @@ class PlaybackService : MediaLibraryService() {
                             // CF-2H3G: cancel only when this resumption will really be adopted (Ready + isForPlayback),
                             // before the generation bump and queue replacement. Queries, Unavailable and failures never cancel.
                             if (shouldCancelCrossfadeForPlaybackResumption(resultReady = true, isForPlayback = isForPlayback)) {
-                                recoverCrossfadeFromPlaybackResumption(crossfadePreparation)
+                                recoverCrossfadeFromPlaybackResumption(crossfadeCancelSink)
                             }
                             if (isForPlayback) {
                                 playerController.adoptPlaybackResumption(plan)

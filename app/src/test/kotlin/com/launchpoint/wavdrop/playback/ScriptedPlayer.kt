@@ -1,6 +1,7 @@
 package com.launchpoint.wavdrop.playback
 
 import android.os.Looper
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -52,13 +53,80 @@ internal class ScriptedPlayer(
 
     override fun handlePrepare(): ListenableFuture<*> {
         commands += "$name.prepare()"
+        // A real player goes IDLE -> BUFFERING on prepare (only with something to prepare); the test then calls [becomeReady].
+        if (current.playbackState == Player.STATE_IDLE && current.playlist.isNotEmpty()) {
+            current = current.buildUpon().setPlayerError(null).setPlaybackState(Player.STATE_BUFFERING).build()
+        }
         return Futures.immediateVoidFuture()
     }
 
     override fun handleStop(): ListenableFuture<*> {
         commands += "$name.stop()"
+        current = current.buildUpon().setPlaybackState(Player.STATE_IDLE).build()
         return Futures.immediateVoidFuture()
     }
+
+    // ── playlist commands (CF-2M4): stable per-item uids, so an item's physical identity survives inserts around it ──
+
+    private fun newItemData(item: MediaItem) = MediaItemData.Builder(Any())
+        .setMediaItem(item)
+        .setDurationUs(180_000_000L)
+        .setIsSeekable(true)
+        .build()
+
+    override fun handleSetMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<*> {
+        commands += "$name.setMediaItems(${mediaItems.size})"
+        current = current.buildUpon()
+            .setPlaylist(mediaItems.map(::newItemData))
+            .setCurrentMediaItemIndex(if (startIndex == C.INDEX_UNSET) 0 else startIndex)
+            .setContentPositionMs(if (startPositionMs == C.TIME_UNSET) 0L else startPositionMs)
+            .build()
+        return Futures.immediateVoidFuture()
+    }
+
+    /** Makes every playlist insertion throw (graft-chunk failure tests). */
+    var throwOnAdd = false
+
+    override fun handleAddMediaItems(index: Int, mediaItems: MutableList<MediaItem>): ListenableFuture<*> {
+        if (throwOnAdd) throw IllegalStateException("scripted add failure")
+        commands += "$name.addMediaItems($index,${mediaItems.size})"
+        val playlist = current.playlist.toMutableList().also { it.addAll(index, mediaItems.map(::newItemData)) }
+        // Media3 semantics modelled here (and proven on a REAL ExoPlayer in NextSlotGraftTest): inserting at or before the
+        // current item shifts the current index; the current item and its position are unchanged.
+        val shifted = if (index <= current.currentMediaItemIndex && current.playlist.isNotEmpty()) {
+            current.currentMediaItemIndex + mediaItems.size
+        } else {
+            current.currentMediaItemIndex
+        }
+        current = current.buildUpon().setPlaylist(playlist).setCurrentMediaItemIndex(shifted).build()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> {
+        commands += "$name.removeMediaItems($fromIndex,$toIndex)"
+        val playlist = current.playlist.toMutableList().also { it.subList(fromIndex, toIndex).clear() }
+        val removedBeforeCurrent = (minOf(toIndex, current.currentMediaItemIndex) - fromIndex).coerceAtLeast(0)
+        val builder = current.buildUpon().setPlaylist(playlist)
+            .setCurrentMediaItemIndex((current.currentMediaItemIndex - removedBeforeCurrent).coerceIn(0, maxOf(0, playlist.size - 1)))
+        if (playlist.isEmpty()) builder.setCurrentMediaItemIndex(0).setPlaybackState(Player.STATE_IDLE).setContentPositionMs(0L)
+        current = builder.build()
+        return Futures.immediateVoidFuture()
+    }
+
+    /** The scripted physical player finished preparing (BUFFERING -> READY). */
+    fun becomeReady() = mutate { setPlaybackState(Player.STATE_READY) }
+
+    /** The scripted physical player reports a playback error (and goes IDLE, like ExoPlayer). */
+    fun failWith(errorCode: Int = PlaybackException.ERROR_CODE_IO_UNSPECIFIED) = mutate {
+        setPlayerError(PlaybackException("scripted", null, errorCode))
+        setPlaybackState(Player.STATE_IDLE)
+    }
+
+    /** The mediaIds currently in the playlist, in order. */
+    val mediaIds: List<String> get() = (0 until mediaItemCount).map { getMediaItemAt(it).mediaId }
+
+    /** The physical uid of the item at [index] (identity of that physical decode). */
+    fun uidAt(index: Int): Any = current.playlist[index].uid
 
     override fun handleRelease(): ListenableFuture<*> {
         commands += "$name.release()"

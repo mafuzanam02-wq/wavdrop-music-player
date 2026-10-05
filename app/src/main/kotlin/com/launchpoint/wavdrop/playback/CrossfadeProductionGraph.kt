@@ -11,6 +11,15 @@ internal fun crossfadePrimaryReconciler(
     reconcile: (CrossfadeTransitionKey, SecondaryHandoffSnapshot) -> CrossfadePrimaryReconciliationResult,
 ): CrossfadePrimaryReconciler = CrossfadePrimaryReconciler { key, snapshot -> reconcile(key, snapshot) }
 
+/**
+ * CF-2M4: the one synchronous "explicit cancellation" lifecycle point. Every `recoverCrossfadeFrom...` family function ends
+ * here. The legacy CF-2L runtime and the CF-2M NEXT-slot preparation both implement it, so one hook invalidates whichever
+ * owner exists (a null sink, i.e. nothing built, is a no-op).
+ */
+internal fun interface CrossfadeCancelSink {
+    fun cancel(reason: CrossfadeCancelReason)
+}
+
 /** The service-owned runtime plus the (never started here) timing driver built against that exact runtime. */
 internal class CrossfadeProductionGraph(
     val runtime: CrossfadePreparationRuntime,
@@ -87,7 +96,7 @@ internal fun closeCrossfadeGraph(driver: CrossfadeTimingDriver?, runtime: Crossf
  * the secondary; Idle is harmless). The timing driver is deliberately left alone: activation belongs to the
  * persisted-duration policy and bad-media queue recovery stays with PlayerController. A null runtime (gate false) is a no-op.
  */
-internal fun recoverCrossfadeFromPrimaryPlaybackError(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromPrimaryPlaybackError(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(CrossfadeCancelReason.PlaybackError)
 }
 
@@ -97,7 +106,7 @@ internal fun recoverCrossfadeFromPrimaryPlaybackError(runtime: CrossfadePreparat
  * gain. Same runtime-owned cleanup as other cancellations; the timing driver is left running and a null runtime
  * (gate false) is a no-op. Deliberately not wired to onIsPlayingChanged (that can fire for non-user reasons).
  */
-internal fun recoverCrossfadeFromExplicitPause(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromExplicitPause(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(CrossfadeCancelReason.Pause)
 }
 
@@ -107,7 +116,7 @@ internal fun recoverCrossfadeFromExplicitPause(runtime: CrossfadePreparationRunt
  * reconciliation) or other internal app-controller seeks. Uses [CrossfadeCancelReason.Seek]; ManualNavigation is
  * reserved for next/previous. The timing driver is left running; a null runtime (gate false) is a no-op.
  */
-internal fun recoverCrossfadeFromExplicitSeek(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromExplicitSeek(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(CrossfadeCancelReason.Seek)
 }
 
@@ -118,7 +127,7 @@ internal fun recoverCrossfadeFromExplicitSeek(runtime: CrossfadePreparationRunti
  * Not used for bad-media recovery or natural transitions. The timing driver is left running; a null runtime (gate
  * false) is a no-op.
  */
-internal fun recoverCrossfadeFromExplicitNavigation(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromExplicitNavigation(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(CrossfadeCancelReason.ManualNavigation)
 }
 
@@ -131,7 +140,7 @@ internal val REPEAT_CHANGE_CANCEL_REASON = CrossfadeCancelReason.RepeatChanged
  * invalidate the planned target); the runtime's own `crossfadeOwnershipLossReason` stays as the defensive fallback.
  * The timing driver is left running; a null runtime (gate false) is a no-op.
  */
-internal fun recoverCrossfadeFromRepeatChange(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromRepeatChange(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(REPEAT_CHANGE_CANCEL_REASON)
 }
 
@@ -144,7 +153,7 @@ internal val SHUFFLE_CHANGE_CANCEL_REASON = CrossfadeCancelReason.ShuffleChanged
  * Native Media3 shuffle attempts (reasserted off) are not a logical shuffle and never reach this. The runtime's generation
  * check (`QueueMutation`) stays as the defensive fallback. The timing driver is left running; a null runtime is a no-op.
  */
-internal fun recoverCrossfadeFromShuffleChange(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromShuffleChange(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(SHUFFLE_CHANGE_CANCEL_REASON)
 }
 
@@ -158,7 +167,7 @@ internal val PLAY_NEXT_MUTATION_CANCEL_REASON = CrossfadeCancelReason.QueueMutat
  * yields one cancel. The runtime's generation check (also `QueueMutation`) stays as the defensive fallback. The timing
  * driver is left running; a null runtime is a no-op.
  */
-internal fun recoverCrossfadeFromPlayNextMutation(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromPlayNextMutation(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(PLAY_NEXT_MUTATION_CANCEL_REASON)
 }
 
@@ -172,7 +181,7 @@ internal val ADD_TO_QUEUE_MUTATION_CANCEL_REASON = CrossfadeCancelReason.QueueMu
  * seam), so one command yields one cancel. The runtime generation check stays as the defensive fallback. The timing
  * driver is left running; a null runtime is a no-op.
  */
-internal fun recoverCrossfadeFromAddToQueueMutation(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromAddToQueueMutation(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(ADD_TO_QUEUE_MUTATION_CANCEL_REASON)
 }
 
@@ -186,7 +195,7 @@ internal val QUEUE_REORDER_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
  * command yields one cancel. The runtime generation check stays as the defensive fallback. The timing driver is left
  * running; a null runtime is a no-op.
  */
-internal fun recoverCrossfadeFromQueueReorder(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromQueueReorder(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(QUEUE_REORDER_CANCEL_REASON)
 }
 
@@ -201,7 +210,7 @@ internal val QUEUE_REMOVAL_CANCEL_REASON = CrossfadeCancelReason.QueueMutation
  * The runtime generation check stays as the defensive fallback. The timing driver is left running; a null runtime is a
  * no-op.
  */
-internal fun recoverCrossfadeFromQueueRemoval(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromQueueRemoval(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(QUEUE_REMOVAL_CANCEL_REASON)
 }
 
@@ -217,7 +226,7 @@ internal val LIBRARY_DELETION_CANCEL_REASON = CrossfadeCancelReason.QueueMutatio
  * cancel. The runtime generation check stays as the defensive fallback. The timing driver is left running; a null
  * runtime is a no-op.
  */
-internal fun recoverCrossfadeFromLibraryDeletion(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromLibraryDeletion(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(LIBRARY_DELETION_CANCEL_REASON)
 }
 
@@ -232,7 +241,7 @@ internal val QUEUE_REPLACEMENT_CANCEL_REASON = CrossfadeCancelReason.QueueMutati
  * start a queue use those internals and keep their own seam, so one user command yields one cancel. The runtime
  * generation check stays as the defensive fallback. The timing driver is left running; a null runtime is a no-op.
  */
-internal fun recoverCrossfadeFromQueueReplacement(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromQueueReplacement(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(QUEUE_REPLACEMENT_CANCEL_REASON)
 }
 
@@ -254,7 +263,7 @@ internal fun shouldCancelCrossfadeForPlaybackResumption(resultReady: Boolean, is
  * adopted (before the generation bump, queue replacement and repeat/shuffle application). The timing driver is left
  * running; a null runtime (gate false) is a no-op. The runtime generation check stays as the defensive fallback.
  */
-internal fun recoverCrossfadeFromPlaybackResumption(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromPlaybackResumption(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(PLAYBACK_RESUMPTION_CANCEL_REASON)
 }
 
@@ -275,7 +284,7 @@ internal val PRIMARY_TERMINAL_STATE_CANCEL_REASON = CrossfadeCancelReason.Primar
  * runtime already Idle and does nothing. The timing driver is left running; a null runtime (gate false) is a no-op. The
  * snapshot-based `!isPlaying -> Pause` ownership check stays as the broad defensive fallback.
  */
-internal fun recoverCrossfadeFromPrimaryTerminalState(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromPrimaryTerminalState(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(PRIMARY_TERMINAL_STATE_CANCEL_REASON)
 }
 
@@ -289,7 +298,7 @@ internal val CONTROLLER_DISCONNECTED_CANCEL_REASON = CrossfadeCancelReason.Contr
  * reaches this. Reconnection stays demand-driven and nothing is carried over. The snapshot `controllerConnected` check
  * stays as the defensive fallback. The timing driver is left running; a null runtime (gate false) is a no-op.
  */
-internal fun recoverCrossfadeFromControllerDisconnected(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromControllerDisconnected(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(CONTROLLER_DISCONNECTED_CANCEL_REASON)
 }
 
@@ -335,7 +344,7 @@ internal val PRIMARY_INTERRUPTION_CANCEL_REASON = CrossfadeCancelReason.Pause
  * primary. Makes the snapshot `!isPlaying -> Pause` fallback synchronous for these signals only. No resurrection when focus
  * or the route returns. The timing driver is left running; a null runtime (gate false) is a no-op.
  */
-internal fun recoverCrossfadeFromPrimaryInterruption(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromPrimaryInterruption(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(PRIMARY_INTERRUPTION_CANCEL_REASON)
 }
 
@@ -349,6 +358,6 @@ internal fun shouldCancelCrossfadeForEqualizerChange(previousEnabled: Boolean, n
  * secondary (existing PlanInvalidated cancellation; no new reason). The timing driver is left running and nothing is
  * resurrected when EQ is disabled again; a null runtime (gate false) is a no-op.
  */
-internal fun recoverCrossfadeFromEqualizerEnabled(runtime: CrossfadePreparationRuntime?) {
+internal fun recoverCrossfadeFromEqualizerEnabled(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(CrossfadeCancelReason.PlanInvalidated)
 }
