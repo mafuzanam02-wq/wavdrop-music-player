@@ -664,6 +664,7 @@ items are validated.
       CF-2M5 promote prepared NEXT + equal-power overlap (B started once, role swap + AUTO facade swap, tail-stripped retiring A recycled as NEXT, fade x duck composer, uid-alias fix; gate-bound, JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 28.
       CF-2M6 overlap interaction + error policy (reason-aware settle-to-B seam: A cut for pause/seek/navigation/repeat/shuffle/queue edits/focus loss/noisy/errors/OFF/EQ/disconnect/teardown, duck preserved; engine + facade command boundaries; gate-bound, JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 29.
       CF-2M7 PHYSICAL PASS (10 s / 12 s crossfades, no takeover stutter; promotion architecture ACCEPTED, gate still false, EQ restriction and END_MARGIN unchanged); CF-2M8 retires and deletes the CF-2L natural-handoff implementation: see the same document, section 30.
+      CF-2N1 rollout sign-off preparation: QA_CHECKLIST section 32 reconciled to the accepted promotion architecture (CF-2L retired); post-CF-2M8 validation APK for the remaining required physical sign-off (background/lock screen, Bluetooth, wired, EQ policy, interactions). Background, Bluetooth, wired and EQ are NOT yet claimed passed; the gate stays false and its flip is a separate slice.
    h. Final gate flip after passed validation - pending.
 9. Physical Bluetooth / background / EQ validation.
 

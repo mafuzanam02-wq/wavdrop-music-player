@@ -414,32 +414,33 @@ that contains the song and an album queue).
 
 The Playback Settings UI foundation exists but stays **hidden while the rollout is disabled**, so in the current production build there is no Crossfade row and no audible crossfade. Expected behaviour of the current production build is unchanged: gapless native transitions, no overlap, no volume dips between tracks, and no "Transitions" section in Settings → Playback.
 
-The procedure below is for a **deliberate validation build or future release candidate with the rollout gate intentionally enabled**. No such build has passed it yet. Production enablement is a separate, source-controlled change that may only happen after the automated gate has passed and every required physical condition below is physically verified on the intended release build and device set (see 32.12). Do not change the gate to run this checklist on a build that will be shipped before the sign-off is complete.
+**Architecture status.** The CF-2L secondary-player natural-handoff implementation is **RETIRED** (deleted by CF-2M8). The **CF-2M promotion architecture is ACCEPTED**: the next track B is prepared on the engine's NEXT player, started once, promoted to CURRENT at fade start and left authoritative, while the old CURRENT (the RETIRING player) fades out and is recycled. There is no final ownership transfer. **CF-2M7 is a PHYSICAL CORE AUDIO PASS** (see 32.2); it does not cover background/lock screen, Bluetooth, wired output or the Equalizer, which remain required below.
+
+The procedure below is for a **deliberate validation build or future release candidate with the rollout gate intentionally enabled**. Production enablement is a separate, source-controlled change that may only happen after the automated gate has passed and every required physical condition below is physically verified on the intended release build and device set (see 32.12). Do not change the gate to run this checklist on a build that will be shipped before the sign-off is complete.
+
+Model used below: **CURRENT** (audible, authoritative), **NEXT** (the prepared incoming track B, silent until promotion), **RETIRING** (the previous CURRENT while it fades out), then recycled. Expected UI behaviour: **Now Playing, the notification and the session move to B at fade start**, while A fades out and B fades in. This is intentional (ownership moves at promotion), not a defect.
 
 ### 32.1 Device evidence (record for every run)
 
 Record in the notes column or a short run log: device model, Android version, WavDrop build/commit, audio output used (speaker / wired / Bluetooth device), crossfade duration, EQ state, repeat mode, result and a note/log reference. A manual record is sufficient; no database or telemetry is involved.
 
-Minimum initial validation target: at least one real Android device covering speaker, wired output (if the device supports it), Bluetooth output, foreground, and background/lock-screen. The Samsung S21 already used for Wavdrop validation is acceptable as the first device. One device does not validate Android universally; do not generalise beyond the devices tested.
+Minimum initial validation target: at least one real Android device covering speaker, wired output (if the device supports it; USB-C wired audio counts), Bluetooth output, foreground, and background/lock-screen. The Samsung S21 already used for Wavdrop validation is acceptable as the first device. One device does not validate Android universally; do not generalise beyond the devices tested. A requirement with no available hardware is **UNVALIDATED**, never Pass.
 
 ### 32.2 Basic overlap
 
-**Recorded physical result (first run, gate-enabled debug validation build; CF-2K2A):** crossfade 6 seconds, EQ off, Repeat off, Shuffle off. The secondary started correctly and the 6-second overlap was audible and balanced, but there was a roughly 1-2 second audible stutter at the final primary takeover, after which track B continued. Core overlap: **PARTIAL / blocker observed**; production enablement is blocked pending the CF-2L1 natural AUTO handoff correction and a physical retest of this section. This is not a pass; `physicalCorePlaybackValidated` remains not satisfied.
+**Recorded physical result (CF-2M7, gate-enabled debug validation build of the promotion architecture, before the CF-2M8 cleanup; user-reported):** ordinary A → B transitions and extended **10 s and 12 s** crossfades were clean; B starts once and remains authoritative; the old final takeover stutter/restart is **gone**; the transition sounded clean through the overlap. The UI/session moved to B at fade start while A faded out (intentional). `END_MARGIN_MS` stayed at 500 ms (not tuned). The Equalizer was not validated. This is a **PHYSICAL CORE AUDIO PASS** for the ownership architecture. It was not run on the post-CF-2M8 build and does not cover the rows below that were not reported; the active blocker is now **validation breadth** (background, Bluetooth, wired, EQ policy, interactions), not the ownership seam.
 
-**Recorded physical result (second run, CF-2L1 gate-enabled debug validation build):** Second physical run (CF-2L1 gate-enabled debug build, same settings: 6 s crossfade, EQ off, Repeat off, Shuffle off, ordinary natural A to B): B no longer restarted from zero, B did not audibly rewind and the musical crossfade worked, but a small, clearly audible stutter remained at the final ownership transfer from the secondary B to the primary B. CF-2L1 materially improved continuity but did not make the primary takeover inaudible. Core overlap stays **PARTIAL / blocker observed**. CF-2L2 (continuity-qualified soft natural ownership transfer) is implemented and a new real-device retest of this section is required; it is NOT yet done, and CF-2L2 is not claimed to fix the phone behaviour.
-
-**Recorded physical result (third run, CF-2L2 gate-enabled debug validation build):** Physical result of the CF-2L2 debug validation build (6 s crossfade, EQ off, Repeat off, Shuffle off): the major final-handoff lag/stutter was mostly resolved and B did not rewind, but an occasional handoff stutter remained and, more importantly, after some handoffs play/pause and playback became intermittently unstable (controls appeared to toggle repeatedly, then playback stuttered and the device felt less smooth); force-stopping the debug app immediately restored normal behaviour. Production rollout stays blocked. A device logcat of that run (DEBUG TRANSFER_* lines only) shows the natural handoff frequently did not settle: 556 TRANSFER_ABORT (reason=divergence, deltaMs about 220-280 within 20-90 ms of a START whose delta was within +/-35 ms) against 5 TRANSFER_COMPLETE, with several transitions looping START/ABORT dozens of times and one transition 354 times (until the end of the capture, over 100 s into the track), each abort returning to reconciliation and issuing another primary seek roughly every 260-570 ms. Observed in the log: the START reading is taken with the primary position pinned at its fresh seek target, and the secondary position then jumps by roughly 250 ms between evaluations only tens of milliseconds apart (a coarse/stepped position clock); this is evidence of an unbounded abort-reseek loop and of position readings whose resolution is coarser than the 80 ms entry / 200 ms abort tolerances, but the cause of that coarseness is NOT proven and the tolerances were deliberately NOT changed in CF-2L3. The play/pause symptom is consistent with a continuous primary reseek storm (Media3 buffering/isPlaying churn) rather than demonstrated crossfade-issued play()/pause(); the transport diagnostics exist to confirm or refute that on the next run. Core overlap stays **PARTIAL / blocker observed**. CF-2L3 adds settlement guarantees and DEBUG diagnostics only (`RECONCILE_*`, `HANDOFF_SETTLED`, `TRANSPORT_PLAY` / `TRANSPORT_PAUSE`, `PRIMARY_*` under `WavdropCrossfade`); capture them on the next run. Not a pass.
-
-**CF-2L4 (projected position clock) is implemented; no new device run has happened.** The next retest must capture the `WavdropCrossfade` lines (`TRANSFER_*`, `RECONCILE_*`, `POSITION_*`, `HANDOFF_SETTLED`, `TRANSPORT_*`) and confirm: transfers complete instead of looping START/ABORT, no repeated reconciliation seeks, the phone stays smooth after handoffs, and no `TRANSPORT_PLAY` / `TRANSPORT_PAUSE` appears that the user did not cause. CF-2L4 is not claimed to have fixed the phone behaviour. During the retest, DEBUG builds log `TRANSFER_START` / `TRANSFER_TICK` / `TRANSFER_ABORT` / `TRANSFER_COMPLETE` under the `WavdropCrossfade` tag (positions, deltas and gains only) to correlate any remaining audible artefact with the ownership transfer.
+*Historical, RETIRED:* the CF-2L runs (CF-2K2A, CF-2L1, CF-2L2) of the secondary-player handoff design showed a 1-2 s then smaller takeover stutter at the final ownership transfer and intermittent play/pause problems after some handoffs. That seam was the cause the promotion architecture removes; CF-2L4 was never retested and no longer exists.
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
 | In a validation build, open Settings → Playback. | A Transitions section with a Crossfade row is visible. (Never visible in a build with the gate disabled.) | |
 | Choose Off and let a track end. | Native transition, no overlap. | |
-| Choose 2 seconds and let a track end. | Audible overlap of roughly 2 seconds; the next track fades in as the current fades out. | |
+| Choose 2 seconds and let a track end. | Audible overlap of roughly 2 seconds; B fades in as A fades out; no restart/rewind of B. | |
 | Choose 6 seconds and let a track end. | Audible overlap of roughly 6 seconds. | |
-| Choose 12 seconds and let a track end. | Bounded overlap, no crash. | |
-| Change the duration while playback continues. | The next eligible transition follows the new duration; a transition already fading is not abruptly re-planned. | |
+| Choose 12 seconds and let a track end. | Clean bounded overlap, no crash. | CF-2M7 (pre-CF-2M8 build): 10 s and 12 s clean. Re-confirm on the post-CF-2M8 validation build. |
+| Change the duration while playback continues. | The next eligible transition follows the new duration; a transition already overlapping is not retimed. | |
+| Watch Now Playing at the transition. | Title/art/progress move to B once at fade start; no return to A; no jump backwards. | CF-2M7: moves to B at fade start (intentional). |
 
 Listening/behaviour validation only; stopwatch precision is not required.
 
@@ -459,31 +460,32 @@ Listening/behaviour validation only; stopwatch precision is not required.
 |---|---|---|
 | Queue the same song more than once at different positions and let the earlier one end. | The crossfade targets the next occurrence by queue position and does not jump to the first occurrence of that song. | |
 
-### 32.5 Manual interaction during preparation or fade
+### 32.5 Manual interaction during preparation or overlap
 
-Perform each during the preparation window and again during an audible fade (organise runs coherently; not all in one run).
+Perform each while NEXT is being prepared and again during an audible overlap (organise runs coherently; not all in one run). During an overlap B is already the current track: every action below cuts the retiring A first and then acts on B.
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
-| Pause, then resume. | Native/manual action wins; no stuck low volume, no doubled playback, no ghost secondary audio. | |
-| Seek in the current track. | Same expectations. | |
-| Next, then Previous. | Same; the correct track plays. | |
-| Toggle shuffle; change repeat mode. | Same; no wrong-track handoff. | |
-| Play Next; Add to Queue; reorder the queue; remove a queued item. | Same; queue stays correct. | |
+| Pause, then resume. | A is cut and B pauses; resume resumes B only; no stuck low volume, no doubled playback, no ghost retiring audio. | |
+| Seek in the current track. | The retiring A is cut; the seek acts on B only; no restart of B beyond an ordinary seek. | |
+| Next, then Previous. | The retiring A is cut; the normal next/previous policy runs from B (including the previous-restart threshold); the correct track plays. | |
+| Toggle shuffle; change repeat mode. | The overlap settles safely; no wrong-track transition. | |
+| Play Next; Add to Queue; reorder the queue; remove a queued item. | A is cut; the queue stays correct; no ghost audio. | |
 | Delete a queued track from the library (where supported). | Same; no crash. | |
 
 ### 32.6 Audio focus
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
-| During preparation or fade, cause an incoming call or another transient audio-focus interruption (any practical source). | The crossfade is abandoned; primary volume is restored; no secondary ghost audio; the normal WavDrop resume policy remains authoritative. | |
+| During preparation or overlap, cause an incoming call or another transient audio-focus interruption (any practical source). | The retiring A is cut; B is the only current track and is suppressed by the interruption, then resumes per the normal WavDrop/Media3 focus behaviour when focus returns; A never returns. | |
+| During an overlap, cause a short "duck" (e.g. a navigation prompt). | The overlap continues; both tracks are quieter and recover; no restart. | |
 
 ### 32.7 Becoming noisy / route removal
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
-| Unplug wired headphones during preparation and during fade. | The crossfade cancels safely; no second player keeps sounding; the existing WavDrop pause/resume policy remains authoritative. | |
-| Disconnect Bluetooth during preparation and during fade. | Same. | |
+| Unplug wired headphones during preparation and during overlap. | One pause; the retiring A is cut; B remains the current track; no second player keeps sounding; the existing WavDrop pause/resume policy remains authoritative. | |
+| Disconnect Bluetooth during preparation and during overlap. | Same. | |
 
 ### 32.8 Bluetooth
 
@@ -492,14 +494,14 @@ Perform each during the preparation window and again during an audible fade (org
 | Start playback on Bluetooth and let tracks crossfade. | One audible stream; normal overlap. | |
 | Background the app; lock the screen; let more transitions occur. | Same; no crash. | |
 | Use next/previous from the headset. | Controls remain authoritative; correct queue occurrence. | |
-| Disconnect during Armed, during Ready, and during Fading; then reconnect. | One audible stream, no duplicate playback, no permanently lowered primary volume, no stale handoff after reconnect. | |
+| Disconnect during preparation and during overlap; then reconnect. | One audible stream, no duplicate playback, no stuck gain, no stale promotion after reconnect. | |
 
 ### 32.9 Wired headphones
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
 | Play wired and let tracks crossfade. | Normal overlap. | |
-| Unplug during overlap, then reconnect. | Behaviour follows the existing WavDrop resume policy only (no invented automatic resume); no ghost audio. | |
+| Unplug during preparation and during overlap, then reconnect. | Behaviour follows the existing WavDrop resume policy only (no invented automatic resume); no ghost audio. | |
 | Manual next/previous; background and lock screen. | Same expectations as Bluetooth. | |
 
 ### 32.10 Background and lock screen
@@ -508,30 +510,32 @@ Perform each during the preparation window and again during an audible fade (org
 |---|---|---|
 | Begin a track in the foreground, background the app before the crossfade, let it transition. | No crash, no duplicate playback. | |
 | Lock the screen before the next transition and let it transition. | Same. | |
-| Use notification transport during preparation and fade. | System transport remains primary authority; correct queue occurrence. | |
-| Use lock-screen transport during preparation and fade. | Same. | |
+| Use notification transport during preparation and overlap. | System transport remains authoritative; B is the current state; no duplicate playback; correct queue occurrence. | |
+| Use lock-screen transport during preparation and overlap. | Same. | |
 
-### 32.11 Equalizer policy, audio-session evidence, failures and teardown
+### 32.11 Equalizer policy, failures and teardown
+
+This validates the CURRENT policy only (crossfade is unavailable while the Equalizer is on). It does **not** validate an Equalizer mirrored across both players and does not lift the EQ restriction (CF-2M9 remains optional and separate).
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
 | Crossfade = 6 seconds, EQ off; play through a transition. | Crossfade is eligible and overlaps. | |
 | Enable the Equalizer. | The Crossfade row is disabled with "Unavailable while Equalizer is on"; the saved 6-second preference stays stored. | |
-| Play through a transition with EQ on. | No crossfade; the primary EQ remains audible. | |
-| Disable the Equalizer. | The row is enabled again and shows 6 seconds; a later eligible transition can crossfade. (No secondary EQ mirroring is claimed.) | |
-| Optional, DEBUG validation build: filter logcat for the audio-session observation line. | Record the primary id, the secondary id or "unavailable", and Shared / Distinct / Unavailable. No particular relationship is required to pass; this is evidence for the open dual-session EQ validation item only. | |
-| Where practical: unreadable next track; next track removed before the transition; secondary preparation failure; primary playback error. | The crossfade fails closed, the primary stays or returns audible, no ghost secondary, existing queue recovery behaviour is unchanged. No artificial destructive hooks are added for this. | |
-| If reproducible: swipe the app away or stop the playback service during Armed, Ready and Fading. | No continuing secondary playback, no leaked audio, the next launch starts from a normal state. | |
+| Play through a transition with EQ on. | No crossfade; the EQ remains audible on ordinary playback. | |
+| Enable the Equalizer DURING an overlap. | The retiring A is cut; B continues with the Equalizer; no re-promotion. | |
+| Disable the Equalizer. | The row is enabled again and shows 6 seconds; a later eligible transition can crossfade. | |
+| Where practical: unreadable next track; next track removed before the transition; NEXT preparation failure; current-player playback error. | The crossfade fails closed, one authoritative current track continues or the normal queue recovery runs, no ghost retiring audio, existing queue recovery behaviour is unchanged. No artificial destructive hooks are added for this. | |
+| If reproducible: swipe the app away or stop the playback service during preparation and during an overlap. | No continuing retiring-player audio, no leaked audio, the next launch starts from a normal state. | |
 
 ### 32.12 Production enablement sign-off
 
-Production enablement requires every row below to be Pass on the intended release build and device set; the gate flip is a separate slice made only after this table is complete.
+Production enablement requires every row below to be Pass on the intended release build and device set; the gate flip is a separate slice made only after this table is complete. This mirrors `CrossfadeProductionReadiness` and is not weakened by the CF-2M7 result.
 
 | Item | Pass / Fail / Notes |
 |---|---|
 | Automated JVM suite green | |
 | Release APK assembled | |
-| Crossfade core overlap passed | PARTIAL - ~1-2 s final handoff stutter in the first run; after CF-2L1 no rewind but a small takeover stutter remained; retest after CF-2L2 |
+| Crossfade core overlap passed | PHYSICAL CORE AUDIO PASS (CF-2M7, promotion architecture, 10 s / 12 s clean, no takeover stutter). Re-confirm on the post-CF-2M8 validation build; remaining blocker is breadth below. |
 | Repeat eligibility passed | |
 | Duplicate occurrence passed | |
 | Manual interaction cancellation passed | |
@@ -539,9 +543,9 @@ Production enablement requires every row below to be Pass on the intended releas
 | Bluetooth passed | |
 | Wired passed | |
 | EQ compatibility passed | |
-| No stuck primary gain | |
-| No ghost secondary audio | |
-| No stale / wrong handoff | |
+| No stuck gain (CURRENT / NEXT / RETIRING) | |
+| No ghost retiring audio | |
+| No wrong / stale promotion state | |
 | No crash | |
 
 ## Final Sign-Off
