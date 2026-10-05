@@ -239,3 +239,11 @@ internal fun shouldCancelCrossfadeForEqualizerChange(previousEnabled: Boolean, n
 internal fun recoverCrossfadeFromEqualizerEnabled(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(CrossfadeCancelReason.PlanInvalidated)
 }
+
+/**
+ * Crossfade stays unavailable while the Equalizer is on, and also until the persisted EQ state has been read after a service
+ * (re)creation: an unknown state is treated conservatively as "on", so a recreated service can never start a crossfade before it
+ * knows whether the Equalizer is enabled.
+ */
+internal fun crossfadeEqualizerBlocks(equalizerStateKnown: Boolean, equalizerEnabled: Boolean): Boolean =
+    !equalizerStateKnown || equalizerEnabled

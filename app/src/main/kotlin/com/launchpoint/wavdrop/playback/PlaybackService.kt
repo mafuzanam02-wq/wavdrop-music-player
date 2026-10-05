@@ -89,6 +89,8 @@ class PlaybackService : MediaLibraryService() {
     private var crossfadeConfiguredDurationMs: Long = CrossfadeRules.OFF_MS
     // CF-2I2: cached EQ-enabled compatibility fact for the crossfade snapshot (conservative default = persisted default).
     private var crossfadeEqualizerEnabled: Boolean = false
+    // False until the first persisted EQ value arrives after (re)creation; crossfade is blocked while unknown (see crossfadeEqualizerBlocks).
+    private var crossfadeEqualizerKnown: Boolean = false
     private var lastObservedCrossfadeDurationMs: Long? = null
     private var previousRestartThresholdMs: Long =
         PreviousButtonBehavior.DEFAULT.previousRestartThresholdMs()
@@ -149,7 +151,7 @@ class PlaybackService : MediaLibraryService() {
             // activation policy below. Nothing starts or promotes B.
             nextSlotDriver = NextSlotPreparationDriver(
                 preparation = engine.nextPreparation,
-                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerEnabled) },
+                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerBlocks(crossfadeEqualizerKnown, crossfadeEqualizerEnabled)) },
                 materialize = { songs -> playerController.materializePlaybackMediaItemsForCrossfade(songs) },
                 configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
                 currentDurationMsProvider = { engine.currentPlayer.duration.takeIf { it > 0L } },
@@ -157,7 +159,7 @@ class PlaybackService : MediaLibraryService() {
             )
             promotionRuntime = CrossfadePromotionRuntime(
                 engine = engine,
-                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerEnabled) },
+                snapshotProvider = { playerController.captureCrossfadeRuntimeSnapshot().copy(equalizerEnabled = crossfadeEqualizerBlocks(crossfadeEqualizerKnown, crossfadeEqualizerEnabled)) },
                 configuredDurationMsProvider = { crossfadeConfiguredDurationMs },
                 scheduler = MainLooperCrossfadeTimingScheduler(),
                 clock = ElapsedRealtimeCrossfadeClock,
@@ -187,6 +189,7 @@ class PlaybackService : MediaLibraryService() {
                 .collect { enabled ->
                     val previous = crossfadeEqualizerEnabled
                     crossfadeEqualizerEnabled = enabled
+                    crossfadeEqualizerKnown = true
                     if (shouldCancelCrossfadeForEqualizerChange(previous, enabled)) {
                         recoverCrossfadeFromEqualizerEnabled(crossfadeCancelSink)
                     }
@@ -432,20 +435,21 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        // Recents swipe: the UI task is gone, the process/service normally is not. The decision reads the session-facing player only
+        // (the SessionFacade presents the logical CURRENT; a prepared NEXT or a RETIRING player never counts) and changes nothing:
+        // an active NEXT preparation or overlap is deliberately NOT cancelled or settled merely because the Activity disappeared.
         val player = mediaSession?.player
-        val keep = player != null && TaskRemovalPlaybackPolicy.shouldKeepSession(
-            mediaItemCount = player.mediaItemCount,
-            hasCurrentMediaItem = player.currentMediaItem != null,
-        )
-        logResume("onTaskRemoved: keepSession=$keep isPlaying=${player?.isPlaying}")
-        // Playing sessions already survive via Media3's default; a paused session with a real
-        // Media3 queue must too, so PLAY can still target Wavdrop. Empty sessions use the default
-        // (pause + stopSelf). onDestroy cleanup is untouched and runs whenever the service ends.
-        if (keep) return
+        val decision = TaskRemovalPlaybackPolicy.decide(player)
+        logResume("TASK_REMOVED keep=${decision == TaskRemovalDecision.KeepSession} isPlaying=${player?.isPlaying}")
+        // Playing sessions already survive via Media3's default; a paused session with a real queue must too, so PLAY can still
+        // target Wavdrop. Empty sessions use the default (pause + stopSelf). onDestroy cleanup is untouched and runs whenever the
+        // service ends.
+        if (decision == TaskRemovalDecision.KeepSession) return
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
+        logResume("SERVICE_DESTROY")
         // CF-2G2: never leave the singleton PlayerController holding a callback into this destroyed service.
         playerController.setExplicitSeekListener(null)
         playerController.setExplicitNavigationListener(null)
