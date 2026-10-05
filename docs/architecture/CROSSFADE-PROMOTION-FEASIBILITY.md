@@ -1,6 +1,6 @@
 # ADR: Crossfade promotion architecture (CF-2M1 feasibility)
 
-- Status: **ACCEPTED** (physically validated by CF-2M7, section 30). The CF-2L natural-handoff architecture is **RETIRED** and was deleted by CF-2M8. The session-façade question was verified by CF-2M2 (section 25); the rollout gate is still false.
+- Status: **ACCEPTED** (physically validated by CF-2M7, section 30). The CF-2L natural-handoff architecture is **RETIRED** and was deleted by CF-2M8. The session-façade question was verified by CF-2M2 (section 25); physical rollout sign-off (CF-2N1) PASSED and production rollout ENABLED by CF-2N2 (`CrossfadeRolloutPolicy.RUNTIME_ENABLED = true`, the single gate).
 - Date: 2026-10-04
 - Baseline: `1d320a1` ("Project crossfade handoff positions safely"), `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false`.
 - Scope: can WavDrop promote the already-playing incoming physical ExoPlayer to be the logical current player,
@@ -761,4 +761,14 @@ scheduler seams and cadence (`CrossfadeTiming.kt`), the rollout gate and readine
 focus/noisy, quarantine, façade/session parity) are the regression oracle. A small source guard (`CrossfadeLegacyRetirementTest`) keeps the retired concepts out of production code.
 Historical CF-2L descriptions above (sections 2, 4, 9, 18) describe the **retired** architecture.
 
-**Not changed by CF-2M8:** the rollout gate (false), the EQ restriction, the Now Playing timing (UI moves to B at promotion by design), `END_MARGIN_MS`, any feature scope.
+**Not changed by CF-2M8:** the rollout gate (false at that time; enabled later by CF-2N2), the EQ restriction, the Now Playing timing (UI moves to B at promotion by design), `END_MARGIN_MS`, any feature scope.
+
+## 31. CF-2N1 sign-off and CF-2N2 production enablement
+
+**CF-2N1 (physical rollout sign-off): PASSED**, as reported by the user: core crossfade playback, repeat/eligibility behaviour, duplicate occurrences, manual overlap interactions,
+background / lock screen, Bluetooth, wired (or supported wired route), the EQ compatibility policy, no stuck gain, no ghost retiring audio, no wrong/stale promotion state and no crash
+(recorded in QA_CHECKLIST.md section 32.12). **CF-2N2 enabled the production rollout:** `CrossfadeRolloutPolicy.RUNTIME_ENABLED = true`, still the one authoritative gate (no second flag,
+remote config, build override or hidden preference). Status: promotion architecture ACCEPTED; physical rollout sign-off PASSED; CF-2L RETIRED; production rollout ENABLED.
+
+Product policy is unchanged: EQ on -> crossfade unavailable; EQ off -> the saved duration (default Off) is available. Crossfade with the Equalizer (a shared-session or mirrored EQ across both
+players, CF-2M9) is **not** part of this rollout and remains deferred. No audio-behaviour code, timing constant (`END_MARGIN_MS` = 500), curve or cadence changed in CF-2N2.

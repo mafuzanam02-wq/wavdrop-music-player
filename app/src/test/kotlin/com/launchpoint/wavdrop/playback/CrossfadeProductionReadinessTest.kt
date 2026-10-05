@@ -48,7 +48,7 @@ class CrossfadeProductionReadinessTest {
         assertFalse(canEnableCrossfadeProduction(allTrue.copy(automatedGatePassed = false)))
     }
 
-    @Test fun shippingGateRemainsFalse() {
-        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
+    @Test fun productionRolloutIsEnabledAfterTheSignOff() {
+        assertTrue(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
     }
 }

@@ -93,8 +93,4 @@ class WidgetPlaybackStateListenerTest {
         idleMainLooper()
         assertEquals(listOf("isPlaying(false)", "update"), sink.calls)
     }
-
-    @Test fun productionRolloutGateRemainsFalse() {
-        assertTrue(!CrossfadeRolloutPolicy.RUNTIME_ENABLED)
-    }
 }

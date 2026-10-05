@@ -39,7 +39,7 @@ updated with the new status and reasoning — history should be amended, never e
 | Product | Wavdrop Music Player |
 | Package | `com.launchpoint.wavdrop` |
 | Version | 0.1.0-beta9 (versionCode 9); post-beta9 engineering work is on `master` unreleased |
-| Phase | Soft-launch stabilization; crossfade runtime foundations in progress |
+| Phase | Soft-launch stabilization; crossfade rolled out (CF-2N2) |
 | Platform | Android (min SDK 26 / compile + target SDK 36) |
 | Database | Room (`wavdrop.db`), schema v13 |
 
@@ -47,8 +47,8 @@ updated with the new status and reasoning — history should be amended, never e
 
 1. **Playback correctness and occurrence safety** — duplicate-song queues, reconnect/resume authority,
    and session hydration must be provably safe before audible features build on them.
-2. **Crossfade runtime integration** — small review-gated slices on top of the completed CF-1..CF-2H3G
-   foundations (see §5 and §11). Not user-facing and not enabled.
+2. **Crossfade runtime integration** — complete: promotion architecture accepted (CF-2M7), rollout signed off (CF-2N1) and enabled (CF-2N2); built from small review-gated slices on the CF-1..CF-2H3G
+   foundations (see §5 and §11). User-facing in Settings → Playback; unavailable while the Equalizer is on.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
 4. **Performance readiness for large libraries** — remaining Wave C items (§7).
@@ -67,7 +67,6 @@ These are deliberately out of scope for the current phase (see §6 and §9 for d
 - Backup encryption / signing.
 - A general user-configurable folder block/allow list (only the WhatsApp-specific toggle and a
   planned exclusion list exist).
-- Enabling crossfade for users (the runtime is gated off; see §5 and §11).
 
 ---
 
@@ -153,7 +152,7 @@ A catalogue of significant, durable decisions. Status reflects the current phase
 | D-23 | **Playback errors recover by bypassing the failing item** | On a Media3 `PlaybackException`, advance to the next valid queue item (or stop cleanly), without fabricating stats or mutating identity; one transient `PlaybackUserMessage` per episode | Active (Wave B WB-01; user message shipped post-beta9) |
 | D-24 | **Song identity is not queue-occurrence identity** | The same song can occupy several queue positions; the current occurrence is positional and bound to `queueGeneration`; ambiguous song-id fallback fails closed; no persistent occurrence UUIDs | Active (OH-1 hardening) |
 | D-25 | **The Media3 queue is the hydration authority** | Whether the player is "hydrated" is inferred from the physical Media3 queue (never from a stale logical queue or a boolean claim); hydration never decides autoplay; external playback is never overwritten | Active (implemented) |
-| D-26 | **Crossfade is gated; the promotion architecture is accepted** | Crossfade runs only through the CF-2M promotion architecture (prepared NEXT started once, promoted at fade start, retiring A faded out and recycled) behind `CrossfadeRolloutPolicy.RUNTIME_ENABLED`, which stays `false` until an explicit rollout decision. Physically validated by CF-2M7; the CF-2L secondary-player natural-handoff design (the earlier D-26 wording) is RETIRED and was deleted by CF-2M8. Transitions are keyed by `CrossfadeTransitionKey`; the EQ restriction stands | Active |
+| D-26 | **Crossfade is enabled through one gate; the promotion architecture is the sole implementation** | Crossfade runs only through the CF-2M promotion architecture (prepared NEXT started once, promoted at fade start, retiring A faded out and recycled) behind `CrossfadeRolloutPolicy.RUNTIME_ENABLED`, now `true` (CF-2N2) after the CF-2N1 physical rollout sign-off. Physically validated by CF-2M7; the CF-2L secondary-player natural-handoff design (the earlier D-26 wording) is RETIRED and was deleted by CF-2M8. Transitions are keyed by `CrossfadeTransitionKey`; the EQ restriction stands | Active |
 | D-27 | **Explicit transport beats automatic playback** | Automatic Bluetooth/wired resume requests carry authority tokens; an explicit user play/pause or route loss voids them | Active (implemented) |
 
 ---
@@ -340,7 +339,7 @@ Summaries of major systems already shipped. Detailed user-facing notes live in `
     revisitable after physical validation. Driver keeps running. Gate `false`.
   - **CF-2J1** rollout-gated Crossfade Settings UI foundation (internal; first slice of item 7): the persisted
     `crossfadeDurationMs` is wired through `SettingsViewModel` to a Transitions section in Playback Settings (Off, 2-12 s radio
-    dialog) behind the single rollout authority `CrossfadeRolloutPolicy.RUNTIME_ENABLED` (`false`, so hidden in production). A pure
+    dialog) behind the single rollout authority `CrossfadeRolloutPolicy.RUNTIME_ENABLED` (`false` at that time; now `true`, see CF-2N2). A pure
     presentation policy hides the row when rollout is off, and when on disables it with "Unavailable while Equalizer is on" while EQ is
     enabled (saved duration preserved). UI persists only; it never drives the runtime. Not in backups. No audible crossfade.
   - **CF-2K1** production enablement safeguards + physical QA contract (internal; first slice of item 8): a pure
@@ -597,8 +596,8 @@ Planning only — **not a release commitment.** Organized by rough horizon. Item
 ### Crossfade runtime integration (engineering; each item is its own slice)
 
 Foundations CF-1..CF-2H3G are complete (§5). The following remain, and must **not** be combined into one
-implementation item. All are gated behind `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false` until the final
-items are validated.
+implementation item. (Historical: they were gated behind `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false` until the final
+items were validated; the gate is now true, see CF-2N2 below.)
 
 1. Continuous fade progression / timing integration:
    a. CF-2C7A - secondary dynamic-gain primitive - complete (unused by the runtime; generic `ApplyGains` still refused).
@@ -663,10 +662,11 @@ items are validated.
       CF-2M4 NEXT-slot preparation + occurrence-safe queue graft (prepare B alone, graft the queue around it, invalidate through the shared cancellation point; gate-bound, never starts B; JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 27.
       CF-2M5 promote prepared NEXT + equal-power overlap (B started once, role swap + AUTO facade swap, tail-stripped retiring A recycled as NEXT, fade x duck composer, uid-alias fix; gate-bound, JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 28.
       CF-2M6 overlap interaction + error policy (reason-aware settle-to-B seam: A cut for pause/seek/navigation/repeat/shuffle/queue edits/focus loss/noisy/errors/OFF/EQ/disconnect/teardown, duck preserved; engine + facade command boundaries; gate-bound, JVM/Robolectric incl. real ExoPlayer, no device): see the same document, section 29.
-      CF-2M7 PHYSICAL PASS (10 s / 12 s crossfades, no takeover stutter; promotion architecture ACCEPTED, gate still false, EQ restriction and END_MARGIN unchanged); CF-2M8 retires and deletes the CF-2L natural-handoff implementation: see the same document, section 30.
-      CF-2N1 rollout sign-off preparation: QA_CHECKLIST section 32 reconciled to the accepted promotion architecture (CF-2L retired); post-CF-2M8 validation APK for the remaining required physical sign-off (background/lock screen, Bluetooth, wired, EQ policy, interactions). Background, Bluetooth, wired and EQ are NOT yet claimed passed; the gate stays false and its flip is a separate slice.
-   h. Final gate flip after passed validation - pending.
-9. Physical Bluetooth / background / EQ validation.
+      CF-2M7 PHYSICAL PASS (10 s / 12 s crossfades, no takeover stutter; promotion architecture ACCEPTED, EQ restriction and END_MARGIN unchanged); CF-2M8 retires and deletes the CF-2L natural-handoff implementation: see the same document, section 30.
+      CF-2N1 rollout sign-off preparation: QA_CHECKLIST section 32 reconciled to the accepted promotion architecture (CF-2L retired); post-CF-2M8 validation APK for the remaining required physical sign-off (background/lock screen, Bluetooth, wired, EQ policy, interactions). The CF-2N1 physical rollout sign-off then PASSED (core, eligibility, duplicate occurrence, manual interactions, background/lock screen, Bluetooth, wired, EQ policy).
+      CF-2N2 production enablement: `CrossfadeRolloutPolicy.RUNTIME_ENABLED` = `true` (the single gate; no second flag), KDoc/readiness wording and QA sign-off reconciled. Promotion architecture is the sole implementation; EQ ON -> crossfade unavailable, EQ OFF -> saved duration (default Off); mirrored EQ (CF-2M9) stays deferred. No release/version/publish performed.
+   h. Final gate flip after passed validation - complete (CF-2N2).
+9. Physical Bluetooth / background / wired / EQ-policy validation - complete (CF-2N1 sign-off).
 
 ### Playback hardening (engineering)
 

@@ -25,7 +25,7 @@ targetSdk 36 - Room schema 13.
 - **Personalisation**: theme, accent colour, six launcher icons (default Obsidian Black), home layout,
   startup screen.
 
-Crossfade is an **engineering foundation only** (disabled by a hard gate, no user-facing setting). See
+Crossfade (promotion-based, Off by default; Settings → Playback; unavailable while the Equalizer is on) is enabled. See
 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
 
 ## Requirements

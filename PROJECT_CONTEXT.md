@@ -48,7 +48,9 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
 
 ## Crossfade - current state
 
-Completed, internal-only foundations:
+**Status: ENABLED (CF-2N2).** The CF-2M promotion architecture (prepared NEXT started once, promoted at fade start, retiring player faded out and recycled) is the sole crossfade implementation behind the single gate `CrossfadeRolloutPolicy.RUNTIME_ENABLED = true`, after the CF-2N1 physical sign-off. Off by default; unavailable while the Equalizer is on. The CF-2L secondary-player handoff slices listed below are RETIRED history (deleted by CF-2M8).
+
+Historical foundation slices (several describe the retired CF-2L design):
 
 | Slice | What it is |
 |---|---|
@@ -99,7 +101,7 @@ Completed, internal-only foundations:
 | CF-2H3F | explicit whole-queue replacement crossfade cancellation (`QueueMutation` cancel from `playSong`, `playSearchResultPreservingQueue`, `playExternalUri`, both `playFromQueue` overloads and `playFromQueueShuffled`, before validation and any logical mutation) |
 | CF-2H3G | playback-resumption adoption crossfade cancellation (`QueueMutation` cancel in `PlaybackService.onPlaybackResumption` only for Ready + `isForPlayback`, immediately before `adoptPlaybackResumption`) |
 
-**Live/audible production rollout is NOT enabled.** Specifically:
+**Historical (superseded by CF-2N2: production rollout is now ENABLED; see the status paragraph at the top of this section).** The bullets below describe the retired CF-2L-era state before rollout and are kept as history:
 
 - `CrossfadeRolloutPolicy.RUNTIME_ENABLED` is `false`; the runtime is never constructed in
   production.

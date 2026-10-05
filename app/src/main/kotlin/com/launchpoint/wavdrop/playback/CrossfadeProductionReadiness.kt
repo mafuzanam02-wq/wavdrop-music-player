@@ -1,7 +1,7 @@
 package com.launchpoint.wavdrop.playback
 
 /**
- * CF-2K1: release-readiness EVIDENCE model for the crossfade rollout. Pure, dependency-free and never shipped as runtime
+ * Release-readiness EVIDENCE model for the crossfade rollout (satisfied by the CF-2N1 physical sign-off; kept as the fail-closed contract). Pure, dependency-free and never shipped as runtime
  * state: it is not persisted, not a user setting and not a hidden flag. It only names what must be true before
  * [CrossfadeRolloutPolicy.RUNTIME_ENABLED] may be changed from false to true, and keeps automated evidence distinct from
  * physical-device evidence (a green JVM suite is never a substitute for a device run).
@@ -18,13 +18,13 @@ internal data class CrossfadeRolloutReadiness(
     val physicalCorePlaybackValidated: Boolean,
     /** Physical: foreground, background and lock-screen playback including system transport controls. */
     val physicalBackgroundValidated: Boolean,
-    /** Physical: Bluetooth output, including disconnect during Armed, Ready and Fading, and reconnect. */
+    /** Physical: Bluetooth output, including disconnect during preparation and during an overlap, and reconnect. */
     val physicalBluetoothValidated: Boolean,
     /** Physical: wired output, including unplug during overlap and reconnect. */
     val physicalWiredValidated: Boolean,
     /**
-     * Physical: the EQ compatibility POLICY works on device (EQ on -> crossfade unavailable and the primary EQ stays
-     * audible; EQ off -> the saved preference resumes). This does NOT mean a mirrored secondary EQ exists.
+     * Physical: the EQ compatibility POLICY works on device (EQ on -> crossfade unavailable and the EQ stays
+     * audible; EQ off -> the saved preference resumes). This does NOT mean an Equalizer mirrored across both engine players exists.
      */
     val equalizerCompatibilityValidated: Boolean,
 )

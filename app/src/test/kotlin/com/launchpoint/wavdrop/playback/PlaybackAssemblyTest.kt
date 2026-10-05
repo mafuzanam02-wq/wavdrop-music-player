@@ -34,9 +34,9 @@ class PlaybackAssemblyTest {
             .also { constructed += Construction(focus, noisy, it) }
     }
 
-    @Test fun rolloutGateRemainsFalse() {
-        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
-        assertEquals(PlaybackTopology.SINGLE_PLAYER, PlaybackTopology.forGate(CrossfadeRolloutPolicy.RUNTIME_ENABLED))
+    @Test fun rolloutGateIsEnabledAndSelectsTheTwoSlotEngine() {
+        assertTrue(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
+        assertEquals(PlaybackTopology.TWO_SLOT_ENGINE, PlaybackTopology.forGate(CrossfadeRolloutPolicy.RUNTIME_ENABLED))
     }
 
     @Test fun shippingGateFalseBuildsOneStandalonePlayerWithItsOwnFocusAndNoisyHandling() {

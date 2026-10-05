@@ -410,13 +410,13 @@ that contains the song and an album queue).
 
 ## 32. Crossfade
 
-**Current production rollout is disabled** through `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false`.
+**Production rollout is ENABLED** through `CrossfadeRolloutPolicy.RUNTIME_ENABLED = true` (CF-2N2, after the CF-2N1 physical sign-off recorded in 32.12). It is the single gate; crossfade is Off by default and unavailable while the Equalizer is on.
 
-The Playback Settings UI foundation exists but stays **hidden while the rollout is disabled**, so in the current production build there is no Crossfade row and no audible crossfade. Expected behaviour of the current production build is unchanged: gapless native transitions, no overlap, no volume dips between tracks, and no "Transitions" section in Settings → Playback.
+The Playback Settings Crossfade row is visible. With the saved duration Off (the default) behaviour is the unchanged gapless native transition: no overlap and no volume dips between tracks.
 
-**Architecture status.** The CF-2L secondary-player natural-handoff implementation is **RETIRED** (deleted by CF-2M8). The **CF-2M promotion architecture is ACCEPTED**: the next track B is prepared on the engine's NEXT player, started once, promoted to CURRENT at fade start and left authoritative, while the old CURRENT (the RETIRING player) fades out and is recycled. There is no final ownership transfer. **CF-2M7 is a PHYSICAL CORE AUDIO PASS** (see 32.2); it does not cover background/lock screen, Bluetooth, wired output or the Equalizer, which remain required below.
+**Architecture status.** The CF-2L secondary-player natural-handoff implementation is **RETIRED** (deleted by CF-2M8). The **CF-2M promotion architecture is ACCEPTED**: the next track B is prepared on the engine's NEXT player, started once, promoted to CURRENT at fade start and left authoritative, while the old CURRENT (the RETIRING player) fades out and is recycled. There is no final ownership transfer. **CF-2M7 was the PHYSICAL CORE AUDIO PASS** (see 32.2) and **CF-2N1 the production-rollout physical sign-off** (see 32.12).
 
-The procedure below is for a **deliberate validation build or future release candidate with the rollout gate intentionally enabled**. Production enablement is a separate, source-controlled change that may only happen after the automated gate has passed and every required physical condition below is physically verified on the intended release build and device set (see 32.12). Do not change the gate to run this checklist on a build that will be shipped before the sign-off is complete.
+The procedure below is the validation and regression checklist for crossfade. The rollout gate was flipped only after the automated gate passed and every required physical condition was physically verified (see 32.12); re-run the relevant rows on any release candidate that changes playback code.
 
 Model used below: **CURRENT** (audible, authoritative), **NEXT** (the prepared incoming track B, silent until promotion), **RETIRING** (the previous CURRENT while it fades out), then recycled. Expected UI behaviour: **Now Playing, the notification and the session move to B at fade start**, while A fades out and B fades in. This is intentional (ownership moves at promotion), not a defect.
 
@@ -529,24 +529,26 @@ This validates the CURRENT policy only (crossfade is unavailable while the Equal
 
 ### 32.12 Production enablement sign-off
 
-Production enablement requires every row below to be Pass on the intended release build and device set; the gate flip is a separate slice made only after this table is complete. This mirrors `CrossfadeProductionReadiness` and is not weakened by the CF-2M7 result.
+Production enablement required every row below to be Pass on the intended release build and device set; the gate flip (CF-2N2) was a separate slice made after this table was complete. This mirrors `CrossfadeProductionReadiness`. No device model or Android version was supplied for the sign-off, so none is recorded here.
+
+**CF-2N1 production-rollout physical sign-off: PASSED** (user-reported, on the CF-2N1 post-CF-2M8 validation build). EQ policy only: EQ on makes crossfade unavailable, EQ off makes the saved duration available; crossfade with the Equalizer (CF-2M9) is not part of the rollout and was not validated. **Automated rows below were established by the CF-2N2 run** (full JVM suite and release build).
 
 | Item | Pass / Fail / Notes |
 |---|---|
-| Automated JVM suite green | |
-| Release APK assembled | |
-| Crossfade core overlap passed | PHYSICAL CORE AUDIO PASS (CF-2M7, promotion architecture, 10 s / 12 s clean, no takeover stutter). Re-confirm on the post-CF-2M8 validation build; remaining blocker is breadth below. |
-| Repeat eligibility passed | |
-| Duplicate occurrence passed | |
-| Manual interaction cancellation passed | |
-| Background / lock-screen passed | |
-| Bluetooth passed | |
-| Wired passed | |
-| EQ compatibility passed | |
-| No stuck gain (CURRENT / NEXT / RETIRING) | |
-| No ghost retiring audio | |
-| No wrong / stale promotion state | |
-| No crash | |
+| Automated JVM suite green | **PASS** (CF-2N2: full JVM suite, 2628 tests, 0 failures, 0 skipped) |
+| Release APK assembled | **PASS** (CF-2N2: `app:assembleRelease` succeeded) |
+| Crossfade core overlap passed | **PASS** (CF-2N1; earlier CF-2M7 core audio pass: 10 s / 12 s clean, no takeover stutter) |
+| Repeat eligibility passed | **PASS** (CF-2N1) |
+| Duplicate occurrence passed | **PASS** (CF-2N1) |
+| Manual interaction cancellation passed | **PASS** (CF-2N1) |
+| Background / lock-screen passed | **PASS** (CF-2N1) |
+| Bluetooth passed | **PASS** (CF-2N1) |
+| Wired passed | **PASS** (CF-2N1; wired / supported wired route) |
+| EQ compatibility passed | **PASS** (CF-2N1; policy only, see above) |
+| No stuck gain (CURRENT / NEXT / RETIRING) | **PASS** (CF-2N1) |
+| No ghost retiring audio | **PASS** (CF-2N1) |
+| No wrong / stale promotion state | **PASS** (CF-2N1) |
+| No crash | **PASS** (CF-2N1) |
 
 ## Final Sign-Off
 

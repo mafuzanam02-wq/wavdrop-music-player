@@ -338,8 +338,4 @@ class SessionFacadeTest {
         assertEquals(emptyList<String>(), p1.commands)
         assertEquals(listOf("P2.release()"), p2.commands)
     }
-
-    @Test fun productionRolloutGateRemainsFalse() {
-        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
-    }
 }

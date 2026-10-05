@@ -238,8 +238,4 @@ class SessionFacadeSessionTest {
         assertEquals(emptyList<String>(), chain.physical.commands)
         assertEquals(listOf("P2.setPlayWhenReady(false)", "P2.seek(2,3000)"), p2.commands)
     }
-
-    @Test fun productionRolloutGateRemainsFalse() {
-        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
-    }
 }

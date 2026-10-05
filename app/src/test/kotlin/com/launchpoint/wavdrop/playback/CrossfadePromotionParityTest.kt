@@ -183,7 +183,7 @@ class CrossfadePromotionParityTest {
         assertEquals("only the assembly constructs ExoPlayers (the two engine physicals); there is no secondary-player system", setOf("PlaybackAssembly.kt"), builders)
         val policy = source("CrossfadeRolloutPolicy.kt")
         assertEquals("exactly one rollout constant", 1, Regex("const val").findAll(policy).count())
-        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
+        assertTrue(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
         assertFalse(code("CrossfadePromotionRuntime.kt").contains("RUNTIME_ENABLED"))
     }
 

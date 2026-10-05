@@ -100,8 +100,16 @@ class CrossfadeSettingsUiPolicyTest {
         assertEquals("6 seconds", buildCrossfadeSettingUiState(true, false, saved).summary)
     }
 
-    @Test fun productionRolloutIsStillOffSoNothingIsShown() {
-        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
-        assertFalse(buildCrossfadeSettingUiState(CrossfadeRolloutPolicy.RUNTIME_ENABLED, false, 6_000L).visible)
+    @Test fun productionRolloutExposesTheCrossfadeSettingAndEqOnDisablesItWithoutLosingTheSavedValue() {
+        assertTrue(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
+        val eqOff = buildCrossfadeSettingUiState(CrossfadeRolloutPolicy.RUNTIME_ENABLED, false, 6_000L)
+        assertTrue(eqOff.visible)
+        assertTrue(eqOff.enabled)
+        assertEquals("6 seconds", eqOff.summary)
+        val eqOn = buildCrossfadeSettingUiState(CrossfadeRolloutPolicy.RUNTIME_ENABLED, true, 6_000L)
+        assertTrue(eqOn.visible)
+        assertFalse(eqOn.enabled)
+        assertEquals(CROSSFADE_EQ_UNAVAILABLE_SUMMARY, eqOn.summary)
+        assertEquals("the saved preference resumes when EQ is turned off", "6 seconds", buildCrossfadeSettingUiState(true, false, 6_000L).summary)
     }
 }

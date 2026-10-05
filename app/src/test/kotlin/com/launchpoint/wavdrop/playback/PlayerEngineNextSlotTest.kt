@@ -27,8 +27,7 @@ class PlayerEngineNextSlotTest {
         .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("//") || it.trimStart().startsWith("/*") }
         .joinToString("\n")
 
-    @Test fun gateIsFalseAndShippingBuildsOnePlayerWithNoNextPreparation() {
-        assertFalse(CrossfadeRolloutPolicy.RUNTIME_ENABLED)
+    @Test fun aRolloutOffAssemblyBuildsOnePlayerWithNoNextPreparation() {
         val assembly = assemblePlayback(RuntimeEnvironment.getApplication(), false, AudioAttributes.DEFAULT)
         assertNull(assembly.engine)
         assertEquals(1, assembly.topology.physicalPlayerCount)

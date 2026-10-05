@@ -494,7 +494,7 @@ class AppSettingsRepository @Inject constructor(
     /**
      * CF-2E2: persisted crossfade duration in milliseconds (one canonical unit). Always normalized through the CF-1
      * rules on read (missing/negative/0 -> OFF, positive clamped to the enabled range), so no invalid value escapes.
-     * Internal configuration only: no user-facing exposure yet, and it never enables the rollout-gated runtime.
+     * The Playback Settings Crossfade row (shown while CrossfadeRolloutPolicy is enabled) edits it; the default stays OFF.
      */
     val crossfadeDurationMs: Flow<Long> = dataStore.data
         .catch { error ->
