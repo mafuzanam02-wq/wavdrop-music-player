@@ -11,7 +11,6 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -228,11 +227,19 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitQueueReplacementListener { recoverCrossfadeFromQueueReplacement(crossfadePreparation) }
         // CF-2F4: an authoritative MediaController disconnect notifies this callback (cleared in onDestroy).
         playerController.setControllerDisconnectedListener { recoverCrossfadeFromControllerDisconnected(crossfadePreparation) }
+        // CF-2M2: physical ExoPlayer -> SessionFacade -> PreviousBehaviorPlayer -> MediaLibrarySession. The façade is bound
+        // ONLY behind the single rollout gate (no second flag): with the gate false (shipping) the chain is exactly the
+        // pre-CF-2M2 ExoPlayer -> PreviousBehaviorPlayer, so shipping behaviour and rollback surface are unchanged. The
+        // façade never swaps delegates here (one physical player); its swap seam is exercised only by tests.
+        val logicalPlayer: Player = if (CrossfadeRolloutPolicy.RUNTIME_ENABLED) SessionFacade(player) else player
         val sessionPlayer = PreviousBehaviorPlayer(
-            player = player,
+            player = logicalPlayer,
             thresholdProvider = { previousRestartThresholdMs },
             scope = serviceScope,
-            playerController = playerController,
+            onExternalTransport = { playerController.onExplicitExternalTransport() },
+            hydrateForPlay = { songs ->
+                playerController.ensurePlayerHydratedFromSession(availableSongs = songs, operation = "explicit_play")
+            },
             songsProvider = { songRepository.songs.first() },
             logResume = ::logResume,
             sessionProvider = { mediaSession },
@@ -249,26 +256,31 @@ class PlaybackService : MediaLibraryService() {
             Log.d(AUDIO_SESSION_TAG, "[init] player created audioSessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
         }
 
-        // Authoritative widget state source: direct ExoPlayer listener fires on the
-        // player thread without the MediaController → MediaSession IPC round-trip.
-        // This covers notification controls, lock-screen controls, Bluetooth buttons,
-        // and widget action intents — all paths that previously bypassed PlayerController.
+        // CF-2M2 listener ownership. LOGICAL consumer (widget state): listens to the session-facing player (the facade when the
+        // gate is true, otherwise the same physical player). It must never observe a physical player directly once promotion
+        // exists. The PHYSICAL/crossfade observer below stays on the raw ExoPlayer: errors, READY/terminal state, the
+        // authoritative AUTO transition fact for the crossfade owner, and raw audio-session callbacks.
+        //
+        // Widget state follows the player events directly (notification controls, lock-screen, Bluetooth buttons and widget
+        // action intents all reach it) without the MediaController -> MediaSession IPC round-trip.
+        logicalPlayer.addListener(
+            WidgetPlaybackStateListener(
+                player = logicalPlayer,
+                scope = serviceScope,
+                sink = object : WidgetStateSink {
+                    override suspend fun save(snapshot: WidgetPlaybackSnapshot) = widgetStateStore.save(snapshot)
+                    override suspend fun updateIsPlaying(isPlaying: Boolean) = widgetStateStore.updateIsPlaying(isPlaying)
+                    override suspend fun clear() = widgetStateStore.clear()
+                    override fun requestUpdate() = WavdropWidgetUpdater.requestUpdate(applicationContext)
+                },
+            ),
+        )
+
+        // PHYSICAL / crossfade observer (raw ExoPlayer only).
         player.addListener(object : Player.Listener {
 
             // DEBUG-only: previous media item index, for the WavdropGapless transition line.
             private var lastGaplessIndex = player.currentMediaItemIndex
-
-            private fun buildSnapshot(isPlaying: Boolean): WidgetPlaybackSnapshot {
-                val item = player.currentMediaItem
-                return WidgetPlaybackSnapshot(
-                    title          = item?.mediaMetadata?.title?.toString()?.takeIf { it.isNotBlank() } ?: "Wavdrop",
-                    artist         = item?.mediaMetadata?.artist?.toString()?.takeIf { it.isNotBlank() } ?: "",
-                    albumId        = item?.mediaMetadata?.extras?.getLong("wavdrop_album_id", 0L) ?: 0L,
-                    isPlaying      = isPlaying,
-                    hasActiveMedia = item != null,
-                    updatedAt      = System.currentTimeMillis(),
-                )
-            }
 
             // CF-2F1: the authoritative primary reported a real playback error. Synchronously cancel any owned
             // crossfade (key-less). PlayerController keeps owning bad-media queue recovery; the timing driver is
@@ -293,19 +305,6 @@ class PlaybackService : MediaLibraryService() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 logCrossfadePrimaryState(player, "PRIMARY_IS_PLAYING value=$isPlaying")
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
-                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged=$isPlaying")
-                serviceScope.launch {
-                    try {
-                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: store write START isPlaying=$isPlaying")
-                        widgetStateStore.updateIsPlaying(isPlaying)
-                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: store write COMPLETE isPlaying=$isPlaying")
-                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: calling requestUpdate")
-                        WavdropWidgetUpdater.requestUpdate(applicationContext)
-                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onIsPlayingChanged: requestUpdate returned (fire-and-forget launched)")
-                    } catch (e: Throwable) {
-                        Log.e(WIDGET_TAG, "[service] onIsPlayingChanged: EXCEPTION ${e::class.simpleName} ${e.message}", e)
-                    }
-                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -317,21 +316,6 @@ class PlaybackService : MediaLibraryService() {
                 // CF-2L1: READY is real readiness evidence for a pending natural handoff (inert when none is pending).
                 if (playbackState == Player.STATE_READY) advanceCrossfadeHandoff(crossfadePreparation)
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
-                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged=$playbackState")
-                if (playbackState == Player.STATE_IDLE) {
-                    serviceScope.launch {
-                        try {
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: store clear START")
-                            widgetStateStore.clear()
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: store clear COMPLETE")
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: calling requestUpdate")
-                            WavdropWidgetUpdater.requestUpdate(applicationContext)
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onPlaybackStateChanged IDLE: requestUpdate returned")
-                        } catch (e: Throwable) {
-                            Log.e(WIDGET_TAG, "[service] onPlaybackStateChanged: EXCEPTION ${e::class.simpleName} ${e.message}", e)
-                        }
-                    }
-                }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -351,25 +335,6 @@ class PlaybackService : MediaLibraryService() {
                     lastGaplessIndex = newIndex
                 }
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onMediaItemTransition reason=$reason sessionId=${player.audioSessionId} title=${mediaItem?.mediaMetadata?.title} ts=${System.currentTimeMillis()}")
-                if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition reason=$reason title=${mediaItem?.mediaMetadata?.title}")
-                serviceScope.launch {
-                    try {
-                        if (mediaItem == null) {
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store clear START (null item)")
-                            widgetStateStore.clear()
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store clear COMPLETE")
-                        } else {
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store save START title=${mediaItem.mediaMetadata.title}")
-                            widgetStateStore.save(buildSnapshot(player.isPlaying))
-                            if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: store save COMPLETE")
-                        }
-                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: calling requestUpdate")
-                        WavdropWidgetUpdater.requestUpdate(applicationContext)
-                        if (BuildConfig.DEBUG) Log.d(WIDGET_TAG, "[service] onMediaItemTransition: requestUpdate returned")
-                    } catch (e: Throwable) {
-                        Log.e(WIDGET_TAG, "[service] onMediaItemTransition: EXCEPTION ${e::class.simpleName} ${e.message}", e)
-                    }
-                }
             }
 
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -753,145 +718,6 @@ class PlaybackService : MediaLibraryService() {
         )
     }
 
-    @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
-    private class PreviousBehaviorPlayer(
-        player: Player,
-        private val thresholdProvider: () -> Long,
-        private val scope: CoroutineScope,
-        private val playerController: PlayerController,
-        private val songsProvider: suspend () -> List<com.launchpoint.wavdrop.data.model.Song>,
-        private val logResume: (String) -> Unit,
-        private val sessionProvider: () -> MediaSession?,
-        // CF-2G1: invoked on every explicit pause BEFORE the primary pause is forwarded (crossfade cleanup needs the
-        // primary still controllable to restore its gain). Kept as a callback so this player knows nothing of crossfade.
-        private val onExplicitPause: () -> Unit,
-        // CF-2G2: invoked for an EXTERNAL user controller's same-track position seek only, before the seek is
-        // forwarded. Never for the app-marked controller (its user seeks are handled in PlayerController.seekTo, and its
-        // internal seeks, e.g. CF-2D2 handoff reconciliation, must stay untouched).
-        private val onExplicitSeek: () -> Unit,
-        // CF-2G3: invoked ONCE per EXTERNAL user NEXT/PREVIOUS command, before navigation. App-marked controller
-        // requests never reach it (PlayerController already notified). Internal delegation uses super.* to bypass it.
-        private val onExplicitNavigation: () -> Unit,
-        // CF-2H1: invoked ONCE per repeat-mode change from an EXTERNAL user controller (system UI, Android Auto,
-        // AVRCP) before it is forwarded. The app-marked controller is inert here: app commands (incl. the custom
-        // CYCLE_REPEAT command, which calls PlayerController.cycleRepeatMode) already notified in PlayerController.
-        private val onExplicitRepeatChange: () -> Unit,
-        // CF-2L3: DEBUG-only transport diagnostics (null in release). Logging never issues or alters transport.
-        private val transportLog: ((String) -> Unit)? = null,
-        private val crossfadeSummary: () -> String = { "" },
-    ) : ForwardingPlayer(player) {
-
-        private fun logTransport(name: String) {
-            val log = transportLog ?: return
-            try {
-                log(
-                    "$name t=${android.os.SystemClock.elapsedRealtime()} external=${isExternalUserTransportRequest()} " +
-                        "hasMedia=${currentMediaItem != null || mediaItemCount > 0} index=$currentMediaItemIndex " +
-                        "playbackState=$playbackState playWhenReady=$playWhenReady isPlaying=$isPlaying ${crossfadeSummary()}",
-                )
-            } catch (_: Exception) {
-                // diagnostics must never affect transport
-            }
-        }
-
-        override fun getMaxSeekToPreviousPosition(): Long = thresholdProvider()
-
-        // Explicit external transport (notification, lock screen, media keys, widget, system
-        // controllers) reaches the player here. Tied to the actual play()/pause() call.
-        private fun isExternalUserTransportRequest(): Boolean {
-            val controller = sessionProvider()?.controllerForCurrentRequest
-            return ExternalTransportPolicy.isExternalUserController(
-                hasController = controller != null,
-                isAppController = controller?.connectionHints
-                    ?.getBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, false) == true,
-            )
-        }
-
-        private fun noteExternalTransport() {
-            if (isExternalUserTransportRequest()) {
-                playerController.onExplicitExternalTransport()
-            }
-        }
-
-        // CF-2G2: same-track position seek (Player.seekTo(positionMs) only). Only an external user controller is an
-        // explicit user seek here; the app-marked controller is never cancelled at this layer.
-        override fun seekTo(positionMs: Long) {
-            if (isExternalUserTransportRequest()) onExplicitSeek()
-            super.seekTo(positionMs)
-        }
-
-        override fun pause() {
-            logTransport("TRANSPORT_PAUSE")
-            noteExternalTransport()
-            onExplicitPause() // cancel any owned crossfade first, then forward the pause
-            super.pause()
-        }
-
-        override fun play() {
-            logTransport("TRANSPORT_PLAY")
-            noteExternalTransport()
-            if (currentMediaItem != null || mediaItemCount > 0) {
-                playForwarded()
-                return
-            }
-            scope.launch {
-                val result = runCatching {
-                    playerController.ensurePlayerHydratedFromSession(
-                        availableSongs = songsProvider(),
-                        operation = "explicit_play",
-                    )
-                }.getOrElse { error ->
-                    logResume("explicit PLAY hydration failed: ${error::class.simpleName} ${error.message}")
-                    PlayerHydrationResult.MediaSetupFailed
-                }
-                logResume("explicit PLAY hydration result=$result")
-                if (playerHydrationAllowsPlay(result)) {
-                    playForwarded()
-                }
-            }
-        }
-
-        // CF-2G3: each explicit NEXT/PREVIOUS Media3 command is a distinct top-level seam (ForwardingPlayer does not
-        // route one through another). Each cancels once for external user controllers only.
-        override fun setRepeatMode(repeatMode: Int) {
-            if (isExternalUserTransportRequest()) onExplicitRepeatChange()
-            super.setRepeatMode(repeatMode)
-        }
-
-        override fun seekToNext() {
-            if (isExternalUserTransportRequest()) onExplicitNavigation()
-            super.seekToNext()
-        }
-
-        override fun seekToNextMediaItem() {
-            if (isExternalUserTransportRequest()) onExplicitNavigation()
-            super.seekToNextMediaItem()
-        }
-
-        override fun seekToPreviousMediaItem() {
-            if (isExternalUserTransportRequest()) onExplicitNavigation()
-            super.seekToPreviousMediaItem()
-        }
-
-        override fun seekToPrevious() {
-            // One cancel at the PREVIOUS command boundary, before threshold evaluation. Delegations below use super.*
-            // so neither the CF-2G2 seek hook nor the media-item hook fires a second time.
-            if (isExternalUserTransportRequest()) onExplicitNavigation()
-            val thresholdMs = thresholdProvider()
-            if (thresholdMs > 0L && currentPosition > thresholdMs) {
-                super.seekTo(0L)
-            } else if (hasPreviousMediaItem()) {
-                super.seekToPreviousMediaItem()
-            } else {
-                super.seekTo(0L)
-            }
-        }
-
-        private fun playForwarded() {
-            super.play()
-        }
-    }
-
     companion object {
         const val ACTION_AUDIO_OUTPUT_CONNECTED = "com.launchpoint.wavdrop.ACTION_AUDIO_OUTPUT_CONNECTED"
         const val EXTRA_AUDIO_OUTPUT_KIND = "com.launchpoint.wavdrop.EXTRA_AUDIO_OUTPUT_KIND"
@@ -916,7 +742,6 @@ class PlaybackService : MediaLibraryService() {
         }
 
         private const val RESUME_TAG = "WavdropResume"
-        private const val WIDGET_TAG = "WavdropWidget"
         private const val AUDIO_SESSION_TAG = "WavdropAudioSession"
         private const val GAPLESS_TAG = "WavdropGapless"
         private const val AUDIO_EFFECTS_TAG = "WavdropAudioEffects"

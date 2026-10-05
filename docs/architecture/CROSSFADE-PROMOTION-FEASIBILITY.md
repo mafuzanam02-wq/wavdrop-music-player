@@ -1,6 +1,6 @@
 # ADR: Crossfade promotion architecture (CF-2M1 feasibility)
 
-- Status: **Proposed**, design only. No production code, test or gate changes accompany this document.
+- Status: **Proposed**; the session-façade question was **verified by CF-2M2** (section 25). CF-2M1 itself changed no production code, test or gate.
 - Date: 2026-10-04
 - Baseline: `1d320a1` ("Project crossfade handoff positions safely"), `CrossfadeRolloutPolicy.RUNTIME_ENABLED = false`.
 - Scope: can WavDrop promote the already-playing incoming physical ExoPlayer to be the logical current player,
@@ -382,8 +382,8 @@ cold resumption and settings architecture.
 
 ## 23. Open questions
 
-1. Does `ForwardingSimpleBasePlayer.setPlayer` + an overridden `getState()` produce exactly one `onMediaItemTransition(AUTO)` and one
-   `AUTO_TRANSITION` discontinuity with `isPlaying` unchanged? (CF-2M2 spike)
+1. ~~Does `ForwardingSimpleBasePlayer.setPlayer` + an overridden `getState()` produce exactly one `onMediaItemTransition(AUTO)` and one
+   `AUTO_TRANSITION` discontinuity with `isPlaying` unchanged?~~ **Answered yes in CF-2M2 (section 25).**
 2. Is `androidx.media3.common.audio.AudioFocusManager` (`@UnstableApi`, verified) safe to drive from an engine outside ExoPlayer?
 3. Measured graft cost for a large queue; graft vs persistent mirror.
 4. Value of `END_MARGIN` and the retiring-player tail-strip behaviour on real files.
@@ -401,3 +401,50 @@ real Timeline, so the queue stays in `PlayerController`. It removes the stutter 
 **Gate on the CF-2M2 parity spike.** If façade event fidelity or `PreviousBehaviorPlayer` parity cannot be achieved
 without behavioural drift, fall back to option D (`MediaSession.setPlayer`) or stop and re-evaluate. No tolerance change
 is proposed anywhere in this plan, and no physical claim is made until a device retest.
+
+## 25. CF-2M2 verification results (single-player parity spike)
+
+Status of the CF-2M1 "to verify" items, proven by tests (hand-written `ScriptedPlayer`, a real Media3 `SimpleBasePlayer`
+driven by explicit state; Robolectric main looper; a real `MediaSession` and real in-process `MediaController`s). **No device
+was used.** Real ExoPlayer live-position behaviour, notification, Bluetooth/AVRCP and Android Auto were not exercised and
+remain CF-2M7 evidence.
+
+**Implemented (production):** `SessionFacade : ForwardingSimpleBasePlayer` (one physical delegate, nothing synthesized,
+eager state snapshot at construction, the single swap seam `replaceDelegate(newDelegate, presentAsAutoTransition)`, explicit
+same-looper `require`); `PreviousBehaviorPlayer` extracted unchanged into its own file (its two `PlayerController` calls became
+injected functions); `WidgetPlaybackStateListener` extracted verbatim as the logical consumer.
+
+**Chain actually built:** `ExoPlayer -> SessionFacade -> PreviousBehaviorPlayer -> MediaLibrarySession`. This differs from the
+sketch in section 5/6, deliberately: the WavDrop policy wrapper stays **outside** the façade, so its decisions
+(`controllerForCurrentRequest`, previous semantics, explicit-transport hooks) run synchronously on the session request exactly
+as before and are not duplicated or ported into `handle*`. The physical player is the façade's swappable delegate.
+
+**Gate decision: B (gate-bound).** The façade is constructed only when `CrossfadeRolloutPolicy.RUNTIME_ENABLED` is true;
+with the gate false (shipping) the chain is exactly the pre-CF-2M2 `ExoPlayer -> PreviousBehaviorPlayer`. No second flag.
+Smallest rollback surface while parity is proven only off-device.
+
+**Findings:**
+
+| CF-2M1 open question | Result |
+|---|---|
+| Façade remains the same object | Yes. |
+| `controllerForCurrentRequest` inside `handle*` | **Works.** A probe `ForwardingSimpleBasePlayer` reads the real `ControllerInfo` (with the app connection hint) inside `handleSetPlayWhenReady`/`handleSeek`/`handleSetRepeatMode`, distinguishing the app controller from an external one. |
+| `PreviousBehaviorPlayer` parity | Identical policy callbacks and identical physical commands with and without the façade, for both an app and an external controller (pause, play, same-track seek, next, previous-restart, previous-item, repeat). `getMaxSeekToPreviousPosition` is still advertised to controllers. |
+| Single-delegate event parity | Exact equality with the player observed directly for pause, play, seek, AUTO transition, buffering, repeat, error, timeline. No extra transitions, discontinuities, pause/play edges or PLAYLIST_CHANGED. |
+| `isPlaying` flicker in playing->playing swap | None (no `isPlaying`, `playWhenReady` or `state` event, at the façade and at a real controller). |
+| Default swap sequence (playing P1(A) -> playing P2(B), same timeline) | `discontinuity(0@170000->1@1000, INTERNAL)`, `transition(B, PLAYLIST_CHANGED)`, `metadata(B)`. One coherent diff; no timeline event. |
+| Swap presented as AUTO (`presentAsAutoTransition = true`) | `discontinuity(0@170000->1@1000, AUTO_TRANSITION)`, `transition(B, AUTO)`, `metadata(B)`. Same single diff with only its reason pinned via an overridden `getState()`; **nothing is fabricated**; the pin is one-shot (a later change carries no leftover discontinuity). |
+| Same sequence as seen by a real `MediaController` through the session | `discontinuity(1@5000->2@1000, AUTO_TRANSITION)`, `transition(C, AUTO)`, `metadata(C)`; controller stays connected, `isPlaying` never flickers. |
+| Different-timeline swap (NEXT slot not yet grafted) | Exactly one timeline event and one transition, no `isPlaying` event. This is why the CF-2M4 graft must finish before promotion. |
+| Command routing after swap | After the swap commands reach only the new delegate; the old delegate receives none (including `release`). |
+| Listener ownership | Old delegate changes (pause, ENDED, repeat) produce no façade event; new delegate changes do. |
+| Looper contract | Same-looper replacement succeeds; a different looper throws `IllegalArgumentException` before any state change (delegate and events untouched). |
+| Session identity | Same `MediaSession`, same session player object and token across a swap; no `MediaSession.setPlayer`; no rebuild. |
+| Widget listener | Through the façade it makes exactly the same sink calls as when attached to the physical player; after a swap it follows the new item with no play/pause edge and ignores the retiring player. |
+
+**Implementation notes learned:** `SimpleBasePlayer` snapshots state lazily, so the façade snapshots at construction (otherwise
+a physical change before the first read is folded into that read and no event is emitted). A bare constant-position jump is
+reported by Media3 as an `INTERNAL` discontinuity; real players supply live positions, which the façade forwards.
+
+**Verdict for CF-2M3: GO.** Every CF-2M2 go criterion was met in JVM/Robolectric tests; none of the no-go conditions occurred.
+Residual limits (device, real ExoPlayer swap, system UI) stay as CF-2M7 evidence.
