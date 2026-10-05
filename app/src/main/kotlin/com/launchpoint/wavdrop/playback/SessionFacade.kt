@@ -99,6 +99,66 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
         }
     }
 
+    /**
+     * CF-2M6: invoked synchronously BEFORE a command that changes the current player's transport or queue is forwarded to the
+     * delegate. The engine uses it to cut a retiring player first, so no command can ever race a still-audible A (pause is
+     * covered at the engine's own play-state boundary). Null (the CF-2M2 shape) means a pure forwarder.
+     */
+    var commandBoundary: ((PromotionInterruption) -> Unit)? = null
+
+    private fun boundary(interruption: PromotionInterruption) { commandBoundary?.invoke(interruption) }
+
+    override fun handleSeek(mediaItemIndex: Int, positionMs: Long, seekCommand: Int): ListenableFuture<*> {
+        boundary(
+            when (seekCommand) {
+                Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> PromotionInterruption.Navigation
+                else -> PromotionInterruption.Seek
+            },
+        )
+        return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
+    }
+
+    override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
+        boundary(PromotionInterruption.RepeatChanged)
+        return super.handleSetRepeatMode(repeatMode)
+    }
+
+    override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> {
+        boundary(PromotionInterruption.ShuffleChanged)
+        return super.handleSetShuffleModeEnabled(shuffleModeEnabled)
+    }
+
+    override fun handleSetMediaItems(mediaItems: MutableList<androidx.media3.common.MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<*> {
+        boundary(PromotionInterruption.QueueMutated)
+        return super.handleSetMediaItems(mediaItems, startIndex, startPositionMs)
+    }
+
+    override fun handleAddMediaItems(index: Int, mediaItems: MutableList<androidx.media3.common.MediaItem>): ListenableFuture<*> {
+        boundary(PromotionInterruption.QueueMutated)
+        return super.handleAddMediaItems(index, mediaItems)
+    }
+
+    override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> {
+        boundary(PromotionInterruption.QueueMutated)
+        return super.handleMoveMediaItems(fromIndex, toIndex, newIndex)
+    }
+
+    override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: MutableList<androidx.media3.common.MediaItem>): ListenableFuture<*> {
+        boundary(PromotionInterruption.QueueMutated)
+        return super.handleReplaceMediaItems(fromIndex, toIndex, mediaItems)
+    }
+
+    override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> {
+        boundary(PromotionInterruption.QueueMutated)
+        return super.handleRemoveMediaItems(fromIndex, toIndex)
+    }
+
+    override fun handleStop(): ListenableFuture<*> {
+        boundary(PromotionInterruption.FacadeCommand)
+        return super.handleStop()
+    }
+
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         val owner = playWhenReadyOwner ?: return super.handleSetPlayWhenReady(playWhenReady)
         owner.requestPlayWhenReady(playWhenReady)

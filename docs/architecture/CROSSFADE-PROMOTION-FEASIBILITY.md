@@ -674,3 +674,70 @@ and at most one logical transition.
 
 **Evidence limits / remaining for CF-2M6:** the interaction and error matrix is deliberately NOT implemented: pause, seek, next/previous, repeat/shuffle mutation, focus loss, noisy, incoming/retiring errors and
 physical death during an overlap. M5 only fails closed: the shared cancel hook cuts A immediately and B (already the logical CURRENT) continues alone. CF-2M7 owns device validation of audible seams, END_MARGIN tuning and jank.
+
+## 29. CF-2M6 results (overlap interaction + error policy)
+
+JVM/Robolectric only, including structural proofs on **real ExoPlayers** and a real MediaSession/MediaController; **no device, no claim about audible smoothness**
+(CF-2M7). The gate is still false. CF-2L is not deleted and the engine topology never executes it. The promotion model is unchanged: no B->A rollback, no second B, no B seek
+for settlement, no handoff.
+
+**Core rule.** After a promotion B is already the logical CURRENT, so every interruption does the same thing: **cut the retiring A, settle to B only, then let the requested
+logical action act on B.** The one exception is a focus duck, which is not an interruption (it is a volume multiplier): both audible players are attenuated by the gain composer and
+the overlap continues.
+
+**Reason-aware settlement.** `PromotionInterruption` (Pause, Seek, Navigation, RepeatChanged, ShuffleChanged, QueueMutated, TransientFocusLoss, PermanentFocusLoss, AudioBecomingNoisy,
+CurrentError, CurrentTerminal, RetiringError, RetiringEnded, ConfigurationDisabled, PlanInvalidated, ControllerDisconnected, Teardown, FacadeCommand, Other) is the one policy type.
+`PromotionInterruption.from(CrossfadeCancelReason)` is a total mapping, so the existing shared cancellation family (the `recoverCrossfadeFrom...` hooks and the service fan-out) needs no
+overlap knowledge. The M5 generic `cancel()` placeholder is now `CrossfadePromotionRuntime.settleOverlap(reason)`: one idempotent, re-entrancy-safe seam that invalidates pending ticks,
+forces A = 0 and B = full fade, stops and clears A (recycle, or quarantine if that fails) and returns to Idle. It is physical cleanup only: no seek/skip/pause/repeat/queue action and no
+logical event (settlement alone emits no transition, no discontinuity, no timeline change, no play-state change). The outcome is recorded as `Interrupted(key, reason, retiringRecycled)`.
+DEBUG-only line `OVERLAP_SETTLE reason=... gen= from= to= current=<slot> retiring=<slot>` (no titles, paths or song ids).
+
+**Command-order findings (why there are three layers).** (1) The explicit hooks already run BEFORE the action is forwarded: `PreviousBehaviorPlayer.pause/seekTo/seekToNext/...` (external
+controllers only) and `PlayerController.seekTo` (before it clamps/applies). (2) They do not cover every path: `setPlayWhenReady(false)`, app-controller pause, the engine's own noisy and
+focus-loss pauses, queue-index seeks and external queue edits never reach them, and in the engine topology a physical player has `handleAudioFocus = false` so it can never report a
+focus-loss reason itself. So the engine settles at its own **play-state boundary** (`commit`) before it pushes ANY pause/suppression to B, and `SessionFacade.commandBoundary` settles
+before any seek, navigation, repeat, shuffle, queue load/add/move/replace/remove or stop reaches B. (3) Hook + boundary both fire for the same user action; the seam is idempotent, so one
+action yields one settlement. Journal tests prove A's `stop()` precedes the first command that reaches B for pause, seek, next, previous, repeat and every queue mutation, and that A never
+receives a seek, navigation, queue-load, prepare, repeat or shuffle command.
+
+**Policy matrix**
+
+| Interruption | Result |
+|---|---|
+| Explicit pause | A cut, then ONE pause on B (no seek, no restart); resume resumes B only |
+| Seek | A cut, then the seek on B only; A never sought; no second B |
+| Next / Previous | A cut, then the normal action on B (the existing previous restart-threshold policy runs against B); A never receives navigation |
+| Repeat / shuffle change | A cut, then the change on B/logical state; the recycled NEXT stays repeat OFF; prepared future work is invalidated by the existing hooks |
+| Queue mutation (play-next, add, reorder, remove, clear, replace, library deletion, adopted resumption) | A cut, then applied to B exactly once; nothing is mirrored onto A |
+| Focus DUCK | NOT settled: both audible players attenuated (`duck x fade(slot)`), unduck restores the fade-relative volumes, ticks preserve the duck, progress stays monotonic |
+| Transient focus loss | A cut; B suppressed by the engine's logical state (TRANSIENT suppression, play intent kept); regain resumes B only |
+| Permanent focus loss | A cut; B current but not playing (`AUDIO_FOCUS_LOSS`) |
+| Audio becoming noisy | A cut; exactly one logical pause (`AUDIO_BECOMING_NOISY`); a duplicate broadcast is harmless |
+| Route removal bookkeeping | unchanged and never pauses (source-guarded); it only records resume entitlement, so the engine's noisy path is the single pause |
+| Current B error / terminal | A cut; the player error reaches the existing current-player bad-media recovery exactly once; A is never used as a fallback |
+| Retiring A error | ignored logically; A cut; B continues; no session error, transition or stats effect; DEBUG log only |
+| Retiring A early ENDED | settled immediately (A = 0, B = 1); no logical transition; no error |
+| Crossfade OFF | A cut; B continues; polling stops |
+| Enabled -> enabled duration change | the active overlap keeps its captured duration; the new value applies to future transitions |
+| EQ enabled | A cut; B continues; the existing eligibility blocks future preparation |
+| Controller disconnect | A cut; neither physical is released |
+| Service teardown | runtime closes first (closed before it settles, so nothing is rescheduled), then the engine releases; `close()` and `release()` are idempotent; a stale tick is inert |
+
+**Retiring-event identity.** The retiring observer is created per retirement episode and bound to that slot; settlement bumps the episode, so a late event of an old episode (or of the
+recycled player in its later NEXT role) is inert.
+
+**Quarantine.** A retirement whose cleanup fails leaves A silent (fade 0) and quarantined: B keeps playing, `promotionActive` stays true, NEXT preparation stops accepting and promotion is
+rejected, so crossfade fails closed for the rest of the engine's life. Nothing rebuilds the slot automatically in this slice (deliberate degradation; playback itself is unaffected).
+
+**Stats / persistence.** None added. Settlement is physical only, so it produces no stats or save event; every logical action uses its existing event semantics (the source guard forbids
+stats, now-playing and persistence references in the engine and runtime).
+
+**Preparation restart.** After a healthy settlement the runtime is Idle, the recycled slot is empty and neutral, and the M4 driver prepares the next eligible transition on a later poll
+(verified after pause+resume, seek and next). Settlement never recurses into preparation.
+
+**Deliberately deferred.** (1) Rebuilding a dead current physical player: M6 stops at a clean single-authority state (A cut, B authoritative) and the normal logical error recovery;
+there is no hidden B->A rollback and no physical rebuild (a later hardening slice). (2) A physical UNSUITABLE_AUDIO_ROUTE suppression maps to Pause (not a dedicated reason). (3) Real-player
+tests cannot produce A's natural ENDED/error because Robolectric freezes the playback clock; those paths are proven on the scripted physicals. (4) Interruption-resume entitlement itself
+(Bluetooth/wired) is existing PlayerController behaviour and was not changed or re-tested here. (5) No mutation testing of the new boundaries was done. CF-2M7 owns device validation
+and END_MARGIN tuning.

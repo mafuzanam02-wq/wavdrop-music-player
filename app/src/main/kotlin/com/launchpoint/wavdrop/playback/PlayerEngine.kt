@@ -149,6 +149,8 @@ internal class PlayerEngine<P : Player>(
 
     init {
         facade.bindPlayWhenReadyOwner(owner)
+        // CF-2M6 defense in depth: any command that reaches the façade (so B) first cuts an active retiring A.
+        facade.commandBoundary = { interruptOverlap(it) }
         first.addListener(currentObserver)
         setHandleAudioBecomingNoisy(handleAudioBecomingNoisy)
     }
@@ -233,6 +235,18 @@ internal class PlayerEngine<P : Player>(
         }
         // The change reason is only meaningful with a play-when-ready change; never emit a reason-only diff.
         if (newPlayWhenReady == logicalPlayWhenReady) newReason = logicalChangeReason
+        // CF-2M6: only the logical CURRENT (B) is ever paused/suppressed below, so a retiring A must be cut BEFORE that happens or
+        // it would keep playing behind a paused B. A duck never gets here (it is a volume multiplier, not a play command).
+        if (retiringSlot != null && !(newPlayWhenReady && newSuppression == Player.PLAYBACK_SUPPRESSION_REASON_NONE)) {
+            interruptOverlap(
+                when {
+                    newReason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY && !newPlayWhenReady -> PromotionInterruption.AudioBecomingNoisy
+                    newReason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS && !newPlayWhenReady -> PromotionInterruption.PermanentFocusLoss
+                    newSuppression == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS -> PromotionInterruption.TransientFocusLoss
+                    else -> PromotionInterruption.Pause
+                },
+            )
+        }
         logicalPlayWhenReady = newPlayWhenReady
         logicalChangeReason = newReason
         logicalSuppressionReason = newSuppression
@@ -324,17 +338,48 @@ internal class PlayerEngine<P : Player>(
     /** True while a retiring (or quarantined) player occupies the NEXT role. */
     val promotionActive: Boolean get() = retiringSlot != null || quarantinedSlot != null
 
-    /** Invoked (physical-only) when the retiring player ends or errors before the overlap completes. */
-    var retiringTerminalListener: (() -> Unit)? = null
+    /**
+     * CF-2M6: the one seam through which the engine reports an interruption of an ACTIVE overlap (set by the promotion runtime).
+     * It is invoked synchronously, BEFORE the interrupting state reaches B, so the retiring A is cut first. A null sink or no
+     * retiring player makes it a no-op.
+     */
+    var overlapInterruptionSink: ((PromotionInterruption) -> Unit)? = null
 
-    private val retiringObserver = object : Player.Listener {
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) retiringTerminalListener?.invoke()
-        }
+    private fun interruptOverlap(interruption: PromotionInterruption) {
+        if (released || retiringSlot == null) return
+        overlapInterruptionSink?.invoke(interruption)
+    }
 
-        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            retiringTerminalListener?.invoke()
+    // One observer per retirement episode, bound to that slot: after the episode ends (or the slot is recycled and later
+    // retires again) an old event can never be mistaken for the new retiring player's.
+    private var retiringEpisode = 0L
+    private var retiringObserver: Player.Listener? = null
+
+    private fun attachRetiringObserver(slot: PlayerSlot<P>) {
+        val episode = ++retiringEpisode
+        val observer = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) retiringEvent(slot, episode, PromotionInterruption.RetiringEnded)
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                retiringEvent(slot, episode, PromotionInterruption.RetiringError)
+            }
         }
+        retiringObserver = observer
+        slot.player.addListener(observer)
+    }
+
+    private fun detachRetiringObserver(slot: PlayerSlot<P>) {
+        retiringEpisode++ // anything still queued for the ended episode is stale
+        val observer = retiringObserver ?: return
+        retiringObserver = null
+        try { slot.player.removeListener(observer) } catch (_: Exception) { }
+    }
+
+    private fun retiringEvent(slot: PlayerSlot<P>, episode: Long, interruption: PromotionInterruption) {
+        if (released || episode != retiringEpisode || retiringSlot !== slot) return
+        overlapInterruptionSink?.invoke(interruption)
     }
 
     private fun step(step: PromotionStep) { promotionStepHook?.invoke(step) }
@@ -407,7 +452,7 @@ internal class PlayerEngine<P : Player>(
             step(PromotionStep.ReplaceDelegate)
             facade.replaceDelegate(currentPlayer, presentAsAutoTransition = true)
             retiringSlot = outgoing
-            out.addListener(retiringObserver)
+            attachRetiringObserver(outgoing)
             applyVolumes()
         } catch (e: Exception) {
             return settleAfterSwapFailure(outgoing, incoming, swapped)
@@ -487,9 +532,8 @@ internal class PlayerEngine<P : Player>(
     fun finishRetirement(): Boolean {
         val slot = retiringSlot ?: return true
         val p = slot.player
+        detachRetiringObserver(slot)
         retiringSlot = null
-        retiringTerminalListener = null
-        try { p.removeListener(retiringObserver) } catch (_: Exception) { }
         fade[currentSlot.id] = 1f
         fade[slot.id] = 0f
         try { applyVolumes() } catch (_: Exception) { }
@@ -531,10 +575,11 @@ internal class PlayerEngine<P : Player>(
     fun release() {
         if (released) return
         released = true
-        retiringTerminalListener = null
+        overlapInterruptionSink = null
+        facade.commandBoundary = null
         unregisterNoisyReceiver()
         nextPreparation.release()
-        retiringSlot?.player?.removeListener(retiringObserver)
+        retiringSlot?.let { detachRetiringObserver(it) }
         observedCurrent.removeListener(currentObserver)
         currentListeners.forEach { observedCurrent.removeListener(it) }
         focus.release()

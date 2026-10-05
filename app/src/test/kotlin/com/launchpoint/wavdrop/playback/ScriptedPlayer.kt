@@ -31,7 +31,15 @@ internal class ScriptedPlayer(
     audioSessionId: Int = androidx.media3.common.C.AUDIO_SESSION_ID_UNSET,
 ) : SimpleBasePlayer(looper) {
 
-    val commands = mutableListOf<String>()
+    /** CF-2M6: optional shared, ordered journal of every command of several players (proves cross-player ordering). */
+    var journal: MutableList<String>? = null
+
+    val commands: MutableList<String> = object : ArrayList<String>() {
+        override fun add(element: String): Boolean {
+            journal?.add(element)
+            return super.add(element)
+        }
+    }
     private var current: State = buildState(titles, index, positionMs, playing, state, audioSessionId)
 
     // SimpleBasePlayer snapshots its state lazily on first access; force it NOW so later mutate() calls produce real diffs.
@@ -142,6 +150,22 @@ internal class ScriptedPlayer(
     override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
         commands += "$name.setRepeatMode($repeatMode)"
         current = current.buildUpon().setRepeatMode(repeatMode).build()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> {
+        commands += "$name.setShuffle($shuffleModeEnabled)"
+        current = current.buildUpon().setShuffleModeEnabled(shuffleModeEnabled).build()
+        return Futures.immediateVoidFuture()
+    }
+
+    override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> {
+        commands += "$name.moveMediaItems($fromIndex,$toIndex,$newIndex)"
+        val playlist = current.playlist.toMutableList()
+        val moved = ArrayList(playlist.subList(fromIndex, toIndex))
+        playlist.subList(fromIndex, toIndex).clear()
+        playlist.addAll(newIndex, moved)
+        current = current.buildUpon().setPlaylist(playlist).build()
         return Futures.immediateVoidFuture()
     }
 

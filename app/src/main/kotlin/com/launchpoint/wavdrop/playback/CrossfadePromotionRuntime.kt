@@ -41,9 +41,63 @@ internal sealed interface PromotionOverlapState {
     data class Retiring(val key: CrossfadeTransitionKey, val outgoingSlotId: Int, val incomingSlotId: Int) : PromotionOverlapState
 }
 
+/**
+ * CF-2M6: WHY an active overlap is being settled. After a promotion B is already the logical CURRENT, so every interruption
+ * resolves the same way: CUT the retiring A, settle to B only, then let the requested logical action act on B. The one
+ * exception is a focus DUCK, which is not an interruption at all (it never reaches this type: the gain composer attenuates both
+ * audible players and the overlap continues). Nothing here ever restores A or seeks B.
+ */
+internal enum class PromotionInterruption(val label: String) {
+    Pause("PAUSE"),
+    Seek("SEEK"),
+    Navigation("NAVIGATION"),
+    RepeatChanged("REPEAT_CHANGED"),
+    ShuffleChanged("SHUFFLE_CHANGED"),
+    QueueMutated("QUEUE_MUTATED"),
+    TransientFocusLoss("FOCUS_LOSS_TRANSIENT"),
+    PermanentFocusLoss("FOCUS_LOSS_PERMANENT"),
+    AudioBecomingNoisy("AUDIO_BECOMING_NOISY"),
+    /** The current (incoming B) player reported an error: handled ONCE by the normal current-player recovery. */
+    CurrentError("CURRENT_ERROR"),
+    /** The current player reached IDLE/ENDED outside a normal transition (physical death or natural end). */
+    CurrentTerminal("CURRENT_TERMINAL"),
+    RetiringError("RETIRING_ERROR"),
+    RetiringEnded("RETIRING_ENDED"),
+    ConfigurationDisabled("CROSSFADE_OFF"),
+    /** The CF-1 plan no longer holds; today the only producer is the Equalizer becoming enabled. */
+    PlanInvalidated("PLAN_INVALIDATED"),
+    ControllerDisconnected("CONTROLLER_DISCONNECTED"),
+    Teardown("TEARDOWN"),
+    /** A command reached the façade that no explicit hook announced (defense in depth; always settles first). */
+    FacadeCommand("FACADE_COMMAND"),
+    /** Any other shared cancellation reason: fail closed. */
+    Other("OTHER");
+
+    companion object {
+        /** The ONE mapping from the shared cancellation family to the overlap policy. Total: no reason is ever ignored. */
+        fun from(reason: CrossfadeCancelReason): PromotionInterruption = when (reason) {
+            CrossfadeCancelReason.Pause -> Pause
+            CrossfadeCancelReason.Seek -> Seek
+            CrossfadeCancelReason.ManualNavigation -> Navigation
+            CrossfadeCancelReason.RepeatChanged -> RepeatChanged
+            CrossfadeCancelReason.ShuffleChanged -> ShuffleChanged
+            CrossfadeCancelReason.QueueMutation, CrossfadeCancelReason.QueueBecameDirty -> QueueMutated
+            CrossfadeCancelReason.PlaybackError -> CurrentError
+            CrossfadeCancelReason.PrimaryPlaybackTerminated -> CurrentTerminal
+            CrossfadeCancelReason.ConfigurationDisabled -> ConfigurationDisabled
+            CrossfadeCancelReason.PlanInvalidated -> PlanInvalidated
+            CrossfadeCancelReason.ControllerDisconnected -> ControllerDisconnected
+            CrossfadeCancelReason.ServiceStopping -> Teardown
+            else -> Other
+        }
+    }
+}
+
 /** Bounded record of the last promotion attempt, for tests and DEBUG diagnostics. */
 internal sealed interface PromotionOutcome {
     data class Completed(val key: CrossfadeTransitionKey) : PromotionOutcome
+    /** CF-2M6: the overlap was settled to B only by [interruption]; [retiringRecycled] is false when A had to be quarantined. */
+    data class Interrupted(val key: CrossfadeTransitionKey, val interruption: PromotionInterruption, val retiringRecycled: Boolean) : PromotionOutcome
     data class Skipped(val key: CrossfadeTransitionKey, val reason: String) : PromotionOutcome
     data class Rejected(val key: CrossfadeTransitionKey, val reason: PromotionRejection) : PromotionOutcome
     data class Failed(val key: CrossfadeTransitionKey, val step: PromotionStep, val survivorSlotId: Int) : PromotionOutcome
@@ -55,8 +109,9 @@ internal sealed interface PromotionOutcome {
  * engine, run the equal-power fade from a monotonic clock, and retire A. It plans nothing (it reuses the CF-1 plan/key and
  * ownership rules), converts no Songs, owns no stats/session/focus policy, and never seeks, re-prepares or hands off B.
  *
- * The CF-2M6 interaction/error matrix is NOT here. The shared cancel hook ([cancel]) only fails closed: if it fires while an
- * overlap exists, A is cut immediately and B (already the logical CURRENT) continues alone. Main-thread confined.
+ * CF-2M6 interaction/error policy: every interruption goes through [settleOverlap] with an explicit [PromotionInterruption];
+ * A is cut and B (already the logical CURRENT) continues alone, then the requested action runs against B. A focus duck is the one
+ * exception and never reaches it. Main-thread confined.
  */
 internal class CrossfadePromotionRuntime<P : Player>(
     private val engine: PlayerEngine<P>,
@@ -80,6 +135,10 @@ internal class CrossfadePromotionRuntime<P : Player>(
     // A transition whose window was missed or whose promotion failed is not retried by the poll (no storm).
     private var settledKey: CrossfadeTransitionKey? = null
 
+    // CF-2M6: the engine reports the interruptions only it can see (logical focus loss / noisy / pause at its own play-state
+    // boundary, a command reaching the façade, the retiring player's own end/error) through this one seam.
+    init { engine.overlapInterruptionSink = { settleOverlap(it) } }
+
     // ── lifecycle ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     fun start() {
@@ -95,11 +154,13 @@ internal class CrossfadePromotionRuntime<P : Player>(
         invalidatePulse()
     }
 
+    /** Idempotent teardown. Closed first, so settling the overlap schedules nothing and no stale tick can run afterwards. */
     fun close() {
         if (closed) return
-        abortOverlap("close")
         closed = true
         started = false
+        settleOverlap(PromotionInterruption.Teardown)
+        engine.overlapInterruptionSink = null
         invalidatePulse()
     }
 
@@ -178,7 +239,6 @@ internal class CrossfadePromotionRuntime<P : Player>(
                 state = PromotionOverlapState.Starting(key, result.outgoingSlotId, result.incomingSlotId)
                 generation++ // any earlier scheduled pulse belongs to the previous phase
                 scheduler.cancelAll()
-                engine.retiringTerminalListener = { abortOverlap("retiring ended") }
                 try {
                     engine.stripRetiringTail()
                     state = PromotionOverlapState.Overlap(key, result.outgoingSlotId, result.incomingSlotId, clock.nowMs(), effectiveMs)
@@ -229,32 +289,61 @@ internal class CrossfadePromotionRuntime<P : Player>(
     }
 
     /**
-     * Shared explicit-cancellation lifecycle point. M5 only fails closed: an existing overlap is cut so exactly one logical
-     * CURRENT (B) remains. The per-interaction product policy (pause/seek/navigation/repeat/focus/noisy/error/physical death) is
-     * CF-2M6; this contract is the placeholder it will refine.
+     * The shared explicit-cancellation family ends here. Every `recoverCrossfadeFrom...` hook (pause, seek, navigation, repeat,
+     * shuffle, queue mutations, controller disconnect, EQ enable, crossfade OFF, current error/terminal) carries a
+     * [CrossfadeCancelReason] that [PromotionInterruption.from] maps to the overlap policy, so no external hook needs overlap
+     * knowledge. Before an overlap exists this does nothing here (the NEXT preparation owner has its own invalidation).
      */
     override fun cancel(reason: CrossfadeCancelReason) {
-        abortOverlap("cancel:$reason")
+        settleOverlap(PromotionInterruption.from(reason))
     }
 
+    /**
+     * CF-2M6: the ONE overlap-settlement seam. Cuts the retiring A and leaves B (already the logical CURRENT) as the only
+     * authoritative player. It is physical cleanup only: it invalidates pending ticks, forces A = 0 and B = full fade, stops and
+     * clears A (recycle, or quarantine if that fails), and returns to Idle. It performs NO seek/skip/pause/repeat/queue action and
+     * emits no logical event, so the requested interaction runs afterwards against B exactly as it would without any overlap.
+     * Idempotent: a second call (or one with no overlap) does nothing. Safe to re-enter (the state is Idle before cleanup).
+     */
+    fun settleOverlap(why: PromotionInterruption) {
+        endOverlap(why.label) { key, recycled -> PromotionOutcome.Interrupted(key, why, recycled) }
+    }
+
+    /** An internal failure of the overlap's own machinery: the same cut, recorded as Aborted. */
     private fun abortOverlap(why: String) {
-        val key = when (val s = state) {
-            is PromotionOverlapState.Overlap -> s.key
-            is PromotionOverlapState.Starting -> s.key
-            is PromotionOverlapState.Retiring -> s.key
-            PromotionOverlapState.Idle -> return
+        endOverlap(why) { key, _ -> PromotionOutcome.Aborted(key, why) }
+    }
+
+    private fun endOverlap(label: String, outcome: (CrossfadeTransitionKey, Boolean) -> PromotionOutcome) {
+        val ended = state
+        val key = when (ended) {
+            is PromotionOverlapState.Overlap -> ended.key
+            is PromotionOverlapState.Starting -> ended.key
+            is PromotionOverlapState.Retiring -> ended.key
+            PromotionOverlapState.Idle -> null
         }
+        // An engine-side retiring player with no runtime state would be inconsistent; still cut it rather than leave two audible.
+        if (key == null && engine.retiringPlayer == null) return
         generation++
         scheduler.cancelAll()
-        try {
+        state = PromotionOverlapState.Idle
+        val recycled = try {
             engine.finishRetirement() // B -> 1, A -> 0, A stopped and cleared; B (the logical CURRENT) is untouched
         } catch (e: Exception) {
-            Log.w(TAG, "overlap abort cleanup failed", e)
+            Log.w(TAG, "overlap settlement cleanup failed", e)
+            false
         }
-        settledKey = key
-        lastOutcome = PromotionOutcome.Aborted(key, why)
-        state = PromotionOverlapState.Idle
-        debug("PROMOTION_ABORT", key, "reason=$why")
+        if (key != null) {
+            settledKey = key
+            lastOutcome = outcome(key, recycled)
+            val slots = when (ended) {
+                is PromotionOverlapState.Overlap -> "current=${ended.incomingSlotId} retiring=${ended.outgoingSlotId}"
+                is PromotionOverlapState.Starting -> "current=${ended.incomingSlotId} retiring=${ended.outgoingSlotId}"
+                is PromotionOverlapState.Retiring -> "current=${ended.incomingSlotId} retiring=${ended.outgoingSlotId}"
+                PromotionOverlapState.Idle -> ""
+            }
+            debug("OVERLAP_SETTLE", key, "reason=$label $slots recycled=$recycled")
+        }
         if (started && !closed) schedule(CrossfadeTimingDriver.PRE_FADE_POLL_INTERVAL_MS)
     }
 

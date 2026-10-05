@@ -304,7 +304,7 @@ class CrossfadePromotionRuntimeTest {
         r.runtime.tick()
         r.runtime.cancel(CrossfadeCancelReason.Pause)
         assertEquals(PromotionOverlapState.Idle, r.runtime.state)
-        assertTrue(r.runtime.lastOutcome is PromotionOutcome.Aborted)
+        assertEquals(PromotionOutcome.Interrupted(r.base.key, PromotionInterruption.Pause, retiringRecycled = true), r.runtime.lastOutcome)
         assertEquals(0, r.p1.mediaItemCount)
         assertFalse(r.p1.playWhenReady)
         assertEquals(1f, r.p2.volume, 0f)
