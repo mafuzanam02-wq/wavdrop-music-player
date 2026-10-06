@@ -131,10 +131,13 @@ class LibraryScanStateTest {
         assertFalse("fun refreshLibrary" in vm)
         assertTrue("val isRefreshing: StateFlow<Boolean> = scanState" in vm) // derived, never contradicts scanState
         val home = src("ui/screen/home/HomeScreen.kt")
-        assertTrue("onRescan = viewModel::rescanLibrary" in home) // top-bar overflow
+        assertTrue("onRefresh    = viewModel::rescanLibrary" in home) // routine Home rescan is pull-to-refresh, same authority as Songs
+        assertTrue("PullToRefreshBox(" in home && "isRefreshing = scanState == LibraryScanUiState.Scanning" in home) // scan state is the only refresh state
         assertTrue("onRescan               = viewModel::rescanLibrary" in home) // dashboard / empty state
         assertTrue("onRetry           = viewModel::rescanLibrary" in home)
-        assertTrue("\"More options\"" in home && "\"Rescan library\"" in home)
+        assertFalse("no Home top-bar overflow / Rescan menu", "HomeOverflowMenu" in home || "\"More options\"" in home || "MoreVert" in home || "DropdownMenu" in home)
+        assertTrue("the contextual empty-state Rescan button stays", "\"Rescan library\"" in home)
+        assertTrue("explicit scan recovery stays", "LibraryScanStatus(" in home && "onDismiss         = viewModel::dismissScanMessage" in home)
         assertTrue("onRefresh    = viewModel::rescanLibrary" in src("ui/screen/songs/SongsScreen.kt"))
     }
 

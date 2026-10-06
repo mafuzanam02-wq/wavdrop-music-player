@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
@@ -42,9 +41,8 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import com.launchpoint.wavdrop.ui.scan.LibraryScanStatus
 import com.launchpoint.wavdrop.ui.scan.LibraryScanUiState
 import androidx.compose.material3.MaterialTheme
@@ -194,10 +192,6 @@ fun HomeScreen(
                             tint               = MaterialTheme.colorScheme.onSurface,
                         )
                     }
-                    HomeOverflowMenu(
-                        scanning = scanState == LibraryScanUiState.Scanning,
-                        onRescan = viewModel::rescanLibrary,
-                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor    = MaterialTheme.colorScheme.surface,
@@ -236,11 +230,19 @@ fun HomeScreen(
             } else {
               Column(Modifier.padding(innerPadding)) {
                 LibraryScanStatus(
-                    state             = scanState,
+                    state             = if (scanState == LibraryScanUiState.Scanning) LibraryScanUiState.Idle else scanState,
                     onRetry           = viewModel::rescanLibrary,
                     onLibrarySettings = onLibrarySettingsClick,
                     onDismiss         = viewModel::dismissScanMessage,
                 )
+                // Routine manual refresh is pull-to-refresh (same pattern as Songs), routed to the one scan authority.
+                // The pull indicator is the scan-in-progress indicator on Home, so the status card above never also draws
+                // its own progress bar; Try again / Library Settings / Dismiss for a warning or error stay explicit.
+                PullToRefreshBox(
+                    isRefreshing = scanState == LibraryScanUiState.Scanning,
+                    onRefresh    = viewModel::rescanLibrary,
+                    modifier     = Modifier.weight(1f).fillMaxSize(),
+                ) {
                 HomeDashboardContent(
                     dashboard                = dashboardState,
                     visibleSections          = homeLayout.visibleSections,
@@ -283,8 +285,9 @@ fun HomeScreen(
                     onRescan               = viewModel::rescanLibrary,
                     onSettingsClick        = onSettingsClick,
                     onLibrarySettingsClick = onLibrarySettingsClick,
-                    modifier               = Modifier.weight(1f),
+                    modifier               = Modifier.fillMaxSize(),
                 )
+                }
               }
             }
         }
@@ -451,32 +454,6 @@ private fun ScanningContent(modifier: Modifier = Modifier) {
             text  = "Scanning library…",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
-    }
-}
-
-/** Top-bar "More options" menu. Rescan is disabled while a scan runs (the ViewModel also ignores a second start). */
-@Composable
-internal fun HomeOverflowMenu(
-    scanning: Boolean,
-    onRescan: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    IconButton(onClick = { expanded = true }) {
-        Icon(
-            imageVector        = Icons.Default.MoreVert,
-            contentDescription = "More options",
-            tint               = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        DropdownMenuItem(
-            text    = { Text("Rescan library") },
-            enabled = !scanning,
-            onClick = {
-                expanded = false
-                onRescan()
-            },
         )
     }
 }
