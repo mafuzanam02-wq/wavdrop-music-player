@@ -21,8 +21,8 @@ Each major area is labelled against the implementation reconciled after CF-2C3:
 
 Overall: the contract started as a proposed architecture baseline. The preservation foundation (pending
 quarantine, backup format v2, integrity, eventId, device-local TrackIdentity, extension-root
-preservation) and explicit Recovery Restore with a mandatory verified safety snapshot are implemented (device QA
-pending). Portable identity, rematching, GHOST/ARCHIVED lifecycle, and
+preservation) and explicit Recovery Restore with a mandatory verified safety snapshot are implemented and physically
+validated. Portable identity, rematching, GHOST/ARCHIVED lifecycle, and
 snapshot retention/receipts are **not** implemented.
 
 ---
@@ -66,7 +66,7 @@ Backup, import, and export never modify audio files.
 | 1 | No silent historical loss because music is temporarily absent | Implemented for restore (unmatched history -> pending tables); pending rows are archive artefacts and are not rematched |
 | 2 | No silent partial restore | Implemented (warnings, restore diagnostics, partial-restore warning for unknown optional capabilities) |
 | 3 | No future-format partial import | Implemented (newer versions and unknown required capabilities are rejected before apply) |
-| 4 | No destructive restore without explicit user intent | Implemented by omission: restore is merge-only; no destructive mode exists |
+| 4 | No destructive restore without explicit user intent | Implemented: Merge is the default; Recovery must be explicitly selected, requires the stronger destructive confirmation, and cannot run until a verified pre-Recovery safety snapshot exists |
 | 5 | No backup reported successful until read back and verified | Implemented (export read-back parse + integrity check before success) |
 | 6 | No automatic deletion of historical music data merely because files disappeared | Implemented (no automatic purge exists; deleting a track keeps its stats and events) |
 | 7 | No weak match attaches history to the wrong song | Implemented (ambiguous matches stay unresolved; no metadata-as-identity) |
@@ -160,7 +160,11 @@ data" action.
 
 Contract: make the user's intent explicit (Recovery vs Merge).
 
-### 8.1 Recovery Restore - *Implemented (device QA pending)*
+### 8.1 Recovery Restore - *Implemented and physically validated*
+Physical validation (2026-10-06): the destructive/authoritative behavior and the safety-snapshot requirement
+passed on a real device, and the destructive wording and confirmation were clear in use. The limitations
+listed below are unchanged by that validation.
+
 An explicit, user-selected mode for Wavdrop (Android) backups. The selected backup becomes authoritative for
 WavDrop-owned recoverable state, mapped conservatively onto the songs currently in the device library. It is
 never inferred (not from a clean install, an empty database, wording, backup age or source installation); every
@@ -306,7 +310,10 @@ event lineage exist.
 
 - **Restore preview / result** - *Partially implemented.* Shows matched / unmatched / ambiguous tracks,
   stats, favourites, lyrics, playlists, events restored and skipped (duplicate, unmatched, invalid),
-  preferences, integrity status, and pending-preserved counts. A restore-mode selector does not exist.
+  preferences, integrity status, and pending-preserved counts. For eligible (verified v2 Android) backups it
+  offers an explicit Merge / Recovery mode selector: Merge is the default, Recovery shows an explicit
+  destructive warning, a concise impact summary and a stronger confirmation, and the result reports which mode
+  ran. V1 and Desktop backups offer Merge only. Wording was physically validated.
 - **Archive management (Historical Music / Storage Management)** - *Deferred.*
 
 ## 17. Implementation Sequencing
@@ -316,7 +323,7 @@ event lineage exist.
 | P1 | Truthful automatic-backup wording | Implemented |
 | P1 | Integrity-status distinction | Implemented |
 | P1 | Duplicate-key rejection | Implemented |
-| P1 | Recovery Restore vs Merge Restore | Implemented (explicit mode; device QA pending) |
+| P1 | Recovery Restore vs Merge Restore | Implemented and physically validated |
 | P1 | Mandatory pre-restore safety snapshot | Implemented (latest only; retention/receipts deferred) |
 | P1 | Clear future-version rejection messaging | Implemented |
 | P2 | Pending historical-data quarantine | Implemented |
@@ -324,7 +331,7 @@ event lineage exist.
 | P2 | Post-scan rematching | Deferred |
 | P2 | `lastListenedAt` backup support | Implemented |
 | P2 | Snapshot retention and receipts | Deferred |
-| P2 | Playlist order preservation | Implemented for Merge and Recovery (device QA pending) |
+| P2 | Playlist order preservation | Implemented for Merge and Recovery |
 | P3 | TrackIdentity migration | Device-local foundation implemented; portable identity deferred |
 | P3 | Stable event ids | Implemented (new events only) |
 | P3 | Event-led analytics reconciliation | Deferred |
@@ -338,13 +345,16 @@ Backup must not be described as a "preservation-grade" system until all of the f
 Current status in brackets:
 
 - Unmatched history is retained rather than discarded. [met]
-- Restore mode is explicit. [met in code - Merge default, Recovery deliberate; device QA pending]
+- Restore mode is explicit. [met - Merge default, Recovery deliberate; physically validated]
 - Backup integrity status is visible. [met]
 - Backup success requires read-back verification. [met]
 - Previous verified snapshots survive new-write failure. [met]
 - Recently Played data survives restoration. [met]
-- Playlist order survives recovery restoration. [met in code; device QA pending]
+- Playlist order survives recovery restoration. [met]
 - Future-version backups fail safely. [met]
 - Auto-backup wording accurately describes actual behavior. [met]
 
-Every gate item is now implemented in code, but the physical Recovery/Merge QA has not been run on a device, so user-facing copy must still not claim "preservation-grade" until that QA passes. Snapshot retention/receipts remain deferred.
+All currently defined preservation release-gate conditions are met. This is an internal engineering fact, not
+a marketing claim: the project is not required to use the term "preservation-grade", and it must not appear in
+public copy unless a deliberate product/marketing decision chooses it. Snapshot retention/receipts remain
+deferred and are not a gate condition.

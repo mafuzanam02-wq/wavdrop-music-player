@@ -217,7 +217,7 @@ fully shipped:
 - Lock-screen widgets (only a home-screen widget ships)
 - Tag / ID3 metadata editing
 - Crossfade (engineering foundation only; not enabled)
-- "Preservation-grade" or exact authoritative recovery (restore is merge-only;
+- "Preservation-grade" (not adopted as public marketing wording; Recovery Restore exists but never restores audio files, there is no cloud backup or account sync, and automatic backup is best-effort;
   see docs/BACKUP_PRESERVATION_CONTRACT.md section 18)
 - Guaranteed scheduled or daily backups (automatic backup is best-effort)
 - Equalizer on every device (availability depends on device support)

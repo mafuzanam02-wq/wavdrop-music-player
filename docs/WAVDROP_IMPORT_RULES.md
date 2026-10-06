@@ -317,7 +317,7 @@ Real QA counts: source Desktop backup had 732 songs and 1523 listen events, incl
 ## Unsupported / Deferred
 
 - Required capabilities of any kind (rejected), portable song identity or `portableSongKey`, TrackIdentity
-  export, rematching of pending history, a restore-mode selector (restore is merge-only), and encrypted or
+  export, rematching of pending history, and encrypted or
   signed backups.
 - Desktop portable import of `importBaselines`, `lyricsOverrides`, and `preferences.android` beyond the
   current safe Android-side behavior.

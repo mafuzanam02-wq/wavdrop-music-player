@@ -5,7 +5,7 @@ music library. Record device model, Android version, Wavdrop version (Settings -
 recordings or logs for failures. Automated JVM tests do not replace these checks; Bluetooth, OEM, and
 background behaviour can only be validated on hardware.
 
-> **Warning - back up Wavdrop first.** Uninstalling or clearing app data removes local stats, playlists, settings, and backup schedules unless restored from a backup. Wavdrop has no in-app reset. Before ANY test below that involves uninstalling, clearing app data, or a fresh install, run Settings -> Backup & Migration -> Back Up Now (or Save Backup File), open Backup Verification, and confirm the file is verified and located in a place that survives the test. Restore is **merge-only** and never restores audio files.
+> **Warning - back up Wavdrop first.** Uninstalling or clearing app data removes local stats, playlists, settings, and backup schedules unless restored from a backup. Wavdrop has no in-app reset. Before ANY test below that involves uninstalling, clearing app data, or a fresh install, run Settings -> Backup & Migration -> Back Up Now (or Save Backup File), open Backup Verification, and confirm the file is verified and located in a place that survives the test. WavDrop supports Merge Restore and, for eligible verified v2 Android backups, Recovery Restore. Recovery can replace current WavDrop state and requires a verified pre-Recovery safety snapshot. Restore never restores audio files.
 
 ## High-Risk Areas
 
@@ -586,7 +586,7 @@ Run on a real device; use the debug build and filter logcat by tag `WavdropArtwo
 - [ ] B. Grant: the library scans normally.
 - [ ] C. Android Settings > Apps > Wavdrop > Permissions > deny Music & audio, return to Wavdrop: the screen says "Music access was turned off" (not the first-run text); existing library, stats and history are not cleared.
 - [ ] D. Tap Open Settings, re-enable the permission, return: normal content resumes and the library can be rescanned.
-- [ ] E. Populated Home: More options > Rescan library; no duplicate scan; the library stays visible with a thin progress bar while scanning.
+- [ ] E. Populated Home: pull/drag down to refresh triggers a library rescan; no duplicate scan; the library stays visible and the pull-to-refresh indicator represents scanning.
 - [ ] F. Induced scan failure where practical: the existing library stays, "Library scan couldn't complete" shows, Try again works and a success clears the card.
 - [ ] G. Songs: pull-to-refresh still rescans and the spinner stops.
 
@@ -600,7 +600,9 @@ Use a genuinely large library/queue if available (Debug builds log `WavdropQueue
 - [ ] D. Natural end-of-track on a large queue (including right after a shuffle toggle): no long delay before the next track. In Debug logs there should be no `full_queue_sync reason=NaturalBoundaryUnverified`.
 - [ ] E. Crossfade enabled on a large queue: no interaction freeze or regression.
 
-## Recovery Restore + verified safety snapshot (post-Beta 10; NOT yet validated on a device)
+## Recovery Restore + verified safety snapshot (post-Beta 10; PHYSICAL VALIDATION PASSED)
+
+Initial physical validation passed on 2026-10-06. Recovery's destructive wording was clear. Checklist retained for future regression passes. Individual items below are intentionally not ticked, because per-item evidence was not recorded.
 
 Use a Wavdrop v2 backup you exported yourself. The pre-Recovery safety snapshot lives in app-private storage (`files/recovery-safety/pre-recovery-latest.json`); verify it via Backup Verification / a normal import parse (it is an ordinary v2 backup), e.g. with adb run-as on a debug build.
 
