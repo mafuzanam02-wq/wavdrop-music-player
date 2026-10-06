@@ -17,7 +17,7 @@ class BpstatMatcherTest {
 
     @Test
     fun `matched rows are paired with the correct song`() {
-        val importRows = listOf(makeRow("Song Alpha", "Artist A", "Album A", plays = 10, skips = 2))
+        val importRows = listOf(makeRow("Song Alpha", "Artist A", "Album A", plays = 10, periodPlays = 2))
         val result = match(importRows, songs)
 
         assertEquals(1, result.matchedCount)
@@ -29,8 +29,8 @@ class BpstatMatcherTest {
     @Test
     fun `multiple rows matched to their respective songs`() {
         val importRows = listOf(
-            makeRow("Song Alpha", "Artist A", "Album A", plays = 5, skips = 0),
-            makeRow("Song Beta",  "Artist B", "Album B", plays = 3, skips = 1),
+            makeRow("Song Alpha", "Artist A", "Album A", plays = 5, periodPlays = 0),
+            makeRow("Song Beta",  "Artist B", "Album B", plays = 3, periodPlays = 1),
         )
         val result = match(importRows, songs)
 
@@ -41,7 +41,7 @@ class BpstatMatcherTest {
 
     @Test
     fun `unmatched rows are not in matchedRows`() {
-        val importRows = listOf(makeRow("Unknown", "Nobody", "Nothing", plays = 1, skips = 0))
+        val importRows = listOf(makeRow("Unknown", "Nobody", "Nothing", plays = 1, periodPlays = 0))
         val result = match(importRows, songs)
 
         assertEquals(0, result.matchedCount)
@@ -52,8 +52,8 @@ class BpstatMatcherTest {
     @Test
     fun `mixed import produces correct matched and unmatched counts`() {
         val importRows = listOf(
-            makeRow("Song Alpha", "Artist A", "Album A", plays = 10, skips = 0),
-            makeRow("Unknown",    "Nobody",   "Nowhere", plays = 1,  skips = 0),
+            makeRow("Song Alpha", "Artist A", "Album A", plays = 10, periodPlays = 0),
+            makeRow("Unknown",    "Nobody",   "Nowhere", plays = 1,  periodPlays = 0),
         )
         val result = match(importRows, songs)
 
@@ -65,21 +65,21 @@ class BpstatMatcherTest {
 
     @Test
     fun `matching is case-insensitive`() {
-        val importRows = listOf(makeRow("SONG ALPHA", "ARTIST A", "ALBUM A", plays = 5, skips = 0))
+        val importRows = listOf(makeRow("SONG ALPHA", "ARTIST A", "ALBUM A", plays = 5, periodPlays = 0))
         val result = match(importRows, songs)
         assertEquals(1, result.matchedCount)
     }
 
     @Test
     fun `matching trims leading and trailing whitespace`() {
-        val importRows = listOf(makeRow("  Song Alpha  ", "  Artist A  ", "  Album A  ", plays = 5, skips = 0))
+        val importRows = listOf(makeRow("  Song Alpha  ", "  Artist A  ", "  Album A  ", plays = 5, periodPlays = 0))
         val result = match(importRows, songs)
         assertEquals(1, result.matchedCount)
     }
 
     @Test
     fun `case-insensitive and whitespace both applied together`() {
-        val importRows = listOf(makeRow("  SONG ALPHA  ", "  ARTIST A  ", "  ALBUM A  ", plays = 3, skips = 0))
+        val importRows = listOf(makeRow("  SONG ALPHA  ", "  ARTIST A  ", "  ALBUM A  ", plays = 3, periodPlays = 0))
         val result = match(importRows, songs)
         assertEquals(1, result.matchedCount)
     }
@@ -127,13 +127,13 @@ class BpstatMatcherTest {
     // ── Merge arithmetic verification ─────────────────────────────────────────
 
     @Test
-    fun `matchedRows carry original play and skip counts for repository to use`() {
-        val importRows = listOf(makeRow("Song Alpha", "Artist A", "Album A", plays = 148, skips = 7))
+    fun `matchedRows carry the original play and period play counts for the repository to use`() {
+        val importRows = listOf(makeRow("Song Alpha", "Artist A", "Album A", plays = 148, periodPlays = 7))
         val result = match(importRows, songs)
 
         val (_, row) = result.matchedRows[0]
         assertEquals(148, row.playCount)
-        assertEquals(7, row.skipCount)
+        assertEquals(7, row.periodPlayCount)
     }
 
     @Test
@@ -141,7 +141,7 @@ class BpstatMatcherTest {
         val importRows = listOf(
             BlackPlayerStatImportRow(
                 playCount    = 5,
-                skipCount    = 1,
+                periodPlayCount = 1,
                 title        = "Song Alpha",
                 artist       = "Artist A",
                 album        = "Album A",
@@ -163,8 +163,8 @@ class BpstatMatcherTest {
             makeSong(11L, "Still", "Artist", "Album"),
         )
         val importRows = listOf(
-            makeRow("Jole", "Dont Artist", "Picture_Perfect", plays = 3, skips = 0),
-            makeRow("Still(256k)", "Artist", "Album", plays = 4, skips = 0),
+            makeRow("Jole", "Dont Artist", "Picture_Perfect", plays = 3, periodPlays = 0),
+            makeRow("Still(256k)", "Artist", "Album", plays = 4, periodPlays = 0),
         )
 
         val result = match(importRows, library)
@@ -180,7 +180,7 @@ class BpstatMatcherTest {
             makeSong(10L, "Jolé", "Artist", "Album"),
             makeSong(11L, "Jole", "Artist", "Album"),
         )
-        val importRows = listOf(makeRow("Jolè", "Artist", "Album", plays = 3, skips = 0))
+        val importRows = listOf(makeRow("Jolè", "Artist", "Album", plays = 3, periodPlays = 0))
 
         val result = match(importRows, library)
 
@@ -196,8 +196,8 @@ private fun match(
     songs: List<Song>,
 ): BpstatMatchResult {
     val totalPlays = rows.sumOf { it.playCount.toLong() }
-    val totalSkips = rows.sumOf { it.skipCount.toLong() }
-    val parseResult = BlackPlayerImportResult(rows, emptyList(), totalPlays, totalSkips)
+    val totalPeriodPlays = rows.sumOf { it.periodPlayCount.toLong() }
+    val parseResult = BlackPlayerImportResult(rows, emptyList(), totalPlays, totalPeriodPlays)
     return BpstatMatcher.match(parseResult, songs)
 }
 
@@ -219,10 +219,10 @@ private fun makeRow(
     artist: String,
     album: String,
     plays: Int,
-    skips: Int,
+    periodPlays: Int,
 ) = BlackPlayerStatImportRow(
     playCount    = plays,
-    skipCount    = skips,
+    periodPlayCount = periodPlays,
     title        = title,
     artist       = artist,
     album        = album,

@@ -120,6 +120,28 @@ effectiveListeningTimeMs =
 
 `effectiveListeningTimeMs` is the larger of stored actual/measured time and estimated time. Imports must not read, write, export, or persist an `effectiveListeningTimeMs` field, and must not use it to overwrite `totalListeningTimeMs`. No listen events are synthesized from aggregate stats.
 
+## BlackPlayer `.bpstat` field semantics (BP-1)
+
+A BlackPlayer EX `.bpstat` row has exactly 8 semicolon-separated fields:
+
+```
+playCount;periodPlayCount;title;artist;album;filePath;dateAddedMs;lastPlayedMs
+```
+
+- **Field 1 (`playCount`)** is the main play count. It is the only counter WavDrop imports (MAX-merged into `playCount`).
+- **Field 2 (`periodPlayCount`)** is a PERIOD play count (a secondary play aggregate). It is **NOT a skip count**. It is parsed and shown
+  in the preview for inspection only. It is never imported into `skipCount`, never added to `playCount` (the counters are not proven
+  additive), never turned into listening time, and never creates events.
+- Both numeric fields are play counters and use the play-count plausibility bound; neither uses the skip bound.
+- **A `.bpstat` import never changes `skipCount`.** The merge passes 0 skips, so `MAX(local, 0)` leaves the local value untouched:
+  never raised, replaced or decremented. Re-importing the same file changes nothing.
+- The import baseline records `lastImportedPlayCount = playCount` and `lastImportedSkipCount = 0` (the file has no skip evidence).
+  Idempotency comes from MAX semantics, not from the baseline.
+- Aggregate import never fabricates listen events (D-17).
+- **Historical limitation:** versions before this correction imported field 2 into `skipCount`. Those values are NOT decremented: their
+  provenance (native WavDrop skips, older imports, backups/restores) cannot be reconstructed, and subtracting would risk destroying
+  legitimate local skip history. The correction is prospective only.
+
 ## Listening Events
 
 Do not fabricate listening events from aggregate stats.

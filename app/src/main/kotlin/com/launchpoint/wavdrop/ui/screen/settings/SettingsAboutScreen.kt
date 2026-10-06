@@ -481,7 +481,7 @@ private object WavdropAbout {
         "Delete from device:\n" +
             "If you delete a track using Delete from device, the audio file is permanently removed from your device. Wavdrop may retain listening statistics and history records associated with that deleted track so that reports, Wrapped summaries, and historical listening data remain accurate. The deleted audio file is not recoverable through Wavdrop.",
         "BlackPlayer import:\n" +
-            "The BlackPlayer import feature reads a .bpstat file from your device and writes matched play and skip counts into Wavdrop's local database. No data is sent anywhere during this process.",
+            "The BlackPlayer import feature reads a .bpstat file from your device and writes matched play counts into Wavdrop's local database. No data is sent anywhere during this process.",
         "Third-party services:\n" +
             "Wavdrop does not use advertising SDKs, analytics services, crash-reporting tools, or third-party tracking. External links, such as the LaunchPoint Digital website and support email, open in your device's browser or email app. Wavdrop itself makes no network requests.",
         "Contact:\n" +

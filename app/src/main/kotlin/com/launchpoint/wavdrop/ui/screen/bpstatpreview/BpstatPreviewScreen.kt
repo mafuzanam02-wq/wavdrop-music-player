@@ -200,7 +200,7 @@ private fun PreviewContent(
         ConfirmImportDialog(
             matchedCount = match.matchedCount,
             matchedPlays = match.matchedRows.sumOf { it.second.playCount.toLong() },
-            matchedSkips = match.matchedRows.sumOf { it.second.skipCount.toLong() },
+            matchedPeriodPlays = match.matchedRows.sumOf { it.second.periodPlayCount.toLong() },
             onConfirm    = { showDialog = false; onApplyConfirmed() },
             onDismiss    = { showDialog = false },
         )
@@ -231,7 +231,7 @@ private fun PreviewContent(
         item { SectionLabel("Totals found in file", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
         item {
             StatRow("Total play count", parse.totalPlayCount.toString())
-            StatRow("Total skip count", parse.totalSkipCount.toString())
+            StatRow("Total period plays (not imported)", parse.totalPeriodPlayCount.toString())
         }
         item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
 
@@ -342,7 +342,7 @@ private fun PreviewContent(
 private fun ConfirmImportDialog(
     matchedCount: Int,
     matchedPlays: Long,
-    matchedSkips: Long,
+    matchedPeriodPlays: Long,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -353,7 +353,7 @@ private fun ConfirmImportDialog(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 StatRow("Matched tracks", matchedCount.toString())
                 StatRow("Matched file plays", matchedPlays.toString())
-                StatRow("Matched file skips", matchedSkips.toString())
+                StatRow("Matched file period plays (not imported)", matchedPeriodPlays.toString())
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text  = "Stats will be updated where the import has higher totals. Local stats that are already higher will not be reduced. Re-importing the same file will not change anything.",
@@ -406,7 +406,6 @@ private fun AppliedContent(
                         result.tracksSkippedNoNewStats.toString(),
                     )
                     StatRow("Plays updated", result.playsImported.toString())
-                    StatRow("Skips updated", result.skipsImported.toString())
                     StatRow("Unmatched skipped", result.unmatchedSkipped.toString())
                 }
             }

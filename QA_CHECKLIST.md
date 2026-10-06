@@ -227,8 +227,8 @@ background behaviour can only be validated on hardware.
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
 | Select a valid `.bpstat` export. | Preview opens and parses rows. | |
-| Import rows that match Wavdrop songs. | Matched tracks and deltas are shown. | |
-| Apply import once. | Aggregate play/skip stats update. | |
+| Import rows that match Wavdrop songs. | Matched tracks and play totals are shown; the file's period plays are shown as "not imported". | |
+| Apply import once. | Play counts update (MAX-merged); skip counts are NOT changed (`.bpstat` field 2 is a period play count). The result lists plays updated, no skips. | |
 | Apply the same import again. | Delta-based import reports no new changes. | |
 | Import a file with unmatched rows. | Unmatched rows are counted/skipped without crash. | |
 | Import malformed file. | App shows clear error and does not change stats. | |

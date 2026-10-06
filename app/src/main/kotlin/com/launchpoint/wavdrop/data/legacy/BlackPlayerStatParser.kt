@@ -8,7 +8,7 @@ import com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility
  * ## Format
  * Each line holds exactly 8 semicolon-separated fields with no quoting or escaping:
  * ```
- * playCount;skipCount;title;artist;album;filePath;dateAddedMs;lastPlayedMs
+ * playCount;periodPlayCount;title;artist;album;filePath;dateAddedMs;lastPlayedMs
  * ```
  * Example:
  * ```
@@ -17,7 +17,7 @@ import com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility
  *
  * ## Validation rules (a line is rejected if any rule fails)
  * - Exactly 8 semicolon-separated fields (semicolons inside values are not supported).
- * - playCount and skipCount must parse as non-negative Int.
+ * - playCount and periodPlayCount (field 2, a PERIOD play count, NOT a skip count) must parse as non-negative Int.
  * - dateAddedMs and lastPlayedMs must parse as non-negative Long.
  * - title, artist, album, and filePath are accepted as-is (may be empty strings).
  *
@@ -50,7 +50,7 @@ object BlackPlayerStatParser {
             validRows      = validRows,
             invalidRows    = invalidRows,
             totalPlayCount = validRows.sumOf { it.playCount.toLong() },
-            totalSkipCount = validRows.sumOf { it.skipCount.toLong() },
+            totalPeriodPlayCount = validRows.sumOf { it.periodPlayCount.toLong() },
         )
     }
 
@@ -59,7 +59,7 @@ object BlackPlayerStatParser {
         if (fields.size != FIELD_COUNT) return null
 
         val playCount    = fields[0].toIntOrNull()  ?: return null
-        val skipCount    = fields[1].toIntOrNull()  ?: return null
+        val periodPlayCount = fields[1].toIntOrNull() ?: return null
         val title        = fields[2]
         val artist       = fields[3]
         val album        = fields[4]
@@ -67,17 +67,17 @@ object BlackPlayerStatParser {
         val dateAddedMs  = fields[6].toLongOrNull() ?: return null
         val lastPlayedMs = fields[7].toLongOrNull() ?: return null
 
-        if (playCount < 0 || skipCount < 0) return null
+        if (playCount < 0 || periodPlayCount < 0) return null
         if (dateAddedMs < 0 || lastPlayedMs < 0) return null
-        // WD-05: reject implausibly large counters. .bpstat imports only play/skip
-        // counts, so only the count bounds apply here. Existing valid files (real
+        // WD-05: reject implausibly large counters. Both numeric fields are PLAY counters (main and period), so the play-count
+        // bound applies to each (never the skip bound). Existing valid files (real
         // BlackPlayer exports) sit far below these limits and are unaffected.
         if (!ImportedStatPlausibility.isPlausiblePlayCount(playCount)) return null
-        if (!ImportedStatPlausibility.isPlausibleSkipCount(skipCount)) return null
+        if (!ImportedStatPlausibility.isPlausiblePlayCount(periodPlayCount)) return null
 
         return BlackPlayerStatImportRow(
             playCount    = playCount,
-            skipCount    = skipCount,
+            periodPlayCount = periodPlayCount,
             title        = title,
             artist       = artist,
             album        = album,

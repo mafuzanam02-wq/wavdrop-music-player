@@ -1,7 +1,8 @@
 package com.launchpoint.wavdrop.data.backup
 
 /**
- * Pure MAX-reconciliation strategy used by BlackPlayer *import* (merge mode).
+ * Pure MAX-reconciliation strategy used by BlackPlayer *import* (merge mode). A .bpstat import passes 0 for skips (field 2 is a period
+ * play count, not skips; see [com.launchpoint.wavdrop.data.legacy.planBpstatMerge]), so it never changes skipCount.
  * Wavdrop backup *restore* uses [StatsRestoreStrategy] instead, which sets exact
  * backup values.
  *

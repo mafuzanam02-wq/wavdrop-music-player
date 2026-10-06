@@ -340,7 +340,7 @@ format), [BACKUP_PRESERVATION_CONTRACT.md](BACKUP_PRESERVATION_CONTRACT.md) (sem
   "Recovery" mode or pre-restore safety snapshot yet. See the preservation contract for per-area status.
 
 BlackPlayer EX import (`data/legacy`): parse -> match (title+artist+album) -> preview -> apply in one
-transaction; delta-based and idempotent via `import_baselines`; never writes events.
+transaction; MAX-merges the main play count only (field 2 is a period play count, never skips; see WAVDROP_IMPORT_RULES.md); idempotent; never writes events.
 
 ---
 

@@ -9,7 +9,7 @@ class BlackPlayerStatParserTest {
     // ── Happy path ────────────────────────────────────────────────────────────
 
     @Test
-    fun `parses single valid row correctly`() {
+    fun `parses single valid row correctly and field 2 is the period play count`() {
         val line = "148;2;23;Wilfred;Everything We Need;/storage/emulated/0/Music/example.mp3;1759066940607;1779810940727"
         val result = BlackPlayerStatParser.parse(line)
 
@@ -18,7 +18,7 @@ class BlackPlayerStatParserTest {
 
         val row = result.validRows[0]
         assertEquals(148, row.playCount)
-        assertEquals(2, row.skipCount)
+        assertEquals(2, row.periodPlayCount)
         assertEquals("23", row.title)
         assertEquals("Wilfred", row.artist)
         assertEquals("Everything We Need", row.album)
@@ -30,14 +30,14 @@ class BlackPlayerStatParserTest {
     // ── WD-05: count plausibility bounds ──────────────────────────────────────
 
     @Test
-    fun `maximum allowed play and skip counts are accepted`() {
+    fun `maximum allowed play and period play counts are accepted`() {
         val max = com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility.MAX_PLAY_COUNT
         val line = "$max;$max;Title;Artist;Album;/storage/emulated/0/Music/max.mp3;0;0"
         val result = BlackPlayerStatParser.parse(line)
 
         assertEquals(1, result.validRows.size)
         assertEquals(max, result.validRows[0].playCount)
-        assertEquals(max, result.validRows[0].skipCount)
+        assertEquals(max, result.validRows[0].periodPlayCount)
     }
 
     @Test
@@ -51,8 +51,8 @@ class BlackPlayerStatParserTest {
     }
 
     @Test
-    fun `skip count above maximum is rejected`() {
-        val over = com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility.MAX_SKIP_COUNT + 1
+    fun `period play count above maximum is rejected`() {
+        val over = com.launchpoint.wavdrop.data.backup.ImportedStatPlausibility.MAX_PLAY_COUNT + 1
         val line = "0;$over;Title;Artist;Album;/storage/emulated/0/Music/over.mp3;0;0"
         val result = BlackPlayerStatParser.parse(line)
 
@@ -72,23 +72,23 @@ class BlackPlayerStatParserTest {
         assertEquals(2, result.validRows.size)
         assertEquals(0, result.invalidRows.size)
         assertEquals(158L, result.totalPlayCount)
-        assertEquals(3L, result.totalSkipCount)
+        assertEquals(3L, result.totalPeriodPlayCount)
     }
 
     @Test
-    fun `zero play count and zero skip count are valid`() {
+    fun `zero play count and zero period play count are valid`() {
         val line = "0;0;Title;Artist;Album;/storage/emulated/0/Music/c.mp3;0;0"
         val result = BlackPlayerStatParser.parse(line)
 
         assertEquals(1, result.validRows.size)
         assertEquals(0, result.validRows[0].playCount)
-        assertEquals(0, result.validRows[0].skipCount)
+        assertEquals(0, result.validRows[0].periodPlayCount)
     }
 
     @Test
     fun `empty string metadata fields are accepted`() {
         // Empty title, artist, album — filePath must still be present (can be empty too)
-        // Field order: playCount;skipCount;title;artist;album;filePath;dateAddedMs;lastPlayedMs
+        // Field order: playCount;periodPlayCount;title;artist;album;filePath;dateAddedMs;lastPlayedMs
         //              5        ;0        ;     ;      ;     ;/storage...
         val line = "5;0;;;;" + "/storage/emulated/0/Music/d.mp3;1000000000000;1000000001000"
         val result = BlackPlayerStatParser.parse(line)
@@ -119,7 +119,7 @@ class BlackPlayerStatParserTest {
         assertTrue(result.validRows.isEmpty())
         assertTrue(result.invalidRows.isEmpty())
         assertEquals(0L, result.totalPlayCount)
-        assertEquals(0L, result.totalSkipCount)
+        assertEquals(0L, result.totalPeriodPlayCount)
     }
 
     @Test
@@ -161,7 +161,7 @@ class BlackPlayerStatParserTest {
     }
 
     @Test
-    fun `non-numeric skipCount is rejected`() {
+    fun `non-numeric periodPlayCount is rejected`() {
         val line = "5;xyz;Title;Artist;Album;/path/to/file.mp3;1000000000000;1000000001000"
         assertTrue(BlackPlayerStatParser.parse(line).validRows.isEmpty())
     }
@@ -187,7 +187,7 @@ class BlackPlayerStatParserTest {
     }
 
     @Test
-    fun `negative skipCount is rejected`() {
+    fun `negative periodPlayCount is rejected`() {
         val line = "5;-3;Title;Artist;Album;/path/to/file.mp3;1000000000000;1000000001000"
         assertTrue(BlackPlayerStatParser.parse(line).validRows.isEmpty())
     }
@@ -216,7 +216,7 @@ class BlackPlayerStatParserTest {
         assertEquals(1, result.invalidRows.size)
         assertEquals(invalidLine, result.invalidRows[0])
         assertEquals(10L, result.totalPlayCount)
-        assertEquals(1L, result.totalSkipCount)
+        assertEquals(1L, result.totalPeriodPlayCount)
     }
 
     @Test
@@ -240,6 +240,6 @@ class BlackPlayerStatParserTest {
         assertEquals(2, result.validRows.size)
         assertEquals(1, result.invalidRows.size)
         assertEquals(80L, result.totalPlayCount)
-        assertEquals(7L, result.totalSkipCount)
+        assertEquals(7L, result.totalPeriodPlayCount)
     }
 }

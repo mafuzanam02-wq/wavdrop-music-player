@@ -5,6 +5,7 @@ import com.launchpoint.wavdrop.data.backup.StatsImportMerger
 import com.launchpoint.wavdrop.data.legacy.BpstatApplyResult
 import com.launchpoint.wavdrop.data.legacy.BlackPlayerStatImportRow
 import com.launchpoint.wavdrop.data.legacy.ImportSourceTypes
+import com.launchpoint.wavdrop.data.legacy.planBpstatMerge
 import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
@@ -148,17 +149,20 @@ class StatsRepository @Inject constructor(
     /**
      * Merges [matchedRows] into the Wavdrop stats database inside a single Room transaction.
      *
-     * Merge strategy: MAX-reconciliation.
-     * - newPlayCount  = MAX(current, imported)
-     * - newSkipCount  = MAX(current, imported)
+     * Merge strategy: MAX-reconciliation of what a .bpstat file actually supplies.
+     * - newPlayCount  = MAX(current, imported main play count)   (BlackPlayer field 1)
      * - lastPlayedAt  = MAX(current, imported)
+     * - skipCount is NEVER changed: BlackPlayer field 2 is a PERIOD play count, not skips, and is neither imported, added to
+     *   the play count, nor turned into listening time or events (see [planBpstatMerge]). Existing skip counts, including any
+     *   that an older version mis-imported from field 2, are left exactly as they are (their provenance cannot be proven, so
+     *   they are not decremented).
      *
-     * This is idempotent — importing the same file twice produces no change on the
-     * second import. Local stats that are already higher are never reduced.
-     * totalListeningTimeMs is not available from BlackPlayer and is left unchanged.
+     * This is idempotent: importing the same file twice produces no change on the second import. Local stats that are
+     * already higher are never reduced. totalListeningTimeMs is not available from BlackPlayer and is left unchanged. No
+     * listen events are written.
      *
-     * Import baselines are still written for historical tracking but are no longer
-     * required for idempotency (MAX semantics guarantee that).
+     * Import baselines are still written for historical tracking (play count; skip baseline 0 because the file carries no skip
+     * evidence) but are not required for idempotency (MAX semantics guarantee that).
      *
      * @param matchedRows  Pairs of (Wavdrop Song, BlackPlayer import row) to apply.
      * @param unmatchedCount Rows that had no match — recorded in the result for display.
@@ -169,7 +173,6 @@ class StatsRepository @Inject constructor(
     ): BpstatApplyResult = db.withTransaction {
         var tracksUpdated = 0
         var playsImported = 0L
-        var skipsImported = 0L
         val importedAt = System.currentTimeMillis()
 
         // Pre-load all current stats to compute reporting deltas without N individual queries.
@@ -181,31 +184,26 @@ class StatsRepository @Inject constructor(
             // Ensure a stats row exists before updating.
             dao.insertIfAbsent(TrackStatsEntity(songId = song.id, contentUri = song.uri))
 
-            // MAX-reconciliation: each counter is set to MAX(current, imported).
-            // Pass 0 for totalListeningTimeMs — BlackPlayer does not provide listening time,
-            // so MAX(current, 0) = current, leaving it unchanged.
-            dao.mergeMaxStats(
-                songId                 = song.id,
-                importedPlayCount      = row.playCount,
-                importedSkipCount      = row.skipCount,
-                importedListeningTimeMs = 0L,
-                importedLastPlayedAt   = row.lastPlayedMs,
-                // BlackPlayer has no lastListenedAt — pass 0 so MAX(local, 0) = local unchanged.
-                importedLastListenedAt = 0L,
+            val plan = planBpstatMerge(
+                currentPlayCount       = current?.playCount ?: 0,
+                currentSkipCount       = current?.skipCount ?: 0,
+                currentListeningTimeMs = current?.totalListeningTimeMs ?: 0L,
+                row                    = row,
             )
 
-            val effect = StatsImportMerger.computeEffect(
-                currentPlayCount        = current?.playCount ?: 0,
-                currentSkipCount        = current?.skipCount ?: 0,
-                currentListeningTimeMs  = current?.totalListeningTimeMs ?: 0L,
-                importedPlayCount       = row.playCount,
-                importedSkipCount       = row.skipCount,
-                importedListeningTimeMs = 0L,
+            // MAX-reconciliation. The plan passes 0 for skips, listening time and lastListenedAt, so MAX(local, 0) = local.
+            dao.mergeMaxStats(
+                songId                  = song.id,
+                importedPlayCount       = plan.importedPlayCount,
+                importedSkipCount       = plan.importedSkipCount,
+                importedListeningTimeMs = plan.importedListeningTimeMs,
+                importedLastPlayedAt    = plan.importedLastPlayedAt,
+                importedLastListenedAt  = plan.importedLastListenedAt,
             )
-            if (effect.anyUpdated) {
+
+            if (plan.effect.anyUpdated) {
                 tracksUpdated++
-                playsImported += effect.playDelta
-                skipsImported += effect.skipDelta
+                playsImported += plan.effect.playDelta
             }
 
             // Write baseline for historical tracking.
@@ -214,8 +212,8 @@ class StatsRepository @Inject constructor(
                     songId                = song.id,
                     sourceType            = ImportSourceTypes.BLACKPLAYER_BPSTAT,
                     sourceKey             = row.blackPlayerBpstatSourceKey(),
-                    lastImportedPlayCount = row.playCount,
-                    lastImportedSkipCount = row.skipCount,
+                    lastImportedPlayCount = plan.baselinePlayCount,
+                    lastImportedSkipCount = plan.baselineSkipCount,
                     lastImportedAt        = importedAt,
                 )
             )
@@ -226,7 +224,6 @@ class StatsRepository @Inject constructor(
             tracksUpdated           = tracksUpdated,
             tracksSkippedNoNewStats = matchedRows.size - tracksUpdated,
             playsImported           = playsImported,
-            skipsImported           = skipsImported,
             unmatchedSkipped        = unmatchedCount,
         )
     }

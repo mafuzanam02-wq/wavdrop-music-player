@@ -379,7 +379,7 @@ fun SettingsBackupScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Import BlackPlayer data",
-                    subtitle = "Choose a BlackPlayer .bpstat file to import play and skip counts.",
+                    subtitle = "Choose a BlackPlayer .bpstat file to import play counts.",
                     onClick  = onImportClick,
                 )
             }
