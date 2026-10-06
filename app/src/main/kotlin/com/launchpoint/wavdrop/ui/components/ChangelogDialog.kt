@@ -19,6 +19,37 @@ private sealed interface ChangelogEntry {
     data class Item(val text: String) : ChangelogEntry
 }
 
+private val BETA_10_ENTRIES: List<ChangelogEntry> = listOf(
+    ChangelogEntry.Section("Crossfade"),
+    ChangelogEntry.Item("Smooth transitions between songs are now available in Settings > Playback (off by default, 2 to 12 seconds)."),
+    ChangelogEntry.Item("Crossfade is unavailable while the Equalizer is turned on."),
+
+    ChangelogEntry.Section("Synchronized Lyrics"),
+    ChangelogEntry.Item("Timed .lrc lyrics can follow the song on Now Playing."),
+
+    ChangelogEntry.Section("More Reliable Playback"),
+    ChangelogEntry.Item("Queues behave correctly even when the same song appears more than once."),
+    ChangelogEntry.Item("Playback can resume after the app was closed, from the notification, lock screen, Bluetooth controls, or widget."),
+    ChangelogEntry.Item("Bluetooth and wired reconnects are more predictable, and paused sessions survive a swipe away from Recents."),
+    ChangelogEntry.Item("Unplayable tracks are skipped instead of stalling playback."),
+
+    ChangelogEntry.Section("Faster Libraries"),
+    ChangelogEntry.Item("Search is faster on large libraries."),
+    ChangelogEntry.Item("Library rescans no longer rewrite every unchanged song."),
+    ChangelogEntry.Item("Smart Collections update only what changed; Home previews and artwork load more efficiently."),
+    ChangelogEntry.Item("Home Smart Collections are configurable."),
+
+    ChangelogEntry.Section("Better Now Playing"),
+    ChangelogEntry.Item("Artwork loads more reliably and transitions more smoothly."),
+
+    ChangelogEntry.Section("Backup & Import"),
+    ChangelogEntry.Item("Automatic backup now runs on a periodic background schedule (best-effort)."),
+    ChangelogEntry.Item("BlackPlayer statistics import no longer mistakes period play counts for skips."),
+
+    ChangelogEntry.Section("Stability"),
+    ChangelogEntry.Item("Broad reliability improvements across playback, statistics, backups, imports, and library scanning."),
+)
+
 private val BETA_9_ENTRIES: List<ChangelogEntry> = listOf(
     ChangelogEntry.Section("Better Listening History"),
     ChangelogEntry.Item("Backup and restore now better protect your listening history, stats, playlists, and recovery data."),
@@ -175,8 +206,8 @@ private fun fullBeta5Entries(): List<ChangelogEntry> = listOf(
 @Composable
 fun ChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
-        title = "What's new in Beta 9",
-        entries = BETA_9_ENTRIES,
+        title = "What's new in Beta 10",
+        entries = BETA_10_ENTRIES,
         onDismiss = onDismiss,
     )
 }
@@ -186,6 +217,8 @@ fun FullChangelogDialog(onDismiss: () -> Unit) {
     ChangelogEntriesDialog(
         title = "Wavdrop Changelog",
         entries = buildList {
+            add(ChangelogEntry.Section("Beta 10 — Crossfade, Lyrics & Playback Reliability"))
+            addAll(BETA_10_ENTRIES)
             add(ChangelogEntry.Section("Beta 9 — Equalizer, Listening Settings & Backup Protection"))
             addAll(BETA_9_ENTRIES)
             add(ChangelogEntry.Section("Beta 7.9 — Story Mode, Smart Collections & More"))

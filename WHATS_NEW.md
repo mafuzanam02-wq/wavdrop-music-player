@@ -1,27 +1,35 @@
-# What's New — Wavdrop Version 9
+# What's New — Wavdrop Beta 10.0
 
-A new Equalizer, stronger backups, and better protection for your listening history.
+New listening features, faster libraries, and major playback reliability improvements.
 
-## New Equalizer
+## Crossfade
 
-Fine-tune your sound with the new Equalizer — device-supported frequency controls, system equalizer integration, and built-in sound presets that stay put between sessions. Availability depends on your device.
+Smooth transitions between songs are now available in **Settings → Playback**. It's off by default; pick a fade length from 2 to 12 seconds. Crossfade isn't available while the Equalizer is turned on.
 
-## Listening settings
+## Synchronized lyrics
 
-A dedicated **Listening** section in Settings makes audio controls easier to discover and manage.
+Timed `.lrc` lyrics can now follow the song on Now Playing, and your own plain lyrics still work as before.
 
-## Better protection for your history
+## More reliable playback
 
-Your listening history, statistics, playlists, and library information are now more resilient during backup and restore — with stronger recovery support after reinstalling the app.
+Queues behave correctly even when the same song appears more than once. Playback can pick up where you left off after the app was closed, from the notification, lock screen, Bluetooth controls or widget. Bluetooth and wired reconnects are more predictable, paused sessions survive a swipe away from Recents, and unplayable tracks are skipped instead of stalling playback.
 
-## More reliable backups
+## Faster libraries
 
-Backup and restore has been strengthened to reduce duplicate listening history and improve long-term data consistency, with more careful validation during import and recovery.
+Search is faster on large libraries, rescans no longer rewrite every unchanged song, Smart Collections update only what changed, and Home previews and artwork load more efficiently.
 
-## Smart Collections & Wrapped
+## Smarter Home
 
-Smart Collections rank the most relevant tracks more consistently and show how many songs qualify for each collection. Returning from artist, album, or track details in Wrapped now keeps your place instead of restarting.
+Home Smart Collections are now configurable, and Home dashboard previews stay fast as your library grows.
+
+## Better Now Playing
+
+Album artwork loads more reliably and transitions more smoothly, with polish across queue controls, artist and album navigation, and motion.
+
+## Backup & import improvements
+
+Automatic backup now runs on a periodic schedule through Android's background scheduler (best-effort). Backups keep your history and settings consistent after restore, and BlackPlayer statistics import no longer mistakes period play counts for skips.
 
 ## Stability
 
-General reliability improvements across playback, statistics, backups, imports, recovery, and library scanning.
+Broad reliability improvements across playback, statistics, backups, imports and library scanning, plus updated support for the latest Android version.

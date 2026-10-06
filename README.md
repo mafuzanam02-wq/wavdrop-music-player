@@ -3,7 +3,7 @@
 An offline-first, local-first Android music player built with Kotlin, Jetpack Compose, and Media3.
 No account, no ads, no cloud, no analytics. The app declares no `INTERNET` permission.
 
-Package `com.launchpoint.wavdrop` - version `0.1.0-beta9` (versionCode 9) - minSdk 26, compileSdk /
+Package `com.launchpoint.wavdrop` - version `0.1.0-beta10` (versionCode 10) - minSdk 26, compileSdk /
 targetSdk 36 - Room schema 13.
 
 ## Current capabilities

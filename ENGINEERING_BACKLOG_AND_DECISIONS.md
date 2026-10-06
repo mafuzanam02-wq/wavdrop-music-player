@@ -38,7 +38,7 @@ updated with the new status and reasoning — history should be amended, never e
 |---|---|
 | Product | Wavdrop Music Player |
 | Package | `com.launchpoint.wavdrop` |
-| Version | 0.1.0-beta9 (versionCode 9); post-beta9 engineering work is on `master` unreleased |
+| Version | 0.1.0-beta10 (versionCode 10), Beta 10.0 release checkpoint; Wave C WC-09 and WC-10 remain open |
 | Phase | Soft-launch stabilization; crossfade rolled out (CF-2N2) |
 | Platform | Android (min SDK 26 / compile + target SDK 36) |
 | Database | Room (`wavdrop.db`), schema v13 |
@@ -681,6 +681,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
       WC-06 resolved: Smart Collections recompute by dependency family (songs-only / stats / stats+day / completion) with type-scoped detail subscriptions; rules, ranking, caps (D-11), orphan filtering and canonical order unchanged; completion GROUP BY still re-runs on Room invalidation but no longer cascades into the other nine collections.
       WC-07 artwork: list artwork moved off SubcomposeAsyncImage/BoxWithConstraints with bounded request sizes; Now Playing artwork is request-keyed with stale-result protection, truthful failure (no stale cover), debug-only diagnostics (tag WavdropArtwork). Notification artwork is NOT the albumart URI: Wavdrop sets no artworkUri/artworkData on the Media3 item (only title/artist/album/extras), so the notification shows ExoPlayer's embedded-file artwork, a different mechanism than the MediaStore albumart URI Coil loads on every in-app surface; notification success therefore does not prove the URI decodes. Owner later validated the Now Playing artwork change on a real device (passed).
       WC-08 resolved: library sync writes only new/changed song rows and deletes only stale ids (pure SongSyncPlanner + applySongSyncPlan in the existing transaction); unchanged scans write nothing; playlist-remap boundary (new ids only), TrackIdentity reconciliation and preserve-on-empty/failed-scan behaviour unchanged; MediaStore is still fully scanned each launch; no schema change, no song-referencing foreign keys exist.
+      Beta 10.0 release checkpoint: versionName 0.1.0-beta10 / versionCode 10; release notes and What's New rewritten around production crossfade, synchronized lyrics, playback reliability, faster libraries, backup/import fixes; in-app changelog updated; WC-09 and WC-10 explicitly remain open; no tag, publish or deploy performed.
    h. Final gate flip after passed validation - complete (CF-2N2).
 9. Physical Bluetooth / background / wired / EQ-policy validation - complete (CF-2N1 sign-off).
 
@@ -688,14 +689,14 @@ items were validated; the gate is now true, see CF-2N2 below.)
 
 - **Natural AUTO-transition callback ownership** (TD-018): the crossfade-owned portion became a demonstrated blocker (physical handoff stutter) and is owned by CF-2L1 and CF-2L2; the broader callback-ownership cleanup stays a dedicated slice.
 
-### Beta 9.x (stabilization)
+### Post-Beta 9 carry-over (still open after the Beta 10 checkpoint)
 
-- Remaining Wave C items (§7): the open MEDIUM/LOW items (WC-02 is resolved; WC-09 still groups full-history PLAY timestamps in memory).
+- Remaining Wave C items (§7): WC-09 (Insights groups full-history PLAY timestamps by day/hour in memory) and WC-10 (`normalizeTolerant` allocation churn) remain open; WC-01 through WC-08 and WC-11 are resolved.
 - Wave B UX follow-ups: permission-revoked recovery state; optional Home scan-failure banner.
 - Outstanding real-device QA from `PLANNED.md`: delete-from-device flow, native share across share
   targets, Bluetooth/wired resume, launcher icon switching, end-to-end backup/restore regression.
 
-### Beta 10
+### Post-Beta 10 stabilization (follow-ups after the Beta 10.0 release checkpoint; not release blockers)
 
 - Remaining Wave C MEDIUM performance items (WC-09…WC-10).
 - Additional Delete entry points (pending accidental-deletion risk review).

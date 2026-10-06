@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-CF-2L4. Update this paragraph when the project state changes materially.
+**Implementation baseline:** Beta 10 release checkpoint (after WC-08; WC-09 and WC-10 open). Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
@@ -17,7 +17,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
 | Item | Value |
 |---|---|
 | Package | `com.launchpoint.wavdrop` |
-| Version | `0.1.0-beta9`, versionCode 9 |
+| Version | `0.1.0-beta10`, versionCode 10 (Beta 10.0) |
 | minSdk / compileSdk / targetSdk | 26 / 36 / 36 |
 | Room | `wavdrop.db`, schema **13** (migrations 1 -> 13, schemas in `app/schemas`) |
 | Playback stack | Media3 `MediaLibraryService` + ExoPlayer (versions in `gradle/libs.versions.toml`) |
@@ -44,7 +44,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
 - Occurrence-authority hardening of the playback queue (OH-1).
-- Crossfade engineering foundations CF-1 to CF-2H3G, CF-2F2, CF-2F3, CF-2F4, CF-2F5, CF-2I1, CF-2I2, CF-2J1, CF-2K1, CF-2L1, CF-2L2, CF-2L3 and CF-2L4 (below).
+- Crossfade (production, opt-in, Off by default, unavailable while the Equalizer is on) - see "Crossfade - current state" below.
 
 ## Crossfade - current state
 

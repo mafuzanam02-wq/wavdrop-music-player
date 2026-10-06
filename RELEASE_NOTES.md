@@ -6,57 +6,91 @@ is `WHATS_NEW.md`.
 
 ---
 
-## Unreleased / Engineering since beta9
+## 0.1.0-beta10
 
-Work merged to `master` after the `v0.1.0-beta9` tag (the app version is still `0.1.0-beta9`, versionCode 9).
-Not yet distributed. Source: git history after tag `v0.1.0-beta9`.
+Wavdrop Beta 10.0 (`versionName` `0.1.0-beta10`, `versionCode` 10). New listening features, faster libraries, and major playback
+reliability improvements. Still a beta.
 
-### Platform
+### Crossfade
 
-- Targets Android 16 (API 36); build toolchain upgraded for API 36; Media3 upgraded to 1.11.x; Compose
-  and Lifecycle baseline modernized.
+- **Crossfade is now available in Settings -> Playback.** Songs can fade into each other instead of switching abruptly.
+- It is **opt-in (Off by default)**; choose Off or 2-12 seconds in 2-second steps.
+- Crossfade is **unavailable while the Equalizer is on** (the setting says so).
+- It was validated on real hardware (Bluetooth, background, wired, Equalizer interplay) before being enabled.
 
-### Playback reliability and system integration
+### Lyrics and Now Playing
 
-- **Queue and duplicate safety.** The playback queue is now occurrence-safe: songs that appear more than
-  once in a queue behave correctly across shuffle, session restore, playlist playback, queue jumps,
-  batch Play next, seeks during controller reconnect, and song deletion. Ambiguous cases fail safely
-  rather than guessing. Playlist and queue UI actions are duplicate-safe.
-- **Resume after process death.** Playback can be resumed from notification, Bluetooth, lock screen, and
-  widget controls even when the app process was cold; the saved session is rebuilt on demand and never
-  overwrites a queue you already started.
-- **System media integration.** Wavdrop exposes a browsable library and a "recent" item to system media
+- **Synchronized lyrics.** Timed `.lrc` sidecar files render as synchronized lyrics on Now Playing and follow playback position;
+  custom/plain lyrics remain available. (Online lyric fetching is not part of this release.)
+- **More reliable Now Playing artwork**, with smoother artwork transitions.
+- Queue controls: move controls, drop confirmation, long-queue drag fixes and bulk cleanup actions.
+- Contextual artist/album navigation, plus polish across Home, Library, Search, Statistics and Wrapped with consistent motion.
+
+### Playback and queue reliability
+
+- **Queue handling is more reliable when the same song appears more than once**: shuffle, session restore, playlist playback,
+  queue jumps, Play next, seeking while reconnecting, and song deletion all act on the exact entry you chose. Ambiguous cases fail
+  safely rather than guessing; playlist and queue actions are duplicate-safe.
+- **Resume after the app was closed or killed.** Playing from the notification, lock screen, Bluetooth controls or widget can rebuild
+  the saved session when appropriate, and never overwrites a queue you already started.
+- **A paused, resumable session survives a swipe away from Recents.**
+- **More predictable Bluetooth, LE Audio and wired reconnect.** An explicit pause/play from you always wins over an automatic
+  resume, and losing the route cancels a pending resume.
+- **Gapless transitions hardened**; playback progress stays in sync with the system.
+- **Unplayable tracks are skipped** with a short message instead of stalling playback.
+- More reliable playback lifecycle behaviour when the app is swiped away, the playback service is recreated, or the process is later restarted.
+- Improved notification, lock-screen and external transport behaviour, and a browsable library / "recent" item for system media
   surfaces and the music-app launcher integration.
-- **Paused sessions survive.** A paused, resumable session is no longer destroyed when the app is swiped
-  away from Recents.
-- **Bluetooth / LE Audio / wired reconnect.** Automatic resume uses request-ownership rules so an explicit
-  pause/play always wins over an automatic resume, and a lost route cancels a pending resume.
-- **Gapless transitions hardened**; playback progress is synchronized with Media3; unplayable tracks are
-  skipped with a short on-screen message instead of stalling.
-- **Queue controls.** Move controls, drop confirmation, long-queue drag fixes, and bulk cleanup actions.
 
-### Library, search, and lyrics
+### Library, search and performance
 
-- Faster search for large libraries (cached normalized index, off-main-thread filtering).
-- Configurable Smart Collections on Home; contextual artist/album navigation; Home Wrapped preview bounded
-  to the latest year.
-- **Synchronized lyrics** for timed `.lrc` sidecar files on Now Playing.
-- Polish passes across Home, Library, Search, Now Playing, Statistics, and Wrapped; shared motion and
-  interaction foundation.
+- **Faster search on large libraries**: normalized search data is cached instead of rebuilt on every keystroke, and heavy filtering
+  runs off the UI thread.
+- **Library rescans no longer rewrite every unchanged song** (only new, changed or removed songs are written). The library is still
+  fully scanned on launch.
+- **More efficient artwork loading**: thumbnails use bounded decode sizes and a lighter loading path, so large lists should scroll
+  more smoothly.
+- Home dashboard previews and the Home Wrapped preview do less unnecessary work.
 
-### Backup and security
+### Smart Collections and Insights
 
-- **Automatic backup now runs through WorkManager** (a periodic check) instead of only when the app opens;
-  it remains best-effort under Android scheduling.
-- Backup reliability and preference-parity hardening (backed-up settings now round-trip consistently).
+- **Home Smart Collections are configurable.**
+- Smart Collections update more efficiently (only the collections affected by a change are recomputed), and ranking and counts
+  remain consistent.
+- Statistics, Monthly Reports, Wrapped and Insights read only the history they need.
 
-### Engineering foundations (not user-facing)
+### Backup, history and imports
 
-- **Crossfade engineering foundation only - not user-facing, not enabled.** Foundations CF-1 through
-  CF-2H3G, CF-2F2, CF-2F3, CF-2F4, CF-2F5, CF-2I1, CF-2I2, CF-2J1, CF-2K1, CF-2L1, CF-2L2, CF-2L3 and CF-2L4 (planning rules, lifecycle coordinator, runtime snapshot, silent secondary-player preparation,
-  fade-window trigger, secondary start primitive, lateness-aware begin timing, plan-bound fade-begin bridge, BeginFade execution with exact secondary start, occurrence-owned primary gain restoration, occurrence-owned secondary dynamic gain primitive, explicit FadeTick execution ending at HandoffPending, active-fade evaluation policy, unwired main-thread timing-driver foundation, occurrence-owned secondary handoff snapshot, primary occurrence-reconciliation primitive, runtime handoff execution driven by the timing driver, gated-off production composition, internal persisted configuration and driver lifecycle policy foundation, internal primary-playback-error crossfade failure-recovery foundation, internal manual-pause crossfade recovery foundation, internal explicit-seek crossfade recovery foundation, internal next/previous crossfade recovery foundation, internal repeat-change crossfade recovery foundation, internal shuffle-change crossfade recovery foundation, internal play-next queue-mutation crossfade recovery foundation, internal add-to-queue crossfade recovery foundation, internal queue-reorder crossfade recovery foundation, internal queue-removal crossfade recovery foundation, internal library-deletion crossfade recovery foundation, internal queue-replacement crossfade recovery foundation, internal playback-resumption crossfade recovery foundation, internal primary terminal-state crossfade recovery foundation, internal secondary terminal-state crossfade recovery foundation, internal controller-disconnection crossfade recovery foundation, internal audio-focus/route interruption crossfade recovery foundation, internal secondary audio-session observability foundation, internal Equalizer compatibility policy: crossfade unavailable while the Equalizer is enabled, internal rollout-gated Crossfade Settings UI foundation, hidden in production, internal production-readiness model and physical QA contract, internal natural AUTO-transition handoff correction after a physical validation finding, internal continuity-qualified soft natural ownership transfer after a second physical validation finding, internal natural-handoff lifecycle settlement and transport/reconciliation diagnostics after a third physical validation finding, internal bounded monotonic projected position clock for the natural handoff after the captured device log) are merged behind a hard
-  gate (`CrossfadeRolloutPolicy.RUNTIME_ENABLED = false`). The Crossfade Settings UI foundation exists but is hidden while the rollout gate is off, and nothing audible
-  changes: the internal runtime can start the secondary and lower/restore the primary gain, but the gate is off and nothing is reachable in the app. Live/audible production rollout is not enabled.
+- **Automatic backup now runs through WorkManager** (a periodic check) instead of only when the app opens; it remains best-effort
+  under Android scheduling.
+- Backup reliability and preference-parity hardening: backed-up settings round-trip consistently, and listening history continues to
+  be preserved safely across restore.
+- **Corrected BlackPlayer statistics import**: the `.bpstat` period play count is no longer misread as skips. Skip values imported
+  incorrectly by earlier versions are not retroactively repaired.
+
+### Platform and stability
+
+- Targets Android 16 (API 36) with updated media, UI and lifecycle foundations.
+- Broad reliability and analytics/history correctness hardening across playback, statistics, backups, imports and library scanning.
+- Room database schema is unchanged at v13.
+
+### Fixed
+
+- Duplicate-song queue, shuffle and deletion edge cases.
+- Playback stalling on unplayable media.
+- Intermittent missing artwork on the large Now Playing view (validated on a real device).
+- BlackPlayer period counts imported as skips.
+
+### Internal / engineering notes
+
+- Crossfade production rollout completed: the promotion architecture is the sole implementation behind
+  `CrossfadeRolloutPolicy.RUNTIME_ENABLED = true`; the earlier handoff-based foundation work is retired and recorded in
+  `ENGINEERING_BACKLOG_AND_DECISIONS.md`.
+- Occurrence-safe queue hardening and app-kill / task-removal lifecycle hardening landed; BP-1 (`.bpstat` field-2 semantics) corrected.
+- Wave C performance items WC-01 through WC-08 and WC-11 are resolved. **WC-09 (Insights full-history day/hour grouping) and WC-10
+  (`normalizeTolerant` allocation churn) remain open** and are not release blockers.
+- Not part of this release: Android Auto, cloud/accounts/streaming, online lyric fetching, cross-device TrackIdentity, automatic
+  history rematching, authoritative Recovery Restore, or incremental MediaStore scanning.
 
 ---
 

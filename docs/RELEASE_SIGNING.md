@@ -88,7 +88,7 @@ apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
 
 ## versionCode / package notes
 
-- Current values in `app/build.gradle.kts`: `versionCode = 9`, `versionName = "0.1.0-beta9"`,
+- Current values in `app/build.gradle.kts`: `versionCode = 10`, `versionName = "0.1.0-beta10"`,
   `compileSdk = 36`, `targetSdk = 36`, `minSdk = 26`. Each Play upload needs a unique,
   monotonically increasing `versionCode` — bump before every new upload.
 - `applicationId = com.launchpoint.wavdrop` — this is **permanent** once first
