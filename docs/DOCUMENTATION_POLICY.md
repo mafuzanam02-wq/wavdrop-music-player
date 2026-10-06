@@ -47,10 +47,15 @@ fix the doc.
 | `docs/WAVDROP_BACKUP_SCHEMA_V1.md` | legacy V1 compatibility contract |
 | `docs/WAVDROP_IMPORT_RULES.md` | import semantics |
 | `docs/BACKUP_PRESERVATION_CONTRACT.md` | preservation semantics |
+| `docs/architecture/adr/` | durable architecture-decision history (why a choice was made; alternatives rejected/deferred) |
 | `docs/BRANDING.md`, `docs/RELEASE_SIGNING.md` | branding facts; release-signing procedure |
 | `PLAY_STORE_LISTING_DRAFT.md`, `PLAY_STORE_READINESS_CHECKLIST.md` | store claims and readiness |
 
 **No competing sources of truth.**
+
+`docs/ARCHITECTURE.md` is the current architecture. ADRs under `docs/architecture/adr/` record why durable
+architecture choices were made and which alternatives were rejected or deferred. They are historical records
+(replaced by a superseding ADR, not rewritten) and never a second source for the current state.
 
 Each topic has one authoritative document for its full definition. Other documents may repeat concise,
 context-appropriate summaries when useful, but those summaries must stay consistent with the authoritative
