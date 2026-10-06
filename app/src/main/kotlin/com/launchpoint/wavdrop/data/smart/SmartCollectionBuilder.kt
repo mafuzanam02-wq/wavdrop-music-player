@@ -26,27 +26,78 @@ object SmartCollectionBuilder {
     private const val USUALLY_ABANDON_MIN_VALID_PLAYS = 3
     internal const val USUALLY_ABANDON_LIMIT          = 30
 
+    /**
+     * What a collection's membership/ranking actually reads (WC-06). The classification is verified against the rules below by a
+     * test that perturbs every input a family must NOT depend on. Every type also depends on the live songs list (orphan stats and
+     * completion rows never create visible songs).
+     */
+    enum class Dependency {
+        /** Song metadata only. */
+        SONGS_ONLY,
+        /** Songs + TrackStats. */
+        STATS,
+        /** Songs + TrackStats + the current time (Forgotten Gems ages into eligibility). */
+        STATS_AND_TIME,
+        /** Songs + trusted-event completion summaries. */
+        COMPLETION,
+    }
+
+    fun dependencyOf(type: SmartCollectionType): Dependency = when (type) {
+        SmartCollectionType.RECENTLY_ADDED,
+        SmartCollectionType.LONG_TRACKS,
+        SmartCollectionType.SHORT_TRACKS -> Dependency.SONGS_ONLY
+
+        SmartCollectionType.FAVORITES,
+        SmartCollectionType.MOST_PLAYED,
+        SmartCollectionType.RECENTLY_PLAYED,
+        SmartCollectionType.NEVER_PLAYED,
+        SmartCollectionType.MOST_SKIPPED -> Dependency.STATS
+
+        SmartCollectionType.FORGOTTEN_GEMS -> Dependency.STATS_AND_TIME
+
+        SmartCollectionType.ALWAYS_FINISH,
+        SmartCollectionType.USUALLY_ABANDON -> Dependency.COMPLETION
+    }
+
+    /** The types of one dependency family, in canonical enum order. */
+    fun typesWith(dependency: Dependency): List<SmartCollectionType> =
+        SmartCollectionType.values().filter { dependencyOf(it) == dependency }
+
+    /** Stats rows restricted to live songs, keyed by song id. Prepare once per songs/stats emission, not per type. */
+    fun liveStatsById(songs: List<Song>, stats: List<TrackStatsEntity>): Map<Long, TrackStatsEntity> {
+        val songIds = songs.mapTo(HashSet()) { it.id }
+        return stats.filter { it.songId in songIds }.associateBy { it.songId }
+    }
+
+    /** Completion summaries restricted to live songs, keyed by song id. Prepare once per songs/completions emission. */
+    fun liveCompletionsById(songs: List<Song>, completions: List<SongCompletionSummary>): Map<Long, SongCompletionSummary> {
+        val songIds = songs.mapTo(HashSet()) { it.id }
+        return completions.filter { it.songId in songIds }.associateBy { it.songId }
+    }
+
+    /** The collection summary for [result], or null when the visible result is empty (empty collections are omitted). */
+    fun summaryFor(type: SmartCollectionType, result: SmartCollectionSongResult): SmartCollection? =
+        if (result.songs.isEmpty()) null
+        else SmartCollection(
+            id                 = type.name,
+            title              = titleFor(type),
+            description        = descriptionFor(type),
+            type               = type,
+            songCount          = result.songs.size,
+            totalEligibleCount = result.totalEligibleCount,
+            visibleLimit       = result.visibleLimit,
+        )
+
     fun build(
         songs: List<Song>,
         stats: List<TrackStatsEntity>,
         completionSummaries: List<SongCompletionSummary> = emptyList(),
         nowMs: Long = System.currentTimeMillis(),
     ): List<SmartCollection> {
-        val songIds      = songs.mapTo(HashSet()) { it.id }
-        val statsById    = stats.filter { it.songId in songIds }.associateBy { it.songId }
-        val completionById = completionSummaries.filter { it.songId in songIds }.associateBy { it.songId }
+        val statsById = liveStatsById(songs, stats)
+        val completionById = liveCompletionsById(songs, completionSummaries)
         return SmartCollectionType.values().mapNotNull { type ->
-            val result = songsResultForInternal(type, songs, statsById, completionById, nowMs)
-            if (result.songs.isEmpty()) null
-            else SmartCollection(
-                id                 = type.name,
-                title              = titleFor(type),
-                description        = descriptionFor(type),
-                type               = type,
-                songCount          = result.songs.size,
-                totalEligibleCount = result.totalEligibleCount,
-                visibleLimit       = result.visibleLimit,
-            )
+            summaryFor(type, resultFor(type, songs, statsById, completionById, nowMs))
         }
     }
 
@@ -56,12 +107,7 @@ object SmartCollectionBuilder {
         stats: List<TrackStatsEntity>,
         completionSummaries: List<SongCompletionSummary> = emptyList(),
         nowMs: Long = System.currentTimeMillis(),
-    ): List<Song> {
-        val songIds      = songs.mapTo(HashSet()) { it.id }
-        val statsById    = stats.filter { it.songId in songIds }.associateBy { it.songId }
-        val completionById = completionSummaries.filter { it.songId in songIds }.associateBy { it.songId }
-        return songsResultForInternal(type, songs, statsById, completionById, nowMs).songs
-    }
+    ): List<Song> = songsResultFor(type, songs, stats, completionSummaries, nowMs).songs
 
     fun songsResultFor(
         type: SmartCollectionType,
@@ -69,16 +115,14 @@ object SmartCollectionBuilder {
         stats: List<TrackStatsEntity>,
         completionSummaries: List<SongCompletionSummary> = emptyList(),
         nowMs: Long = System.currentTimeMillis(),
-    ): SmartCollectionSongResult {
-        val songIds = songs.mapTo(HashSet()) { it.id }
-        val statsById = stats.filter { it.songId in songIds }.associateBy { it.songId }
-        val completionById = completionSummaries
-            .filter { it.songId in songIds }
-            .associateBy { it.songId }
-        return songsResultForInternal(type, songs, statsById, completionById, nowMs)
-    }
+    ): SmartCollectionSongResult =
+        resultFor(type, songs, liveStatsById(songs, stats), liveCompletionsById(songs, completionSummaries), nowMs)
 
-    private fun songsResultForInternal(
+    /**
+     * The single authority for one collection's rules, over PREPARED live-only maps ([liveStatsById] / [liveCompletionsById]).
+     * Ranks the FULL eligible set first, then applies the visible cap (D-11).
+     */
+    fun resultFor(
         type: SmartCollectionType,
         songs: List<Song>,
         statsById: Map<Long, TrackStatsEntity>,

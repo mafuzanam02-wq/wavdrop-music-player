@@ -482,7 +482,8 @@ tracks. Status was re-checked against code after CF-2C3.
 | WC-03 | **Resolved** - `LibrarySearchIndex` precomputes normalized fields once per library change |
 | WC-05 | **Resolved** - Home Wrapped preview is bounded to the latest activity year AND no longer builds a WrappedSummary or reads the year's event rows: one small aggregate (`observeHomeWrappedActivity`: one row per live active song with PLAY/SKIP counts + the all-event PLAY total, orphan PLAYs included) feeds `HomeWrappedPreviewBuilder`, which reproduces exactly what the card shows (matched-live-activity gate, total, top artist, top track). The full Wrapped screen is unchanged |
 | WC-04 | **Resolved** - Home Recently/Most Played previews are ranked and limited in SQLite (`observeRecentlyListenedPreview` / `observeMostPlayedPreview`, `LIMIT 4`); Home no longer reads or sorts the full stats table. The queries `INNER JOIN songs` BEFORE the LIMIT, so orphan stats (history survives deletion) never consume a slot; ties break by `songId ASC` explicitly (the old Kotlin tie order was only incidental). Recently Played uses `lastListenedAt`, not `lastPlayedAt`. No schema change, no new index. `getMostPlayed()` / `getRecentlyPlayed()` / `allTrackStatsEntities()` are unchanged for other consumers |
-| WC-06..WC-10 | Open (unchanged) |
+| WC-06 | **Resolved** - the Smart Collections pipeline is dependency-aware. `SmartCollectionBuilder.dependencyOf` classifies every type (songs-only: Recently Added/Long/Short; stats: Favorites/Most Played/Recently Played/Never Played/Most Skipped; stats+time: Forgotten Gems; completion: Always Finish/Usually Abandon). `SmartCollectionsAssembler` re-evaluates only the affected families (completion change -> 2 types, day tick -> Forgotten Gems only, stats -> 6, library -> all 11) over live-only maps prepared once per emission; `observeSongResultForCollection(type)` subscribes only to the inputs its rules read. Membership, ranking, caps and order unchanged. Not changed: the completion-summary `GROUP BY` still re-executes when Room invalidates it (no persisted/incremental aggregate), a stats change still re-evaluates all 6 stats-dependent types, and each collector still builds its own pipeline (no shared application scope) |
+| WC-07..WC-10 | Open (unchanged) |
 | WC-11 | **Resolved** - Home builds the `songsById` lookup once per song-library emission (`HomeLibraryProjection`, shared StateFlow) instead of on every dashboard input; playlist, stats-preview, Smart Collection and Wrapped emissions reuse it |
 
 Descriptions below are the original audit observations; rows marked Resolved above are retained for
@@ -674,6 +675,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
       WC-02 resolved: Monthly Reports, Wrapped, Insights, Statistics, Most Played and Diagnostics read counts, PLAY/SKIP timestamps or one selected period range instead of the full event entity history (month/year membership stays in Kotlin ZoneId logic, not SQL); analytics meaning unchanged; WC-09 (full-history day/hour grouping) remains open.
       WC-04 resolved: Home previews rank, live-song-filter (INNER JOIN before LIMIT) and limit in SQLite with an explicit songId ASC tie-break; analytics unchanged; WC-11 remains open.
       WC-05 + WC-11 resolved: Home Wrapped card uses a per-live-song selected-year aggregate and a narrow preview builder (no full WrappedSummary; orphan PLAYs still count in the total, orphan-only history still shows the seed card); Home's song-id lookup is built once per library emission and shared; Wrapped screen, WC-02 and WC-04 contracts untouched.
+      WC-06 resolved: Smart Collections recompute by dependency family (songs-only / stats / stats+day / completion) with type-scoped detail subscriptions; rules, ranking, caps (D-11), orphan filtering and canonical order unchanged; completion GROUP BY still re-runs on Room invalidation but no longer cascades into the other nine collections.
    h. Final gate flip after passed validation - complete (CF-2N2).
 9. Physical Bluetooth / background / wired / EQ-policy validation - complete (CF-2N1 sign-off).
 
@@ -690,7 +692,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
 
 ### Beta 10
 
-- Remaining Wave C MEDIUM performance items (WC-06…WC-10).
+- Remaining Wave C MEDIUM performance items (WC-07…WC-10).
 - Additional Delete entry points (pending accidental-deletion risk review).
 - Broader folder exclusion list (Telegram/Signal/Messenger/Downloads/Recordings) and the general
   block/allow list evaluation.
