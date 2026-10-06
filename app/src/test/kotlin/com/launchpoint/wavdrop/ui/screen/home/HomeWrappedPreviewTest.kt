@@ -210,6 +210,15 @@ class HomeWrappedPreviewTest {
         assertEquals("Artist B", newSummary.topArtists.first().artistKey)
     }
 
+    /** The pre-WC-05 Home preview (full WrappedBuilder pipeline), kept here as the reference implementation. */
+    private fun buildHomeWrappedPreview(
+        year: Int,
+        songs: List<Song>,
+        events: List<TrackListenEventEntity>,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ) = WrappedBuilder.buildYear(year = year, songs = songs, events = events, zone = zone)
+        .takeIf { it.hasActivity && !it.emptyState.isEmpty }
+
     private fun multiYearEvents(): List<TrackListenEventEntity> = listOf(
         playEvent(songId = 1, occurredAt = epochMs(2024, 1, 1), listenedMs = 999_000L),
         skipEvent(songId = 1, occurredAt = epochMs(2025, 2, 1)),

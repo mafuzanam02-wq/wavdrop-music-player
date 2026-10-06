@@ -10,7 +10,7 @@ import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.ListeningPeriodRange
 import com.launchpoint.wavdrop.data.model.Song
-import com.launchpoint.wavdrop.data.model.WrappedSummary
+import com.launchpoint.wavdrop.data.model.HomeWrappedPreview
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
@@ -29,7 +29,7 @@ import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.SongSortMode
 import com.launchpoint.wavdrop.data.stats.MostPlayedBuilder
-import com.launchpoint.wavdrop.data.stats.WrappedBuilder
+import com.launchpoint.wavdrop.data.stats.HomeWrappedPreviewBuilder
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
@@ -68,6 +68,40 @@ private const val DASHBOARD_COLLECTION_PREVIEW_LIMIT = 3
 internal fun homePreviewSongs(rankedStats: List<TrackStatsEntity>, songsById: Map<Long, Song>): List<Song> =
     rankedStats.mapNotNull { songsById[it.songId] }
 
+/** The song list plus its id lookup, built together once per library emission (WC-11). Song ids are the table's primary key. */
+internal class HomeLibraryProjection(val songs: List<Song>, val songsById: Map<Long, Song>) {
+    companion object {
+        val EMPTY = HomeLibraryProjection(emptyList(), emptyMap())
+        fun of(songs: List<Song>) = HomeLibraryProjection(songs, songs.associateBy { it.id })
+    }
+}
+
+/** One projection per library emission; the `build` seam lets tests count how often the O(N) map is constructed. */
+internal fun homeLibraryProjectionFlow(
+    songs: Flow<List<Song>?>,
+    build: (List<Song>) -> HomeLibraryProjection = HomeLibraryProjection::of,
+): Flow<HomeLibraryProjection> = songs.map { build(it.orEmpty()) }
+
+/** Combines the shared library projection with the other dashboard inputs; it never builds a song lookup itself. */
+internal fun homeDashboardFlow(
+    library: Flow<HomeLibraryProjection>,
+    previewStats: Flow<Pair<List<TrackStatsEntity>, List<TrackStatsEntity>>>,
+    playlists: Flow<List<PlaylistSummary>>,
+    smartCollections: Flow<List<SmartCollection>>,
+    wrapped: Flow<HomeWrappedPreview?>,
+): Flow<HomeDashboardUiState> = combine(
+    library, previewStats, playlists, smartCollections, wrapped,
+) { lib, (recentStats, mostStats), playlistList, smart, latestWrapped ->
+    HomeDashboardUiState(
+        totalSongs = lib.songs.size,
+        recentlyPlayed = homePreviewSongs(recentStats, lib.songsById),
+        mostPlayed = homePreviewSongs(mostStats, lib.songsById),
+        playlists = playlistList.take(DASHBOARD_COLLECTION_PREVIEW_LIMIT),
+        smartCollections = smart,
+        wrapped = latestWrapped,
+    )
+}
+
 // Matches the debounce already used by songSearchResults so both Home search pipelines
 // coalesce keystrokes consistently (WC-01).
 private const val SEARCH_DEBOUNCE_MS = 200L
@@ -84,7 +118,7 @@ data class HomeDashboardUiState(
     val mostPlayed: List<Song> = emptyList(),
     val playlists: List<PlaylistSummary> = emptyList(),
     val smartCollections: List<SmartCollection> = emptyList(),
-    val wrapped: WrappedSummary? = null,
+    val wrapped: HomeWrappedPreview? = null,
 )
 
 @HiltViewModel
@@ -257,26 +291,35 @@ class HomeViewModel @Inject constructor(
                 ),
             )
 
-    // Wrapped preview only depends on songs + events; isolated so that playlist/stats
-    // changes don't trigger a full WrappedBuilder run. Home observes one scalar latest PLAY/SKIP
-    // timestamp, then only the latest activity year's event slice; distinctUntilChanged suppresses
-    // Room's table-level invalidation when out-of-year inserts leave that slice unchanged.
+    // Shared Home library lookup (WC-11): the O(N) songsById map is built ONCE per song-library emission and reused by the dashboard
+    // previews and the Wrapped card; playlist / stats / Smart Collection / Wrapped emissions never rebuild it.
+    private val libraryProjection: StateFlow<HomeLibraryProjection> = homeLibraryProjectionFlow(allSongs)
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = HomeLibraryProjection.EMPTY,
+        )
+
+    // Wrapped preview (WC-05): Home observes one scalar latest PLAY/SKIP timestamp, then ONE small aggregate for the latest activity
+    // year (one row per live active song + the all-event PLAY total) instead of the year's event rows and a full WrappedSummary.
+    // flatMapLatest cancels the previous year's query when the latest activity moves to a new year; distinctUntilChanged suppresses
+    // Room's table-level invalidation when out-of-year inserts leave the aggregate unchanged.
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val wrappedPreview: StateFlow<WrappedSummary?> = statsRepository.latestAnalyticsEventAt()
+    private val wrappedPreview: StateFlow<HomeWrappedPreview?> = statsRepository.latestAnalyticsEventAt()
         .distinctUntilChanged()
         .flatMapLatest { latestAt ->
             val selection = homeWrappedYearSelection(latestAt) ?: return@flatMapLatest flowOf(null)
             combine(
-                allSongs,
+                libraryProjection,
                 statsRepository
-                    .listenEventsInRange(selection.range.fromMs, selection.range.toMs)
+                    .homeWrappedActivity(selection.range.fromMs, selection.range.toMs)
                     .distinctUntilChanged(),
-            ) { songs, events ->
-                buildHomeWrappedPreview(
+            ) { library, activity ->
+                HomeWrappedPreviewBuilder.build(
                     year = selection.year,
-                    songs = songs.orEmpty(),
-                    events = events,
-                    zone = selection.range.zone,
+                    songsById = library.songsById,
+                    activity = activity,
                 )
             }
         }
@@ -308,24 +351,13 @@ class HomeViewModel @Inject constructor(
         statsRepository.mostPlayedPreview(DASHBOARD_SONG_PREVIEW_LIMIT),
     ) { recent, most -> recent to most }
 
-    val dashboardState: StateFlow<HomeDashboardUiState> = combine(
-        allSongs,
-        previewStats,
-        playlistRepository.observePlaylists(),
-        homeSmartCollections,
-        wrappedPreview,
-    ) { songs, (recentStats, mostStats), playlists, smartCollections, latestWrapped ->
-        val loadedSongs = songs.orEmpty()
-        val songsById = loadedSongs.associateBy { it.id } // WC-11 still tracks avoiding this allocation
-        HomeDashboardUiState(
-            totalSongs = loadedSongs.size,
-            recentlyPlayed = homePreviewSongs(recentStats, songsById),
-            mostPlayed = homePreviewSongs(mostStats, songsById),
-            playlists = playlists.take(DASHBOARD_COLLECTION_PREVIEW_LIMIT),
-            smartCollections = smartCollections,
-            wrapped = latestWrapped,
-        )
-    }.stateIn(
+    val dashboardState: StateFlow<HomeDashboardUiState> = homeDashboardFlow(
+        library = libraryProjection,
+        previewStats = previewStats,
+        playlists = playlistRepository.observePlaylists(),
+        smartCollections = homeSmartCollections,
+        wrapped = wrappedPreview,
+    ).stateIn(
         scope   = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = HomeDashboardUiState(),
@@ -553,12 +585,3 @@ internal fun homeWrappedYearSelection(
         range = ListeningPeriodRange.year(year, zone),
     )
 }
-
-internal fun buildHomeWrappedPreview(
-    year: Int,
-    songs: List<Song>,
-    events: List<TrackListenEventEntity>,
-    zone: ZoneId = ZoneId.systemDefault(),
-): WrappedSummary? =
-    WrappedBuilder.buildYear(year = year, songs = songs, events = events, zone = zone)
-        .takeIf { it.hasActivity && !it.emptyState.isEmpty }

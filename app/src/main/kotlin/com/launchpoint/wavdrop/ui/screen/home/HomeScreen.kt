@@ -74,7 +74,7 @@ import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.model.Song
-import com.launchpoint.wavdrop.data.model.WrappedSummary
+import com.launchpoint.wavdrop.data.model.HomeWrappedPreview
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.data.settings.AppIconChoice
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
@@ -740,13 +740,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardSection(
 
 @Composable
 private fun WrappedPreviewCard(
-    wrapped: WrappedSummary,
+    wrapped: HomeWrappedPreview,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val highlight = when {
-        wrapped.mostPlayedArtist != null -> "Top artist: ${wrapped.mostPlayedArtist.artistKey}"
-        wrapped.mostPlayedSong != null -> "Top track: ${wrapped.mostPlayedSong.song.displayTitle}"
+        wrapped.topArtistKey != null -> "Top artist: ${wrapped.topArtistKey}"
+        wrapped.topSong != null -> "Top track: ${wrapped.topSong.displayTitle}"
         else -> "${wrapped.totalPlayCount} plays"
     }
 
@@ -792,7 +792,7 @@ private fun WrappedPreviewCard(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = wrapped.period.displayLabel,
+                        text = wrapped.displayLabel,
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                     )

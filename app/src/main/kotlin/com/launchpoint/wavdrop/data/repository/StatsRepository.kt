@@ -13,6 +13,7 @@ import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
+import com.launchpoint.wavdrop.data.model.HomeWrappedSongActivity
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 import com.launchpoint.wavdrop.data.model.TrackStats
@@ -121,6 +122,10 @@ class StatsRepository @Inject constructor(
 
     /** Latest PLAY/SKIP event timestamp used to select the bounded Home Wrapped preview year. */
     fun latestAnalyticsEventAt(): Flow<Long?> = listenEventDao.observeLatestAnalyticsEventAt()
+
+    /** Lightweight per-live-song PLAY/SKIP aggregate for the Home Wrapped card over an inclusive window (WC-05). */
+    fun homeWrappedActivity(fromMs: Long, toMs: Long): Flow<List<HomeWrappedSongActivity>> =
+        listenEventDao.observeHomeWrappedActivity(fromMs, toMs)
 
     /**
      * Listen events within an inclusive [fromMs]..[toMs] window. Lets callers that only need a

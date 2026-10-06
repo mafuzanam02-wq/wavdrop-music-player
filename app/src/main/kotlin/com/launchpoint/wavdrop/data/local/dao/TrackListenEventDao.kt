@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+import com.launchpoint.wavdrop.data.model.HomeWrappedSongActivity
 import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 import kotlinx.coroutines.flow.Flow
 
@@ -71,6 +72,28 @@ interface TrackListenEventDao {
         WHERE eventType IN ('PLAY', 'SKIP')
     """)
     fun observeLatestAnalyticsEventAt(): Flow<Long?>
+
+    /**
+     * Home Wrapped preview aggregate (WC-05): one row per LIVE song (INNER JOIN songs) with PLAY and/or SKIP events in the inclusive
+     * range, carrying only the per-song PLAY/SKIP counts plus the range's PLAY total over ALL events (orphan-song PLAYs included,
+     * as the full Wrapped total counts them). Unsupported event types are excluded from the rows. The total rides on every row so one
+     * result is internally coherent; no live activity means no rows. Room observes track_listen_events and songs.
+     */
+    @Query("""
+        SELECT
+            e.songId AS songId,
+            SUM(CASE WHEN e.eventType = 'PLAY' THEN 1 ELSE 0 END) AS playCount,
+            SUM(CASE WHEN e.eventType = 'SKIP' THEN 1 ELSE 0 END) AS skipCount,
+            MAX(CASE WHEN e.eventType = 'PLAY' THEN e.occurredAt ELSE NULL END) AS latestPlayAt,
+            (SELECT COUNT(*) FROM track_listen_events AS t
+                WHERE t.eventType = 'PLAY' AND t.occurredAt >= :fromMs AND t.occurredAt <= :toMs) AS totalPlayCount
+        FROM track_listen_events AS e
+        INNER JOIN songs AS s ON s.id = e.songId
+        WHERE e.occurredAt >= :fromMs AND e.occurredAt <= :toMs AND e.eventType IN ('PLAY', 'SKIP')
+        GROUP BY e.songId
+        ORDER BY e.songId ASC
+    """)
+    fun observeHomeWrappedActivity(fromMs: Long, toMs: Long): Flow<List<HomeWrappedSongActivity>>
 
     /** Events in an inclusive time range, most recent first. */
     @Query("""
