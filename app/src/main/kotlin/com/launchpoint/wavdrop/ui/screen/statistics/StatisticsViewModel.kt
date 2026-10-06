@@ -6,11 +6,11 @@ import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.model.StatsDashboardSummary
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
-import com.launchpoint.wavdrop.data.stats.InsightsSummaryBuilder
+import com.launchpoint.wavdrop.data.stats.InsightsPlayActivity
 import com.launchpoint.wavdrop.data.stats.StatsDashboardBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.DayOfWeek
-import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
 import kotlinx.coroutines.delay
@@ -58,7 +58,7 @@ class StatisticsViewModel @Inject constructor(
     )
 
     val insightsState: StateFlow<StatisticsInsights> = statisticsInsightsFlow(
-        playTimestamps = statsRepository.playEventTimestamps(),
+        playActivity = statsRepository.playActivity(),
         favoriteSongIds = statsRepository.favoriteSongIds(),
     ).stateIn(
         scope = viewModelScope,
@@ -95,17 +95,17 @@ class StatisticsViewModel @Inject constructor(
 }
 
 /**
- * Statistics insights data flow (WC-02): streak and most-active weekday are derived from PLAY TIMESTAMPS (most recent first, the
- * order the old entity query supplied, which keeps the weekday tie-break identical) instead of full event entities.
+ * Statistics insights data flow (WC-02, WC-09): streak and most-active weekday come from the bounded [InsightsPlayActivity] summary (a
+ * streamed reduction of the PLAY history; the weekday tie-break is the explicit latest-play rule) instead of event lists.
  */
 internal fun statisticsInsightsFlow(
-    playTimestamps: Flow<List<Long>>,
+    playActivity: Flow<InsightsPlayActivity>,
     favoriteSongIds: Flow<Set<Long>>,
     zone: ZoneId = ZoneId.systemDefault(),
-): Flow<StatisticsInsights> = combine(playTimestamps, favoriteSongIds) { plays, favoriteIds ->
+): Flow<StatisticsInsights> = combine(playActivity, favoriteSongIds) { activity, favoriteIds ->
     StatisticsInsights(
         favoritesCount      = favoriteIds.size,
-        currentStreakDays   = InsightsSummaryBuilder.currentStreakDaysFromPlayTimestamps(plays, zone),
-        mostActiveDayOfWeek = InsightsSummaryBuilder.mostActiveDayOfWeekFromPlayTimestamps(plays, zone),
+        currentStreakDays   = activity.currentStreakDays(LocalDate.now(zone)),
+        mostActiveDayOfWeek = activity.mostActiveDayOfWeek,
     )
 }

@@ -89,7 +89,8 @@ class AnalyticsEventFlowDecouplingTest {
 
         val count: Flow<Int> get() = rows.map { it.size }
         val analyticsTimestamps: Flow<List<Long>> get() = rows.map { l -> l.filter { it.eventType == "PLAY" || it.eventType == "SKIP" }.map { it.occurredAt } }
-        val playTimestamps: Flow<List<Long>> get() = rows.map { l -> l.filter { it.eventType == "PLAY" }.map { it.occurredAt } } // already DESC
+        fun playActivity(zone: ZoneId, today: LocalDate): Flow<InsightsPlayActivity> =
+            rows.map { l -> InsightsPlayActivityReader.reduce(l.filter { it.eventType == "PLAY" }.map { it.occurredAt }.asSequence(), zone, today) }
 
         fun inRange(from: Long, to: Long): Flow<List<TrackListenEventEntity>> =
             rows.map { l -> l.filter { it.occurredAt in from..to } }
@@ -359,7 +360,7 @@ class AnalyticsEventFlowDecouplingTest {
 
     @Test fun anAllSkipHistoryProducesNoStreakDayOrHour() {
         val table = Table(listOf(skip(1, at(2026, 6, 15)), skip(2, at(2026, 6, 14))))
-        withCollected(statisticsInsightsFlow(table.playTimestamps, MutableStateFlow(setOf(1L, 2L)), utc)) { latest, _ ->
+        withCollected(statisticsInsightsFlow(table.playActivity(utc, LocalDate.now(utc)), MutableStateFlow(setOf(1L, 2L)), utc)) { latest, _ ->
             awaitTrue("insights") { latest() != null }
             assertEquals(0, latest()!!.currentStreakDays)
             assertEquals(null, latest()!!.mostActiveDayOfWeek)
@@ -369,7 +370,7 @@ class AnalyticsEventFlowDecouplingTest {
 
     @Test fun statisticsInsightsUpdateWhenANewPlayArrivesAndIgnoreSkips() {
         val table = Table(emptyList())
-        withCollected(statisticsInsightsFlow(table.playTimestamps, MutableStateFlow(emptySet()), utc)) { latest, _ ->
+        withCollected(statisticsInsightsFlow(table.playActivity(utc, LocalDate.now(utc)), MutableStateFlow(emptySet()), utc)) { latest, _ ->
             awaitTrue("initial") { latest() != null }
             assertEquals(null, latest()!!.mostActiveDayOfWeek)
             table.insert(skip(1, at(2026, 6, 15)))
@@ -386,7 +387,7 @@ class AnalyticsEventFlowDecouplingTest {
         val monthRange = ListeningPeriodRange.month(2026, 6, utc)
         val flow = insightsHubFlow(
             songs = MutableStateFlow(songs), stats = MutableStateFlow(stats),
-            thisMonthEvents = table.inRange(monthRange.fromMs, monthRange.toMs).map { MonthScopedEvents(MonthYear(2026, 6), it) }, playTimestamps = table.playTimestamps,
+            thisMonthEvents = table.inRange(monthRange.fromMs, monthRange.toMs).map { MonthScopedEvents(MonthYear(2026, 6), it) }, playActivity = table.playActivity(utc, LocalDate.of(2026, 6, 15)),
             collections = MutableStateFlow(emptyList()), zone = utc, now = { LocalDateTime.of(2026, 6, 15, 10, 0) },
         )
         withCollected(flow) { latest, _ ->
@@ -466,7 +467,7 @@ class AnalyticsEventFlowDecouplingTest {
         val flow = insightsHubFlow(
             songs = MutableStateFlow(songs), stats = MutableStateFlow(stats),
             thisMonthEvents = currentMonthEventsFlow(table.analyticsTimestamps, table::inRange, utc) { clock },
-            playTimestamps = table.playTimestamps, collections = MutableStateFlow(emptyList()), zone = utc,
+            playActivity = table.playActivity(utc, LocalDate.of(2026, 10, 31)), collections = MutableStateFlow(emptyList()), zone = utc,
             now = { Instant.ofEpochMilli(clock).atZone(utc).toLocalDateTime() },
         )
         withCollected(flow) { latest, all ->
@@ -523,8 +524,8 @@ class AnalyticsEventFlowDecouplingTest {
     @Test fun noTargetViewModelSubscribesToTheFullEventHistoryAndEachUsesItsNarrowRead() {
         val expected = mapOf(
             "ui/screen/monthlyreports/MonthlyReportsViewModel.kt" to listOf("analyticsEventTimestamps()", "listenEventsInRange"),
-            "ui/screen/settings/InsightsViewModel.kt" to listOf("playEventTimestamps()", "listenEventsInRange", "analyticsEventTimestamps()", "currentMonthEventsFlow"),
-            "ui/screen/statistics/StatisticsViewModel.kt" to listOf("playEventTimestamps()"),
+            "ui/screen/settings/InsightsViewModel.kt" to listOf("playActivity()", "listenEventsInRange", "listenEventCount()", "currentMonthEventsFlow"),
+            "ui/screen/statistics/StatisticsViewModel.kt" to listOf("playActivity()"),
             "ui/screen/wrapped/WrappedViewModel.kt" to listOf("analyticsEventTimestamps()", "listenEventsInRange"),
             "ui/screen/smart/SmartCollectionDetailsViewModel.kt" to listOf("listenEventsInRange", "analyticsEventTimestamps()", "currentMonthEventsFlow"),
             "ui/screen/settings/SettingsDiagnosticsViewModel.kt" to listOf("listenEventCount()"),
@@ -545,8 +546,8 @@ class AnalyticsEventFlowDecouplingTest {
         val dao = read("data/local/dao/TrackListenEventDao.kt")
         assertTrue(dao.contains("SELECT COUNT(*) FROM track_listen_events"))
         assertTrue(dao.contains("SELECT occurredAt FROM track_listen_events WHERE eventType IN ('PLAY', 'SKIP')"))
-        assertTrue("PLAY timestamps exclude SKIP and keep the most-recent-first order the tie-break depends on",
-            dao.contains("SELECT occurredAt FROM track_listen_events WHERE eventType = 'PLAY' ORDER BY occurredAt DESC"))
+        assertTrue("PLAY timestamps are streamed through a cursor (WC-09): PLAY only, no ORDER BY (the tie-break is explicit latest-play, not row order)",
+            dao.contains("SELECT occurredAt FROM track_listen_events WHERE eventType = 'PLAY'\"") && !dao.contains("observePlayEventTimestamps"))
         assertFalse("month/year membership must stay in Kotlin ZoneId logic, never SQLite strftime", dao.contains("strftime"))
         assertEquals("TYPE constants still match the literals", "PLAY" to "SKIP", TrackListenEventEntity.TYPE_PLAY to TrackListenEventEntity.TYPE_SKIP)
     }

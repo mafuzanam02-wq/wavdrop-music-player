@@ -39,7 +39,7 @@ interface TrackListenEventDao {
 
     /**
      * All events, most recent first. A genuine full-history ENTITY read: ordinary analytics screens must not use it (WC-02); they
-     * use [observeCount], [observeAnalyticsEventTimestamps], [observePlayEventTimestamps] or [observeInRange] instead.
+     * use [observeCount], [observeAnalyticsEventTimestamps], [playTimestampCursor] or [observeInRange] instead.
      */
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     fun observeAll(): Flow<List<TrackListenEventEntity>>
@@ -60,11 +60,13 @@ interface TrackListenEventDao {
     fun observeAnalyticsEventTimestamps(): Flow<List<Long>>
 
     /**
-     * occurredAt of every PLAY event, most recent first (the order the full-entity query used, which the most-active weekday/hour
-     * tie-break depends on). Timestamps only, for streaks and most-active day/hour. SKIP is excluded.
+     * occurredAt of every PLAY event as a CURSOR, in no particular order (WC-09). It is meant to be reduced row-by-row (see
+     * `InsightsPlayActivityReader`) and closed by the caller, NEVER materialized into a list: the most-active weekday/hour and streak
+     * need only small buckets, grouped in Kotlin through the user's ZoneId (never SQLite date functions). Blocking: call it off the
+     * main thread. SKIP and unsupported types are excluded. Re-run it when [observeCount] re-emits (any change to the table).
      */
-    @Query("SELECT occurredAt FROM track_listen_events WHERE eventType = 'PLAY' ORDER BY occurredAt DESC")
-    fun observePlayEventTimestamps(): Flow<List<Long>>
+    @Query("SELECT occurredAt FROM track_listen_events WHERE eventType = 'PLAY'")
+    fun playTimestampCursor(): android.database.Cursor
 
     /** Latest PLAY/SKIP timestamp for analytics previews; ignores unsupported future event types. */
     @Query("""

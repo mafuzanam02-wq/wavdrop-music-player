@@ -11,7 +11,7 @@ import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
-import com.launchpoint.wavdrop.data.stats.InsightsSummaryBuilder
+import com.launchpoint.wavdrop.data.stats.InsightsPlayActivity
 import com.launchpoint.wavdrop.data.stats.MonthScopedEvents
 import com.launchpoint.wavdrop.data.stats.currentMonthEventsFlow
 import com.launchpoint.wavdrop.data.stats.ListeningAnalyticsBuilder
@@ -49,21 +49,20 @@ sealed interface InsightsHubUiState {
 }
 
 /**
- * Insights hub data flow (WC-02): the this-month summary reads ONLY the current month's events ([thisMonthEvents], which carry the
- * month they were queried for; the ViewModel re-binds that range when an analytics event arrives after a month rollover); streak and
- * most-active weekday/hour read PLAY TIMESTAMPS ([playTimestamps], most recent first) instead of full event entities. The streak
- * keeps its current-calendar-year definition. Grouping the full-history PLAY timestamps by weekday/hour still happens in memory here
- * until WC-09 moves it out; that is intentionally out of scope for WC-02.
+ * Insights hub data flow (WC-02, WC-09): the this-month summary reads ONLY the current month's events ([thisMonthEvents], which carry
+ * the month they were queried for; the ViewModel re-binds that range after a month rollover); streak and most-active weekday/hour come
+ * from [playActivity], a bounded summary reduced from a streamed cursor over the PLAY history (no per-event list, grouped through
+ * the user's ZoneId). The streak keeps its current-calendar-year definition and is evaluated against `now()` on every emission.
  */
 internal fun insightsHubFlow(
     songs: Flow<List<Song>>,
     stats: Flow<List<TrackStatsEntity>>,
     thisMonthEvents: Flow<MonthScopedEvents>,
-    playTimestamps: Flow<List<Long>>,
+    playActivity: Flow<InsightsPlayActivity>,
     collections: Flow<List<SmartCollection>>,
     zone: ZoneId = ZoneId.systemDefault(),
     now: () -> LocalDateTime = { LocalDateTime.now(zone) },
-): Flow<InsightsHubUiState> = combine(songs, stats, thisMonthEvents, playTimestamps, collections) { songList, statList, scoped, plays, smart ->
+): Flow<InsightsHubUiState> = combine(songs, stats, thisMonthEvents, playActivity, collections) { songList, statList, scoped, activity, smart ->
     val summary = StatsDashboardBuilder.build(songs = songList, stats = statList)
     if (summary.totalPlayCount == 0 && summary.totalSkipCount == 0 && summary.totalListeningTimeMs == 0L) {
         InsightsHubUiState.Empty
@@ -82,15 +81,15 @@ internal fun insightsHubFlow(
         InsightsHubUiState.Content(
             totalPlayCount           = summary.totalPlayCount,
             totalListeningTimeMs     = summary.totalListeningTimeMs,
-            currentStreakDays        = InsightsSummaryBuilder.currentStreakDaysFromPlayTimestamps(plays, zone, current.toLocalDate()),
+            currentStreakDays        = activity.currentStreakDays(current.toLocalDate()),
             forgottenGemsCount       = smart.find { it.type == SmartCollectionType.FORGOTTEN_GEMS }?.songCount ?: 0,
             recentlyPlayedCount      = smart.find { it.type == SmartCollectionType.RECENTLY_PLAYED }?.songCount ?: 0,
             neverPlayedCount         = smart.find { it.type == SmartCollectionType.NEVER_PLAYED }?.songCount ?: 0,
             thisMonthPlayCount       = if (hasMonthActivity) monthSummary.totalPlayCount else null,
             thisMonthListeningTimeMs = if (hasMonthActivity) monthSummary.totalListeningTimeMs else null,
             thisMonthTopTrackTitle   = if (hasMonthActivity) monthSummary.topSongs.firstOrNull()?.song?.title else null,
-            mostActiveDayOfWeek      = InsightsSummaryBuilder.mostActiveDayOfWeekFromPlayTimestamps(plays, zone),
-            mostActiveHour           = InsightsSummaryBuilder.mostActiveHourFromPlayTimestamps(plays, zone),
+            mostActiveDayOfWeek      = activity.mostActiveDayOfWeek,
+            mostActiveHour           = activity.mostActiveHour,
         )
     }
 }
@@ -102,10 +101,10 @@ class InsightsViewModel @Inject constructor(
     smartCollectionRepository: SmartCollectionRepository,
 ) : ViewModel() {
 
-    // Current-month events: the month key follows the wall clock and is re-evaluated whenever an analytics event (PLAY/SKIP) timestamp
-    // emission arrives, so a screen left open across a month boundary switches range on the first event of the new month (no timer).
+    // Current-month events: the month key follows the wall clock and is re-evaluated whenever the listen-event table changes (a scalar
+    // COUNT signal: any inserted event, including restored historical ones), so a screen left open across a month boundary switches range on the first event of the new month (no timer, no timestamp list).
     private val thisMonthEvents = currentMonthEventsFlow(
-        invalidation = statsRepository.analyticsEventTimestamps(),
+        invalidation = statsRepository.listenEventCount(),
         eventsInRange = statsRepository::listenEventsInRange,
     )
 
@@ -113,7 +112,7 @@ class InsightsViewModel @Inject constructor(
         songs = songRepository.songs,
         stats = statsRepository.allTrackStatsEntities(),
         thisMonthEvents = thisMonthEvents,
-        playTimestamps = statsRepository.playEventTimestamps(),
+        playActivity = statsRepository.playActivity(),
         collections = smartCollectionRepository.observeSmartCollections(),
     )
         .flowOn(Dispatchers.Default)

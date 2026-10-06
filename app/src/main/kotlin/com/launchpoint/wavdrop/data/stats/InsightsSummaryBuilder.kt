@@ -11,8 +11,9 @@ import java.time.ZoneId
  * load event entities, WC-02); the entity overloads filter PLAY and delegate. Ties in most-active day/hour resolve to the first
  * group in the order the timestamps are supplied (callers supply most-recent-first, as the entity query did).
  *
- * Insights still groups the full-history PLAY timestamps in memory; moving that grouping out of memory is WC-09, deliberately not
- * done here.
+ * Production Insights/Statistics no longer call the timestamp functions: since WC-09 they read the bounded [InsightsPlayActivity]
+ * summary (streamed, grouped through the same ZoneId). These functions remain as the pure reference implementation of the semantics
+ * that summary must reproduce (and are used by tests).
  */
 object InsightsSummaryBuilder {
 
@@ -76,7 +77,7 @@ object InsightsSummaryBuilder {
     private fun playTimestamps(events: List<TrackListenEventEntity>): List<Long> =
         events.filter { it.eventType == TrackListenEventEntity.TYPE_PLAY }.map { it.occurredAt }
 
-    private fun currentStreak(sortedDays: List<LocalDate>, today: LocalDate): Int {
+    internal fun currentStreak(sortedDays: List<LocalDate>, today: LocalDate): Int {
         if (sortedDays.isEmpty()) return 0
         if (sortedDays.last() < today.minusDays(1)) return 0
         var streak = 1

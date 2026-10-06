@@ -17,7 +17,15 @@ import com.launchpoint.wavdrop.data.model.HomeWrappedSongActivity
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 import com.launchpoint.wavdrop.data.model.TrackStats
+import com.launchpoint.wavdrop.data.stats.InsightsPlayActivity
+import com.launchpoint.wavdrop.data.stats.InsightsPlayActivityReader
+import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -106,7 +114,7 @@ class StatsRepository @Inject constructor(
 
     /**
      * Every listen event ENTITY, most recent first. Only for genuine full-history entity consumers: ordinary analytics screens
-     * must not subscribe to it (WC-02). Use [listenEventCount], [analyticsEventTimestamps], [playEventTimestamps] or
+     * must not subscribe to it (WC-02). Use [listenEventCount], [analyticsEventTimestamps], [playActivity] or
      * [listenEventsInRange] for counts, timestamps or one selected period.
      */
     fun allListenEvents(): Flow<List<TrackListenEventEntity>> = listenEventDao.observeAll()
@@ -117,8 +125,21 @@ class StatsRepository @Inject constructor(
     /** occurredAt of every PLAY and SKIP event (timestamps only): feeds available months/years. */
     fun analyticsEventTimestamps(): Flow<List<Long>> = listenEventDao.observeAnalyticsEventTimestamps()
 
-    /** occurredAt of every PLAY event, most recent first (timestamps only): feeds streaks and most-active weekday/hour. */
-    fun playEventTimestamps(): Flow<List<Long>> = listenEventDao.observePlayEventTimestamps()
+    /**
+     * Bounded most-active weekday/hour + current-year play-date summary for Insights and Statistics (WC-09). The PLAY history is
+     * streamed through a cursor into a small accumulator, so no per-event list is ever built (memory is bounded by 7 + 24 buckets and
+     * at most 366 dates; the scan itself is still O(N) over the PLAY rows). Re-computes whenever the event table changes (including
+     * restored historical events, which a MAX(occurredAt) signal would miss) and cancels an in-flight scan on a newer change.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun playActivity(zone: ZoneId = ZoneId.systemDefault()): Flow<InsightsPlayActivity> =
+        listenEventDao.observeCount().mapLatest {
+            withContext(Dispatchers.IO) {
+                listenEventDao.playTimestampCursor().use { cursor ->
+                    InsightsPlayActivityReader.reduce(cursor, zone) { ensureActive() }
+                }
+            }
+        }
 
     /** Latest PLAY/SKIP event timestamp used to select the bounded Home Wrapped preview year. */
     fun latestAnalyticsEventAt(): Flow<Long?> = listenEventDao.observeLatestAnalyticsEventAt()
