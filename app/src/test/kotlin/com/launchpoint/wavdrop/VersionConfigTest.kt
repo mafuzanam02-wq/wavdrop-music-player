@@ -40,10 +40,14 @@ class VersionConfigTest {
     }
 
     @Test
-    fun `beta 10 checkpoint keeps WC-10 open and crossfade enabled`() {
+    fun `wave c is closed with every WC item resolved and crossfade enabled`() {
         val backlog = doc("ENGINEERING_BACKLOG_AND_DECISIONS.md")
-        assertTrue("| WC-10 | Open (unchanged) |" in backlog)
+        assertTrue("| WC-10 | **Resolved (post-Beta 10)**" in backlog)
         assertTrue("| WC-09 | **Resolved (post-Beta 10)**" in backlog)
+        for (id in (1..11).map { "WC-%02d".format(it) }) {
+            assertTrue("$id must be resolved", Regex("""\| $id \| \*\*Resolved""").containsMatchIn(backlog))
+        }
+        assertTrue("| Open (unchanged) |" !in backlog)
         val gate = File("src/main/kotlin/com/launchpoint/wavdrop/playback/CrossfadeRolloutPolicy.kt").readText()
         assertTrue("const val RUNTIME_ENABLED = true" in gate)
     }

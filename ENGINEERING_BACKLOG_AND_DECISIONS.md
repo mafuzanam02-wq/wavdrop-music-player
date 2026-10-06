@@ -38,7 +38,7 @@ updated with the new status and reasoning — history should be amended, never e
 |---|---|
 | Product | Wavdrop Music Player |
 | Package | `com.launchpoint.wavdrop` |
-| Version | 0.1.0-beta10 (versionCode 10), Beta 10.0 release checkpoint; post-Beta 10 engineering on `master` (WC-09 resolved; WC-10 remains open) |
+| Version | 0.1.0-beta10 (versionCode 10), Beta 10.0 release checkpoint; post-Beta 10 engineering on `master` (Wave C closed: WC-01 through WC-11 resolved) |
 | Phase | Soft-launch stabilization; crossfade rolled out (CF-2N2) |
 | Platform | Android (min SDK 26 / compile + target SDK 36) |
 | Database | Room (`wavdrop.db`), schema v13 |
@@ -51,7 +51,7 @@ updated with the new status and reasoning — history should be amended, never e
    foundations (see §5 and §11). User-facing in Settings → Playback; unavailable while the Equalizer is on.
 3. **Preservation integrity** — listening history, statistics, playlists, and favourites must
    survive reinstall, migration, and recovery without silent loss or false attribution.
-4. **Performance readiness for large libraries** — remaining Wave C items (§7).
+4. **Performance readiness for large libraries** - Wave C is closed (WC-01 through WC-11 resolved, §7); remaining work is the roadmap items below.
 
 ### Explicitly NOT being worked on right now
 
@@ -487,7 +487,7 @@ tracks. Status was re-checked against code after CF-2C3.
 | WC-07 / Now Playing artwork | **Resolved - physical validation PASSED (owner, real device)** - the large Now Playing artwork now uses a request-keyed loader: retained cover ownership is request-scoped (`ArtworkSurface` reducer, late results from superseded requests are ignored), a definitive failure clears the previous cover, same URI+size (same-album tracks) is a no-op, the decode target is the measured surface (bucketed, capped at 1600px), software bitmaps, and one bounded retry so a single transient provider failure no longer sticks for the whole track. The owner has since validated the change on hardware; the Now Playing artwork reliability item is closed. The media notification does not use this path (see decision log) |
 | WC-08 | **Resolved** - `sync()` no longer rewrites the whole songs table. `SongSyncPlanner` (pure) diffs the persisted rows against the scan by full `SongEntity` equality and `applySongSyncPlan` writes only new + changed rows and deletes only stale ids, in one Room transaction (upsert -> playlist remap -> stale delete -> TrackIdentity reconcile). An unchanged scan performs zero song upserts/deletes/identity writes (verified with SQLite `total_changes()`), identity reconciliation still runs every scan, only genuinely new ids are playlist-remap candidates, empty/failed-scan preservation is unchanged. Limitation: MediaStore is still fully scanned on every launch; this removes Room write churn (and the resulting library re-emissions), not the scan itself |
 | WC-09 | **Resolved (post-Beta 10)** - Insights and Statistics no longer materialize the full PLAY timestamp history. A streamed cursor over the PLAY rows (`playTimestampCursor`, no ORDER BY) is reduced row-by-row by `InsightsPlayActivityAccumulator` into 7 weekday + 24 hour buckets and at most 366 current-year dates (`InsightsPlayActivity`), grouped through the supplied ZoneId in Kotlin (no SQLite strftime/localtime), so DST/half-hour offsets match the old implementation. The most-active day/hour tie rule is now explicit: highest count, then latest PLAY. Recomputes on any event-table change (COUNT invalidation, so restored historical events are seen) and Insights no longer subscribes to all analytics timestamps for its month-rollover trigger. No schema change or index (query plan is a table scan). Cost remains O(N) CPU over PLAY rows; memory is now bounded |
-| WC-10 | Open (unchanged) |
+| WC-10 | **Resolved (post-Beta 10)** - `MusicTextNormalizer.normalizeTolerant` uses a reduced-pass implementation: suffix strip (regex, only when a closing bracket exists), one NFD, one builder pass (drops `Mn` (non-spacing) marks and the five apostrophe variants, maps `_` to a space), one in-place pass for the spaced-dash separator rule plus whitespace collapse, Unicode-aware `trim()`, one `lowercase(Locale.ROOT)`. The old per-stage `replace` chain (combining-mark regex, four apostrophe replaces, underscore replace, dash regex, final whitespace regex) is gone. Output is unchanged, proven against the legacy implementation kept in test code (exhaustive BMP, curated corpus, 60,000 fixed-seed random strings). NFD (not NFKD), Locale.ROOT lowercasing and suffix/dash semantics are unchanged; `normalizeStrict` keeps its output and shares a non-regex whitespace collapse. Per-call cost only: how often keys are computed stays with WC-03 (`LibrarySearchIndex`). No global normalization cache, no schema change. |
 | WC-11 | **Resolved** - Home builds the `songsById` lookup once per song-library emission (`HomeLibraryProjection`, shared StateFlow) instead of on every dashboard input; playlist, stats-preview, Smart Collection and Wrapped emissions reuse it |
 
 Descriptions below are the original audit observations; rows marked Resolved above are retained for
@@ -683,7 +683,8 @@ items were validated; the gate is now true, see CF-2N2 below.)
       WC-07 artwork: list artwork moved off SubcomposeAsyncImage/BoxWithConstraints with bounded request sizes; Now Playing artwork is request-keyed with stale-result protection, truthful failure (no stale cover), debug-only diagnostics (tag WavdropArtwork). Notification artwork is NOT the albumart URI: Wavdrop sets no artworkUri/artworkData on the Media3 item (only title/artist/album/extras), so the notification shows ExoPlayer's embedded-file artwork, a different mechanism than the MediaStore albumart URI Coil loads on every in-app surface; notification success therefore does not prove the URI decodes. Owner later validated the Now Playing artwork change on a real device (passed).
       WC-08 resolved: library sync writes only new/changed song rows and deletes only stale ids (pure SongSyncPlanner + applySongSyncPlan in the existing transaction); unchanged scans write nothing; playlist-remap boundary (new ids only), TrackIdentity reconciliation and preserve-on-empty/failed-scan behaviour unchanged; MediaStore is still fully scanned each launch; no schema change, no song-referencing foreign keys exist.
       Beta 10.0 release checkpoint: versionName 0.1.0-beta10 / versionCode 10; release notes and What's New rewritten around production crossfade, synchronized lyrics, playback reliability, faster libraries, backup/import fixes; in-app changelog updated; WC-09 and WC-10 explicitly remain open; no tag, publish or deploy performed.
-      WC-09 resolved (post-Beta 10): Insights/Statistics read a bounded InsightsPlayActivity reduced from a streamed PLAY-timestamp cursor (Kotlin ZoneId grouping, explicit count-then-latest-play tie rule, <=366 retained dates) instead of the full PLAY timestamp list; month-rollover trigger uses the scalar event count; no schema/index change; WC-10 remains open.
+      WC-09 resolved (post-Beta 10): Insights/Statistics read a bounded InsightsPlayActivity reduced from a streamed PLAY-timestamp cursor (Kotlin ZoneId grouping, explicit count-then-latest-play tie rule, <=366 retained dates) instead of the full PLAY timestamp list; month-rollover trigger uses the scalar event count; no schema/index change.
+      WC-10 resolved (post-Beta 10): normalizeTolerant is a reduced-pass implementation (one NFD, one builder pass for marks/apostrophes/underscore, one in-place spaced-dash + whitespace pass, one Locale.ROOT lowercase) with output identical to the legacy chain (legacy kept as a test reference); no cache, no schema change, indexing frequency still owned by WC-03. Wave C is closed.
    h. Final gate flip after passed validation - complete (CF-2N2).
 9. Physical Bluetooth / background / wired / EQ-policy validation - complete (CF-2N1 sign-off).
 
@@ -693,14 +694,14 @@ items were validated; the gate is now true, see CF-2N2 below.)
 
 ### Post-Beta 9 carry-over (still open after the Beta 10 checkpoint)
 
-- Remaining Wave C items (§7): only WC-10 (`normalizeTolerant` allocation churn) remains open; WC-01 through WC-09 and WC-11 are resolved.
+- Wave C is fully closed (WC-01 through WC-11 resolved; see §7).
 - Wave B UX follow-ups: permission-revoked recovery state; optional Home scan-failure banner.
 - Outstanding real-device QA from `PLANNED.md`: delete-from-device flow, native share across share
   targets, Bluetooth/wired resume, launcher icon switching, end-to-end backup/restore regression.
 
 ### Post-Beta 10 stabilization (follow-ups after the Beta 10.0 release checkpoint; not release blockers)
 
-- Remaining Wave C MEDIUM performance item (WC-10).
+- (none: Wave C closed)
 - Additional Delete entry points (pending accidental-deletion risk review).
 - Broader folder exclusion list (Telegram/Signal/Messenger/Downloads/Recordings) and the general
   block/allow list evaluation.
