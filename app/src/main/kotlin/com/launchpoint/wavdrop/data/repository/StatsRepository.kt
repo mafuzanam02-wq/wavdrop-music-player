@@ -102,8 +102,21 @@ class StatsRepository @Inject constructor(
 
     // ── Read ops ──────────────────────────────────────────────────────────────
 
-    /** All listen events (PLAY + SKIP), most recent first. Used by Monthly Reports / analytics. */
+    /**
+     * Every listen event ENTITY, most recent first. Only for genuine full-history entity consumers: ordinary analytics screens
+     * must not subscribe to it (WC-02). Use [listenEventCount], [analyticsEventTimestamps], [playEventTimestamps] or
+     * [listenEventsInRange] for counts, timestamps or one selected period.
+     */
     fun allListenEvents(): Flow<List<TrackListenEventEntity>> = listenEventDao.observeAll()
+
+    /** Number of listen-event rows (all types) without loading them. */
+    fun listenEventCount(): Flow<Int> = listenEventDao.observeCount()
+
+    /** occurredAt of every PLAY and SKIP event (timestamps only): feeds available months/years. */
+    fun analyticsEventTimestamps(): Flow<List<Long>> = listenEventDao.observeAnalyticsEventTimestamps()
+
+    /** occurredAt of every PLAY event, most recent first (timestamps only): feeds streaks and most-active weekday/hour. */
+    fun playEventTimestamps(): Flow<List<Long>> = listenEventDao.observePlayEventTimestamps()
 
     /** Latest PLAY/SKIP event timestamp used to select the bounded Home Wrapped preview year. */
     fun latestAnalyticsEventAt(): Flow<Long?> = listenEventDao.observeLatestAnalyticsEventAt()

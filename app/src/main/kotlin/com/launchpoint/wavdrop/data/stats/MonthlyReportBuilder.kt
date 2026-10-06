@@ -26,11 +26,16 @@ object MonthlyReportBuilder {
         events: List<TrackListenEventEntity> = emptyList(),
         zone: ZoneId = ZoneId.systemDefault(),
     ): List<MonthYear> =
+        availableMonthsFromTimestamps(analyticsTimestamps(events), zone)
+
+    /** Available months from PLAY+SKIP timestamps (no event entities needed). */
+    fun availableMonthsFromTimestamps(timestamps: Collection<Long>, zone: ZoneId = ZoneId.systemDefault()): List<MonthYear> =
+        AnalyticsPeriodIndex.availableMonths(timestamps, zone)
+
+    private fun analyticsTimestamps(events: List<TrackListenEventEntity>): List<Long> =
         events
             .filter { it.eventType == TrackListenEventEntity.TYPE_PLAY || it.eventType == TrackListenEventEntity.TYPE_SKIP }
-            .map { MonthYear.fromEpochMs(it.occurredAt, zone) }
-            .distinct()
-            .sortedDescending()
+            .map { it.occurredAt }
 
     @Suppress("UNUSED_PARAMETER")
     fun build(

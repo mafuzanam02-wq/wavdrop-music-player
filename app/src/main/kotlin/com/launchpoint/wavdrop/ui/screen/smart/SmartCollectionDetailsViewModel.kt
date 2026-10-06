@@ -3,6 +3,9 @@ package com.launchpoint.wavdrop.ui.screen.smart
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
+import com.launchpoint.wavdrop.data.model.ListeningPeriodRange
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
@@ -11,6 +14,7 @@ import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
@@ -19,13 +23,17 @@ import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.smart.SmartCollectionBuilder
 import com.launchpoint.wavdrop.data.stats.MostPlayedBuilder
+import com.launchpoint.wavdrop.data.stats.currentMonthEventsFlow
 import com.launchpoint.wavdrop.playback.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -89,21 +97,14 @@ class SmartCollectionDetailsViewModel @Inject constructor(
         }
     }
 
-    private val mostPlayedSummaries = combine(
-        songRepository.songs,
-        statsRepository.allTrackStatsEntities(),
-        statsRepository.allListenEvents(),
-        mostPlayedPeriod,
-        mostPlayedDisplayLimit,
-    ) { songs, stats, events, period, limit ->
-        MostPlayedBuilder.build(
-            songs = songs,
-            stats = stats,
-            events = events,
-            period = period,
-            limit = limit,
-        )
-    }
+    private val mostPlayedSummaries = mostPlayedSummariesFlow(
+        songs = songRepository.songs,
+        stats = statsRepository.allTrackStatsEntities(),
+        period = mostPlayedPeriod,
+        limit = mostPlayedDisplayLimit,
+        eventsInRange = statsRepository::listenEventsInRange,
+        invalidation = statsRepository.analyticsEventTimestamps(),
+    )
 
     val uiState: StateFlow<SmartCollectionDetailsUiState> = when {
         type == null -> MutableStateFlow(
@@ -241,3 +242,40 @@ internal fun smartCollectionCapFooterText(
 
 internal fun smartCollectionPlaylistSongIds(songs: List<Song>): List<Long> =
     songs.map { it.id }
+
+/**
+ * Most Played data flow (WC-02). ALL_TIME is built from aggregate TrackStats and subscribes to NO event stream. THIS_MONTH subscribes
+ * only to the wall-clock current month's events through [eventsInRange]; the month key is re-evaluated on every [invalidation]
+ * emission (analytics event timestamps), so a screen left open across a month boundary switches range on the first event of the new
+ * month. Switching back to ALL_TIME cancels that subscription (flatMapLatest); returning to THIS_MONTH re-resolves the month.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun mostPlayedSummariesFlow(
+    songs: Flow<List<Song>>,
+    stats: Flow<List<TrackStatsEntity>>,
+    period: Flow<MostPlayedPeriod>,
+    limit: Flow<MostPlayedDisplayLimit>,
+    eventsInRange: (fromMs: Long, toMs: Long) -> Flow<List<TrackListenEventEntity>>,
+    invalidation: Flow<*>,
+    zone: ZoneId = ZoneId.systemDefault(),
+    nowMs: () -> Long = { System.currentTimeMillis() },
+): Flow<List<SongStatsSummary>> = period.flatMapLatest { selected ->
+    when (selected) {
+        MostPlayedPeriod.ALL_TIME -> combine(songs, stats, limit) { songList, statList, displayLimit ->
+            MostPlayedBuilder.build(
+                songs = songList, stats = statList, events = emptyList(), period = MostPlayedPeriod.ALL_TIME,
+                limit = displayLimit, zone = zone,
+            )
+        }
+        MostPlayedPeriod.THIS_MONTH -> combine(
+            songs, stats, currentMonthEventsFlow(invalidation, eventsInRange, zone, nowMs), limit,
+        ) { songList, statList, scoped, displayLimit ->
+            // Anchor the builder at the start of the month the rows were scoped to so rows and month can never disagree.
+            val anchorMs = ListeningPeriodRange.month(scoped.month.year, scoped.month.month, zone).fromMs
+            MostPlayedBuilder.build(
+                songs = songList, stats = statList, events = scoped.events, period = MostPlayedPeriod.THIS_MONTH,
+                limit = displayLimit, nowMs = anchorMs, zone = zone,
+            )
+        }
+    }
+}

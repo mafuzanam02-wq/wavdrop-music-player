@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.grouping.AlbumGrouper
 import com.launchpoint.wavdrop.data.grouping.ArtistGrouper
+import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
@@ -18,7 +19,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 data class SettingsDiagnosticsUiState(
@@ -43,19 +46,11 @@ class SettingsDiagnosticsViewModel @Inject constructor(
     scanSettingsRepository: LibraryScanSettingsRepository,
 ) : ViewModel() {
 
-    private val libraryCounts = combine(
-        songRepository.songs,
-        playlistRepository.observePlaylists(),
-        statsRepository.allListenEvents(),
-    ) { songs, playlists, listenEvents ->
-        LibraryCounts(
-            songCount = songs.size,
-            albumCount = AlbumGrouper.group(songs).size,
-            artistCount = ArtistGrouper.group(songs).size,
-            playlistCount = playlists.size,
-            listenEventCount = listenEvents.size,
-        )
-    }
+    private val libraryCounts = libraryCountsFlow(
+        songs = songRepository.songs,
+        playlistCount = playlistRepository.observePlaylists().map { it.size },
+        listenEventCount = statsRepository.listenEventCount(),
+    )
 
     private val appPreferences = combine(
         appSettingsRepository.themeMode,
@@ -93,7 +88,7 @@ class SettingsDiagnosticsViewModel @Inject constructor(
     )
 }
 
-private data class LibraryCounts(
+internal data class LibraryCounts(
     val songCount: Int,
     val albumCount: Int,
     val artistCount: Int,
@@ -110,4 +105,22 @@ private data class AppPreferences(
 internal fun LibraryScanMode.displayName(): String = when (this) {
     LibraryScanMode.WHOLE_DEVICE -> "Whole device"
     LibraryScanMode.SELECTED_FOLDERS -> "Selected folders"
+}
+
+/**
+ * Diagnostics library counts (WC-02): the listen-event total is a COUNT flow, so Diagnostics never loads event rows just to read
+ * `.size`. The displayed number is identical to counting every row.
+ */
+internal fun libraryCountsFlow(
+    songs: Flow<List<Song>>,
+    playlistCount: Flow<Int>,
+    listenEventCount: Flow<Int>,
+): Flow<LibraryCounts> = combine(songs, playlistCount, listenEventCount) { songList, playlists, events ->
+    LibraryCounts(
+        songCount = songList.size,
+        albumCount = AlbumGrouper.group(songList).size,
+        artistCount = ArtistGrouper.group(songList).size,
+        playlistCount = playlists,
+        listenEventCount = events,
+    )
 }

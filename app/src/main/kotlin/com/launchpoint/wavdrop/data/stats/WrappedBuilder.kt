@@ -18,22 +18,25 @@ object WrappedBuilder {
     fun availableYears(
         events: List<TrackListenEventEntity>,
         zone: ZoneId = ZoneId.systemDefault(),
-    ): List<Int> =
-        events
-            .filter { it.eventType == TrackListenEventEntity.TYPE_PLAY || it.eventType == TrackListenEventEntity.TYPE_SKIP }
-            .map { MonthYear.fromEpochMs(it.occurredAt, zone).year }
-            .distinct()
-            .sortedDescending()
+    ): List<Int> = availableYearsFromTimestamps(analyticsTimestamps(events), zone)
 
     fun availableMonths(
         events: List<TrackListenEventEntity>,
         zone: ZoneId = ZoneId.systemDefault(),
-    ): List<MonthYear> =
+    ): List<MonthYear> = availableMonthsFromTimestamps(analyticsTimestamps(events), zone)
+
+    /** Available years from PLAY+SKIP timestamps (no event entities needed). */
+    fun availableYearsFromTimestamps(timestamps: Collection<Long>, zone: ZoneId = ZoneId.systemDefault()): List<Int> =
+        AnalyticsPeriodIndex.availableYears(timestamps, zone)
+
+    /** Available months from PLAY+SKIP timestamps (no event entities needed). */
+    fun availableMonthsFromTimestamps(timestamps: Collection<Long>, zone: ZoneId = ZoneId.systemDefault()): List<MonthYear> =
+        AnalyticsPeriodIndex.availableMonths(timestamps, zone)
+
+    private fun analyticsTimestamps(events: List<TrackListenEventEntity>): List<Long> =
         events
             .filter { it.eventType == TrackListenEventEntity.TYPE_PLAY || it.eventType == TrackListenEventEntity.TYPE_SKIP }
-            .map { MonthYear.fromEpochMs(it.occurredAt, zone) }
-            .distinct()
-            .sortedDescending()
+            .map { it.occurredAt }
 
     fun buildYear(
         year: Int,

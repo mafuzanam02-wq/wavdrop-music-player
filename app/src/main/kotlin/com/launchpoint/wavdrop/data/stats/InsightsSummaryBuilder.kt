@@ -1,31 +1,80 @@
 package com.launchpoint.wavdrop.data.stats
 
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
+/**
+ * Streak and most-active day/hour from listen history. The canonical implementations take PLAY TIMESTAMPS (so callers need not
+ * load event entities, WC-02); the entity overloads filter PLAY and delegate. Ties in most-active day/hour resolve to the first
+ * group in the order the timestamps are supplied (callers supply most-recent-first, as the entity query did).
+ *
+ * Insights still groups the full-history PLAY timestamps in memory; moving that grouping out of memory is WC-09, deliberately not
+ * done here.
+ */
 object InsightsSummaryBuilder {
 
     fun currentStreakDays(
         events: List<TrackListenEventEntity>,
         zone: ZoneId = ZoneId.systemDefault(),
+    ): Int = currentStreakDaysFromPlayTimestamps(playTimestamps(events), zone)
+
+    /** Current-calendar-year play streak ending today or yesterday. [today] is injectable for deterministic tests. */
+    fun currentStreakDaysFromPlayTimestamps(
+        playTimestamps: Collection<Long>,
+        zone: ZoneId = ZoneId.systemDefault(),
+        today: LocalDate = LocalDate.now(zone),
     ): Int {
-        val today     = LocalDate.now(zone)
         val yearStart = today.withDayOfYear(1).atStartOfDay(zone).toInstant().toEpochMilli()
         val yearEnd   = today.withDayOfYear(1).plusYears(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
-        val sortedPlayDays = events
-            .filter {
-                it.eventType == TrackListenEventEntity.TYPE_PLAY &&
-                    it.occurredAt >= yearStart && it.occurredAt < yearEnd
-            }
-            .map { Instant.ofEpochMilli(it.occurredAt).atZone(zone).toLocalDate() }
+        val sortedPlayDays = playTimestamps
+            .filter { it >= yearStart && it < yearEnd }
+            .map { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
             .toSortedSet()
             .toList()
 
         return currentStreak(sortedPlayDays, today)
     }
+
+    fun mostActiveDayOfWeek(
+        events: List<TrackListenEventEntity>,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): DayOfWeek? = mostActiveDayOfWeekFromPlayTimestamps(playTimestamps(events), zone)
+
+    fun mostActiveDayOfWeekFromPlayTimestamps(
+        playTimestamps: Collection<Long>,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): DayOfWeek? =
+        if (playTimestamps.isEmpty()) null else {
+            playTimestamps
+                .groupingBy { Instant.ofEpochMilli(it).atZone(zone).dayOfWeek }
+                .eachCount()
+                .maxByOrNull { it.value }
+                ?.key
+        }
+
+    fun mostActiveHour(
+        events: List<TrackListenEventEntity>,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Int? = mostActiveHourFromPlayTimestamps(playTimestamps(events), zone)
+
+    fun mostActiveHourFromPlayTimestamps(
+        playTimestamps: Collection<Long>,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Int? =
+        if (playTimestamps.isEmpty()) null else {
+            playTimestamps
+                .groupingBy { Instant.ofEpochMilli(it).atZone(zone).hour }
+                .eachCount()
+                .maxByOrNull { it.value }
+                ?.key
+        }
+
+    private fun playTimestamps(events: List<TrackListenEventEntity>): List<Long> =
+        events.filter { it.eventType == TrackListenEventEntity.TYPE_PLAY }.map { it.occurredAt }
 
     private fun currentStreak(sortedDays: List<LocalDate>, today: LocalDate): Int {
         if (sortedDays.isEmpty()) return 0

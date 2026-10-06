@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.ui.screen.wrapped
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.MonthYear
 import com.launchpoint.wavdrop.data.model.Song
@@ -19,6 +20,11 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -124,61 +130,15 @@ class WrappedViewModel @Inject constructor(
         statsRepository.allTrackStatsEntities(),
     ) { songs, stats -> songs to stats }
 
-    val uiState: StateFlow<WrappedUiState> = combine(
-        songData,
-        statsRepository.allListenEvents(),
-        selection,
-        appSettingsRepository.showMilestoneCelebrations,
-        visualPreferences,
-    ) { songAndStats, events, request, showMilestones, visualPrefs ->
-        val songs: List<Song> = songAndStats.first
-        val stats: List<TrackStatsEntity> = songAndStats.second
-        val years = WrappedBuilder.availableYears(events, zone)
-        val months = WrappedBuilder.availableMonths(events, zone)
-
-        if (request.scope == WrappedScope.ALL_TIME) {
-            return@combine WrappedUiState.Content(
-                selectedScope = WrappedScope.ALL_TIME,
-                availableYears = years,
-                selectedYear = years.firstOrNull() ?: 0,
-                availableMonths = months,
-                selectedMonth = months.firstOrNull() ?: MonthYear(2020, 1),
-                currentPeriod = WrappedPeriod.AllTime,
-                summary = WrappedBuilder.buildAllTime(songs, stats),
-                showMilestoneCelebrations = showMilestones,
-                useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
-                backgroundIntensity = visualPrefs.backgroundIntensity,
-                fallbackTheme = visualPrefs.fallbackTheme,
-                visualStyle = visualPrefs.visualStyle,
-            )
-        }
-
-        val resolved = resolveWrappedSelection(
-            request = request,
-            availableYears = years,
-            availableMonths = months,
-            zone = zone,
-        ) ?: return@combine WrappedUiState.Empty
-
-        WrappedUiState.Content(
-            selectedScope = resolved.scope,
-            availableYears = years,
-            selectedYear = resolved.year,
-            availableMonths = months,
-            selectedMonth = resolved.month,
-            currentPeriod = resolved.period,
-            summary = WrappedBuilder.buildPeriod(
-                period = resolved.period,
-                songs = songs,
-                events = events,
-            ),
-            showMilestoneCelebrations = showMilestones,
-            useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
-            backgroundIntensity = visualPrefs.backgroundIntensity,
-            fallbackTheme = visualPrefs.fallbackTheme,
-            visualStyle = visualPrefs.visualStyle,
-        )
-    }
+    val uiState: StateFlow<WrappedUiState> = wrappedStateFlow(
+        songData = songData,
+        analyticsTimestamps = statsRepository.analyticsEventTimestamps(),
+        selection = selection,
+        showMilestoneCelebrations = appSettingsRepository.showMilestoneCelebrations,
+        visualPreferences = visualPreferences,
+        eventsInRange = statsRepository::listenEventsInRange,
+        zone = zone,
+    )
         .flowOn(Dispatchers.Default)
         .stateIn(
             scope        = viewModelScope,
@@ -253,7 +213,7 @@ internal fun resolveWrappedSelection(
     )
 }
 
-private data class WrappedVisualPreferences(
+internal data class WrappedVisualPreferences(
     val useArtworkBackgrounds: Boolean,
     val backgroundIntensity: WrappedBackgroundIntensity,
     val fallbackTheme: WrappedFallbackTheme,
@@ -266,3 +226,94 @@ internal fun WrappedPeriod.toWrappedReportKey(): String = when (this) {
     is WrappedPeriod.Monthly ->
         "MONTHLY:${month.year}-${month.month.toString().padStart(2, '0')}"
 }
+
+/** The resolved Wrapped choice: availability comes from lightweight timestamps; the period (if any) decides what is subscribed. */
+internal sealed interface WrappedPlan {
+    val years: List<Int>
+    val months: List<MonthYear>
+
+    data class Empty(override val years: List<Int>, override val months: List<MonthYear>) : WrappedPlan
+    data class AllTime(override val years: List<Int>, override val months: List<MonthYear>) : WrappedPlan
+    data class Period(
+        override val years: List<Int>,
+        override val months: List<MonthYear>,
+        val resolved: ResolvedWrappedSelection,
+    ) : WrappedPlan
+}
+
+/**
+ * Wrapped data flow (WC-02). Availability (years/months with PLAY or SKIP activity) comes from timestamps only. ALL_TIME is built from
+ * aggregate stats and subscribes to NO event stream. Yearly/Monthly subscribe only to the selected period's events through
+ * [eventsInRange]; a selection change cancels the previous range subscription (flatMapLatest) and an unchanged plan does not
+ * resubscribe. Output equals building from the full history because the period builder only reads events inside its range.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun wrappedStateFlow(
+    songData: Flow<Pair<List<Song>, List<TrackStatsEntity>>>,
+    analyticsTimestamps: Flow<List<Long>>,
+    selection: Flow<WrappedSelectionRequest>,
+    showMilestoneCelebrations: Flow<Boolean>,
+    visualPreferences: Flow<WrappedVisualPreferences>,
+    eventsInRange: (fromMs: Long, toMs: Long) -> Flow<List<TrackListenEventEntity>>,
+    zone: ZoneId = ZoneId.systemDefault(),
+): Flow<WrappedUiState> =
+    combine(analyticsTimestamps, selection) { timestamps, request ->
+        val years = WrappedBuilder.availableYearsFromTimestamps(timestamps, zone)
+        val months = WrappedBuilder.availableMonthsFromTimestamps(timestamps, zone)
+        if (request.scope == WrappedScope.ALL_TIME) {
+            WrappedPlan.AllTime(years, months)
+        } else {
+            resolveWrappedSelection(request, years, months, zone)?.let { WrappedPlan.Period(years, months, it) }
+                ?: WrappedPlan.Empty(years, months)
+        }
+    }
+        .distinctUntilChanged()
+        .flatMapLatest { plan ->
+            when (plan) {
+                is WrappedPlan.Empty -> flowOf(WrappedUiState.Empty)
+                is WrappedPlan.AllTime -> combine(songData, showMilestoneCelebrations, visualPreferences) { songAndStats, showMilestones, visualPrefs ->
+                    WrappedUiState.Content(
+                        selectedScope = WrappedScope.ALL_TIME,
+                        availableYears = plan.years,
+                        selectedYear = plan.years.firstOrNull() ?: 0,
+                        availableMonths = plan.months,
+                        selectedMonth = plan.months.firstOrNull() ?: MonthYear(2020, 1),
+                        currentPeriod = WrappedPeriod.AllTime,
+                        summary = WrappedBuilder.buildAllTime(songAndStats.first, songAndStats.second),
+                        showMilestoneCelebrations = showMilestones,
+                        useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
+                        backgroundIntensity = visualPrefs.backgroundIntensity,
+                        fallbackTheme = visualPrefs.fallbackTheme,
+                        visualStyle = visualPrefs.visualStyle,
+                    )
+                }
+                is WrappedPlan.Period -> {
+                    val range = plan.resolved.period.range
+                    combine(
+                        songData,
+                        eventsInRange(range.fromMs, range.toMs),
+                        showMilestoneCelebrations,
+                        visualPreferences,
+                    ) { songAndStats, events, showMilestones, visualPrefs ->
+                        WrappedUiState.Content(
+                            selectedScope = plan.resolved.scope,
+                            availableYears = plan.years,
+                            selectedYear = plan.resolved.year,
+                            availableMonths = plan.months,
+                            selectedMonth = plan.resolved.month,
+                            currentPeriod = plan.resolved.period,
+                            summary = WrappedBuilder.buildPeriod(
+                                period = plan.resolved.period,
+                                songs = songAndStats.first,
+                                events = events,
+                            ),
+                            showMilestoneCelebrations = showMilestones,
+                            useArtworkBackgrounds = visualPrefs.useArtworkBackgrounds,
+                            backgroundIntensity = visualPrefs.backgroundIntensity,
+                            fallbackTheme = visualPrefs.fallbackTheme,
+                            visualStyle = visualPrefs.visualStyle,
+                        )
+                    }
+                }
+            }
+        }

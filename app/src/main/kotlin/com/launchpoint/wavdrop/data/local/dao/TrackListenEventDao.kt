@@ -36,9 +36,34 @@ interface TrackListenEventDao {
     """)
     suspend fun getEventIdsInRangeSnapshot(fromMs: Long, toMs: Long): List<String>
 
-    /** All events, most recent first. Use for full-history analytics (Monthly Reports, Wrapped). */
+    /**
+     * All events, most recent first. A genuine full-history ENTITY read: ordinary analytics screens must not use it (WC-02); they
+     * use [observeCount], [observeAnalyticsEventTimestamps], [observePlayEventTimestamps] or [observeInRange] instead.
+     */
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     fun observeAll(): Flow<List<TrackListenEventEntity>>
+
+    /**
+     * Total number of listen-event rows (every type, exactly what `observeAll().size` was). A single COUNT so a screen that only
+     * needs the number (Diagnostics) never materializes the rows. Re-emits when the table changes.
+     */
+    @Query("SELECT COUNT(*) FROM track_listen_events")
+    fun observeCount(): Flow<Int>
+
+    /**
+     * occurredAt of every PLAY and SKIP event (the same two types the analytics builders accept; unsupported future types are
+     * excluded). Timestamps only, so available months/years can be derived (in Kotlin, through the user's ZoneId) without
+     * loading TrackListenEventEntity rows. Order is irrelevant to the callers.
+     */
+    @Query("SELECT occurredAt FROM track_listen_events WHERE eventType IN ('PLAY', 'SKIP')")
+    fun observeAnalyticsEventTimestamps(): Flow<List<Long>>
+
+    /**
+     * occurredAt of every PLAY event, most recent first (the order the full-entity query used, which the most-active weekday/hour
+     * tie-break depends on). Timestamps only, for streaks and most-active day/hour. SKIP is excluded.
+     */
+    @Query("SELECT occurredAt FROM track_listen_events WHERE eventType = 'PLAY' ORDER BY occurredAt DESC")
+    fun observePlayEventTimestamps(): Flow<List<Long>>
 
     /** Latest PLAY/SKIP timestamp for analytics previews; ignores unsupported future event types. */
     @Query("""

@@ -14,6 +14,7 @@ import java.time.Instant
 import java.time.ZoneId
 import javax.inject.Inject
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,23 +57,10 @@ class StatisticsViewModel @Inject constructor(
         initialValue = StatisticsUiState.Loading,
     )
 
-    val insightsState: StateFlow<StatisticsInsights> = combine(
-        statsRepository.allListenEvents(),
-        statsRepository.favoriteSongIds(),
-    ) { events, favoriteIds ->
-        val zone = ZoneId.systemDefault()
-        val playEvents = events.filter { it.eventType == TrackListenEventEntity.TYPE_PLAY }
-        val mostActiveDayOfWeek = playEvents
-            .groupingBy { Instant.ofEpochMilli(it.occurredAt).atZone(zone).dayOfWeek }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-        StatisticsInsights(
-            favoritesCount       = favoriteIds.size,
-            currentStreakDays    = InsightsSummaryBuilder.currentStreakDays(events, zone),
-            mostActiveDayOfWeek  = mostActiveDayOfWeek,
-        )
-    }.stateIn(
+    val insightsState: StateFlow<StatisticsInsights> = statisticsInsightsFlow(
+        playTimestamps = statsRepository.playEventTimestamps(),
+        favoriteSongIds = statsRepository.favoriteSongIds(),
+    ).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = StatisticsInsights(
@@ -104,4 +92,20 @@ class StatisticsViewModel @Inject constructor(
 
     private fun StatsDashboardSummary.hasVisibleStats(): Boolean =
         totalPlayCount > 0 || totalSkipCount > 0 || totalListeningTimeMs > 0L
+}
+
+/**
+ * Statistics insights data flow (WC-02): streak and most-active weekday are derived from PLAY TIMESTAMPS (most recent first, the
+ * order the old entity query supplied, which keeps the weekday tie-break identical) instead of full event entities.
+ */
+internal fun statisticsInsightsFlow(
+    playTimestamps: Flow<List<Long>>,
+    favoriteSongIds: Flow<Set<Long>>,
+    zone: ZoneId = ZoneId.systemDefault(),
+): Flow<StatisticsInsights> = combine(playTimestamps, favoriteSongIds) { plays, favoriteIds ->
+    StatisticsInsights(
+        favoritesCount      = favoriteIds.size,
+        currentStreakDays   = InsightsSummaryBuilder.currentStreakDaysFromPlayTimestamps(plays, zone),
+        mostActiveDayOfWeek = InsightsSummaryBuilder.mostActiveDayOfWeekFromPlayTimestamps(plays, zone),
+    )
 }

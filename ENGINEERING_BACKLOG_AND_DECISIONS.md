@@ -478,7 +478,7 @@ tracks. Status was re-checked against code after CF-2C3.
 | ID | Status |
 |---|---|
 | WC-01 | **Resolved** - Home search filters off-main (`Dispatchers.Default`) with a 200 ms debounce over a cached index |
-| WC-02 | **Partially addressed** - Home and Songs no longer subscribe to the full events table; Monthly Reports, Insights, Statistics, Wrapped, Smart Collection details, and Diagnostics still use `allListenEvents()` |
+| WC-02 | **Resolved** - no production screen or ViewModel subscribes to the full `track_listen_events` entity history any more. Home and Songs were decoupled earlier; Monthly Reports, Wrapped, Insights, Statistics, Most Played details and Diagnostics now use a COUNT, PLAY+SKIP / PLAY timestamps, or one selected period range (`listenEventsInRange`). `allListenEvents()` / `observeAll()` remain only as documented full-history entity primitives with no production caller. Insights still groups full-history PLAY timestamps by day/hour in memory until WC-09 |
 | WC-03 | **Resolved** - `LibrarySearchIndex` precomputes normalized fields once per library change |
 | WC-05 | **Partially addressed** - Home Wrapped preview is bounded to the latest year via a ranged query; still recomputed on event changes |
 | WC-04, WC-06..WC-11 | Open (unchanged) |
@@ -669,6 +669,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
       CF-2N2 production enablement: `CrossfadeRolloutPolicy.RUNTIME_ENABLED` = `true` (the single gate; no second flag), KDoc/readiness wording and QA sign-off reconciled. Promotion architecture is the sole implementation; EQ ON -> crossfade unavailable, EQ OFF -> saved duration (default Off); mirrored EQ (CF-2M9) stays deferred. No release/version/publish performed.
       AK-1 app-kill / task-removal lifecycle hardening: pure `TaskRemovalPlaybackPolicy.decide(player)` over the session-facing player (NEXT/RETIRING never count), onTaskRemoved leaves crossfade untouched, teardown order and callback clearing pinned by tests, crossfade blocked until the persisted EQ state is known after recreation; see D-28.
       BP-1 `.bpstat` field-2 semantic correction: field 2 is a PERIOD play count (not skips); parser/model/UI/result corrected, `skipCount` is never touched by an import, no retroactive skip repair; see D-29 and WAVDROP_IMPORT_RULES.md.
+      WC-02 resolved: Monthly Reports, Wrapped, Insights, Statistics, Most Played and Diagnostics read counts, PLAY/SKIP timestamps or one selected period range instead of the full event entity history (month/year membership stays in Kotlin ZoneId logic, not SQL); analytics meaning unchanged; WC-09 (full-history day/hour grouping) remains open.
    h. Final gate flip after passed validation - complete (CF-2N2).
 9. Physical Bluetooth / background / wired / EQ-policy validation - complete (CF-2N1 sign-off).
 
@@ -678,8 +679,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
 
 ### Beta 9.x (stabilization)
 
-- Remaining Wave C items (§7): **WC-02** (finish decoupling analytics screens from the full-events flow)
-  and the open MEDIUM/LOW items.
+- Remaining Wave C items (§7): the open MEDIUM/LOW items (WC-02 is resolved; WC-09 still groups full-history PLAY timestamps in memory).
 - Wave B UX follow-ups: permission-revoked recovery state; optional Home scan-failure banner.
 - Outstanding real-device QA from `PLANNED.md`: delete-from-device flow, native share across share
   targets, Bluetooth/wired resume, launcher icon switching, end-to-end backup/restore regression.
