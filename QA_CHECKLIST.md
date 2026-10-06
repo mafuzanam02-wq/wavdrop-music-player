@@ -550,7 +550,7 @@ Production enablement required every row below to be Pass on the intended releas
 | No wrong / stale promotion state | **PASS** (CF-2N1) |
 | No crash | **PASS** (CF-2N1) |
 
-## Now Playing Artwork Reliability (WC-07) — physical validation PENDING
+## Now Playing Artwork Reliability (WC-07) — physical validation PASSED (owner, real device)
 
 Run on a real device; use the debug build and filter logcat by tag `WavdropArtwork` (request / failure lines for the large artwork).
 
