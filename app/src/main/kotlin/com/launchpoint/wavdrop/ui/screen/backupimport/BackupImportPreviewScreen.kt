@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -32,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -52,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportApplyResult
+import com.launchpoint.wavdrop.data.backup.BackupRestoreMode
 import com.launchpoint.wavdrop.data.backup.CleanInstallRecoveryUiText
 import com.launchpoint.wavdrop.ui.permission.audioPermission
 
@@ -137,6 +141,7 @@ fun BackupImportPreviewScreen(
                 PreviewContent(
                     state            = state,
                     onApplyConfirmed = viewModel::applyImport,
+                    onSelectMode     = viewModel::selectRestoreMode,
                     modifier         = Modifier.padding(innerPadding),
                 )
 
@@ -173,6 +178,7 @@ fun BackupImportPreviewScreen(
             is BackupImportUiState.Applied ->
                 AppliedContent(
                     result              = state.result,
+                    partialRecoveryDetail = state.partialRecoveryDetail,
                     onNavigateBack      = onNavigateBack,
                     onChooseFolder      = { backupFolderPickerLauncher.launch(null) },
                     modifier            = Modifier.padding(innerPadding),
@@ -184,12 +190,69 @@ fun BackupImportPreviewScreen(
                     modifier       = Modifier.padding(innerPadding),
                 )
 
+            is BackupImportUiState.RecoveryBlocked ->
+                RecoveryBlockedContent(
+                    state          = state,
+                    onRetry        = viewModel::backToPreview,
+                    onUseMerge     = viewModel::useMergeInstead,
+                    onNavigateBack = onNavigateBack,
+                    modifier       = Modifier.padding(innerPadding),
+                )
+
             is BackupImportUiState.Error ->
                 ErrorContent(
                     message        = state.message,
                     onNavigateBack = onNavigateBack,
                     modifier       = Modifier.padding(innerPadding),
                 )
+        }
+    }
+}
+
+// ── Recovery blocked / failed ─────────────────────────────────────────────────
+
+@Composable
+private fun RecoveryBlockedContent(
+    state: BackupImportUiState.RecoveryBlocked,
+    onRetry: () -> Unit,
+    onUseMerge: () -> Unit,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = when (state.kind) {
+        RecoveryBlockedKind.SAFETY_SNAPSHOT_FAILED -> RecoveryRestoreCopy.SNAPSHOT_FAILED_TITLE
+        RecoveryBlockedKind.INPUT_BACKUP_INVALID -> "This backup can't be used for Recovery"
+        RecoveryBlockedKind.RECOVERY_APPLY_FAILED -> "Recovery didn't complete"
+        RecoveryBlockedKind.RESTORE_IN_PROGRESS -> "Another restore is running"
+    }
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier            = Modifier.padding(horizontal = 32.dp),
+        ) {
+            Icon(
+                imageVector        = Icons.Default.Warning,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.error,
+                modifier           = Modifier.size(56.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text  = state.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(24.dp))
+            // Never "continue anyway": the only forward options are retrying deliberately or the non-destructive Merge.
+            if (state.kind != RecoveryBlockedKind.INPUT_BACKUP_INVALID) {
+                Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Back to preview to retry") }
+                Spacer(Modifier.height(8.dp))
+            }
+            OutlinedButton(onClick = onUseMerge, modifier = Modifier.fillMaxWidth()) { Text("Use Merge Restore instead") }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onNavigateBack) { Text("Cancel") }
         }
     }
 }
@@ -260,17 +323,26 @@ private fun LoadingContent(stage: BackupLoadingStage, modifier: Modifier = Modif
 private fun PreviewContent(
     state: BackupImportUiState.Preview,
     onApplyConfirmed: () -> Unit,
+    onSelectMode: (BackupRestoreMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showDialog by remember { mutableStateOf(false) }
+    val recoverySelected = state.selectedRestoreMode == BackupRestoreMode.RECOVERY
 
     if (showDialog) {
-        ConfirmApplyDialog(
-            isDesktopBackup = state.isDesktopBackup,
-            cleanInstallRecovery = state.cleanInstallRecovery,
-            onConfirm = { showDialog = false; onApplyConfirmed() },
-            onDismiss = { showDialog = false },
-        )
+        if (recoverySelected) {
+            ConfirmRecoveryDialog(
+                onConfirm = { showDialog = false; onApplyConfirmed() },
+                onDismiss = { showDialog = false },
+            )
+        } else {
+            ConfirmApplyDialog(
+                isDesktopBackup = state.isDesktopBackup,
+                cleanInstallRecovery = state.cleanInstallRecovery,
+                onConfirm = { showDialog = false; onApplyConfirmed() },
+                onDismiss = { showDialog = false },
+            )
+        }
     }
 
     LazyColumn(
@@ -307,6 +379,51 @@ private fun PreviewContent(
             }
         }
 
+        if (state.recoveryOffered) {
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { SectionLabel("Restore mode", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+            item {
+                RestoreModeOption(
+                    title    = RecoveryRestoreCopy.MODE_MERGE_TITLE,
+                    body     = RecoveryRestoreCopy.MODE_MERGE_BODY,
+                    selected = !recoverySelected,
+                    enabled  = true,
+                    onSelect = { onSelectMode(BackupRestoreMode.MERGE) },
+                )
+                RestoreModeOption(
+                    title    = RecoveryRestoreCopy.MODE_RECOVERY_TITLE,
+                    body     = if (state.recoveryEligible) RecoveryRestoreCopy.MODE_RECOVERY_BODY
+                    else state.recoveryUnavailableReason ?: RecoveryRestoreCopy.MODE_RECOVERY_BODY,
+                    selected = recoverySelected,
+                    enabled  = state.recoveryEligible,
+                    onSelect = { onSelectMode(BackupRestoreMode.RECOVERY) },
+                )
+            }
+        }
+        if (recoverySelected) {
+            item { Spacer(Modifier.height(8.dp)) }
+            item {
+                CapabilityWarningNotice(
+                    text     = RecoveryRestoreCopy.RECOVERY_WARNING,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            state.recoveryImpact?.let { impact ->
+                item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+                item { SectionLabel("What will be replaced", Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+                item {
+                    StatRow("Songs matched on this device", impact.matchedTracks.toString())
+                    StatRow("Backup tracks preserved, not matched", impact.unmatchedTracks.toString())
+                    StatRow("Statistics rows replaced", impact.localStatsRowsReplaced.toString())
+                    StatRow("Favourites that will be cleared", impact.localFavoritesToClear.toString())
+                    StatRow("Playlists restored from backup", impact.playlistsToRestore.toString())
+                    StatRow("Current playlists that will be removed", impact.localPlaylistsToRemove.toString())
+                    StatRow("Listening events restored", impact.eventsToRestore.toString())
+                    StatRow("Current listening events not in backup", impact.localEventsNotInBackup.toString())
+                }
+            }
+        }
+
         item { Spacer(Modifier.height(16.dp)) }
         if (state.legacyWarning != null) {
             item {
@@ -317,7 +434,7 @@ private fun PreviewContent(
                 Spacer(Modifier.height(8.dp))
             }
         }
-        if (state.mergeNotice != null) {
+        if (state.mergeNotice != null && !recoverySelected) {
             item {
                 MergeRestoreNotice(
                     text     = state.mergeNotice,
@@ -351,7 +468,8 @@ private fun PreviewContent(
                 }
             }
         }
-        if (state.noOpReason != null) {
+        // Merge's "nothing to merge" explanation says nothing about Recovery, which can still replace newer local state.
+        if (state.noOpReason != null && !recoverySelected) {
             item {
                 NoOpNotice(
                     text     = state.noOpReason,
@@ -376,6 +494,8 @@ private fun PreviewContent(
                 state.matchedSongs > 0 || state.statsCount > 0 || state.lyricsOverridesCount > 0
                     || state.playlistCount > 0 || state.listenEventsCount > 0
                     || state.baselineCount > 0
+            } else if (recoverySelected) {
+                state.recoveryEligible // never hasMergeableData: Recovery may replace newer local state with an older backup
             } else {
                 state.hasMergeableData
             }
@@ -386,14 +506,85 @@ private fun PreviewContent(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
             ) {
-                Text(if (state.cleanInstallRecovery) "Start Recovery" else "Apply Import")
+                Text(
+                    when {
+                        recoverySelected -> "Replace with this backup"
+                        state.cleanInstallRecovery -> "Start Recovery"
+                        else -> "Apply Import"
+                    },
+                )
             }
             Spacer(Modifier.height(24.dp))
         }
     }
 }
 
-// ── Confirmation dialog ───────────────────────────────────────────────────────
+// ── Restore-mode selector ─────────────────────────────────────────────────────
+
+@Composable
+private fun RestoreModeOption(
+    title: String,
+    body: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onSelect: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onSelect)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RadioButton(selected = selected, onClick = if (enabled) onSelect else null, enabled = enabled)
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(
+                text  = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.5f),
+            )
+            Text(
+                text  = body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.7f else 0.5f),
+            )
+        }
+    }
+}
+
+// ── Confirmation dialogs ──────────────────────────────────────────────────────
+
+/** Stronger than the Merge confirmation: destructive styling, explicit consequences, explicit safety-backup step. */
+@Composable
+private fun ConfirmRecoveryDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(RecoveryRestoreCopy.CONFIRM_TITLE) },
+        text = {
+            Text(
+                text  = RecoveryRestoreCopy.CONFIRM_BODY,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors  = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor   = MaterialTheme.colorScheme.onError,
+                ),
+            ) { Text(RecoveryRestoreCopy.CONFIRM_BUTTON) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
 
 @Composable
 private fun ConfirmApplyDialog(
@@ -443,6 +634,7 @@ private fun ConfirmApplyDialog(
 @Composable
 private fun AppliedContent(
     result: WavdropBackupImportApplyResult,
+    partialRecoveryDetail: String?,
     onNavigateBack: () -> Unit,
     onChooseFolder: () -> Unit,
     modifier: Modifier = Modifier,
@@ -483,16 +675,24 @@ private fun AppliedContent(
                 modifier           = Modifier.size(64.dp),
             )
             Spacer(Modifier.height(16.dp))
+            val isRecovery = result.restoreMode == BackupRestoreMode.RECOVERY
             Text(
-                if (result.cleanInstallRecovery) "Recovery complete" else "Merge complete",
+                when {
+                    isRecovery && partialRecoveryDetail != null -> RecoveryRestoreCopy.PARTIAL_TITLE
+                    isRecovery -> "Recovery complete"
+                    result.cleanInstallRecovery -> "Recovery complete"
+                    else -> "Merge complete"
+                },
                 style = MaterialTheme.typography.titleMedium,
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text  = if (result.cleanInstallRecovery) {
-                    "The library scan finished and compatible history was merged with this device."
-                } else {
-                    "Compatible backup data has been merged into your library."
+                text  = when {
+                    isRecovery && partialRecoveryDetail != null -> RecoveryRestoreCopy.PARTIAL_BODY
+                    isRecovery -> "WavDrop's recoverable state now matches this backup. Audio files were not changed."
+                    result.cleanInstallRecovery ->
+                        "The library scan finished and compatible history was merged with this device."
+                    else -> "Compatible backup data has been merged into your library."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
@@ -504,6 +704,32 @@ private fun AppliedContent(
                 shape    = RoundedCornerShape(12.dp),
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                    val recovery = result.recovery
+                    if (isRecovery && recovery != null) {
+                        StatRow("Songs matched", recovery.matchedTracks.toString())
+                        StatRow("Unmatched tracks preserved", recovery.unmatchedTracksPreserved.toString())
+                        StatRow("Statistics restored", recovery.statsRestored.toString())
+                        StatRow("Favourites restored", recovery.favoritesRestored.toString())
+                        if (recovery.favoritesCleared > 0) StatRow("Favourites cleared", recovery.favoritesCleared.toString())
+                        StatRow("Listening history restored", recovery.eventsRestored.toString())
+                        StatRow("Playlists restored", recovery.playlistsRestored.toString())
+                        StatRow("Playlist songs restored", recovery.playlistEntriesRestored.toString())
+                        if (recovery.playlistEntriesPreserved > 0) {
+                            StatRow("Playlist entries preserved", recovery.playlistEntriesPreserved.toString())
+                        }
+                        StatRow("Lyrics restored", recovery.lyricsRestored.toString())
+                        StatRow("Import history restored", recovery.baselinesRestored.toString())
+                        StatRow("Settings", if (recovery.preferencesRestored) "Restored" else "Not applied")
+                        StatRow(
+                            "Safety backup",
+                            if (recovery.safetySnapshot != null) "Created and verified" else "Not created",
+                        )
+                        if (partialRecoveryDetail != null) StatRow("Note", partialRecoveryDetail)
+                        result.warnings.forEach { warning -> StatRow("Note", warning) }
+                        result.notRestoredOnThisDevice.forEach { item ->
+                            StatRow(item, CleanInstallRecoveryUiText.NOT_RESTORED)
+                        }
+                    } else {
                     StatRow("Songs restored",    result.matchedTracks.toString())
                     StatRow("Could not match",   result.unmatchedTracks.toString())
                     if (result.ambiguousTracks > 0) {
@@ -568,6 +794,7 @@ private fun AppliedContent(
                     }
                     result.notRestoredOnThisDevice.forEach { item ->
                         StatRow(item, CleanInstallRecoveryUiText.NOT_RESTORED)
+                    }
                     }
                 }
             }

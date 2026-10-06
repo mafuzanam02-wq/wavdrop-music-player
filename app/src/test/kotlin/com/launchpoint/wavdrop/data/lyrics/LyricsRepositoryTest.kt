@@ -65,6 +65,10 @@ class LyricsRepositoryTest {
                 overrideFlow.value = null
             }
         }
+
+        override suspend fun deleteAllLyricsForRecovery() {
+            overrideFlow.value = null
+        }
     }
 
     companion object {

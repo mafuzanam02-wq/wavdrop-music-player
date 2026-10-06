@@ -30,7 +30,8 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   the only playback authority**. `PlayerController` (app side) owns the logical queue.
 - Analytics: time-scoped views are event-backed only; aggregate counters feed all-time views.
 - Backup: export is format v2 with mandatory integrity; v1 and Desktop backups import; unmatched history
-  is preserved in pending (quarantine) tables; restore is merge-only.
+  is preserved in pending (quarantine) tables. Restore mode is explicit: Merge (default) or Recovery (authoritative,
+  VERIFIED v2 only, behind a mandatory verified app-private safety snapshot; see docs/BACKUP_PRESERVATION_CONTRACT.md 8.1).
 
 ## Major systems complete
 
@@ -221,3 +222,5 @@ implementation slice is left partially applied on `master`.
 
 See the documentation map in [README.md](README.md) and the maintenance rules in
 [docs/DOCUMENTATION_POLICY.md](docs/DOCUMENTATION_POLICY.md).
+
+Recovery Restore (post-Beta 10; implemented, NOT yet validated on a device): `RecoveryRestoreOrchestrator` is the single authority (re-validate the selected backup text as VERIFIED v2 -> create a verified safety snapshot -> stop unless verified -> plan -> one Room `withTransaction` -> apply supported preferences -> detailed outcome). The snapshot is an ordinary v2 backup from the existing exporter written to app-private `files/recovery-safety/pre-recovery-latest.json` (temp file, read-back equality, `BackupSaveValidator` + v2 parser, atomic replace) through `BackupExecutionSerializer`; only the latest is kept, after success and failure. Lock order: `RestoreOperationLock` (non-queuing, across Merge/Desktop/Recovery) -> `BackupExecutionSerializer` (snapshot, released, then again for apply+preferences so no backup exports a half-applied Recovery). Merge is unchanged (MAX stats, favourites set-true-only, event union, add-missing playlists). Recovery takes backup values for matched songs (exact v2 lastListenedAt, favourite may be cleared), replaces exported-source events/WavDrop playlists/lyrics/baselines/desktopOverlay, preserves unmatched data in pending tables, and never touches songs, audio files, TrackIdentity, non-exported events or existing pending rows. Preferences are applied after the DB commit (DataStore cannot join the Room transaction); a failure is `PartialRecovery`, never success, with no compensating rollback. SAF folder grants/scan mode are device state and are not restored. v1 and Desktop backups stay Merge-only. No schema, v2-format or version change.

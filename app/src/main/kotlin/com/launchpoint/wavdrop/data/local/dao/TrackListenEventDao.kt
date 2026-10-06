@@ -17,6 +17,14 @@ interface TrackListenEventDao {
     @Insert
     suspend fun insertAll(events: List<TrackListenEventEntity>)
 
+    /**
+     * Recovery Restore only. Deletes exactly the event rows a Wavdrop backup exports (the [sources] accepted by
+     * BackupEventExportRules), so the verified safety snapshot covers everything removed. Rows from any other source are never
+     * exported and are therefore never deleted.
+     */
+    @Query("DELETE FROM track_listen_events WHERE source IN (:sources)")
+    suspend fun deleteExportedEventsForRecovery(sources: List<String>): Int
+
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     suspend fun getAllSnapshot(): List<TrackListenEventEntity>
 

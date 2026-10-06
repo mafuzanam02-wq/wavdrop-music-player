@@ -5,6 +5,13 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.BackupInputReader
+import com.launchpoint.wavdrop.data.backup.BackupRestoreMode
+import com.launchpoint.wavdrop.data.backup.RecoveryEligibility
+import com.launchpoint.wavdrop.data.backup.RecoveryImpact
+import com.launchpoint.wavdrop.data.backup.RecoveryRestoreOrchestrator
+import com.launchpoint.wavdrop.data.backup.RecoveryRestoreOutcome
+import com.launchpoint.wavdrop.data.backup.RecoveryRestoreRepository
+import com.launchpoint.wavdrop.data.backup.RestoreOperationLock
 import com.launchpoint.wavdrop.data.backup.BackupIntegrityStatus
 import com.launchpoint.wavdrop.data.backup.CleanInstallPreferenceRestoreResult
 import com.launchpoint.wavdrop.data.backup.CleanInstallPreferenceRestorer
@@ -32,6 +39,49 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+enum class RecoveryBlockedKind {
+    /** No verified safety snapshot could be created: Recovery never started. Offer Retry / Use Merge / Cancel. */
+    SAFETY_SNAPSHOT_FAILED,
+
+    /** The selected backup is not eligible for Recovery (invalid, unverified or legacy). */
+    INPUT_BACKUP_INVALID,
+
+    /** The database transaction failed and rolled back; nothing changed and the safety snapshot is kept. */
+    RECOVERY_APPLY_FAILED,
+
+    /** Another restore is running. */
+    RESTORE_IN_PROGRESS,
+}
+
+/** Wording kept in one place so the screen and the structural tests agree. */
+object RecoveryRestoreCopy {
+    const val MODE_MERGE_TITLE = "Merge"
+    const val MODE_MERGE_BODY = "Keep what's on this device and add compatible data from the backup."
+    const val MODE_RECOVERY_TITLE = "Recovery"
+    const val MODE_RECOVERY_BODY =
+        "Replace WavDrop's recoverable state with this backup where it can be matched to music on this device."
+    const val RECOVERY_WARNING =
+        "Your current WavDrop history, favourites, playlists, lyrics and settings may be replaced by this backup. " +
+            "A verified safety backup of your current data is created first. Audio files are not changed or restored. " +
+            "Backup history that can't be matched to music on this device is preserved, not guessed."
+    const val CONFIRM_TITLE = "Replace WavDrop data with this backup?"
+    const val CONFIRM_BODY =
+        "WavDrop will first create and verify a safety backup of your current data. If that fails, nothing is changed. " +
+            "Then your recoverable WavDrop state (statistics, favourites, listening history, playlists, lyrics and supported " +
+            "settings) is replaced by this backup. Audio files are not changed. Unmatched backup history is preserved."
+    const val CONFIRM_BUTTON = "Create safety backup and replace"
+    const val SNAPSHOT_FAILED_TITLE = "Recovery wasn't started"
+    const val SNAPSHOT_FAILED_BODY =
+        "Recovery wasn't started because WavDrop couldn't create a verified safety backup of your current data. " +
+            "Nothing was changed."
+    const val APPLY_FAILED_BODY =
+        "Recovery couldn't be completed and your WavDrop data was left exactly as it was. The safety backup was kept."
+    const val PARTIAL_TITLE = "Recovery partly complete"
+    const val PARTIAL_BODY =
+        "Your history, favourites, playlists and lyrics were recovered, but some settings could not be applied. " +
+            "The safety backup of your previous data was kept."
+}
 
 data class BackupLoadingStage(
     val label: String,
@@ -97,6 +147,19 @@ sealed interface BackupImportUiState {
         val cleanInstallRecovery: Boolean = false,
         /** Recovery must discard old SAF URIs and wait for a new folder selection. */
         val requiresFolderReselection: Boolean = false,
+        /**
+         * The explicit restore mode. Every import starts at [BackupRestoreMode.MERGE]; Recovery needs a deliberate selection and
+         * is never remembered, inferred from a clean install, or defaulted.
+         */
+        val selectedRestoreMode: BackupRestoreMode = BackupRestoreMode.MERGE,
+        /** True when the mode choice is shown: Wavdrop Android backups that are not the clean-install flow. */
+        val recoveryOffered: Boolean = false,
+        /** True only for a VERIFIED v2 backup. Independent of [hasMergeableData]: Recovery can be meaningful when Merge is a no-op. */
+        val recoveryEligible: Boolean = false,
+        /** Why Recovery is unavailable (v1 / unverified); null when eligible or not offered. */
+        val recoveryUnavailableReason: String? = null,
+        /** Concise destructive-impact summary for the selected backup; null unless eligible. */
+        val recoveryImpact: RecoveryImpact? = null,
     ) : BackupImportUiState
 
     data class Applying(val stage: BackupLoadingStage) : BackupImportUiState
@@ -104,7 +167,20 @@ sealed interface BackupImportUiState {
     data object AwaitingFolderSelection : BackupImportUiState
     data object ScanningLibrary : BackupImportUiState
 
-    data class Applied(val result: WavdropBackupImportApplyResult) : BackupImportUiState
+    /**
+     * [partialRecoveryDetail] is non-null only when a Recovery committed its database changes but applying settings failed:
+     * the screen must then say so instead of announcing a complete Recovery.
+     */
+    data class Applied(
+        val result: WavdropBackupImportApplyResult,
+        val partialRecoveryDetail: String? = null,
+    ) : BackupImportUiState
+
+    /** Recovery did not run or did not complete. Distinct from a generic import [Error]; nothing is hidden behind one message. */
+    data class RecoveryBlocked(
+        val kind: RecoveryBlockedKind,
+        val message: String,
+    ) : BackupImportUiState
 
     /**
      * Returned when the apply-time authoritative recheck determined that no persistent
@@ -127,6 +203,9 @@ class BackupImportPreviewViewModel @Inject constructor(
     private val autoBackupWorkScheduler: AutoBackupWorkScheduler,
     private val songRepository: SongRepository,
     private val scanSettingsRepository: LibraryScanSettingsRepository,
+    private val recoveryRepository: RecoveryRestoreRepository,
+    private val recoveryOrchestrator: RecoveryRestoreOrchestrator,
+    private val restoreLock: RestoreOperationLock,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<BackupImportUiState>(BackupImportUiState.Idle)
@@ -136,9 +215,13 @@ class BackupImportPreviewViewModel @Inject constructor(
     private var parsedDesktopBackup: DesktopWavdropBackup? = null
     private var recoveryPreferenceResult: CleanInstallPreferenceRestoreResult? = null
 
+    /** Original text of the selected Android backup. Recovery re-validates from THIS, never from the parsed preview model. */
+    private var parsedBackupText: String? = null
+
     // ── File loading ──────────────────────────────────────────────────────────
 
     fun processFile(uri: Uri) {
+        parsedBackupText = null // each import starts from scratch, and therefore from the safe default mode (Merge)
         _uiState.value = BackupImportUiState.Loading(BackupLoadingStage("Reading backup file…"))
         viewModelScope.launch {
             _uiState.value = runCatching { readAndParse(uri) }.getOrElse { e ->
@@ -213,6 +296,7 @@ class BackupImportPreviewViewModel @Inject constructor(
 
         parsedBackup = backup
         parsedDesktopBackup = null
+        parsedBackupText = content
 
         val legacyWarning = if (result.integrityStatus == BackupIntegrityStatus.UNVERIFIED_LEGACY) {
             "This is an older Wavdrop backup without integrity verification. " +
@@ -238,6 +322,17 @@ class BackupImportPreviewViewModel @Inject constructor(
         }
         val requiresFolderReselection =
             cleanInstallRecovery && CleanInstallRecoveryPolicy.requiresFolderReselection(backup.preferences)
+
+        // Recovery is offered for Wavdrop Android backups outside the clean-install flow (which is itself the recovery path for an
+        // empty install and has nothing to replace). Eligibility is VERIFIED v2 only and is independent of Merge's no-op result.
+        val recoveryOffered = !cleanInstallRecovery
+        val eligibility = RecoveryEligibility.evaluate(result)
+        val recoveryEligible = recoveryOffered && eligibility is RecoveryEligibility.Result.Eligible
+        val recoveryImpact = if (recoveryEligible) {
+            withContext(Dispatchers.IO) { runCatching { recoveryRepository.previewImpact(backup) }.getOrNull() }
+        } else {
+            null
+        }
 
         return BackupImportUiState.Preview(
             format               = WavdropBackupParser.SUPPORTED_FORMAT,
@@ -268,7 +363,36 @@ class BackupImportPreviewViewModel @Inject constructor(
             capabilityWarnings    = result.warnings,
             cleanInstallRecovery  = cleanInstallRecovery,
             requiresFolderReselection = requiresFolderReselection,
+            selectedRestoreMode   = BackupRestoreMode.MERGE,
+            recoveryOffered       = recoveryOffered,
+            recoveryEligible      = recoveryEligible,
+            recoveryUnavailableReason =
+                (eligibility as? RecoveryEligibility.Result.Blocked)?.message.takeIf { recoveryOffered },
+            recoveryImpact        = recoveryImpact,
         )
+    }
+
+    // ── Restore mode (explicit, never sticky) ─────────────────────────────────
+
+    /** Recovery can only be selected for an eligible backup; anything else keeps Merge. */
+    fun selectRestoreMode(mode: BackupRestoreMode) {
+        val preview = _uiState.value as? BackupImportUiState.Preview ?: return
+        if (!preview.recoveryOffered) return
+        if (mode == BackupRestoreMode.RECOVERY && !preview.recoveryEligible) return
+        _uiState.value = preview.copy(selectedRestoreMode = mode)
+    }
+
+    private var recoveryPreview: BackupImportUiState.Preview? = null
+
+    /** From the blocked screen: go back to the preview with Merge selected. Recovery is not retried implicitly. */
+    fun useMergeInstead() {
+        val preview = recoveryPreview ?: return
+        _uiState.value = preview.copy(selectedRestoreMode = BackupRestoreMode.MERGE)
+    }
+
+    /** From the blocked screen: back to the preview (Recovery still selected) so the user can retry deliberately. */
+    fun backToPreview() {
+        _uiState.value = recoveryPreview ?: return
     }
 
     /**
@@ -331,12 +455,53 @@ class BackupImportPreviewViewModel @Inject constructor(
     fun applyImport() {
         val preview = _uiState.value as? BackupImportUiState.Preview ?: return
 
+        if (preview.selectedRestoreMode == BackupRestoreMode.RECOVERY) {
+            // Defence in depth: the mode selector already refuses this, but the destructive path re-checks.
+            if (!preview.recoveryOffered || !preview.recoveryEligible || preview.isDesktopBackup) return
+            applyRecovery(preview)
+            return
+        }
+
         _uiState.value = BackupImportUiState.Applying(BackupLoadingStage("Checking what changed…"))
         viewModelScope.launch {
             if (preview.cleanInstallRecovery && parsedDesktopBackup == null) {
                 beginCleanInstallRecovery()
             } else {
                 applyCurrentImport()
+            }
+        }
+    }
+
+    private fun applyRecovery(preview: BackupImportUiState.Preview) {
+        val raw = parsedBackupText ?: return setError("No parsed backup to recover.")
+        recoveryPreview = preview
+        _uiState.value = BackupImportUiState.Applying(BackupLoadingStage("Creating a verified safety backup…"))
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withContext(Dispatchers.IO) { recoveryOrchestrator.restore(raw) }
+            }.getOrElse {
+                _uiState.value = BackupImportUiState.RecoveryBlocked(
+                    RecoveryBlockedKind.RECOVERY_APPLY_FAILED,
+                    it.message ?: RecoveryRestoreCopy.APPLY_FAILED_BODY,
+                )
+                return@launch
+            }
+            _uiState.value = when (outcome) {
+                is RecoveryRestoreOutcome.Success -> BackupImportUiState.Applied(outcome.result)
+                is RecoveryRestoreOutcome.PartialRecovery ->
+                    BackupImportUiState.Applied(outcome.result, partialRecoveryDetail = outcome.detail)
+                is RecoveryRestoreOutcome.SafetySnapshotFailed -> BackupImportUiState.RecoveryBlocked(
+                    RecoveryBlockedKind.SAFETY_SNAPSHOT_FAILED, RecoveryRestoreCopy.SNAPSHOT_FAILED_BODY,
+                )
+                is RecoveryRestoreOutcome.InputBackupInvalid -> BackupImportUiState.RecoveryBlocked(
+                    RecoveryBlockedKind.INPUT_BACKUP_INVALID, outcome.message,
+                )
+                is RecoveryRestoreOutcome.RecoveryApplyFailed -> BackupImportUiState.RecoveryBlocked(
+                    RecoveryBlockedKind.RECOVERY_APPLY_FAILED, RecoveryRestoreCopy.APPLY_FAILED_BODY,
+                )
+                RecoveryRestoreOutcome.RestoreInProgress -> BackupImportUiState.RecoveryBlocked(
+                    RecoveryBlockedKind.RESTORE_IN_PROGRESS, "Another restore is already running.",
+                )
             }
         }
     }
@@ -401,13 +566,16 @@ class BackupImportPreviewViewModel @Inject constructor(
     private suspend fun applyCurrentImport() {
         _uiState.value = runCatching {
             withContext(Dispatchers.IO) {
-                parsedDesktopBackup?.let { desktopImportRepository.applyImport(it) }
-                    ?: parsedBackup?.let { backup ->
-                        importRepository.applyImport(backup) { label ->
-                            _uiState.value = BackupImportUiState.Applying(BackupLoadingStage(label))
+                // One restore at a time: a Merge/Desktop import never overlaps a Recovery (and vice versa).
+                restoreLock.tryRun {
+                    parsedDesktopBackup?.let { desktopImportRepository.applyImport(it) }
+                        ?: parsedBackup?.let { backup ->
+                            importRepository.applyImport(backup) { label ->
+                                _uiState.value = BackupImportUiState.Applying(BackupLoadingStage(label))
+                            }
                         }
-                    }
-                    ?: error("No parsed backup to import.")
+                        ?: error("No parsed backup to import.")
+                } ?: error("Another restore is already running. Try again when it has finished.")
             }
         }.fold(
             onSuccess = { result ->

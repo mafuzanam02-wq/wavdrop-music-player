@@ -44,7 +44,19 @@ class CleanInstallPreferenceRestorer @Inject constructor(
     private val resumeSettings: ResumeBehaviorSettingsRepository,
     private val iconManager: AppIconAliasManager,
 ) {
-    suspend fun restore(preferences: BackupPreferences?): CleanInstallPreferenceRestoreResult {
+    /** What happens to the device-specific music-folder configuration (SAF grants / scan mode). */
+    enum class FolderPolicy {
+        /** Clean-install recovery: old grants cannot exist, so folders are cleared and re-selection is requested. */
+        CLEAN_INSTALL_RESET,
+
+        /** Recovery on a device that already has a working library: folder grants are device state and are left untouched. */
+        KEEP_DEVICE_FOLDERS,
+    }
+
+    suspend fun restore(
+        preferences: BackupPreferences?,
+        folderPolicy: FolderPolicy = FolderPolicy.CLEAN_INSTALL_RESET,
+    ): CleanInstallPreferenceRestoreResult {
         if (preferences == null) {
             return CleanInstallPreferenceRestoreResult(false, false, false, false)
         }
@@ -68,12 +80,15 @@ class CleanInstallPreferenceRestorer @Inject constructor(
         preferences.minimumTrackDurationSeconds?.let { scanSettings.setMinimumTrackDurationSeconds(it) }
         preferences.includeWhatsAppVoiceNotes?.let { scanSettings.setIncludeWhatsAppVoiceNotes(it) }
 
-        val needsFolders = CleanInstallRecoveryPolicy.requiresFolderReselection(preferences)
-        scanSettings.setSelectedFolderUris(emptyList())
-        scanSettings.setScanMode(
-            if (needsFolders) LibraryScanMode.SELECTED_FOLDERS else LibraryScanMode.WHOLE_DEVICE,
-        )
-        appSettings.setNeedsFolderReselectionAfterRestore(needsFolders)
+        val needsFolders = folderPolicy == FolderPolicy.CLEAN_INSTALL_RESET &&
+            CleanInstallRecoveryPolicy.requiresFolderReselection(preferences)
+        if (folderPolicy == FolderPolicy.CLEAN_INSTALL_RESET) {
+            scanSettings.setSelectedFolderUris(emptyList())
+            scanSettings.setScanMode(
+                if (needsFolders) LibraryScanMode.SELECTED_FOLDERS else LibraryScanMode.WHOLE_DEVICE,
+            )
+            appSettings.setNeedsFolderReselectionAfterRestore(needsFolders)
+        }
 
         preferences.themeMode.enumValue<ThemeMode>()?.let { appSettings.setThemeMode(it) }
         preferences.accentColor.enumValue<AccentColor>()?.let { appSettings.setAccentColor(it) }

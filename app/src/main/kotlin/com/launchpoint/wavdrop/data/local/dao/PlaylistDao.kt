@@ -101,4 +101,11 @@ interface PlaylistDao {
 
     @Query("UPDATE playlists SET updatedAt = :updatedAt WHERE playlistId = :playlistId")
     suspend fun touchPlaylist(playlistId: Long, updatedAt: Long)
+
+    /**
+     * Recovery Restore only: removes every WavDrop playlist and (by FK cascade) its entries. Device/MediaStore playlists are not
+     * stored here and are never touched. Playlists are fully exported, so the safety snapshot covers what is removed.
+     */
+    @Query("DELETE FROM playlists")
+    suspend fun clearWavdropPlaylistsForRecovery()
 }

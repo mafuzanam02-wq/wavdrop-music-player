@@ -34,4 +34,8 @@ interface ImportBaselineDao {
 
     @Query("DELETE FROM import_baselines WHERE songId = :songId")
     suspend fun deleteBySongId(songId: Long)
+
+    /** Recovery Restore only: baselines are fully exported, so the safety snapshot covers every row removed. */
+    @Query("DELETE FROM import_baselines")
+    suspend fun deleteAllBaselinesForRecovery()
 }

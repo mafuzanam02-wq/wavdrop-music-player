@@ -14,4 +14,8 @@ interface PendingBackupExtensionDao {
 
     @Query("SELECT * FROM pending_backup_extensions WHERE rootName = :rootName")
     suspend fun getByRootName(rootName: String): PendingBackupExtensionEntity?
+
+    /** Recovery Restore only: the desktopOverlay extension is exported verbatim, so the safety snapshot covers it. */
+    @Query("DELETE FROM pending_backup_extensions WHERE rootName = :rootName")
+    suspend fun deleteByRootNameForRecovery(rootName: String)
 }

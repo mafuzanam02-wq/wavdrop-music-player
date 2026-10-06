@@ -21,8 +21,9 @@ Each major area is labelled against the implementation reconciled after CF-2C3:
 
 Overall: the contract started as a proposed architecture baseline. The preservation foundation (pending
 quarantine, backup format v2, integrity, eventId, device-local TrackIdentity, extension-root
-preservation) is implemented. Portable identity, rematching, GHOST/ARCHIVED lifecycle, explicit Recovery
-Restore with a safety snapshot, and snapshot retention/receipts are **not** implemented.
+preservation) and explicit Recovery Restore with a mandatory verified safety snapshot are implemented (device QA
+pending). Portable identity, rematching, GHOST/ARCHIVED lifecycle, and
+snapshot retention/receipts are **not** implemented.
 
 ---
 
@@ -159,11 +160,57 @@ data" action.
 
 Contract: make the user's intent explicit (Recovery vs Merge).
 
-### 8.1 Recovery Restore - *Deferred*
-Authoritative replacement with a mandatory verified pre-restore safety snapshot (blocked if none can be
-created). Not implemented. A **clean-install recovery** flow exists (preferences restored, music folder
-re-selection prompted, library scan, then history merged into the empty install), but it is a merge into
-an empty database, not an authoritative replacement.
+### 8.1 Recovery Restore - *Implemented (device QA pending)*
+An explicit, user-selected mode for Wavdrop (Android) backups. The selected backup becomes authoritative for
+WavDrop-owned recoverable state, mapped conservatively onto the songs currently in the device library. It is
+never inferred (not from a clean install, an empty database, wording, backup age or source installation); every
+import starts at Merge and Recovery is never remembered. Desktop backups stay Merge-only.
+
+**Eligibility.** VERIFIED v2 only. A v1 backup (even with a v1 checksum) stays Merge-only; an invalid, tampered or
+unparseable file is blocked. Eligibility is independent of Merge's "nothing mergeable" result (Recovery may
+replace newer local state with an older backup). The clean-install flow is not redefined: the mode choice is
+not offered there because there is nothing to replace.
+
+**Mandatory safety snapshot.** Recovery never runs before a VERIFIED pre-restore snapshot exists. The snapshot is
+an ordinary current-format (v2) backup produced by the existing exporter, written to the app-private
+`files/recovery-safety/pre-recovery-latest.json` (no SAF folder, external storage, network or cloud), read back,
+required to equal what was written, and accepted by `BackupSaveValidator` and the v2 parser (integrity
+fingerprint, manifest, plausibility). The write goes through a temp file and an atomic replace, so a failed
+attempt never destroys the previous verified snapshot. Any failure at any stage (build, write, read-back,
+validate, replace) blocks Recovery with no "continue anyway"; Merge stays available. Only the latest snapshot is
+kept (no retention, receipts or snapshot UI - still deferred). It is kept after success and after failure.
+Because only one is kept, a second Recovery replaces the first snapshot with the post-first-Recovery state.
+
+**Sequencing (single authority: `RecoveryRestoreOrchestrator`).** Re-parse and re-validate the selected text ->
+verified snapshot -> (stop unless VERIFIED) -> plan (all matching decided before any clear) -> one Room
+transaction -> supported preferences -> detailed outcome (Success / InputBackupInvalid / SafetySnapshotFailed /
+RecoveryApplyFailed / PartialRecovery / RestoreInProgress).
+
+**Locks (outermost first, never nested the other way).** `RestoreOperationLock` (non-queuing `tryLock`; one
+restore at a time across Merge, Desktop import and Recovery) -> `BackupExecutionSerializer` for the snapshot,
+released, then again for the apply+preferences window so Back up now / WorkManager auto-backup can never export a
+half-applied Recovery. The two serializer holds are separate (the Mutex is not re-entrant). Known window: an
+event recorded between the snapshot and the transaction is not in the snapshot.
+
+**Data semantics (matched songs take the backup value; nothing is MAX-merged).**
+
+| Data | Recovery behavior |
+|---|---|
+| Stats | Replaced with the backup row (lower values included, exact v2 `lastListenedAt`); local rows for songs the backup does not represent are removed |
+| Favourites | Backup is authoritative; a local favourite the backup does not mark is cleared (Recovery only) |
+| Events | Exported-source events (`wavdrop_playback`, `manual_restore`, `wavdrop_desktop_playback`) are replaced by the backup's set (matched ones restored, deduped inside the backup; none fabricated from counters). Events from non-exported sources are never deleted |
+| Playlists | WavDrop playlists replaced by the backup's (names, backup order, created/updated times, duplicate entries of the same backup song kept); local-only playlists removed; device/MediaStore playlists untouched |
+| Lyrics / baselines | Replaced by the backup's matched rows |
+| Unmatched data | Preserved in the pending/quarantine tables with the same origin-key idempotence as Merge. Existing pending rows are NOT deleted (they are not exported, so the snapshot could not restore them) |
+| desktopOverlay | Stored verbatim from the backup; removed if the backup carries none. Overlay stats/events are not re-applied (the root is already authoritative) |
+| Preferences | The supported preference set, with unspecified (default) values resolved to defaults so Recovery is authoritative over a changed device. Scan mode and SAF folder grants are device state and are not restored. If auto-backup is restored without a local folder, the existing "Choose backup folder" prompt appears |
+
+Never touched: the songs table / MediaStore / audio files, device-local TrackIdentity, queue/session, EQ.
+
+**Atomicity boundary.** All Room changes are one `withTransaction`; a failure leaves the database exactly as it was.
+DataStore cannot join that transaction. Preferences are applied afterwards; if that fails the result is
+`PartialRecovery` (never reported as success), the snapshot is retained, and no compensating rollback is
+attempted (not implemented).
 
 ### 8.2 Merge Restore - *Implemented*
 
@@ -269,15 +316,15 @@ event lineage exist.
 | P1 | Truthful automatic-backup wording | Implemented |
 | P1 | Integrity-status distinction | Implemented |
 | P1 | Duplicate-key rejection | Implemented |
-| P1 | Recovery Restore vs Merge Restore | Merge implemented; Recovery deferred |
-| P1 | Mandatory pre-restore safety snapshot | Deferred |
+| P1 | Recovery Restore vs Merge Restore | Implemented (explicit mode; device QA pending) |
+| P1 | Mandatory pre-restore safety snapshot | Implemented (latest only; retention/receipts deferred) |
 | P1 | Clear future-version rejection messaging | Implemented |
 | P2 | Pending historical-data quarantine | Implemented |
 | P2 | Retain unmatched stats/events/lyrics/baselines/playlist entries | Implemented |
 | P2 | Post-scan rematching | Deferred |
 | P2 | `lastListenedAt` backup support | Implemented |
 | P2 | Snapshot retention and receipts | Deferred |
-| P2 | Playlist order preservation | Implemented for restore; recovery-mode exactness deferred |
+| P2 | Playlist order preservation | Implemented for Merge and Recovery (device QA pending) |
 | P3 | TrackIdentity migration | Device-local foundation implemented; portable identity deferred |
 | P3 | Stable event ids | Implemented (new events only) |
 | P3 | Event-led analytics reconciliation | Deferred |
@@ -291,13 +338,13 @@ Backup must not be described as a "preservation-grade" system until all of the f
 Current status in brackets:
 
 - Unmatched history is retained rather than discarded. [met]
-- Restore mode is explicit. [**not met** - merge-only, no mode selector]
+- Restore mode is explicit. [met in code - Merge default, Recovery deliberate; device QA pending]
 - Backup integrity status is visible. [met]
 - Backup success requires read-back verification. [met]
 - Previous verified snapshots survive new-write failure. [met]
 - Recently Played data survives restoration. [met]
-- Playlist order survives recovery restoration. [partially met - no Recovery mode]
+- Playlist order survives recovery restoration. [met in code; device QA pending]
 - Future-version backups fail safely. [met]
 - Auto-backup wording accurately describes actual behavior. [met]
 
-User-facing copy therefore must not claim "preservation-grade" or exact authoritative recovery.
+Every gate item is now implemented in code, but the physical Recovery/Merge QA has not been run on a device, so user-facing copy must still not claim "preservation-grade" until that QA passes. Snapshot retention/receipts remain deferred.

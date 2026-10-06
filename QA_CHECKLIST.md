@@ -599,3 +599,21 @@ Use a genuinely large library/queue if available (Debug builds log `WavdropQueue
 - [ ] C. Dirty/recovery scenario if reproducible: disconnect/reconnect the controller/service, mutate the queue (Play Next, shuffle), press Next; no multi-second freeze, the current song does not restart, paused stays paused and playing stays playing.
 - [ ] D. Natural end-of-track on a large queue (including right after a shuffle toggle): no long delay before the next track. In Debug logs there should be no `full_queue_sync reason=NaturalBoundaryUnverified`.
 - [ ] E. Crossfade enabled on a large queue: no interaction freeze or regression.
+
+## Recovery Restore + verified safety snapshot (post-Beta 10; NOT yet validated on a device)
+
+Use a Wavdrop v2 backup you exported yourself. The pre-Recovery safety snapshot lives in app-private storage (`files/recovery-safety/pre-recovery-latest.json`); verify it via Backup Verification / a normal import parse (it is an ordinary v2 backup), e.g. with adb run-as on a debug build.
+
+- [ ] A. Create local WavDrop history, favourites and playlists.
+- [ ] B. Export a known verified backup (Back up now / export).
+- [ ] C. Change local state substantially (more plays, un-favourite/favourite, delete/add playlists, new lyrics).
+- [ ] D. Import the backup: Merge is selected by default; deliberately select Recovery (it shows the warning, the "what will be replaced" summary, and the stronger confirmation). Leave and re-import: the mode resets to Merge.
+- [ ] E. Confirm: the safety snapshot is created and verified before anything changes. A v1 backup offers Merge only; a Desktop backup shows no Recovery option.
+- [ ] F. Confirm local WavDrop state becomes backup-authoritative (counts, favourites incl. cleared ones, event history, playlists and their order, lyrics), where matched to music on this device.
+- [ ] G. Confirm current audio files are untouched and the active queue/playback is not disturbed.
+- [ ] H. Confirm tracks the backup has but this device does not are preserved (pending), not guessed.
+- [ ] I. Where automatic backup was enabled in the backup and no folder is set: the "Choose backup folder" prompt appears; the music-folder selection/scan mode on this device is unchanged.
+- [ ] J. Restart the app: the recovered state persists.
+- [ ] K. Verify the safety snapshot itself through Backup Verification / import parsing (VERIFIED v2) and that importing it with Recovery would return the pre-Recovery state.
+- [ ] L. Induced failure where practical (e.g. no free storage): Recovery shows "Recovery wasn't started", nothing changed, Retry / Use Merge / Cancel are offered, and there is no "continue anyway".
+- [ ] M. Note: a second Recovery replaces the first safety snapshot (latest only); keep a copy if you need the earlier one.

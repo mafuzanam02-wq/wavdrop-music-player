@@ -64,4 +64,8 @@ data class WavdropBackupImportApplyResult(
     val needsMusicFolderReselection: Boolean = false,
     /** Portable features intentionally absent from the backup format or unsafe on this device. */
     val notRestoredOnThisDevice: List<String> = emptyList(),
+    /** Which restore semantics produced this result. Recovery counts live in [recovery], never mixed into the Merge counters. */
+    val restoreMode: BackupRestoreMode = BackupRestoreMode.MERGE,
+    /** Non-null only for [BackupRestoreMode.RECOVERY]. */
+    val recovery: RecoveryRestoreSummary? = null,
 )

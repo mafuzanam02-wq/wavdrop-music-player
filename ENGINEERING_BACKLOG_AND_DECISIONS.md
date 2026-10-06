@@ -462,8 +462,8 @@ P2 preservation capability -> P3 full music-memory architecture).
 | **Event-led analytics reconciliation** | Aggregates remain the fast path until complete event coverage exists | Complete event coverage, stable eventIds | P3 |
 | **Streaming import/export** | Memory-bounded large-history backups need a streaming codec | — | P3 |
 | **Optional encrypted / signed backups** | Integrity checksum protects against accidental corruption only; encryption is a separate feature | Backup v2 stable | P3 |
-| **Recovery Restore (authoritative) full path** | Not implemented; restore is merge-only. Requires a mandatory verified pre-restore safety snapshot before destructive replacement | Safety-snapshot system | P1/P2 (staged) |
-| **Snapshot retention and backup receipts** | Only DATED / REPLACE_PREVIOUS file modes exist; no retained-N snapshot policy or persisted receipts | Retention policy design | Post-launch |
+| **Recovery Restore (authoritative)** | IMPLEMENTED (post-Beta 10, device QA pending): explicit mode, VERIFIED v2 only, mandatory verified app-private safety snapshot, single Room transaction, honest Room/DataStore boundary (PartialRecovery, no compensating rollback). See docs/BACKUP_PRESERVATION_CONTRACT.md 8.1 | - | Done (QA pending) |
+| **Snapshot retention and backup receipts** | Only DATED / REPLACE_PREVIOUS file modes exist and ONE latest pre-Recovery snapshot (a second Recovery replaces it); no retained-N snapshot policy or persisted receipts | Retention policy design | Post-launch |
 | **Equalizer intent in backups** | EQ settings are not part of `preferences.android` today | Backup preference capability review | Future |
 | **Desktop portable import of baselines / lyrics / `preferences.android`** | Beyond current safe Android-side behaviour | Shared cross-platform validation library | Future |
 | **Portable song key / acoustic fingerprinting** | Conservative matching aid; risk of false attribution if rushed | Identity model | Future |
@@ -712,7 +712,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
 ### Post-launch
 
 - Public Privacy Policy page at the required Play Store URL; in-app policy reference line.
-- Recovery Restore (authoritative) with mandatory verified pre-restore safety snapshot.
+- Recovery Restore: implemented (verified safety snapshot, latest only); remaining: physical QA, snapshot retention/receipts, and a snapshot-management surface.
 - Snapshot retention/receipts surfacing and Storage Management entry points.
 
 ### Future (P3 horizon)

@@ -30,4 +30,8 @@ interface LyricsOverrideDao {
 
     @Query("DELETE FROM lyrics_overrides WHERE songId = :songId OR contentUri = :contentUri")
     suspend fun deleteForSong(songId: Long, contentUri: String)
+
+    /** Recovery Restore only: lyrics overrides are fully exported, so the safety snapshot covers every row removed. */
+    @Query("DELETE FROM lyrics_overrides")
+    suspend fun deleteAllLyricsForRecovery()
 }

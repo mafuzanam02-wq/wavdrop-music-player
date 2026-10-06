@@ -166,4 +166,12 @@ interface TrackStatsDao {
 
     @Query("SELECT * FROM track_stats WHERE songId = :songId")
     suspend fun getStatsBySongId(songId: Long): TrackStatsEntity?
+
+    // ── Recovery Restore only (authoritative replace). Never called by Merge, sync or playback. ──
+
+    @Query("DELETE FROM track_stats")
+    suspend fun deleteAllTrackStatsForRecovery()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllForRecovery(entities: List<TrackStatsEntity>)
 }
