@@ -13,6 +13,9 @@ enum class AudioPermissionStatus {
     NotRequested,
     Denied,
     PermanentlyDenied,
+
+    /** Permission was granted on this device before (persisted) but is missing now. Never a first run. */
+    Revoked,
     Granted,
 }
 

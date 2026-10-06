@@ -37,7 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun AudioPermissionGate(
@@ -48,42 +50,41 @@ fun AudioPermissionGate(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentOnPermissionGranted by rememberUpdatedState(onPermissionGranted)
-    var permissionStatus by remember {
-        mutableStateOf(
-            if (context.hasAudioPermission()) AudioPermissionStatus.Granted
-            else AudioPermissionStatus.NotRequested,
-        )
-    }
+    val permissionViewModel: AudioPermissionViewModel = hiltViewModel()
+    val hasEverGranted by permissionViewModel.hasEverGranted.collectAsStateWithLifecycle()
+    var hasPermission by remember { mutableStateOf(context.hasAudioPermission()) }
+    var lastRequest by remember { mutableStateOf<AudioPermissionRequestOutcome?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { isGranted ->
-        permissionStatus = when {
-            isGranted -> AudioPermissionStatus.Granted
-            context.shouldShowAudioPermissionRationale() -> AudioPermissionStatus.Denied
-            else -> AudioPermissionStatus.PermanentlyDenied
-        }
+        lastRequest = AudioPermissionResolver.outcomeOf(isGranted, context.shouldShowAudioPermissionRationale())
+        hasPermission = context.hasAudioPermission()
     }
 
+    // Re-read the real permission bit on every resume (returning from Android Settings, or after a revoke).
     DisposableEffect(context, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                if (context.hasAudioPermission()) {
-                    permissionStatus = AudioPermissionStatus.Granted
-                } else if (permissionStatus == AudioPermissionStatus.Granted) {
-                    permissionStatus = AudioPermissionStatus.NotRequested
-                }
-            }
+            if (event == Lifecycle.Event.ON_RESUME) hasPermission = context.hasAudioPermission()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(permissionStatus) {
-        if (permissionStatus == AudioPermissionStatus.Granted) {
+    LaunchedEffect(hasPermission) {
+        if (hasPermission) {
+            permissionViewModel.recordGranted() // idempotent, at most one write
             currentOnPermissionGranted()
         }
     }
+
+    // Until the persisted history is read, a missing permission must not flash the first-run screen.
+    val everGrantedKnown = hasEverGranted
+    if (!hasPermission && everGrantedKnown == null) {
+        Spacer(modifier.fillMaxSize())
+        return
+    }
+    val permissionStatus = AudioPermissionResolver.resolve(hasPermission, everGrantedKnown == true, lastRequest)
 
     when (permissionStatus) {
         AudioPermissionStatus.Granted -> content()
@@ -99,7 +100,53 @@ fun AudioPermissionGate(
             modifier = modifier,
             onOpenSettings = { context.openAppSettings() },
         )
+        AudioPermissionStatus.Revoked -> AudioPermissionRevokedContent(
+            modifier = modifier,
+            onOpenSettings = { context.openAppSettings() },
+        )
     }
+}
+
+@Composable
+private fun AudioPermissionRevokedContent(
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    PermissionCenteredColumn(modifier) {
+        Icon(
+            imageVector = Icons.Default.FolderOff,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+            modifier = Modifier.size(56.dp),
+        )
+        Spacer(Modifier.height(20.dp))
+        Text(
+            text = AudioPermissionCopy.REVOKED_TITLE,
+            style = MaterialTheme.typography.titleLarge,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = AudioPermissionCopy.REVOKED_BODY,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+        Spacer(Modifier.height(28.dp))
+        Button(onClick = onOpenSettings) {
+            Text("Open Settings")
+        }
+    }
+}
+
+/** User-facing copy that must stay distinct between first run, blocked and revoked. */
+object AudioPermissionCopy {
+    const val FIRST_RUN_TITLE = "Allow music access"
+    const val BLOCKED_TITLE = "Music access blocked"
+    const val REVOKED_TITLE = "Music access was turned off"
+    const val REVOKED_BODY =
+        "Wavdrop no longer has permission to read music on this device. Your existing library data has been kept."
 }
 
 @Composable
@@ -116,7 +163,7 @@ private fun AllowMusicAccessContent(
         )
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "Allow music access",
+            text = AudioPermissionCopy.FIRST_RUN_TITLE,
             style = MaterialTheme.typography.titleLarge,
             textAlign = TextAlign.Center,
         )
@@ -182,7 +229,7 @@ private fun AudioPermissionBlockedContent(
         )
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "Music access blocked",
+            text = AudioPermissionCopy.BLOCKED_TITLE,
             style = MaterialTheme.typography.titleLarge,
             textAlign = TextAlign.Center,
         )

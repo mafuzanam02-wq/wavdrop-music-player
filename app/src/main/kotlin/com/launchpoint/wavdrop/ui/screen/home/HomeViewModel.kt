@@ -14,6 +14,8 @@ import com.launchpoint.wavdrop.data.model.HomeWrappedPreview
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
+import com.launchpoint.wavdrop.ui.scan.LibraryScanCoordinator
+import com.launchpoint.wavdrop.ui.scan.LibraryScanUiState
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.repository.localDayRefreshFlow
 import com.launchpoint.wavdrop.data.search.LibrarySearchIndex
@@ -410,38 +412,32 @@ class HomeViewModel @Inject constructor(
             initialValue = emptySet(),
         )
 
+    // One scan operation owner for every Home/Songs entry point (initial sync, pull-to-refresh, top-bar Rescan,
+    // empty-state Rescan). `scanState` is the single authoritative operation state; a second start while Scanning is a no-op.
+    private val libraryScan = LibraryScanCoordinator()
+    val scanState: StateFlow<LibraryScanUiState> = libraryScan.state
+
+    /** Pull-to-refresh spinner: derived from [scanState], so it can never contradict it. */
+    val isRefreshing: StateFlow<Boolean> = scanState
+        .map { it == LibraryScanUiState.Scanning }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     private var hasSynced = false
 
     fun syncIfNeeded() {
         if (hasSynced) return
         hasSynced = true
-        // sync() contains scan failures and returns a typed result; this catch is a final guard
-        // so no unexpected error can escape the coroutine and crash the app (WB-02).
-        viewModelScope.launch {
-            runCatching { repository.sync() }
-                .onFailure { Log.e("HomeViewModel", "Library sync failed", it) }
-        }
+        // The result is recorded in scanState (Failed/EmptyPreserved surface as a warning over the preserved library);
+        // the coordinator also turns an unexpected exception into Error so nothing can crash the app (WB-02).
+        rescanLibrary()
     }
 
-    private val _isRefreshing = MutableStateFlow(false)
-    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
-
-    /** Explicit rescan of MediaStore / music folders, triggered by pull-to-refresh. */
-    fun refreshLibrary() {
-        if (_isRefreshing.value) return
-        viewModelScope.launch {
-            _isRefreshing.value = true
-            try {
-                // sync() never throws for scan failures (returns a typed Failed result); this
-                // catch guards against any other unexpected error so refresh state still clears
-                // and the app does not crash (WB-02).
-                runCatching { repository.sync() }
-                    .onFailure { Log.e("HomeViewModel", "Library refresh failed", it) }
-            } finally {
-                _isRefreshing.value = false
-            }
-        }
+    /** Explicit rescan of MediaStore / music folders. Every Home/Songs rescan entry point calls this. */
+    fun rescanLibrary() {
+        libraryScan.start(viewModelScope) { repository.sync() }
     }
+
+    fun dismissScanMessage() = libraryScan.dismiss()
 
     fun playSong(song: Song) {
         val queue = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()

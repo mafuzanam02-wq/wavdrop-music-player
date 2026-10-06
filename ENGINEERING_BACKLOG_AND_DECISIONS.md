@@ -685,6 +685,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
       Beta 10.0 release checkpoint: versionName 0.1.0-beta10 / versionCode 10; release notes and What's New rewritten around production crossfade, synchronized lyrics, playback reliability, faster libraries, backup/import fixes; in-app changelog updated; WC-09 and WC-10 explicitly remain open; no tag, publish or deploy performed.
       WC-09 resolved (post-Beta 10): Insights/Statistics read a bounded InsightsPlayActivity reduced from a streamed PLAY-timestamp cursor (Kotlin ZoneId grouping, explicit count-then-latest-play tie rule, <=366 retained dates) instead of the full PLAY timestamp list; month-rollover trigger uses the scalar event count; no schema/index change.
       WC-10 resolved (post-Beta 10): normalizeTolerant is a reduced-pass implementation (one NFD, one builder pass for marks/apostrophes/underscore, one in-place spaced-dash + whitespace pass, one Locale.ROOT lowercase) with output identical to the legacy chain (legacy kept as a test reference); no cache, no schema change, indexing frequency still owned by WC-03. Wave C is closed.
+      Library access and scan recovery (post-Beta 10): AudioPermissionGate distinguishes first run, denied, blocked and a distinct Revoked state ("Music access was turned off", Open Settings, library data kept) through a pure AudioPermissionResolver; the one-way device-local fact "audio permission was granted before" is persisted in the existing DataStore (AudioPermissionHistoryRepository, never reset, NOT backed up, not inferred from songs). One shared scan presentation contract (LibraryScanUiState, LibrarySyncResult mapping, LibraryScanCoordinator) serves Home/Songs and Settings: Success = Complete, EmptyPreserved = Warning, Failed/exception = Error; a single scan operation owner per ViewModel prevents concurrent syncs, and Home isRefreshing is derived from it. Home gets a More options menu with Rescan library and a compact status/warning card with Try again over the preserved library; Songs pull-to-refresh and Settings rescan keep working. Transient scan state is not persisted; repository safety (WB-02) unchanged; no schema, backup or version change. Physical QA pending (permission revoke/regrant, rescan, induced scan failure).
    h. Final gate flip after passed validation - complete (CF-2N2).
 9. Physical Bluetooth / background / wired / EQ-policy validation - complete (CF-2N1 sign-off).
 
@@ -695,7 +696,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
 ### Post-Beta 9 carry-over (still open after the Beta 10 checkpoint)
 
 - Wave C is fully closed (WC-01 through WC-11 resolved; see §7).
-- Wave B UX follow-ups: permission-revoked recovery state; optional Home scan-failure banner.
+- Wave B UX follow-ups: resolved (post-Beta 10, pending physical QA): permission-revoked recovery state and Home scan-failure visibility (see decision log).
 - Outstanding real-device QA from `PLANNED.md`: delete-from-device flow, native share across share
   targets, Bluetooth/wired resume, launcher icon switching, end-to-end backup/restore regression.
 

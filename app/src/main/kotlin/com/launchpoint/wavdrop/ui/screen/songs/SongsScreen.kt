@@ -187,7 +187,7 @@ fun SongsScreen(
         ) {
             PullToRefreshBox(
                 isRefreshing = isRefreshing,
-                onRefresh    = viewModel::refreshLibrary,
+                onRefresh    = viewModel::rescanLibrary,
                 modifier     = Modifier.padding(innerPadding).fillMaxSize(),
             ) {
                 when (val state = uiState) {

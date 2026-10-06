@@ -5,7 +5,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.WavdropBackupRepository
-import com.launchpoint.wavdrop.data.repository.LibrarySyncResult
+import com.launchpoint.wavdrop.ui.scan.LibraryScanCoordinator
+import com.launchpoint.wavdrop.ui.scan.LibraryScanUiState
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.backup.AutoBackupRepository
 import com.launchpoint.wavdrop.data.backup.AutoBackupWorkScheduler
@@ -58,14 +59,6 @@ sealed interface ExportUiState {
     data object Exporting : ExportUiState
     data object Success : ExportUiState
     data class Error(val message: String) : ExportUiState
-}
-
-sealed interface LibraryScanUiState {
-    data object Idle : LibraryScanUiState
-    data object Scanning : LibraryScanUiState
-    data object Complete : LibraryScanUiState
-    data class Warning(val message: String) : LibraryScanUiState
-    data class Error(val message: String) : LibraryScanUiState
 }
 
 @HiltViewModel
@@ -363,10 +356,8 @@ class SettingsViewModel @Inject constructor(
             initialValue = WrappedVisualStyle.DEFAULT,
         )
 
-    private val _libraryScanUiState =
-        MutableStateFlow<LibraryScanUiState>(LibraryScanUiState.Idle)
-    val libraryScanUiState: StateFlow<LibraryScanUiState> =
-        _libraryScanUiState.asStateFlow()
+    private val libraryScan = LibraryScanCoordinator()
+    val libraryScanUiState: StateFlow<LibraryScanUiState> = libraryScan.state
 
     private val _iconChangeEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val iconChangeEvent: SharedFlow<String> = _iconChangeEvent.asSharedFlow()
@@ -607,23 +598,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun rescanLibrary() {
-        if (_libraryScanUiState.value == LibraryScanUiState.Scanning) return
-        _libraryScanUiState.value = LibraryScanUiState.Scanning
-        viewModelScope.launch {
-            _libraryScanUiState.value = runCatching {
-                songRepository.sync()
-            }.fold(
-                onSuccess = { result ->
-                    when (result) {
-                        is LibrarySyncResult.Success       -> LibraryScanUiState.Complete
-                        is LibrarySyncResult.EmptyPreserved -> LibraryScanUiState.Warning(result.reason)
-                        is LibrarySyncResult.Failed        -> LibraryScanUiState.Error(result.reason)
-                    }
-                },
-                onFailure = { e ->
-                    LibraryScanUiState.Error(e.message ?: "Library scan failed. Please try again.")
-                },
-            )
-        }
+        libraryScan.start(viewModelScope) { songRepository.sync() }
     }
 }

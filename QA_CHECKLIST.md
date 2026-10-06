@@ -579,3 +579,13 @@ Run on a real device; use the debug build and filter logcat by tag `WavdropArtwo
 | Playback remains stable across foreground/background/headset scenarios. | |
 | Backup/import tests completed with no unexpected data loss. | |
 | Known issues documented with device details and reproduction steps. | |
+
+## Library access and scan recovery (post-Beta 10; NOT yet validated on a device)
+
+- [ ] A. Fresh install: the permission screen says "Allow music access".
+- [ ] B. Grant: the library scans normally.
+- [ ] C. Android Settings > Apps > Wavdrop > Permissions > deny Music & audio, return to Wavdrop: the screen says "Music access was turned off" (not the first-run text); existing library, stats and history are not cleared.
+- [ ] D. Tap Open Settings, re-enable the permission, return: normal content resumes and the library can be rescanned.
+- [ ] E. Populated Home: More options > Rescan library; no duplicate scan; the library stays visible with a thin progress bar while scanning.
+- [ ] F. Induced scan failure where practical: the existing library stays, "Library scan couldn't complete" shows, Try again works and a success clears the card.
+- [ ] G. Songs: pull-to-refresh still rescans and the spinner stops.
