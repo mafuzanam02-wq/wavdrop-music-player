@@ -1933,6 +1933,7 @@ private fun RankedTrackRow(
             ArtworkImage(
                 artworkUri = ArtworkResolver.albumArtworkUri(track.song.albumId),
                 contentDescription = null,
+                artworkSize = 42.dp,
                 modifier = Modifier.size(42.dp),
                 placeholderIcon = Icons.Default.MusicNote,
             )
@@ -2066,6 +2067,7 @@ private fun RecentPlaysPage(
                         ArtworkImage(
                             artworkUri = ArtworkResolver.albumArtworkUri(summary.song.albumId),
                             contentDescription = null,
+                            artworkSize = 40.dp,
                             modifier = Modifier.size(40.dp),
                         )
                         Column(modifier = Modifier.weight(1f)) {

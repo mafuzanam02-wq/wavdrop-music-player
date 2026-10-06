@@ -1019,6 +1019,7 @@ private fun ResumeSessionCard(
                 artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
                 contentDescription = "Album artwork for ${song.album}",
                 placeholderIcon = Icons.Default.MusicNote,
+                artworkSize = 44.dp,
                 modifier = Modifier.size(44.dp),
             )
             Column(modifier = Modifier.weight(1f)) {

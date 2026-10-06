@@ -270,6 +270,7 @@ private fun ArtistRow(
             artworkUri = artist.artworkUri,
             contentDescription = "Artist image for ${artist.artistKey}",
             placeholderIcon = Icons.Default.Person,
+            artworkSize = artworkSize,
             modifier = Modifier.size(artworkSize),
         )
         Column(modifier = Modifier.weight(1f)) {

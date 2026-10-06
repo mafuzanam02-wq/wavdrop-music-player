@@ -272,6 +272,7 @@ private fun AlbumHeader(
             artworkUri         = ArtworkResolver.albumArtworkUri(state.albumId),
             contentDescription = "Album artwork for ${state.albumName}",
             placeholderIcon    = Icons.Default.Album,
+            artworkSize = 112.dp,
             modifier           = Modifier.size(112.dp),
         )
         Column(modifier = Modifier.weight(1f)) {

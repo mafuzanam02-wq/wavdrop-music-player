@@ -330,6 +330,7 @@ private fun ArtistHeader(
             artworkUri = artworkUri,
             contentDescription = "Artist image for $artistName",
             placeholderIcon = Icons.Default.Person,
+            artworkSize = 88.dp,
             modifier = Modifier.size(88.dp),
         )
         Column(modifier = Modifier.weight(1f)) {

@@ -1203,6 +1203,7 @@ private fun QueueNowPlayingRow(song: Song) {
             artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
             contentDescription = "Album artwork for ${song.album}",
             placeholderIcon = Icons.Default.MusicNote,
+            artworkSize = artworkSize,
             modifier = Modifier
                 .padding(start = 12.dp)
                 .size(artworkSize),
@@ -1271,6 +1272,7 @@ private fun QueueEarlierItemRow(
             artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
             contentDescription = "Album artwork for ${song.album}",
             placeholderIcon = Icons.Default.MusicNote,
+            artworkSize = artworkSize,
             modifier = Modifier
                 .padding(start = 12.dp)
                 .size(artworkSize),
@@ -1516,6 +1518,7 @@ private fun QueueItemRow(
             artworkUri = ArtworkResolver.albumArtworkUri(song.albumId),
             contentDescription = "Album artwork for ${song.album}",
             placeholderIcon = Icons.Default.MusicNote,
+            artworkSize = artworkSize,
             modifier = Modifier
                 .padding(start = 12.dp)
                 .size(artworkSize),

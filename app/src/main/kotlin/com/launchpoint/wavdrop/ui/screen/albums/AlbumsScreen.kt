@@ -270,6 +270,7 @@ private fun AlbumRow(
             artworkUri = ArtworkResolver.albumArtworkUri(album.albumId),
             contentDescription = "Album artwork for ${album.albumKey}",
             placeholderIcon = Icons.Default.Album,
+            artworkSize = artworkSize,
             modifier = Modifier.size(artworkSize),
         )
         Column(modifier = Modifier.weight(1f)) {

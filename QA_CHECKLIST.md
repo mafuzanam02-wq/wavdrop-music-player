@@ -550,6 +550,26 @@ Production enablement required every row below to be Pass on the intended releas
 | No wrong / stale promotion state | **PASS** (CF-2N1) |
 | No crash | **PASS** (CF-2N1) |
 
+## Now Playing Artwork Reliability (WC-07) — physical validation PENDING
+
+Run on a real device; use the debug build and filter logcat by tag `WavdropArtwork` (request / failure lines for the large artwork).
+
+| Check | Pass / Fail / Notes |
+|---|---|
+| Track with known artwork: Now Playing, Mini Player and Home row all show it. | |
+| Track with no artwork: placeholder everywhere, and no previous cover left behind on Now Playing. | |
+| Previously problematic track (Mini Player showed art but Now Playing did not): Now Playing now shows it; if not, capture the `WavdropArtwork` failure line. | |
+| Two tracks from the same album: switching between them causes no placeholder flash. | |
+| Rapid next/previous: the final track's artwork (never an intermediate one) is shown. | |
+| Shuffle transitions: artwork always matches the current track. | |
+| Crossfade transition: artwork follows the new track without sticking on the old one. | |
+| Open and close Now Playing repeatedly: artwork present every time. | |
+| Toggle the lyrics overlay: artwork returns correctly when it is hidden. | |
+| Rotate / resize (if applicable): artwork re-renders at the new size without disappearing. | |
+| Background the app and reopen: artwork still present. | |
+| Compare Mini Player, Home and the media notification for the same track (notification uses the file's embedded art, a different source). | |
+| Now Playing background mode other than Artwork: no artwork is expected (not a bug). | |
+
 ## Final Sign-Off
 
 | Item | Pass / Fail / Notes |

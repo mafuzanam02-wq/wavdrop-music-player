@@ -412,6 +412,7 @@ private fun SearchArtistRow(
             artworkUri = artist.artworkUri,
             contentDescription = "Artist image for ${artist.artistKey}",
             placeholderIcon = Icons.Default.Person,
+            artworkSize = artworkSize,
             modifier = Modifier.size(artworkSize),
         )
         Column(modifier = Modifier.weight(1f)) {
@@ -462,6 +463,7 @@ private fun SearchAlbumRow(
             artworkUri = ArtworkResolver.albumArtworkUri(album.albumId),
             contentDescription = "Album artwork for ${album.albumKey}",
             placeholderIcon = Icons.Default.Album,
+            artworkSize = artworkSize,
             modifier = Modifier.size(artworkSize),
         )
         Column(modifier = Modifier.weight(1f)) {

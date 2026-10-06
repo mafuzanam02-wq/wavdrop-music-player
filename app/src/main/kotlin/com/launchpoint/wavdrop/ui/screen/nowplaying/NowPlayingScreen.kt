@@ -1157,11 +1157,7 @@ private fun ArtworkWithLyricsOverlay(
     val currentEdit          by rememberUpdatedState(onEditLyrics)
     val artworkShape         = LocalArtworkCornerStyle.current.toShape()
     val npBackground         = LocalNowPlayingBackground.current
-    val effectiveArtworkUri  = if (npBackground == NowPlayingBackground.ARTWORK) {
-        ArtworkResolver.albumArtworkUri(song.albumId)
-    } else {
-        null
-    }
+    val effectiveArtworkUri  = nowPlayingArtworkUri(npBackground, song.albumId)
 
     // Corner controls are siblings of the gesture surface (not descendants), so they stay outside
     // its merged semantics node and only take taps inside their own targets.
@@ -1591,3 +1587,10 @@ private fun EmptyNowPlayingContent(modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * The artwork the large Now Playing surface should request: only the ARTWORK appearance mode shows cover art, and only when the song
+ * has a valid album id. Any other mode intentionally requests nothing (that is not a loading failure).
+ */
+internal fun nowPlayingArtworkUri(background: NowPlayingBackground, albumId: Long?): String? =
+    if (background == NowPlayingBackground.ARTWORK) ArtworkResolver.albumArtworkUri(albumId) else null

@@ -91,6 +91,7 @@ fun SongRow(
                 contentDescription = "Album artwork for ${song.album}",
                 placeholderIcon = Icons.Default.MusicNote,
                 shape = cornerStyle.toShape(),
+                artworkSize = artworkSize,
                 modifier = Modifier.size(artworkSize),
             )
         }
