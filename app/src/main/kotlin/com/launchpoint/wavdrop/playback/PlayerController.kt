@@ -31,6 +31,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -178,17 +180,25 @@ internal fun resolveCurrentPlaybackIndex(
     stateIndex: Int?,
     stateSongId: Long?,
     playerQueueNeedsSync: Boolean,
+    verifiedLogicalIndices: Set<Int> = emptySet(),
+    physicalIndexOffset: Int = 0,
 ): Int? {
     if (playbackQueue.isEmpty()) return null
 
-    val controllerIndexMatchesSong = controllerIndex != null &&
-        controllerIndex in playbackQueue.indices &&
-        controllerSongId != null &&
-        playbackQueue[controllerIndex].id != controllerSongId
+    // While dirty the physical timeline may be offset from the logical one (physical = logical + offset), and the
+    // controller index is trusted ONLY at logical indices the physical-queue reconciler verified (physical id == logical id).
+    val logicalControllerIndex = controllerIndex?.let { if (playerQueueNeedsSync) it - physicalIndexOffset else it }
 
-    if (!playerQueueNeedsSync && controllerIndex != null && controllerIndex in playbackQueue.indices) {
+    val controllerIndexMatchesSong = logicalControllerIndex != null &&
+        logicalControllerIndex in playbackQueue.indices &&
+        controllerSongId != null &&
+        playbackQueue[logicalControllerIndex].id != controllerSongId
+
+    val controllerIndexTrusted = !playerQueueNeedsSync ||
+        (logicalControllerIndex != null && logicalControllerIndex in verifiedLogicalIndices)
+    if (controllerIndexTrusted && logicalControllerIndex != null && logicalControllerIndex in playbackQueue.indices) {
         if (controllerIndexMatchesSong) return null
-        return controllerIndex
+        return logicalControllerIndex
     }
 
     if (stateIndex != null && stateIndex in playbackQueue.indices) {
@@ -262,19 +272,69 @@ private fun uniquePlaybackIndexForSongId(playbackQueue: List<Song>, songId: Long
     return match
 }
 
+/**
+ * Why the physical Media3 timeline may differ from the logical playbackQueue. The physical queue reconciler repairs every
+ * one of these incrementally (bounded work around the current item first); a full re-push is only a last resort.
+ */
+internal enum class QueueDirtyReason {
+    ControllerUnavailable,
+    AlreadyDirty,
+    PhysicalCurrentMismatch,
+    PhysicalCountMismatch,
+    PhysicalPrefixChanged,
+    LargeBatchSpan,
+    ShuffleReorderDeferred,
+    ShuffleLiveSyncFailed,
+    BatchMutationFailed,
+    Unknown,
+}
+
+/**
+ * The only situations that still justify a synchronous FULL physical re-push (`syncPlayerQueueAt`). Each is rare and is
+ * logged with its queue size; routine transport, queue mutation, shuffle and reconnect repair incrementally instead.
+ */
+internal enum class FullQueueSyncReason {
+    /** The reconciler could not prove the current occurrence or the requested target (never navigate to a guess). */
+    TransportTargetUnprovable,
+
+    /** A natural boundary landed on an index the reconciler had not verified (stale suffix was audible). */
+    NaturalBoundaryUnverified,
+
+    /** Reconnect found a current occurrence it could not trust. */
+    ReconnectCurrentUnprovable,
+
+    /** Library deletion of the CURRENT song: an explicit destructive change with its own transition semantics. */
+    CurrentSongDeleted,
+}
+
 internal enum class BatchQueuePlayerSyncAction {
     NoOp,
-    ReplaceFutureSuffix,
-    FullQueueSync,
+
+    /** One bounded Media3 `replaceMediaItems(replaceFromIndex, replaceToIndexExclusive, songs)`; an insertion is just `from == to`. */
+    ReplaceFutureSpan,
+
+    /** Logical queue already updated; the physical timeline is repaired later by the reconciler (never a full re-push here). */
     MarkDirty,
 }
 
 internal data class BatchQueuePlayerSyncPlan(
     val action: BatchQueuePlayerSyncAction,
     val futureStartIndex: Int,
-    val suffix: List<Song> = emptyList(),
+    val replaceFromIndex: Int = futureStartIndex,
+    val replaceToIndexExclusive: Int = futureStartIndex,
+    val songs: List<Song> = emptyList(),
+    val dirtyReason: QueueDirtyReason? = null,
 )
 
+/** A single replace larger than this is repaired in chunks by the reconciler instead of one main-thread burst. */
+internal const val MAX_SINGLE_SPAN_REPLACE_ITEMS = 2_048
+
+/**
+ * Plans how a batch queue mutation reaches the physical player. The cost scales with the CHANGED span, not the queue:
+ * the old and new future suffixes are trimmed of their common head and tail and only the middle is replaced (a pure
+ * Play-All-Next insertion becomes an insert of the batch). Anything the planner cannot prove aligned is marked dirty for
+ * the reconciler; it is never turned into a synchronous full queue re-push.
+ */
 internal fun planBatchQueuePlayerSync(
     oldPlaybackQueue: List<Song>,
     newPlaybackQueue: List<Song>,
@@ -286,39 +346,51 @@ internal fun planBatchQueuePlayerSync(
     controllerMediaItemCount: Int?,
 ): BatchQueuePlayerSyncPlan {
     val futureStartIndex = currentPlaybackIndex + 1
-    if (!controllerAvailable) {
-        return BatchQueuePlayerSyncPlan(
-            action = BatchQueuePlayerSyncAction.MarkDirty,
-            futureStartIndex = futureStartIndex,
-        )
-    }
-    if (playerQueueNeedsSync ||
-        currentPlaybackIndex !in oldPlaybackQueue.indices ||
+    fun dirty(reason: QueueDirtyReason) = BatchQueuePlayerSyncPlan(
+        action = BatchQueuePlayerSyncAction.MarkDirty,
+        futureStartIndex = futureStartIndex,
+        dirtyReason = reason,
+    )
+    if (!controllerAvailable) return dirty(QueueDirtyReason.ControllerUnavailable)
+    if (playerQueueNeedsSync) return dirty(QueueDirtyReason.AlreadyDirty)
+    if (currentPlaybackIndex !in oldPlaybackQueue.indices ||
         currentPlaybackIndex !in newPlaybackQueue.indices ||
         controllerCurrentIndex != currentPlaybackIndex ||
-        controllerMediaItemCount != oldPlaybackQueue.size ||
-        (controllerSongId != null && newPlaybackQueue[currentPlaybackIndex].id != controllerSongId) ||
-        oldPlaybackQueue.take(futureStartIndex) != newPlaybackQueue.take(futureStartIndex)
+        (controllerSongId != null && newPlaybackQueue[currentPlaybackIndex].id != controllerSongId)
     ) {
-        return BatchQueuePlayerSyncPlan(
-            action = BatchQueuePlayerSyncAction.FullQueueSync,
-            futureStartIndex = futureStartIndex,
-        )
+        return dirty(QueueDirtyReason.PhysicalCurrentMismatch)
+    }
+    if (controllerMediaItemCount != oldPlaybackQueue.size) return dirty(QueueDirtyReason.PhysicalCountMismatch)
+    for (i in 0 until futureStartIndex) {
+        if (oldPlaybackQueue[i] != newPlaybackQueue[i]) return dirty(QueueDirtyReason.PhysicalPrefixChanged)
     }
 
-    val suffix = newPlaybackQueue.drop(futureStartIndex)
-    return if (oldPlaybackQueue.drop(futureStartIndex) == suffix) {
-        BatchQueuePlayerSyncPlan(
-            action = BatchQueuePlayerSyncAction.NoOp,
-            futureStartIndex = futureStartIndex,
-        )
-    } else {
-        BatchQueuePlayerSyncPlan(
-            action = BatchQueuePlayerSyncAction.ReplaceFutureSuffix,
-            futureStartIndex = futureStartIndex,
-            suffix = suffix,
-        )
+    val oldSize = oldPlaybackQueue.size
+    val newSize = newPlaybackQueue.size
+    var head = 0
+    while (futureStartIndex + head < oldSize && futureStartIndex + head < newSize &&
+        oldPlaybackQueue[futureStartIndex + head] == newPlaybackQueue[futureStartIndex + head]
+    ) head++
+    var tail = 0
+    while (tail < oldSize - futureStartIndex - head && tail < newSize - futureStartIndex - head &&
+        oldPlaybackQueue[oldSize - 1 - tail] == newPlaybackQueue[newSize - 1 - tail]
+    ) tail++
+    val replaceFrom = futureStartIndex + head
+    val replaceTo = oldSize - tail
+    val songs = newPlaybackQueue.subList(replaceFrom, newSize - tail)
+    if (replaceFrom == replaceTo && songs.isEmpty()) {
+        return BatchQueuePlayerSyncPlan(action = BatchQueuePlayerSyncAction.NoOp, futureStartIndex = futureStartIndex)
     }
+    if (songs.size > MAX_SINGLE_SPAN_REPLACE_ITEMS || replaceTo - replaceFrom > MAX_SINGLE_SPAN_REPLACE_ITEMS) {
+        return dirty(QueueDirtyReason.LargeBatchSpan)
+    }
+    return BatchQueuePlayerSyncPlan(
+        action = BatchQueuePlayerSyncAction.ReplaceFutureSpan,
+        futureStartIndex = futureStartIndex,
+        replaceFromIndex = replaceFrom,
+        replaceToIndexExclusive = replaceTo,
+        songs = songs.toList(),
+    )
 }
 
 enum class PlayerHydrationResult {
@@ -561,6 +633,7 @@ class PlayerController @Inject constructor(
         const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
         const val BLUETOOTH_RESUME_DEBOUNCE_MS = 1_500L
         const val MEDIA_ITEM_CACHE_MAX_SIZE = 12_288
+        const val QUEUE_REPAIR_CHUNK_ITEMS = 256
 
         const val DEBUG_STATS = false
     }
@@ -617,7 +690,33 @@ class PlayerController @Inject constructor(
     private var libraryQueue: List<Song> = emptyList()
     private var playbackOrder: List<Int> = emptyList()
     private var playbackQueue: List<Song> = emptyList()
-    private var playerQueueNeedsSync: Boolean = false
+    // Physical-queue sync state. `playerQueueNeedsSync` (the long-standing flag) is true while the physical Media3 timeline
+    // may differ from playbackQueue ("dirty"). Only two things clear it: a COMPLETED reconciliation
+    // ([PhysicalQueueReconciler], the single repair authority) and a full re-push ([syncPlayerQueueAt], a last resort).
+    // The reason, the logical indices the reconciler verified and the physical offset qualify the dirty state so transport
+    // can stay targeted instead of rebuilding the whole timeline.
+    private var queueDirty: Boolean = false
+    private var queueDirtyReason: QueueDirtyReason? = null
+    private var verifiedLogicalIndices: Set<Int> = emptySet()
+    private var physicalIndexOffset: Int = 0
+    private var queueRepairCursor: ReconcileCursor? = null
+    private var queueRepairJob: Job? = null
+    private val physicalQueueReconciler = PhysicalQueueReconciler()
+    private var playerQueueNeedsSync: Boolean
+        get() = queueDirty
+        set(value) {
+            queueDirty = value
+            if (value) {
+                if (queueDirtyReason == null) queueDirtyReason = QueueDirtyReason.Unknown
+            } else {
+                queueDirtyReason = null
+                verifiedLogicalIndices = emptySet()
+                physicalIndexOffset = 0
+                queueRepairCursor = null
+                queueRepairJob?.cancel()
+                queueRepairJob = null
+            }
+        }
     private val mediaItemCache = object : LinkedHashMap<MediaItemCacheKey, MediaItem>(
         MEDIA_ITEM_CACHE_MAX_SIZE,
         0.75f,
@@ -722,6 +821,12 @@ class PlayerController @Inject constructor(
             if (DEBUG_STATS) {
                 Log.d(TAG, "[mediaItemTransition] reason=$reason mediaId=${mediaItem?.mediaId} repeatMode=$repeatMode isPlaying=${mediaController?.isPlaying}")
             }
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && isStaleAutomaticEcho()) {
+                // Echo of an earlier discontinuity after a playlist mutation (e.g. a physical repair): the current
+                // occurrence did not change, so no stats, sleep-timer or session ownership; just refresh state.
+                syncNowPlayingState(fromTransition = false)
+                return
+            }
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && handlePendingAutomaticTransition()) {
                 return
             }
@@ -751,6 +856,10 @@ class PlayerController @Inject constructor(
                 Log.d(TAG, "[posDiscontinuity] reason=$reason old=${oldPosition.positionMs} new=${newPosition.positionMs} oldIdx=${oldPosition.mediaItemIndex} newIdx=${newPosition.mediaItemIndex} repeatMode=$repeatMode isPlaying=${mediaController?.isPlaying}")
             }
             if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                if (isStaleAutomaticEcho()) {
+                    syncNowPlayingState(notifyStats = false)
+                    return
+                }
                 if (handlePendingAutomaticTransition()) {
                     return
                 }
@@ -760,8 +869,10 @@ class PlayerController @Inject constructor(
                 }
                 // Reset ticker tracking so it doesn't double-detect this same boundary.
                 lastKnownPositionMs = -1L
-                // newPosition.mediaItemIndex is a playback index (ExoPlayer holds playbackQueue).
-                val song = playbackQueue.getOrNull(newPosition.mediaItemIndex) ?: return
+                // The resolved LOGICAL occurrence (newPosition.mediaItemIndex is physical: equal to it when aligned, offset
+                // from it while a queue repair is in flight).
+                val song = currentPlaybackIndex()?.let(playbackQueue::getOrNull)
+                    ?: playbackQueue.getOrNull(newPosition.mediaItemIndex) ?: return
                 if (DEBUG_STATS) Log.d(TAG, "[posDiscontinuity] AUTO_TRANSITION → songId=${song.id}")
                 if (!isExternalPlayback) {
                     statsTracker.onSongSelected(song)
@@ -963,7 +1074,137 @@ class PlayerController @Inject constructor(
     private fun bumpQueueGeneration() {
         queueGeneration++
         resetBadMediaRecoveryEpisode()
+        // The logical queue is about to change: whatever was verified, and any in-flight repair, no longer applies. A dirty
+        // queue is repaired again from the new facts (the repair starts after this main-thread turn finishes).
+        verifiedLogicalIndices = emptySet()
+        queueRepairCursor = null
+        queueRepairJob?.cancel()
+        queueRepairJob = null
+        kickQueueRepair()
     }
+
+    /** Marks the physical queue dirty for [reason] and starts bounded repair. The logical queue is already the truth. */
+    private fun markQueueDirty(reason: QueueDirtyReason) {
+        playerQueueNeedsSync = true
+        queueDirtyReason = reason
+        verifiedLogicalIndices = emptySet()
+        queueRepairCursor = null
+        kickQueueRepair()
+    }
+
+    /**
+     * Starts (or restarts) the background physical-queue repair: bounded chunks on separate looper turns, bound to the queue
+     * generation and the controller instance it started against, so a stale pass can never mutate a newer queue or a
+     * replaced controller. Explicit transport never waits for it (see [repairForTransportTarget]).
+     */
+    private fun kickQueueRepair() {
+        if (!queueDirty) return
+        queueRepairJob?.cancel()
+        val generation = queueGeneration
+        val startedController = mediaController
+        queueRepairJob = scope.launch {
+            yield() // let the command that dirtied the queue finish its main-thread turn first
+            while (isActive) {
+                val controller = mediaController ?: return@launch
+                if (startedController != null && controller !== startedController) return@launch
+                if (generation != queueGeneration || !queueDirty) return@launch
+                val outcome = reconcilePhysicalQueue(controller, budget = QUEUE_REPAIR_CHUNK_ITEMS)
+                if (outcome !is QueueReconcileOutcome.InProgress) return@launch
+                yield()
+            }
+        }
+    }
+
+    /**
+     * One reconciliation call against the live controller (main thread). Updates the dirty state from the outcome:
+     * Completed clears the flag, InProgress records what is verified, Unsafe leaves the queue dirty for the caller's
+     * conservative fallback. Never touches the current item.
+     */
+    private fun reconcilePhysicalQueue(
+        controller: MediaController,
+        budget: Int,
+        logicalCurrent: Int? = null,
+        priorityIndices: Collection<Int> = emptyList(),
+    ): QueueReconcileOutcome {
+        val current = logicalCurrent ?: currentPlaybackIndex()
+            ?: return QueueReconcileOutcome.Unsafe("current_unresolved")
+        val automaticNext = QueueNavigator.automaticNextIndex(playbackQueue.size, current, repeatMode)
+        val outcome = runCatching {
+            physicalQueueReconciler.reconcile(
+                timeline = queueTimelineFor(controller),
+                queue = playbackQueue,
+                logicalCurrent = current,
+                priorityIndices = if (automaticNext != null) priorityIndices + automaticNext else priorityIndices,
+                budget = budget,
+                cursor = queueRepairCursor,
+            )
+        }.getOrElse { error ->
+            Log.w(TAG, "[queueRepair] reconcile failed: ${error.message}")
+            QueueReconcileOutcome.Unsafe("exception")
+        }
+        when (outcome) {
+            QueueReconcileOutcome.Completed -> {
+                if (BuildConfig.DEBUG) {
+                    Log.d(QUEUE_PERF_TAG, "queue_repair completed reason=$queueDirtyReason queueSize=${playbackQueue.size} current=$current")
+                }
+                playerQueueNeedsSync = false
+            }
+            is QueueReconcileOutcome.InProgress -> {
+                verifiedLogicalIndices = outcome.verified
+                physicalIndexOffset = outcome.physicalOffset
+                queueRepairCursor = outcome.cursor
+            }
+            is QueueReconcileOutcome.Unsafe -> {
+                verifiedLogicalIndices = emptySet()
+                physicalIndexOffset = 0
+                queueRepairCursor = null
+                if (BuildConfig.DEBUG) {
+                    Log.d(QUEUE_PERF_TAG, "queue_repair unsafe reason=${outcome.reason} dirty=$queueDirtyReason queueSize=${playbackQueue.size} current=$current")
+                }
+            }
+        }
+        return outcome
+    }
+
+    /**
+     * Explicit transport (Next / Previous / queue jump) on a dirty queue: synchronously establish just the target window
+     * (bounded, independent of queue size) so the command is a plain seek. Returns false when the current occurrence or
+     * the target cannot be proven; the caller then falls back to a labelled full re-push. Never navigates to a guess.
+     */
+    private fun repairForTransportTarget(controller: MediaController, targetLogicalIndex: Int): Boolean {
+        val outcome = reconcilePhysicalQueue(controller, budget = 0, priorityIndices = listOf(targetLogicalIndex))
+        return when (outcome) {
+            QueueReconcileOutcome.Completed -> true
+            is QueueReconcileOutcome.InProgress -> targetLogicalIndex in outcome.verified
+            is QueueReconcileOutcome.Unsafe -> false
+        }
+    }
+
+    /** True when an automatic callback cannot be a real advance (see [isStaleAutomaticAdvanceEcho]). Main thread only. */
+    private fun isStaleAutomaticEcho(): Boolean {
+        val resolved = currentPlaybackIndex() ?: return false
+        return isStaleAutomaticAdvanceEcho(
+            resolvedIndex = resolved,
+            syncedIndex = _nowPlayingState.value.currentIndex,
+            queueSize = playbackQueue.size,
+            repeatMode = repeatMode,
+        )
+    }
+
+    /** A natural advance is pure Media3 gapless only if it landed on an index the reconciler verified (id equal there). */
+    private fun naturalAdvanceLandedOnVerifiedIndex(controller: MediaController): Boolean =
+        isVerifiedPhysicalLanding(
+            queue = playbackQueue,
+            controllerIndex = controller.currentMediaItemIndex,
+            controllerSongId = controller.currentMediaItem?.mediaId?.toLongOrNull(),
+            physicalOffset = physicalIndexOffset,
+            verifiedLogicalIndices = verifiedLogicalIndices,
+        )
+
+    private fun queueTimelineFor(controller: MediaController): PhysicalQueueTimeline =
+        PlayerQueueTimeline(controller) { from, to, songs ->
+            controller.replaceMeasuredMediaItems("queue_repair", from, to, songs)
+        }
 
     init {
         scope.launch {
@@ -1101,28 +1342,36 @@ class PlayerController @Inject constructor(
     }
 
     /**
-     * Main thread only. Pushes the app-owned queue/order to the live player exactly once on a warm
-     * reconnect after shuffle changed while the controller was unavailable.
+     * Main thread only. Reconciles the app-owned queue with the live player once on a warm reconnect after the queue (or
+     * shuffle) changed while the controller was unavailable.
      *
-     * Preserves the current queue OCCURRENCE (`_nowPlayingState.currentIndex` is a position, so it is
-     * duplicate-safe and never jumps to an older duplicate) and the live playback position (read
-     * before the reload), so the current song is not restarted and playback is not reset to index 0.
-     * Reuses [syncPlayerQueueAt], which clears [playerQueueNeedsSync] after the push. If the current
-     * occurrence cannot be resolved, the queue is left dirty (the existing non-destructive fallback)
-     * so a later queue operation still synchronizes it.
+     * Large-queue hardening: this no longer re-pushes the whole queue. The reconciler validates the physical timeline
+     * first, repairs a bounded window around the current occurrence synchronously (so a pending Next/seek that follows
+     * resolves against a trusted window) and continues the rest in bounded background chunks. The current occurrence
+     * (`_nowPlayingState.currentIndex` is a position, so it is duplicate-safe and never jumps to an older duplicate) is
+     * never touched, so the song is not restarted and the play/pause state and position are preserved. Only when the current
+     * occurrence cannot be trusted does it fall back to the labelled full re-push, which preserves the live position as
+     * before. If the occurrence cannot be resolved at all the queue stays dirty (the non-destructive fallback).
      */
     private fun synchronizePlayerQueueOnReconnect(controller: MediaController) {
         val occurrence = _nowPlayingState.value.currentIndex
             .takeIf { it in playbackQueue.indices }
             ?: currentPlaybackIndex()?.takeIf { it in playbackQueue.indices }
             ?: return
-        val positionMs = controller.currentPosition.coerceAtLeast(0L)
-        syncPlayerQueueAt(
-            controller = controller,
-            playbackIndex = occurrence,
-            positionMs = positionMs,
-            playWhenReady = controller.isPlaying,
-        )
+        when (reconcilePhysicalQueue(controller, budget = 0, logicalCurrent = occurrence)) {
+            QueueReconcileOutcome.Completed -> Unit
+            is QueueReconcileOutcome.InProgress -> kickQueueRepair()
+            is QueueReconcileOutcome.Unsafe -> {
+                val positionMs = controller.currentPosition.coerceAtLeast(0L)
+                syncPlayerQueueAt(
+                    controller = controller,
+                    playbackIndex = occurrence,
+                    positionMs = positionMs,
+                    playWhenReady = controller.isPlaying,
+                    reason = FullQueueSyncReason.ReconnectCurrentUnprovable,
+                )
+            }
+        }
         syncNowPlayingState()
     }
 
@@ -1647,30 +1896,20 @@ class PlayerController @Inject constructor(
         )
         when (syncPlan.action) {
             BatchQueuePlayerSyncAction.NoOp -> Unit
-            BatchQueuePlayerSyncAction.ReplaceFutureSuffix -> {
-                controller?.replaceMeasuredFutureMediaItems(
-                    operation = "play_all_next_future_suffix",
-                    fromIndex = syncPlan.futureStartIndex,
-                    songs = syncPlan.suffix,
-                ) ?: run {
-                    playerQueueNeedsSync = true
-                }
-            }
-            BatchQueuePlayerSyncAction.FullQueueSync -> {
-                if (controller != null) {
-                    syncPlayerQueueAt(
-                        controller = controller,
-                        playbackIndex = currentPlaybackIndex,
-                        positionMs = controller.currentPosition.coerceAtLeast(0L),
-                        playWhenReady = controller.isPlaying,
+            BatchQueuePlayerSyncAction.ReplaceFutureSpan -> {
+                // Cost scales with the changed span (an insertion is just the batch), never with the queue size.
+                val applied = controller != null && runCatching {
+                    controller.replaceMeasuredMediaItems(
+                        operation = "play_all_next_span",
+                        fromIndex = syncPlan.replaceFromIndex,
+                        toIndexExclusive = syncPlan.replaceToIndexExclusive,
+                        songs = syncPlan.songs,
                     )
-                } else {
-                    playerQueueNeedsSync = true
-                }
+                }.isSuccess
+                if (!applied) markQueueDirty(QueueDirtyReason.BatchMutationFailed)
             }
-            BatchQueuePlayerSyncAction.MarkDirty -> {
-                playerQueueNeedsSync = true
-            }
+            BatchQueuePlayerSyncAction.MarkDirty ->
+                markQueueDirty(syncPlan.dirtyReason ?: QueueDirtyReason.Unknown)
         }
 
         _nowPlayingState.update {
@@ -2012,7 +2251,10 @@ class PlayerController @Inject constructor(
         // Explicit destructive library mutation (not a natural G-1 boundary): push the resulting
         // queue at the planned occurrence. Now Playing is updated from the plan below, never from a
         // controller index that may not be observable yet.
-        syncPlayerQueueAt(controller, plan.currentPlaybackIndex, positionMs = 0L, playWhenReady = wasPlaying)
+        syncPlayerQueueAt(
+            controller, plan.currentPlaybackIndex, positionMs = 0L, playWhenReady = wasPlaying,
+            reason = FullQueueSyncReason.CurrentSongDeleted,
+        )
 
         val newSong = plan.currentSong
         // StatsTracker song transition and session persistence are owned by the Media3 transition callback
@@ -2308,10 +2550,19 @@ class PlayerController @Inject constructor(
             // transition. The queue stays marked dirty during the live Media3 mutation because
             // playlist callbacks can observe intermediate physical state; it is cleared only after
             // BOTH replacements succeed, and stays dirty (deferred recovery) if either throws.
-            val succeeded = applyShuffleAroundCurrent(controller, syncPlan)
-            playerQueueNeedsSync = syncPlan.playerQueueNeedsSync(
-                if (succeeded) ShuffleLiveSyncProgress.Succeeded else ShuffleLiveSyncProgress.Failed,
-            )
+            if (syncPlan.desiredPrefix.size + syncPlan.desiredSuffix.size > MAX_SINGLE_SPAN_REPLACE_ITEMS) {
+                // Large queue: one replace of thousands of items would monopolize a main-thread turn and one IPC message.
+                // The reconciler reorders around the untouched current item in bounded chunks, window ahead of it first.
+                markQueueDirty(QueueDirtyReason.ShuffleReorderDeferred)
+            } else {
+                val succeeded = applyShuffleAroundCurrent(controller, syncPlan)
+                playerQueueNeedsSync = syncPlan.playerQueueNeedsSync(
+                    if (succeeded) ShuffleLiveSyncProgress.Succeeded else ShuffleLiveSyncProgress.Failed,
+                )
+                if (!succeeded) markQueueDirty(QueueDirtyReason.ShuffleLiveSyncFailed)
+            }
+        } else if (playerQueueNeedsSync) {
+            markQueueDirty(QueueDirtyReason.ShuffleReorderDeferred)
         }
         if (controller == null) {
             // Demand-driven: bring the controller back so the reconnect drain can push the new order.
@@ -3355,6 +3606,11 @@ class PlayerController @Inject constructor(
     // doing, i.e. the pre-Phase-8 behaviour). Bad-media recovery passes the episode's captured
     // intent explicitly because at error time controller.isPlaying is already false in STATE_IDLE:
     // true resumes the recovered track, false leaves it paused (never auto-starting a paused user).
+    //
+    // Large-queue hardening: aligned -> a plain seekTo. Dirty -> the reconciler establishes only the target window
+    // (bounded, independent of queue size) and the command is then a plain seekTo at the physical index of the target;
+    // the rest of the timeline is repaired in the background. A full re-push happens only when the current occurrence
+    // or the target cannot be proven (never a guessed duplicate).
     private fun seekToPlaybackIndex(
         controller: MediaController,
         playbackIndex: Int,
@@ -3363,7 +3619,16 @@ class PlayerController @Inject constructor(
         lastKnownPositionMs = -1L
         val shouldPlay = forcePlay ?: controller.isPlaying
         if (playerQueueNeedsSync) {
-            syncPlayerQueueAt(controller, playbackIndex, positionMs = 0L, playWhenReady = shouldPlay)
+            if (repairForTransportTarget(controller, playbackIndex)) {
+                // Completed clears the flag (offset 0); otherwise the physical index is the logical one plus the offset.
+                controller.seekTo(playbackIndex + physicalIndexOffset, 0L)
+                kickQueueRepair()
+            } else {
+                syncPlayerQueueAt(
+                    controller, playbackIndex, positionMs = 0L, playWhenReady = shouldPlay,
+                    reason = FullQueueSyncReason.TransportTargetUnprovable,
+                )
+            }
         } else {
             controller.seekTo(playbackIndex, 0L)
         }
@@ -3379,19 +3644,25 @@ class PlayerController @Inject constructor(
 
     /**
      * The only place the app touches the player at a natural track boundary. Media3 has already
-     * advanced natively; when the player playlist is in step with the logical queue (the normal
+     * advanced natively. When the player playlist is in step with the logical queue (the normal
      * case) this returns false and WavDrop merely follows state, preserving native gapless
-     * playback (see [MediaItemTransitionKind]). It intervenes — a full re-push of the queue, which
-     * is NOT gapless — only while [playerQueueNeedsSync] says the player's order is stale (e.g. a
-     * deferred shuffle reorder, or a queue op that could not reach the player).
+     * playback (see [MediaItemTransitionKind]). While the queue is still dirty (a deferred shuffle reorder, or
+     * a queue op that could not reach the player) the reconciler has already verified the window ahead of the current
+     * item, so a boundary that landed on a verified index is ALSO pure native gapless (no re-push). Only a boundary
+     * that landed on an unverified index intervenes with a full re-push (NOT gapless) as the labelled last resort.
      */
     private fun handlePendingAutomaticTransition(): Boolean {
         if (!naturalTransitionRequiresQueueResync(MediaItemTransitionKind.Auto, playerQueueNeedsSync)) {
             return false
         }
         val controller = mediaController ?: return false
+        if (naturalAdvanceLandedOnVerifiedIndex(controller)) {
+            // Follow state exactly like an aligned boundary and keep repairing outward from the new current item.
+            kickQueueRepair()
+            return false
+        }
         if (BuildConfig.DEBUG) {
-            Log.d(GAPLESS_TAG, "natural boundary requires queue resync (playerQueueNeedsSync): full queue re-push, not native gapless")
+            Log.d(GAPLESS_TAG, "natural boundary on an unverified index: full queue re-push, not native gapless")
         }
         val currentPlaybackIndex = _nowPlayingState.value.currentIndex
             .takeIf { it in playbackQueue.indices }
@@ -3408,6 +3679,7 @@ class PlayerController @Inject constructor(
                 playbackIndex = currentPlaybackIndex,
                 positionMs = 0L,
                 playWhenReady = false,
+                reason = FullQueueSyncReason.NaturalBoundaryUnverified,
             )
             controller.pause()
             syncNowPlayingState(fromTransition = true)
@@ -3420,21 +3692,35 @@ class PlayerController @Inject constructor(
             playbackIndex = nextPlaybackIndex,
             positionMs = 0L,
             playWhenReady = wasPlaying,
+            reason = FullQueueSyncReason.NaturalBoundaryUnverified,
         )
         syncNowPlayingState(fromTransition = true)
         saveSessionAsync()
         return true
     }
 
+    /**
+     * FULL physical re-push (`setMediaItems` of the whole playbackQueue + prepare). This is a LAST-RESORT recovery, not
+     * routine transport: it is reached only when the physical timeline cannot be proven or repaired incrementally (see
+     * [FullQueueSyncReason]) or for a fresh/destructive queue change. It is the one place that clears the dirty state besides a
+     * completed reconciliation, and every use is logged with its reason, queue size and current index.
+     */
     private fun syncPlayerQueueAt(
         controller: MediaController,
         playbackIndex: Int,
         positionMs: Long,
         playWhenReady: Boolean,
+        reason: FullQueueSyncReason,
     ) {
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                QUEUE_PERF_TAG,
+                "full_queue_sync reason=$reason queueSize=${playbackQueue.size} currentIndex=$playbackIndex dirtyReason=$queueDirtyReason",
+            )
+        }
         playerQueueNeedsSync = false
         controller.setMeasuredMediaItems(
-            operation = "sync_player_queue",
+            operation = "sync_player_queue:$reason",
             songs = playbackQueue,
             startIndex = playbackIndex,
             positionMs = positionMs,
@@ -3627,6 +3913,8 @@ class PlayerController @Inject constructor(
             stateIndex = state.currentIndex,
             stateSongId = state.song?.id,
             playerQueueNeedsSync = playerQueueNeedsSync,
+            verifiedLogicalIndices = verifiedLogicalIndices,
+            physicalIndexOffset = physicalIndexOffset,
         )
     }
 
@@ -3720,13 +4008,22 @@ class PlayerController @Inject constructor(
         )
     }
 
-    private fun MediaController.replaceMeasuredFutureMediaItems(
+    /**
+     * One bounded Media3 `replaceMediaItems(from, toExclusive, songs)` (empty [songs] removes, `from == to` inserts) with the
+     * same debug accounting as the other measured mutations: materialization is timed separately from the Media3 mutation.
+     */
+    private fun MediaController.replaceMeasuredMediaItems(
         operation: String,
         fromIndex: Int,
+        toIndexExclusive: Int,
         songs: List<Song>,
     ) {
+        if (songs.isEmpty()) {
+            if (toIndexExclusive > fromIndex) removeMediaItems(fromIndex, toIndexExclusive)
+            return
+        }
         if (!BuildConfig.DEBUG) {
-            replaceMediaItems(fromIndex, mediaItemCount, materializeMediaItems(songs).mediaItems)
+            replaceMediaItems(fromIndex, toIndexExclusive, materializeMediaItems(songs).mediaItems)
             return
         }
         val totalStartedAtMs = SystemClock.elapsedRealtime()
@@ -3734,7 +4031,7 @@ class PlayerController @Inject constructor(
         val materialization = materializeMediaItems(songs)
         val materializationElapsedMs = SystemClock.elapsedRealtime() - materializationStartedAtMs
         val mutationStartedAtMs = SystemClock.elapsedRealtime()
-        replaceMediaItems(fromIndex, mediaItemCount, materialization.mediaItems)
+        replaceMediaItems(fromIndex, toIndexExclusive, materialization.mediaItems)
         val mutationElapsedMs = SystemClock.elapsedRealtime() - mutationStartedAtMs
         logQueuePerf(
             operation = operation,

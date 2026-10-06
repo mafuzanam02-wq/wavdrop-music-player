@@ -589,3 +589,13 @@ Run on a real device; use the debug build and filter logcat by tag `WavdropArtwo
 - [ ] E. Populated Home: More options > Rescan library; no duplicate scan; the library stays visible with a thin progress bar while scanning.
 - [ ] F. Induced scan failure where practical: the existing library stays, "Library scan couldn't complete" shows, Try again works and a success clears the card.
 - [ ] G. Songs: pull-to-refresh still rescans and the spinner stops.
+
+## Large-queue interactive latency (post-Beta 10; NOT yet validated on a device)
+
+Use a genuinely large library/queue if available (Debug builds log `WavdropQueuePerf` lines: `full_queue_sync reason=...`, `queue_repair ...`, materializationMs / media3MutationMs).
+
+- [ ] A. 1k+ queue: Next, Previous, queue jump, Play Next, Add to Queue, remove, reorder and shuffle ON/OFF each respond immediately (no multi-second freeze).
+- [ ] B. Largest available queue: the same interactions.
+- [ ] C. Dirty/recovery scenario if reproducible: disconnect/reconnect the controller/service, mutate the queue (Play Next, shuffle), press Next; no multi-second freeze, the current song does not restart, paused stays paused and playing stays playing.
+- [ ] D. Natural end-of-track on a large queue (including right after a shuffle toggle): no long delay before the next track. In Debug logs there should be no `full_queue_sync reason=NaturalBoundaryUnverified`.
+- [ ] E. Crossfade enabled on a large queue: no interaction freeze or regression.

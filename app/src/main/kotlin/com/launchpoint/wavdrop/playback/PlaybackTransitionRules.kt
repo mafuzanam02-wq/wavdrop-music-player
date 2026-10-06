@@ -42,3 +42,23 @@ internal fun naturalTransitionRequiresQueueResync(
     kind: MediaItemTransitionKind,
     playerQueueNeedsSync: Boolean,
 ): Boolean = kind.isNaturalAdvance && playerQueueNeedsSync
+
+/**
+ * A Media3 MediaController re-reports a STALE automatic discontinuity / media-item transition (the old
+ * `0 -> startIndex` pair from the last real discontinuity) after EVERY controller-issued playlist mutation, including pure
+ * repairs that never touch the current item (observed on real Media3: the server player emits only a timeline change). Such an
+ * echo must not reach stats, the sleep timer or session ownership as if the song had changed.
+ *
+ * A genuine natural advance always lands on a different logical occurrence than the one Now Playing last synced, so an
+ * automatic callback whose resolved occurrence equals the synced one is an echo, unless the queue can legitimately loop onto
+ * the same occurrence (Repeat ONE, or Repeat ALL over a single item), which keeps the existing loop handling.
+ */
+internal fun isStaleAutomaticAdvanceEcho(
+    resolvedIndex: Int,
+    syncedIndex: Int,
+    queueSize: Int,
+    repeatMode: RepeatMode,
+): Boolean {
+    val selfLoopPossible = repeatMode == RepeatMode.ONE || (repeatMode == RepeatMode.ALL && queueSize == 1)
+    return resolvedIndex == syncedIndex && !selfLoopPossible
+}

@@ -3,7 +3,7 @@
 Concise handoff/state document. For technical depth see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for
 decisions and backlog see [ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md).
 
-**Implementation baseline:** post-Beta 10 engineering after WC-10 (Wave C closed) and library access & scan recovery UX (physical QA pending). Update this paragraph when the project state changes materially.
+**Implementation baseline:** post-Beta 10 engineering after WC-10 (Wave C closed) and library access & scan recovery UX and large-queue interactive latency hardening (physical QA pending). Update this paragraph when the project state changes materially.
 
 ## What is WavDrop?
 
