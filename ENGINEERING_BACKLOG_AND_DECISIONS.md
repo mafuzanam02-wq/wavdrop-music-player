@@ -481,7 +481,8 @@ tracks. Status was re-checked against code after CF-2C3.
 | WC-02 | **Resolved** - no production screen or ViewModel subscribes to the full `track_listen_events` entity history any more. Home and Songs were decoupled earlier; Monthly Reports, Wrapped, Insights, Statistics, Most Played details and Diagnostics now use a COUNT, PLAY+SKIP / PLAY timestamps, or one selected period range (`listenEventsInRange`). `allListenEvents()` / `observeAll()` remain only as documented full-history entity primitives with no production caller. Insights still groups full-history PLAY timestamps by day/hour in memory until WC-09 |
 | WC-03 | **Resolved** - `LibrarySearchIndex` precomputes normalized fields once per library change |
 | WC-05 | **Partially addressed** - Home Wrapped preview is bounded to the latest year via a ranged query; still recomputed on event changes |
-| WC-04, WC-06..WC-11 | Open (unchanged) |
+| WC-04 | **Resolved** - Home Recently/Most Played previews are ranked and limited in SQLite (`observeRecentlyListenedPreview` / `observeMostPlayedPreview`, `LIMIT 4`); Home no longer reads or sorts the full stats table. The queries `INNER JOIN songs` BEFORE the LIMIT, so orphan stats (history survives deletion) never consume a slot; ties break by `songId ASC` explicitly (the old Kotlin tie order was only incidental). Recently Played uses `lastListenedAt`, not `lastPlayedAt`. No schema change, no new index. `getMostPlayed()` / `getRecentlyPlayed()` / `allTrackStatsEntities()` are unchanged for other consumers |
+| WC-06..WC-11 | Open (unchanged); WC-11 (`songsById` map in `dashboardState`) is deliberately still open |
 
 Descriptions below are the original audit observations; rows marked Resolved above are retained for
 history.
@@ -670,6 +671,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
       AK-1 app-kill / task-removal lifecycle hardening: pure `TaskRemovalPlaybackPolicy.decide(player)` over the session-facing player (NEXT/RETIRING never count), onTaskRemoved leaves crossfade untouched, teardown order and callback clearing pinned by tests, crossfade blocked until the persisted EQ state is known after recreation; see D-28.
       BP-1 `.bpstat` field-2 semantic correction: field 2 is a PERIOD play count (not skips); parser/model/UI/result corrected, `skipCount` is never touched by an import, no retroactive skip repair; see D-29 and WAVDROP_IMPORT_RULES.md.
       WC-02 resolved: Monthly Reports, Wrapped, Insights, Statistics, Most Played and Diagnostics read counts, PLAY/SKIP timestamps or one selected period range instead of the full event entity history (month/year membership stays in Kotlin ZoneId logic, not SQL); analytics meaning unchanged; WC-09 (full-history day/hour grouping) remains open.
+      WC-04 resolved: Home previews rank, live-song-filter (INNER JOIN before LIMIT) and limit in SQLite with an explicit songId ASC tie-break; analytics unchanged; WC-11 remains open.
    h. Final gate flip after passed validation - complete (CF-2N2).
 9. Physical Bluetooth / background / wired / EQ-policy validation - complete (CF-2N1 sign-off).
 
@@ -686,7 +688,7 @@ items were validated; the gate is now true, see CF-2N2 below.)
 
 ### Beta 10
 
-- Remaining Wave C MEDIUM performance items (WC-04…WC-09).
+- Remaining Wave C MEDIUM performance items (WC-06…WC-09).
 - Additional Delete entry points (pending accidental-deletion risk review).
 - Broader folder exclusion list (Telegram/Signal/Messenger/Downloads/Recordings) and the general
   block/allow list evaluation.

@@ -17,6 +17,7 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 import com.launchpoint.wavdrop.data.model.TrackStats
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 import javax.inject.Inject
@@ -144,6 +145,14 @@ class StatsRepository @Inject constructor(
 
     fun allTrackStatsEntities(): Flow<List<TrackStatsEntity>> =
         dao.getAllStats()
+
+    /** At most [limit] live-song stats rows, most played first (WC-04). A non-positive [limit] yields an empty list. */
+    fun mostPlayedPreview(limit: Int): Flow<List<TrackStatsEntity>> =
+        if (limit <= 0) flowOf(emptyList()) else dao.observeMostPlayedPreview(limit)
+
+    /** At most [limit] live-song stats rows, most recently listened (lastListenedAt) first (WC-04). Non-positive [limit] -> empty. */
+    fun recentlyListenedPreview(limit: Int): Flow<List<TrackStatsEntity>> =
+        if (limit <= 0) flowOf(emptyList()) else dao.observeRecentlyListenedPreview(limit)
 
     fun statsForSongs(songIds: List<Long>): Flow<List<TrackStats>> =
         dao.getStatsForSongs(songIds).map { list -> list.map(TrackStatsEntity::toDomain) }

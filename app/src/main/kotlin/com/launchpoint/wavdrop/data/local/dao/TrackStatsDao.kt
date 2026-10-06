@@ -33,6 +33,33 @@ interface TrackStatsDao {
     @Query("SELECT * FROM track_stats WHERE lastPlayedAt > 0 ORDER BY lastPlayedAt DESC")
     fun getRecentlyPlayed(): Flow<List<TrackStatsEntity>>
 
+    /**
+     * Home Most Played preview (WC-04). Ranks and limits in SQLite. The INNER JOIN to `songs` happens BEFORE the LIMIT so stats rows
+     * that outlive their song (history intentionally survives deletion) never consume a preview slot. `songId ASC` is the explicit,
+     * deterministic tie-break (the old Kotlin sort was stable over an unordered read). Room observes both referenced tables.
+     */
+    @Query("""
+        SELECT ts.* FROM track_stats AS ts
+        INNER JOIN songs AS s ON s.id = ts.songId
+        WHERE ts.playCount > 0
+        ORDER BY ts.playCount DESC, ts.songId ASC
+        LIMIT :limit
+    """)
+    fun observeMostPlayedPreview(limit: Int): Flow<List<TrackStatsEntity>>
+
+    /**
+     * Home Recently Played preview (WC-04). Uses lastListenedAt (the >=5s listening-start timestamp), NOT lastPlayedAt. Same
+     * live-song INNER JOIN before LIMIT and `songId ASC` tie-break as [observeMostPlayedPreview].
+     */
+    @Query("""
+        SELECT ts.* FROM track_stats AS ts
+        INNER JOIN songs AS s ON s.id = ts.songId
+        WHERE ts.lastListenedAt > 0
+        ORDER BY ts.lastListenedAt DESC, ts.songId ASC
+        LIMIT :limit
+    """)
+    fun observeRecentlyListenedPreview(limit: Int): Flow<List<TrackStatsEntity>>
+
     @Query("SELECT * FROM track_stats ORDER BY skipCount DESC")
     fun getMostSkipped(): Flow<List<TrackStatsEntity>>
 

@@ -7,6 +7,7 @@ import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
+import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.ListeningPeriodRange
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.model.WrappedSummary
@@ -62,6 +63,10 @@ import javax.inject.Inject
 
 private const val DASHBOARD_SONG_PREVIEW_LIMIT = 4
 private const val DASHBOARD_COLLECTION_PREVIEW_LIMIT = 3
+
+/** Maps the already-bounded, SQL-ranked stats rows (live songs only) onto the current song objects, preserving SQL order. */
+internal fun homePreviewSongs(rankedStats: List<TrackStatsEntity>, songsById: Map<Long, Song>): List<Song> =
+    rankedStats.mapNotNull { songsById[it.songId] }
 
 // Matches the debounce already used by songSearchResults so both Home search pipelines
 // coalesce keystrokes consistently (WC-01).
@@ -296,27 +301,26 @@ class HomeViewModel @Inject constructor(
         selectHomeSmartCollections(collections, configuredOrder)
     }
 
+    // Bounded Home previews (WC-04): SQLite ranks, filters (live songs only, before LIMIT) and limits to
+    // DASHBOARD_SONG_PREVIEW_LIMIT rows each, so Home never receives or sorts the whole track_stats table.
+    private val previewStats: Flow<Pair<List<TrackStatsEntity>, List<TrackStatsEntity>>> = combine(
+        statsRepository.recentlyListenedPreview(DASHBOARD_SONG_PREVIEW_LIMIT),
+        statsRepository.mostPlayedPreview(DASHBOARD_SONG_PREVIEW_LIMIT),
+    ) { recent, most -> recent to most }
+
     val dashboardState: StateFlow<HomeDashboardUiState> = combine(
         allSongs,
-        statsRepository.allTrackStatsEntities(),
+        previewStats,
         playlistRepository.observePlaylists(),
         homeSmartCollections,
         wrappedPreview,
-    ) { songs, stats, playlists, smartCollections, latestWrapped ->
+    ) { songs, (recentStats, mostStats), playlists, smartCollections, latestWrapped ->
         val loadedSongs = songs.orEmpty()
-        val songsById = loadedSongs.associateBy { it.id }
+        val songsById = loadedSongs.associateBy { it.id } // WC-11 still tracks avoiding this allocation
         HomeDashboardUiState(
             totalSongs = loadedSongs.size,
-            recentlyPlayed = stats
-                .filter { it.lastListenedAt > 0 }
-                .sortedByDescending { it.lastListenedAt }
-                .mapNotNull { songsById[it.songId] }
-                .take(DASHBOARD_SONG_PREVIEW_LIMIT),
-            mostPlayed = stats
-                .filter { it.playCount > 0 }
-                .sortedByDescending { it.playCount }
-                .mapNotNull { songsById[it.songId] }
-                .take(DASHBOARD_SONG_PREVIEW_LIMIT),
+            recentlyPlayed = homePreviewSongs(recentStats, songsById),
+            mostPlayed = homePreviewSongs(mostStats, songsById),
             playlists = playlists.take(DASHBOARD_COLLECTION_PREVIEW_LIMIT),
             smartCollections = smartCollections,
             wrapped = latestWrapped,
