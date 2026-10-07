@@ -23,6 +23,11 @@ internal data class CrossfadeRuntimeSnapshot(
     val controllerConnected: Boolean,
     /** CF-2I2: runtime compatibility fact only (the service composes it; the controller never owns EQ settings). */
     val equalizerEnabled: Boolean = false,
+    /**
+     * ST-1: a sleep-timer terminal boundary is armed on the current occurrence. The armed occurrence must be the last audible one,
+     * so no crossfade may be planned, prepared or promoted across it. Owned by [PlayerController] (it owns the timer state).
+     */
+    val sleepBoundaryArmed: Boolean = false,
 )
 
 /** Delegates to CF-1 [planCrossfadeTransition]; an unknown occurrence maps to an invalid index. */
@@ -39,6 +44,7 @@ internal fun planCrossfadeFromRuntimeSnapshot(
     isExternalPlayback = snapshot.isExternalPlayback,
     playerQueueNeedsSync = snapshot.playerQueueNeedsSync,
     equalizerEnabled = snapshot.equalizerEnabled,
+    sleepBoundaryArmed = snapshot.sleepBoundaryArmed,
     currentDurationMs = currentDurationOverrideMs,
 )
 

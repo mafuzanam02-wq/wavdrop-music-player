@@ -186,10 +186,12 @@ fun NowPlayingScreen(
     }
     val sleepTimerLabel: String? = when {
         !sleepTimerState.isActive -> null
-        sleepTimerState.option == SleepTimerOption.END_OF_CURRENT_SONG -> "Sleep Timer: End of song"
+        // Armed (standalone, or a duration timer whose countdown is over): no countdown is shown, it is waiting for the song.
+        sleepTimerState.isFinishingCurrentTrack -> "Sleep Timer: Finishing current track"
         else -> sleepTimerState.endsAtMs?.let { endsAtMs ->
             val remaining = (endsAtMs - sleepTimerNowMs).coerceAtLeast(0L)
-            "Sleep Timer: %d:%02d".format(remaining / 60_000L, (remaining % 60_000L) / 1_000L)
+            val finish = if (sleepTimerState.finishCurrentTrack) " · then finish song" else ""
+            "Sleep Timer: %d:%02d%s".format(remaining / 60_000L, (remaining % 60_000L) / 1_000L, finish)
         }
     }
 
@@ -365,12 +367,12 @@ fun NowPlayingScreen(
     if (showSleepTimerDialog) {
         SleepTimerDialog(
             state = sleepTimerState,
-            onOptionSelected = { option ->
-                viewModel.setSleepTimer(option)
+            onOptionSelected = { option, finishCurrentTrack ->
+                viewModel.setSleepTimer(option, finishCurrentTrack)
                 showSleepTimerDialog = false
             },
-            onCustomDurationSelected = { durationMs ->
-                viewModel.setCustomSleepTimer(durationMs)
+            onCustomDurationSelected = { durationMs, finishCurrentTrack ->
+                viewModel.setCustomSleepTimer(durationMs, finishCurrentTrack)
                 showSleepTimerDialog = false
             },
             onDismiss = { showSleepTimerDialog = false },

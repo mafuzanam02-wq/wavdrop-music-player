@@ -506,9 +506,11 @@ class HomeViewModel @Inject constructor(
 
     fun cycleRepeatMode() = playerController.cycleRepeatMode()
 
-    fun setSleepTimer(option: SleepTimerOption) = playerController.setSleepTimer(option)
+    fun setSleepTimer(option: SleepTimerOption, finishCurrentTrack: Boolean = false) =
+        playerController.setSleepTimer(option, finishCurrentTrack)
 
-    fun setCustomSleepTimer(durationMs: Long) = playerController.setCustomSleepTimer(durationMs)
+    fun setCustomSleepTimer(durationMs: Long, finishCurrentTrack: Boolean = false) =
+        playerController.setCustomSleepTimer(durationMs, finishCurrentTrack)
 }
 
 internal fun isFolderModeNeedsSelection(settings: LibraryScanSettings): Boolean =

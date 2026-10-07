@@ -58,6 +58,21 @@ internal class PlaybackAssembly(
         if (engine != null) engine.addCurrentPlayerListener(listener) else primaryPlayer.addListener(listener)
     }
 
+    /**
+     * ST-1: makes every physical player pause at the natural end of the current media item instead of advancing, repeating or
+     * wrapping (Media3 pause-at-end-of-media-items; verified for Repeat Off/One/All against a real ExoPlayer). Both slots are
+     * set together so the flag can never disagree with which one is current. The sleep timer arms it for the terminal occurrence
+     * and clears it when the boundary is consumed or cancelled.
+     */
+    @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+    fun setPauseAtEndOfMediaItems(enabled: Boolean) {
+        primaryPlayer.pauseAtEndOfMediaItems = enabled
+        engine?.let {
+            it.currentPlayer.pauseAtEndOfMediaItems = enabled
+            it.nextPlayer.pauseAtEndOfMediaItems = enabled
+        }
+    }
+
     /** The user's "pause on audio disconnect" preference, routed to the single noisy owner of this topology. */
     @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
     fun setHandleAudioBecomingNoisy(enabled: Boolean) {

@@ -48,6 +48,8 @@ internal fun crossfadeOwnershipLossReason(
     !snapshot.isPlaying -> CrossfadeCancelReason.Pause
     // EQ became enabled; an overlap would mix processed and unprocessed audio (defensive fallback to the service seam).
     snapshot.equalizerEnabled -> CrossfadeCancelReason.PlanInvalidated
+    // ST-1: an armed sleep boundary means the CF-1 plan no longer holds (the current occurrence is the last audible one).
+    snapshot.sleepBoundaryArmed -> CrossfadeCancelReason.PlanInvalidated
     snapshot.queueGeneration != key.queueGeneration -> CrossfadeCancelReason.QueueMutation
     snapshot.currentPlaybackIndex != key.fromPlaybackIndex -> CrossfadeCancelReason.ManualNavigation
     key.fromPlaybackIndex !in snapshot.playbackQueue.indices ||
@@ -109,6 +111,14 @@ internal val SHUFFLE_CHANGE_CANCEL_REASON = CrossfadeCancelReason.ShuffleChanged
 /** PlayerController.toggleShuffle, before shuffle planning or the queue-generation bump. */
 internal fun recoverCrossfadeFromShuffleChange(runtime: CrossfadeCancelSink?) {
     runtime?.cancel(SHUFFLE_CHANGE_CANCEL_REASON)
+}
+
+/** The cancel reason when a sleep-timer terminal boundary becomes armed (the CF-1 plan no longer holds). Settles an active overlap to B. */
+internal val SLEEP_BOUNDARY_CANCEL_REASON = CrossfadeCancelReason.PlanInvalidated
+
+/** A sleep-timer terminal boundary was just armed on the logical CURRENT occurrence: end any owned preparation/overlap, once. */
+internal fun recoverCrossfadeFromSleepBoundary(runtime: CrossfadeCancelSink?) {
+    runtime?.cancel(SLEEP_BOUNDARY_CANCEL_REASON)
 }
 
 /** The cancel reason of an explicit Play Next-family queue mutation. */

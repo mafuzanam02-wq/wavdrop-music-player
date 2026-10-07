@@ -40,6 +40,8 @@ internal enum class CrossfadeUnavailableReason {
     NotPlaying,
     /** CF-2I2: the WavDrop Equalizer is enabled on the primary session only, so an overlap would mix processed and unprocessed audio. */
     EqualizerEnabled,
+    /** ST-1: a sleep-timer terminal boundary is armed on the current occurrence; it must be the last audible one. */
+    SleepBoundaryArmed,
     RepeatOne,
     QueueTooShort,
     InvalidCurrentIndex,
@@ -87,6 +89,7 @@ internal fun planCrossfadeTransition(
     playerQueueNeedsSync: Boolean,
     equalizerEnabled: Boolean = false,
     currentDurationMs: Long? = null,
+    sleepBoundaryArmed: Boolean = false,
 ): CrossfadeTransitionPlan {
     fun unavailable(reason: CrossfadeUnavailableReason) = CrossfadeTransitionPlan.Unavailable(reason)
 
@@ -99,6 +102,8 @@ internal fun planCrossfadeTransition(
     // CF-2I2: precedence Disabled > ExternalPlayback > PlayerQueueNeedsSync > NotPlaying > EqualizerEnabled > RepeatOne > queue/duration.
     // The primary alone carries the Equalizer and the secondary has none, so EQ takes precedence over crossfade.
     if (equalizerEnabled) return unavailable(CrossfadeUnavailableReason.EqualizerEnabled)
+    // ST-1: precedence ... > EqualizerEnabled > SleepBoundaryArmed > RepeatOne. A terminal sleep boundary outranks automatic continuation.
+    if (sleepBoundaryArmed) return unavailable(CrossfadeUnavailableReason.SleepBoundaryArmed)
     if (repeatMode == RepeatMode.ONE) return unavailable(CrossfadeUnavailableReason.RepeatOne)
     if (playbackQueue.size < 2) return unavailable(CrossfadeUnavailableReason.QueueTooShort)
     if (currentPlaybackIndex !in playbackQueue.indices) {

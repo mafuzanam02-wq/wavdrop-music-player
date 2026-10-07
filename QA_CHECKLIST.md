@@ -111,7 +111,7 @@ background behaviour can only be validated on hardware.
 | Select 15 minutes. | Settings row shows 15 minutes. | |
 | Select Off after setting a timer. | Settings row returns to Off and timer does not pause playback later. | |
 | Select End of current song and let the song finish. | Playback pauses/stops after the current item completes. | |
-| Select End of current song with repeat one active. | Playback pauses/stops at the repeat boundary. | |
+| Select End of current song with repeat one active. | The song finishes once and playback stops at its end; it does not loop (see ST-1 below for the full matrix). | |
 | Kill the app process after setting a timer. | Timer does not need to survive; no crash or stale UI on relaunch. | |
 
 ## 8. Lyrics
@@ -640,3 +640,20 @@ Nothing below has been run on a device. Do not tick items until the user has ver
 - [ ] N. Audio files are untouched by backup, verification, Merge and Recovery.
 - [ ] O. After a restore from a `.wdbk`, restart the app: the restored state persists.
 - [ ] P. (Engineering check, not a user workflow.) Run the instrumented `LegacyExportTieOrderInstrumentedTest` (`./gradlew connectedDebugAndroidTest --tests "*LegacyExportTieOrderInstrumentedTest"`) on a device/emulator: the real `getAllSnapshot()` equal-timestamp order and the streamed WDBK fingerprint must agree (null-vs-empty `eventId` edge). A failure is a compatibility finding. Compiled in the WDBK-1 slice; not yet executed on hardware.
+
+## ST-1 Sleep Timer: Finish current track (implemented; PHYSICAL VALIDATION PENDING)
+
+Nothing below has been run on a device. Do not tick items until the user has verified them on hardware. Open Sleep Timer from Now Playing, Home or Settings -> Playback: the dialog offers Off, 15/30/45/60 minutes, Custom, End of current song, and an independent **Finish current track** switch ("After the timer ends, stop when the current song finishes."). Use a custom 1-minute timer for the short checks and a song longer than a few minutes.
+
+- [ ] A. Custom 1 minute, Finish current track OFF: playback pauses immediately at expiry and the timer indicator disappears.
+- [ ] B. Custom 1 minute, Finish current track ON: at expiry playback CONTINUES, the label changes from the countdown to "Finishing current track" (no 0:00), and playback stops at the natural end of the song that was playing at expiry (not the one playing when the timer was set).
+- [ ] C. Repeat One + Finish ON: the song finishes once and does not loop; Repeat One is still selected afterwards.
+- [ ] D. Repeat All + Finish ON in the middle of the queue: playback stops at the end of that song; the next song does not start or become Now Playing.
+- [ ] E. Repeat All + Finish ON on the FINAL song: playback stops at its end; the queue does not wrap to the first song.
+- [ ] F. Crossfade ON (e.g. 6 s) + Finish ON: the armed song does not crossfade into the next song; it plays at full volume to its end and stops. Also try arming during the fade window.
+- [ ] G. Duplicate songs: queue the same song at two positions, let the SECOND occurrence play, arm Finish ON: that occurrence is the one that stops (not the first, not the next).
+- [ ] H. Seek inside the terminal song while armed: it still stops at its end.
+- [ ] I. After the timer is armed ("Finishing current track"): Pause clears it (Play then continues normally to the next song); Next/Previous clear it and navigate normally; tapping another song / starting a new queue clears it.
+- [ ] J. Standalone End of current song still works (with and without Repeat One/All and with crossfade); selecting Off clears it.
+- [ ] K. Kill the app process while a timer or the "Finishing current track" state is active: after restart there is no timer and nothing stops playback.
+- [ ] L. Shuffle ON, arm Finish ON, then toggle shuffle: playback still stops at the end of the same song.

@@ -217,6 +217,13 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitQueueReplacementListener { recoverCrossfadeFromQueueReplacement(crossfadeCancelSink) }
         // CF-2F4: an authoritative MediaController disconnect notifies this callback (cleared in onDestroy).
         playerController.setControllerDisconnectedListener { recoverCrossfadeFromControllerDisconnected(crossfadeCancelSink) }
+        // ST-1: a sleep-timer terminal boundary armed/released. Armed: end any owned NEXT preparation/overlap (the armed occurrence
+        // is the last audible one) and make the physical players pause at the natural end of the current item instead of advancing,
+        // repeating or wrapping. Released: restore normal continuation. Cleared in onDestroy; replays the current state once when set.
+        playerController.setSleepBoundaryListener { armed ->
+            if (armed) recoverCrossfadeFromSleepBoundary(crossfadeCancelSink)
+            assembly.setPauseAtEndOfMediaItems(armed)
+        }
         // CF-2M2: physical ExoPlayer -> SessionFacade -> PreviousBehaviorPlayer -> MediaLibrarySession. The façade is bound
         // ONLY behind the single rollout gate (no second flag): with the gate false (shipping) the chain is exactly the
         // pre-CF-2M2 ExoPlayer -> PreviousBehaviorPlayer, so shipping behaviour and rollback surface are unchanged. The
@@ -462,6 +469,7 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitLibraryDeletionListener(null)
         playerController.setExplicitQueueReplacementListener(null)
         playerController.setControllerDisconnectedListener(null)
+        playerController.setSleepBoundaryListener(null)
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)

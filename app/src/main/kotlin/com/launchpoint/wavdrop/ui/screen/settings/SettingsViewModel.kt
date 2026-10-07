@@ -484,12 +484,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { audioEnhancementsRepository.setEqWavdropPreset(id) }
     }
 
-    fun setSleepTimer(option: SleepTimerOption) {
-        playerController.setSleepTimer(option)
+    fun setSleepTimer(option: SleepTimerOption, finishCurrentTrack: Boolean = false) {
+        playerController.setSleepTimer(option, finishCurrentTrack)
     }
 
-    fun setCustomSleepTimer(durationMs: Long) {
-        playerController.setCustomSleepTimer(durationMs)
+    fun setCustomSleepTimer(durationMs: Long, finishCurrentTrack: Boolean = false) {
+        playerController.setCustomSleepTimer(durationMs, finishCurrentTrack)
     }
 
     fun setNotificationControlsSetting(setting: NotificationControlsSetting) {

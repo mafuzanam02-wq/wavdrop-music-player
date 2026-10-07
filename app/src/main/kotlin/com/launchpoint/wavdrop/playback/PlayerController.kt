@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -634,6 +635,10 @@ class PlayerController @Inject constructor(
         const val BLUETOOTH_RESUME_DEBOUNCE_MS = 1_500L
         const val MEDIA_ITEM_CACHE_MAX_SIZE = 12_288
         const val QUEUE_REPAIR_CHUNK_ITEMS = 256
+        /** ST-1: a stop within this distance of the item end counts as its natural end (a pause-at-end reports position = duration). */
+        const val SLEEP_NATURAL_END_TOLERANCE_MS = 750L
+        /** ST-1: the second AUTO callback of one escaped boundary arrives within this window and is swallowed. */
+        const val SLEEP_ESCAPE_ECHO_WINDOW_MS = 2_000L
 
         const val DEBUG_STATS = false
     }
@@ -788,6 +793,14 @@ class PlayerController @Inject constructor(
     private var wiredResumeJob: Job? = null
     private var sleepTimerJob: Job? = null
 
+    // ST-1: the lifecycle-scoped owner (PlaybackService) is told when the terminal boundary arms/releases so it can end any
+    // owned crossfade and toggle the physical pause-at-end. The deferred rebind re-validates an armed boundary after a queue
+    // mutation (one main-thread turn later, once the mutation has finished). The echo deadline makes the second of the two
+    // AUTO callbacks of one escaped boundary harmless (no fabricated stats for the track that must not have started).
+    private val sleepBoundaryListeners = SleepBoundaryListenerRegistry()
+    private var sleepRebindJob: Job? = null
+    private var sleepEscapeEchoDeadlineElapsedMs = 0L
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (DEBUG_STATS) {
@@ -811,6 +824,7 @@ class PlayerController @Inject constructor(
                 if (!isExternalPlayback) {
                     statsTracker.onPlaybackPaused()
                 }
+                handleSleepPlaybackStopped()
                 stopPositionTicker()
                 syncPosition()
                 saveSessionAsync()
@@ -830,10 +844,7 @@ class PlayerController @Inject constructor(
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && handlePendingAutomaticTransition()) {
                 return
             }
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
-                _sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG
-            ) {
-                triggerSleepTimer()
+            if (handleSleepTransition(sleepTransitionKind(reason), isAutomaticCallback = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)) {
                 return
             }
             // Reset position tracking so the ticker doesn't mistake the old song's
@@ -863,8 +874,7 @@ class PlayerController @Inject constructor(
                 if (handlePendingAutomaticTransition()) {
                     return
                 }
-                if (_sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG) {
-                    triggerSleepTimer()
+                if (handleSleepTransition(SleepTransitionKind.AUTOMATIC, isAutomaticCallback = true)) {
                     return
                 }
                 // Reset ticker tracking so it doesn't double-detect this same boundary.
@@ -895,13 +905,16 @@ class PlayerController @Inject constructor(
                 // has succeeded, so end it. A later independent failure begins a fresh episode.
                 resetBadMediaRecoveryEpisode()
             }
-            if (playbackState == Player.STATE_ENDED &&
-                _sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG
-            ) {
-                triggerSleepTimer()
-                return
+            if (playbackState == Player.STATE_ENDED) {
+                handleSleepPlaybackStopped()
             }
             syncNowPlayingState()
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // ST-1: a pause (natural pause-at-end of the armed occurrence, or a user/system pause) while a terminal boundary
+            // is armed. Idempotent with onIsPlayingChanged / STATE_ENDED: the first one consumes, the rest find nothing armed.
+            if (!playWhenReady) handleSleepPlaybackStopped()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -1081,6 +1094,7 @@ class PlayerController @Inject constructor(
         queueRepairJob?.cancel()
         queueRepairJob = null
         kickQueueRepair()
+        scheduleSleepBoundaryRebind()
     }
 
     /** Marks the physical queue dirty for [reason] and starts bounded repair. The logical queue is already the truth. */
@@ -1445,7 +1459,7 @@ class PlayerController @Inject constructor(
 
     fun playSong(song: Song) {
         // CF-2H3F: explicit start intent cancels an owned crossfade first, then the non-notifying start primitive runs.
-        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        notifyQueueReplacement()
         startQueueWithoutNotification(queue = listOf(song), startIndex = 0)
     }
 
@@ -1468,7 +1482,7 @@ class PlayerController @Inject constructor(
 
     fun playSearchResultPreservingQueue(song: Song) {
         // CF-2H3F: notified first; playPreservedSearchPlan (also used by the pending drain) never notifies.
-        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        notifyQueueReplacement()
         val controller = mediaController
         val currentMediaIndex = controller?.currentMediaItemIndex
         val currentMediaSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
@@ -1583,7 +1597,7 @@ class PlayerController @Inject constructor(
 
     fun playExternalUri(uri: Uri, displayName: String? = null) {
         // CF-2H3F: notified first, before any state change; the pending drain calls the non-notifying variant.
-        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        notifyQueueReplacement()
         playExternalUriWithoutNotification(uri, displayName)
     }
 
@@ -1641,7 +1655,7 @@ class PlayerController @Inject constructor(
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
         // CF-2H3F: notified before resolution so an absent or ambiguous start song still cancels.
-        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        notifyQueueReplacement()
         val start = resolveQueueStartBySong(queue, startSong)
         if (start == null) {
             Log.w(TAG, "playFromQueue: start song ${startSong.id} is absent or ambiguous in queue; ignoring")
@@ -1661,7 +1675,7 @@ class PlayerController @Inject constructor(
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
         // CF-2H3F: notified before any resolution or replacement.
-        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        notifyQueueReplacement()
         playFromQueueInternal(
             queue = queue,
             startIndex = startIndex,
@@ -1745,7 +1759,7 @@ class PlayerController @Inject constructor(
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
         // CF-2H3F: notified BEFORE any logical mutation (shuffleEnabled) and without double-notifying via playFromQueue.
-        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        notifyQueueReplacement()
         val normalizedQueue = queue.ifEmpty { return }
         shuffleEnabled = true
         startQueueWithoutNotification(
@@ -2387,44 +2401,47 @@ class PlayerController @Inject constructor(
         automaticResumeAuthority.supersedeByUser()
     }
 
-    fun setSleepTimer(option: SleepTimerOption) {
-        sleepTimerJob?.cancel()
-        sleepTimerJob = null
-
-        if (option == SleepTimerOption.OFF) {
-            _sleepTimerState.value = SleepTimerState()
-            return
-        }
-
-        val nowMs = System.currentTimeMillis()
-        val durationMs = option.durationMs
-        _sleepTimerState.value = SleepTimerState(
-            option = option,
-            startedAtMs = nowMs,
-            endsAtMs = durationMs?.let { nowMs + it },
-        )
-
-        if (durationMs != null) {
-            sleepTimerJob = scope.launch {
-                delay(durationMs)
-                triggerSleepTimer()
-            }
+    /**
+     * Sets, replaces or clears the sleep timer. A duration option starts a countdown ([finishCurrentTrack] is the independent
+     * modifier: at expiry it arms the exact then-current occurrence as the terminal one instead of pausing immediately).
+     * [SleepTimerOption.END_OF_CURRENT_SONG] arms the exact current occurrence now. The state is in-memory only.
+     */
+    fun setSleepTimer(option: SleepTimerOption, finishCurrentTrack: Boolean = false) {
+        cancelSleepCountdown()
+        val previous = _sleepTimerState.value
+        when (option) {
+            SleepTimerOption.OFF -> applySleepTransition(SleepTimerPolicy.off(previous))
+            SleepTimerOption.END_OF_CURRENT_SONG ->
+                applySleepTransition(SleepTimerPolicy.startStandalone(System.currentTimeMillis(), currentSleepOccurrence()))
+            else -> startSleepCountdown(previous, option, customDurationMs = null, finishCurrentTrack = finishCurrentTrack)
         }
     }
 
-    fun setCustomSleepTimer(durationMs: Long) {
+    fun setCustomSleepTimer(durationMs: Long, finishCurrentTrack: Boolean = false) {
+        cancelSleepCountdown()
+        startSleepCountdown(_sleepTimerState.value, SleepTimerOption.OFF, customDurationMs = durationMs, finishCurrentTrack = finishCurrentTrack)
+    }
+
+    private fun cancelSleepCountdown() {
         sleepTimerJob?.cancel()
         sleepTimerJob = null
-        val nowMs = System.currentTimeMillis()
-        _sleepTimerState.value = SleepTimerState(
-            option = SleepTimerOption.OFF,
-            startedAtMs = nowMs,
-            endsAtMs = nowMs + durationMs,
-            customDurationMs = durationMs,
-        )
+    }
+
+    private fun startSleepCountdown(
+        previous: SleepTimerState,
+        option: SleepTimerOption,
+        customDurationMs: Long?,
+        finishCurrentTrack: Boolean,
+    ) {
+        // A new configuration replaces an armed boundary of the previous timer (its physical hold is released).
+        if (previous.isFinishingCurrentTrack) sleepBoundaryListeners.notifyArmed(false)
+        val next = SleepTimerPolicy.startDuration(System.currentTimeMillis(), option, customDurationMs, finishCurrentTrack)
+        _sleepTimerState.value = next
+        val durationMs = next.endsAtMs?.let { it - (next.startedAtMs ?: 0L) } ?: return
         sleepTimerJob = scope.launch {
             delay(durationMs)
-            triggerSleepTimer()
+            sleepTimerJob = null
+            onSleepCountdownExpired()
         }
     }
 
@@ -2432,6 +2449,8 @@ class PlayerController @Inject constructor(
         // CF-2G3: user intent cancels an owned crossfade first, even if navigation is deferred or a no-op. The
         // deferred-drain path (navigate) never notifies, so a pending command cancels exactly once.
         explicitNavigationListeners.notifyExplicitNavigation()
+        // ST-1: explicit navigation supersedes an armed sleep boundary (never carried onto the newly selected track).
+        applySleepTransition(SleepTimerPolicy.onExplicitNavigation(_sleepTimerState.value))
         // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
         resetBadMediaRecoveryEpisode()
         val controller = mediaController
@@ -2449,6 +2468,7 @@ class PlayerController @Inject constructor(
     fun skipToPrevious() {
         // CF-2G3: also covers PREVIOUS resolving to restart-current (internal seek, not the public seekTo).
         explicitNavigationListeners.notifyExplicitNavigation()
+        applySleepTransition(SleepTimerPolicy.onExplicitNavigation(_sleepTimerState.value))
         // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
         resetBadMediaRecoveryEpisode()
         val controller = mediaController
@@ -3494,6 +3514,10 @@ class PlayerController @Inject constructor(
         stopPositionTicker()
         sleepTimerJob?.cancel()
         sleepTimerJob = null
+        sleepRebindJob?.cancel()
+        sleepRebindJob = null
+        _sleepTimerState.value = SleepTimerState()
+        sleepBoundaryListeners.notifyArmed(false)
         scope.cancel()
         mediaController?.removeListener(playerListener)
         mediaController?.release()
@@ -3521,14 +3545,114 @@ class PlayerController @Inject constructor(
         positionTickerJob = null
     }
 
-    private fun triggerSleepTimer() {
-        sleepTimerJob?.cancel()
-        sleepTimerJob = null
-        _sleepTimerState.value = SleepTimerState()
-        mediaController?.pause()
-        syncNowPlayingState()
-        syncPosition()
-        saveSessionAsync()
+    // ── ST-1: sleep timer / terminal boundary (decisions live in SleepTimerPolicy; this only executes them) ───────────────
+
+    /** The exact occurrence playing now (generation + playback position), or null when it cannot be resolved safely. */
+    private fun currentSleepOccurrence(): SleepTerminalOccurrence? {
+        val index = currentPlaybackIndex() ?: return null
+        val song = playbackQueue.getOrNull(index) ?: return null
+        return SleepTerminalOccurrence(queueGeneration, index, song.id)
+    }
+
+    /** Publishes the policy's state and performs its action. The ONLY place the timer state changes after configuration. */
+    private fun applySleepTransition(transition: SleepTimerTransition) {
+        val previous = _sleepTimerState.value
+        _sleepTimerState.value = transition.state
+        if (previous.phase == SleepTimerPhase.COUNTDOWN && transition.state.phase != SleepTimerPhase.COUNTDOWN) cancelSleepCountdown()
+        when (transition.action) {
+            SleepTimerAction.None -> Unit
+            is SleepTimerAction.ArmBoundary -> sleepBoundaryListeners.notifyArmed(true)
+            SleepTimerAction.PauseNow -> {
+                sleepBoundaryListeners.notifyArmed(false)
+                mediaController?.pause()
+                syncNowPlayingState()
+                syncPosition()
+                saveSessionAsync()
+            }
+            SleepTimerAction.StopAtBoundary -> {
+                // The player already stopped at the natural end of the armed occurrence (no transition happened): record the
+                // terminal occurrence and its final position. The timer itself is never persisted.
+                sleepBoundaryListeners.notifyArmed(false)
+                syncNowPlayingState()
+                syncPosition()
+                saveSessionAsync()
+            }
+            SleepTimerAction.DisarmBoundary -> sleepBoundaryListeners.notifyArmed(false)
+        }
+    }
+
+    private fun onSleepCountdownExpired() {
+        val controller = mediaController
+        val playbackActive = controller != null && controller.playWhenReady &&
+            controller.playbackState != Player.STATE_ENDED && controller.playbackState != Player.STATE_IDLE
+        val current = if (playbackActive && controller?.currentMediaItem != null) currentSleepOccurrence() else null
+        applySleepTransition(SleepTimerPolicy.onCountdownExpired(_sleepTimerState.value, current, playbackActive))
+    }
+
+    /** The player stopped while a boundary may be armed: natural end of the armed occurrence, or an earlier pause. Idempotent. */
+    private fun handleSleepPlaybackStopped() {
+        val state = _sleepTimerState.value
+        if (!state.isFinishingCurrentTrack) return
+        val controller = mediaController ?: return
+        val stopped = !controller.playWhenReady || controller.playbackState == Player.STATE_ENDED
+        if (!stopped) return
+        applySleepTransition(SleepTimerPolicy.onPlaybackStopped(state, currentSleepOccurrence(), atNaturalEnd = isAtNaturalEnd(controller)))
+    }
+
+    private fun isAtNaturalEnd(controller: MediaController): Boolean {
+        if (controller.playbackState == Player.STATE_ENDED) return true
+        val duration = controller.duration
+        if (duration <= 0L || duration == C.TIME_UNSET) return false
+        return controller.currentPosition >= duration - SLEEP_NATURAL_END_TOLERANCE_MS
+    }
+
+    private fun sleepTransitionKind(reason: Int): SleepTransitionKind = when (reason) {
+        Player.MEDIA_ITEM_TRANSITION_REASON_AUTO -> SleepTransitionKind.AUTOMATIC
+        Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> SleepTransitionKind.REPEAT_WRAP
+        Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> SleepTransitionKind.NAVIGATION
+        else -> SleepTransitionKind.PLAYLIST_CHANGED
+    }
+
+    /**
+     * A Media3 transition observation while a boundary may be armed. Returns true when the boundary had escaped (the player
+     * advanced or wrapped although it should have paused): playback is stopped and the caller must NOT run its normal
+     * selection/stats handling for a track that must not have started. The second callback of the same escape is swallowed.
+     */
+    private fun handleSleepTransition(kind: SleepTransitionKind, isAutomaticCallback: Boolean): Boolean {
+        val state = _sleepTimerState.value
+        if (!state.isFinishingCurrentTrack) {
+            return isAutomaticCallback && SystemClock.elapsedRealtime() < sleepEscapeEchoDeadlineElapsedMs
+        }
+        val transition = SleepTimerPolicy.onTransition(state, kind, currentSleepOccurrence())
+        applySleepTransition(transition)
+        val escaped = transition.action == SleepTimerAction.PauseNow
+        if (escaped) sleepEscapeEchoDeadlineElapsedMs = SystemClock.elapsedRealtime() + SLEEP_ESCAPE_ECHO_WINDOW_MS
+        return escaped
+    }
+
+    /**
+     * Called after every queue-identity bump. A structural mutation or shuffle toggle keeps the same physical item playing, so
+     * the armed boundary is re-bound to that exact occurrence once the mutation has finished (next main-thread turn). A queue
+     * that now plays a DIFFERENT song means the bound occurrence is gone: the boundary is cleared. Never moves it to another one.
+     */
+    private fun scheduleSleepBoundaryRebind() {
+        if (!_sleepTimerState.value.isFinishingCurrentTrack) return
+        sleepRebindJob?.cancel()
+        sleepRebindJob = scope.launch {
+            yield()
+            applySleepTransition(SleepTimerPolicy.onQueueIdentityChanged(_sleepTimerState.value, currentSleepOccurrence()))
+        }
+    }
+
+    /** An explicit whole-queue playback start / song selection: crossfade cleanup (existing) plus clearing an armed boundary. */
+    private fun notifyQueueReplacement() {
+        explicitQueueReplacementListeners.notifyExplicitQueueReplacement()
+        applySleepTransition(SleepTimerPolicy.onQueueReplaced(_sleepTimerState.value))
+    }
+
+    /** ST-1: registers (or clears with null) the lifecycle-scoped owner of the physical boundary; replays the current state once. */
+    internal fun setSleepBoundaryListener(listener: ((Boolean) -> Unit)?) {
+        sleepBoundaryListeners.set(listener, _sleepTimerState.value.isFinishingCurrentTrack)
     }
 
     /**
@@ -3551,8 +3675,7 @@ class PlayerController @Inject constructor(
             val song = songAtResolvedPlaybackIndex(playbackQueue, currentPlaybackIndex())
             if (song != null) {
                 if (DEBUG_STATS) Log.d(TAG, "[ticker] LOOP BOUNDARY detected prev=$prev cur=$currentPos songId=${song.id}")
-                if (_sleepTimerState.value.option == SleepTimerOption.END_OF_CURRENT_SONG) {
-                    triggerSleepTimer()
+                if (handleSleepTransition(SleepTransitionKind.REPEAT_WRAP, isAutomaticCallback = false)) {
                     return
                 }
                 if (!isExternalPlayback) {
@@ -3884,6 +4007,7 @@ class PlayerController @Inject constructor(
             playerQueueNeedsSync = playerQueueNeedsSync,
             controllerConnected = controller != null &&
                 controllerConnectionState == ControllerConnectionState.Connected,
+            sleepBoundaryArmed = _sleepTimerState.value.isFinishingCurrentTrack,
         )
     }
 

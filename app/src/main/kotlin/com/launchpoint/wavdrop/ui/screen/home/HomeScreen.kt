@@ -296,12 +296,12 @@ fun HomeScreen(
     if (showSleepTimerDialog) {
         SleepTimerDialog(
             state = sleepTimerState,
-            onOptionSelected = { option ->
-                viewModel.setSleepTimer(option)
+            onOptionSelected = { option, finishCurrentTrack ->
+                viewModel.setSleepTimer(option, finishCurrentTrack)
                 showSleepTimerDialog = false
             },
-            onCustomDurationSelected = { durationMs ->
-                viewModel.setCustomSleepTimer(durationMs)
+            onCustomDurationSelected = { durationMs, finishCurrentTrack ->
+                viewModel.setCustomSleepTimer(durationMs, finishCurrentTrack)
                 showSleepTimerDialog = false
             },
             onDismiss = { showSleepTimerDialog = false },

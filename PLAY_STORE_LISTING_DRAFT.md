@@ -62,7 +62,7 @@ Reports for top songs, artists, and albums across your full history.
 **Rich playback features.**
 · Full queue management — Play Next, Add to Queue, reorder, and remove
 · Shuffle and repeat (Off, Repeat One, Repeat All)
-· Sleep timer — 15, 30, 45, 60 minutes, or end of current song
+· Sleep timer — 15, 30, 45, 60 minutes or custom (optionally finishing the current song), or end of current song
 · Bluetooth and wired headphone auto-resume controls
 · Swipe album art to skip, double-tap for lyrics, long-press for details
 · Media notification controls and lock-screen playback

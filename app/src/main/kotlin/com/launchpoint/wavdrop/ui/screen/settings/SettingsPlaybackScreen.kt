@@ -246,12 +246,12 @@ fun SettingsPlaybackScreen(
     if (showSleepTimerDialog) {
         SleepTimerDialog(
             state = sleepTimerState,
-            onOptionSelected = { option ->
-                viewModel.setSleepTimer(option)
+            onOptionSelected = { option, finishCurrentTrack ->
+                viewModel.setSleepTimer(option, finishCurrentTrack)
                 showSleepTimerDialog = false
             },
-            onCustomDurationSelected = { durationMs ->
-                viewModel.setCustomSleepTimer(durationMs)
+            onCustomDurationSelected = { durationMs, finishCurrentTrack ->
+                viewModel.setCustomSleepTimer(durationMs, finishCurrentTrack)
                 showSleepTimerDialog = false
             },
             onDismiss = { showSleepTimerDialog = false },
@@ -456,7 +456,9 @@ private fun TimeDisplayDialog(
 
 @Composable
 private fun SleepTimerState.summary(): String = when {
-    customDurationMs != null -> "Custom (${customDurationMs / 60_000L} min)"
-    isActive -> option.displayName
+    isFinishingCurrentTrack -> "Finishing current track"
+    isCountingDown && customDurationMs != null ->
+        "Custom (${customDurationMs / 60_000L} min)" + if (finishCurrentTrack) ", then finish song" else ""
+    isCountingDown -> option.displayName + if (finishCurrentTrack) ", then finish song" else ""
     else -> SleepTimerOption.OFF.displayName
 }

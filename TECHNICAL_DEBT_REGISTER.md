@@ -518,6 +518,8 @@ AUTO, and let the discontinuity callback only refresh state.
 
 **CF-2L2 update:** the final natural-AUTO ownership seam is now a continuity-qualified soft transfer (internal 150 ms equal-power gain envelope while still `HandoffPending`) instead of an instant primary restore plus secondary reset; it keeps the same ownership model, adds no stats or persistence notification and does not change the two-callback ownership described above. The broader cleanup remains open.
 
+**ST-1 update:** sleep-timer end-of-song handling no longer observes natural completion in four callbacks. It is one pure policy (`SleepTimerPolicy`) bound to an exact occurrence and enforced physically (Media3 pause-at-end-of-media-items), so the player never advances or loops past the armed occurrence and no stats or session notification is added for a track that must not start. The Media3 callbacks only feed the policy (a defensive fallback pauses if the physical hold were ever missing). The broader two-callback ownership of ordinary AUTO transitions described above is unchanged and remains open.
+
 **CF-2L3 update:** the natural handoff now has a testable settlement invariant (a finished or cancelled transition leaves no bookkeeping, gain owner or secondary ownership) and DEBUG transport/reconciliation diagnostics; it changes no callback ownership and the broader cleanup remains open.
 
 ---

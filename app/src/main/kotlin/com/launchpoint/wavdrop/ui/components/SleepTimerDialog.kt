@@ -17,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.launchpoint.wavdrop.playback.SleepTimerOption
+import com.launchpoint.wavdrop.playback.SleepTimerPhase
 import com.launchpoint.wavdrop.playback.SleepTimerState
 
 private const val CUSTOM_MIN_MINUTES = 1
@@ -37,13 +39,19 @@ private const val CUSTOM_MAX_MINUTES = 240
 @Composable
 fun SleepTimerDialog(
     state: SleepTimerState,
-    onOptionSelected: (SleepTimerOption) -> Unit,
-    onCustomDurationSelected: (Long) -> Unit,
+    /** [Boolean] is the "Finish current track" modifier; it only matters for the duration options. */
+    onOptionSelected: (SleepTimerOption, Boolean) -> Unit,
+    onCustomDurationSelected: (Long, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val customActive = state.customDurationMs != null
+    // A selection is shown only for a running countdown or the standalone "End of current song" boundary. Once a duration timer
+    // has expired and is only waiting for the song to finish, no duration is selected (the countdown is over).
+    val showSelection = state.phase == SleepTimerPhase.COUNTDOWN ||
+        (state.phase == SleepTimerPhase.FINISHING_CURRENT_TRACK && state.option == SleepTimerOption.END_OF_CURRENT_SONG)
+    val customActive = showSelection && state.customDurationMs != null
+    var finishCurrentTrack by remember { mutableStateOf(state.phase == SleepTimerPhase.COUNTDOWN && state.finishCurrentTrack) }
     var customMinutesText by remember {
-        mutableStateOf(state.customDurationMs?.let { (it / 60_000L).toString() } ?: "")
+        mutableStateOf(state.customDurationMs?.takeIf { state.phase == SleepTimerPhase.COUNTDOWN }?.let { (it / 60_000L).toString() } ?: "")
     }
 
     val minutes = customMinutesText.toIntOrNull()
@@ -61,17 +69,25 @@ fun SleepTimerDialog(
         title = { Text("Sleep Timer") },
         text = {
             Column {
+                if (state.phase == SleepTimerPhase.FINISHING_CURRENT_TRACK) {
+                    Text(
+                        text = "Finishing current track. Playback will stop when this song ends.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
                 SleepTimerOption.entries.forEach { option ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onOptionSelected(option) }
+                            .clickable { onOptionSelected(option, finishCurrentTrack) }
                             .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(
-                            selected = option == state.option && !customActive,
-                            onClick = { onOptionSelected(option) },
+                            selected = showSelection && option == state.option && !customActive,
+                            onClick = { onOptionSelected(option, finishCurrentTrack) },
                         )
                         Text(
                             text = option.displayName,
@@ -80,6 +96,29 @@ fun SleepTimerDialog(
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { finishCurrentTrack = !finishCurrentTrack }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Finish current track",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "After the timer ends, stop when the current song finishes.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                    }
+                    Switch(checked = finishCurrentTrack, onCheckedChange = { finishCurrentTrack = it })
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 Row(
@@ -115,7 +154,7 @@ fun SleepTimerDialog(
                         textStyle = MaterialTheme.typography.bodyLarge,
                     )
                     TextButton(
-                        onClick = { if (canSet) onCustomDurationSelected(minutes!! * 60_000L) },
+                        onClick = { if (canSet) onCustomDurationSelected(minutes!! * 60_000L, finishCurrentTrack) },
                         enabled = canSet,
                     ) {
                         Text("Set")
