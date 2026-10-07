@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.data.settings.LibraryScanExclusion
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import kotlin.math.roundToInt
 
@@ -107,6 +108,52 @@ fun SettingsLibraryScreen(
                         isError = true,
                     )
                 }
+            }
+            item { SectionDivider() }
+
+            item { SectionHeader("Exclude folders") }
+            item {
+                SettingsMessageRow("Off by default. Changes apply the next time you rescan your library.")
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Exclude Telegram",
+                    subtitle        = "Hide audio stored in Telegram folders.",
+                    checked         = LibraryScanExclusion.TELEGRAM in scanSettings.excludedPresetFolders,
+                    onCheckedChange = { viewModel.setPresetScanExclusion(LibraryScanExclusion.TELEGRAM, it) },
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Exclude Signal",
+                    subtitle        = "Hide audio stored in Signal folders.",
+                    checked         = LibraryScanExclusion.SIGNAL in scanSettings.excludedPresetFolders,
+                    onCheckedChange = { viewModel.setPresetScanExclusion(LibraryScanExclusion.SIGNAL, it) },
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Exclude Messenger",
+                    subtitle        = "Hide audio stored in Messenger folders.",
+                    checked         = LibraryScanExclusion.MESSENGER in scanSettings.excludedPresetFolders,
+                    onCheckedChange = { viewModel.setPresetScanExclusion(LibraryScanExclusion.MESSENGER, it) },
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Exclude Downloads",
+                    subtitle        = "Hide audio stored in your Downloads folder.",
+                    checked         = LibraryScanExclusion.DOWNLOADS in scanSettings.excludedPresetFolders,
+                    onCheckedChange = { viewModel.setPresetScanExclusion(LibraryScanExclusion.DOWNLOADS, it) },
+                )
+            }
+            item {
+                ToggleSettingsRow(
+                    title           = "Exclude Recordings",
+                    subtitle        = "Hide audio stored in recording folders.",
+                    checked         = LibraryScanExclusion.RECORDINGS in scanSettings.excludedPresetFolders,
+                    onCheckedChange = { viewModel.setPresetScanExclusion(LibraryScanExclusion.RECORDINGS, it) },
+                )
             }
             item { SectionDivider() }
 

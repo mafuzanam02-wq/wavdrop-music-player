@@ -3,6 +3,15 @@ package com.launchpoint.wavdrop.data.repository
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
 
+/** How [SongSyncPolicy.emptyScanDisposition] resolves a zero-song scan. */
+enum class EmptyScanDisposition {
+    /** Cannot tell "no music" from a transient problem: keep the existing library. */
+    PRESERVE_AMBIGUOUS,
+
+    /** Conclusive (or nothing to preserve): apply the empty result normally. */
+    APPLY_DEFINITIVE_EMPTY,
+}
+
 /**
  * Pure (no Android/Room deps) sync-decision rules so they can be unit-tested without an
  * instrumented environment.
@@ -24,6 +33,23 @@ object SongSyncPolicy {
     ): Boolean = existingSongCount > 0
 
     /**
+     * What to do with a scan that produced no songs. An empty result is DEFINITIVE only when the explicit preset
+     * exclusions alone caused it: songs survived every existing rule ([eligibleBeforePresetExclusionsCount] > 0) and the
+     * user has exclusions enabled. Anything else keeps the established preserve-on-empty safety (WB-02): a zero that
+     * existed before the exclusions ran may be a permission, storage or indexing problem.
+     */
+    fun emptyScanDisposition(
+        settings: LibraryScanSettings,
+        existingSongCount: Int,
+        eligibleBeforePresetExclusionsCount: Int,
+    ): EmptyScanDisposition = when {
+        !shouldPreserveOnEmptyScan(settings, existingSongCount) -> EmptyScanDisposition.APPLY_DEFINITIVE_EMPTY
+        eligibleBeforePresetExclusionsCount > 0 && settings.excludedPresetFolders.isNotEmpty() ->
+            EmptyScanDisposition.APPLY_DEFINITIVE_EMPTY
+        else -> EmptyScanDisposition.PRESERVE_AMBIGUOUS
+    }
+
+    /**
      * Returns a user-facing explanation for why an empty scan was preserved.
      * Callers should only invoke this after [shouldPreserveOnEmptyScan] returns true.
      */
@@ -35,8 +61,8 @@ object SongSyncPolicy {
                 "Check your folder selection and rescan."
             LibraryScanMode.WHOLE_DEVICE ->
                 "Library scan returned no songs. " +
-                "Your device storage or media permission may need attention. " +
-                "Existing songs were kept."
+                    "Your device storage or media permission may need attention. " +
+                    "Existing songs were kept."
         }
 
     /**

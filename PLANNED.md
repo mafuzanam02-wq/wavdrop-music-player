@@ -20,10 +20,6 @@ do not duplicate them here.
 
 Publish the Wavdrop Privacy Policy at `https://launchpointdigital.co.za/wavdrop/privacy`. This URL is required for the Google Play store listing Privacy Policy field before public launch. The page should publish the same text as the in-app Privacy Policy dialog. Once the page is live, add a reference line to the bottom of the in-app Privacy Policy copy pointing to the URL.
 
-### Future Scan Exclusions
-
-Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped or prioritised).
-
 ---
 
 ## Under Evaluation
@@ -37,9 +33,9 @@ Telegram, Signal, Messenger, Downloads, and Recordings folders (not yet scoped o
   implementation with a stable third-party library if real-device edge cases surface in
   testing. The current implementation is functional but the auto-scroll and
   virtualization-interrupt paths are non-trivial to maintain.
-- **Broader folder exclusion system**: extending the per-folder scan exclusion beyond the current
-  WhatsApp-specific toggle and the planned scan-exclusion folder list to a general block/allow
-  list that users can configure freely.
+- **Broader folder exclusion system**: extending the per-folder scan exclusion beyond the WhatsApp-specific
+  toggle and the shipped preset exclusions (Telegram, Signal, Messenger, Downloads, Recordings; all default
+  OFF) to a general block/allow list that users can configure freely. Arbitrary exclusion is NOT supported yet.
 
 ---
 

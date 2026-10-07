@@ -35,6 +35,9 @@ class LibraryScanSettingsRepository @Inject constructor(
                         ?: LibraryScanSettingsRules.DEFAULT_MINIMUM_TRACK_DURATION_SECONDS,
                     includeWhatsAppVoiceNotes = preferences[INCLUDE_WHATSAPP_VOICE_NOTES_KEY]
                         ?: false,
+                    excludedPresetFolders = LibraryScanSettingsRules.parsePresetExclusions(
+                        preferences[EXCLUDED_PRESET_FOLDERS_KEY],
+                    ),
                 ),
             )
         }
@@ -64,6 +67,27 @@ class LibraryScanSettingsRepository @Inject constructor(
     suspend fun setIncludeWhatsAppVoiceNotes(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[INCLUDE_WHATSAPP_VOICE_NOTES_KEY] = enabled
+        }
+    }
+
+    /**
+     * SE-1: enables or disables ONE preset exclusion. Read-modify-write inside one DataStore edit, so concurrent toggles cannot
+     * lose each other, and the whole normalized set is stored (stable enum names; unknown stored values are dropped on write).
+     * Every other scan setting is left exactly as it is. A change takes effect at the next rescan.
+     */
+    suspend fun setPresetExclusion(exclusion: LibraryScanExclusion, enabled: Boolean) {
+        dataStore.edit { preferences ->
+            val current = LibraryScanSettingsRules.parsePresetExclusions(preferences[EXCLUDED_PRESET_FOLDERS_KEY])
+            val updated = LibraryScanSettingsRules.withPresetExclusion(
+                LibraryScanSettings(excludedPresetFolders = current),
+                exclusion,
+                enabled,
+            ).excludedPresetFolders
+            if (updated.isEmpty()) {
+                preferences.remove(EXCLUDED_PRESET_FOLDERS_KEY)
+            } else {
+                preferences[EXCLUDED_PRESET_FOLDERS_KEY] = updated.mapTo(linkedSetOf()) { it.name }
+            }
         }
     }
 
@@ -99,5 +123,7 @@ class LibraryScanSettingsRepository @Inject constructor(
             intPreferencesKey("library_minimum_track_duration_seconds")
         val INCLUDE_WHATSAPP_VOICE_NOTES_KEY =
             booleanPreferencesKey("library_include_whatsapp_voice_notes")
+        val EXCLUDED_PRESET_FOLDERS_KEY =
+            stringSetPreferencesKey("library_excluded_preset_folders")
     }
 }

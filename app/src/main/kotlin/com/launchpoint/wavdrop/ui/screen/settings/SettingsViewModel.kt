@@ -27,6 +27,7 @@ import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.ThemeMode
+import com.launchpoint.wavdrop.data.settings.LibraryScanExclusion
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
@@ -423,6 +424,13 @@ class SettingsViewModel @Inject constructor(
     fun setIncludeWhatsAppVoiceNotes(enabled: Boolean) {
         viewModelScope.launch {
             scanSettingsRepository.setIncludeWhatsAppVoiceNotes(enabled)
+        }
+    }
+
+    /** SE-1: enables or disables one preset scan exclusion. Applies at the next rescan; the path rules live in the data layer. */
+    fun setPresetScanExclusion(exclusion: LibraryScanExclusion, excluded: Boolean) {
+        viewModelScope.launch {
+            scanSettingsRepository.setPresetExclusion(exclusion, excluded)
         }
     }
 

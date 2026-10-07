@@ -641,9 +641,9 @@ Nothing below has been run on a device. Do not tick items until the user has ver
 - [ ] O. After a restore from a `.wdbk`, restart the app: the restored state persists.
 - [ ] P. (Engineering check, not a user workflow.) Run the instrumented `LegacyExportTieOrderInstrumentedTest` (`./gradlew connectedDebugAndroidTest --tests "*LegacyExportTieOrderInstrumentedTest"`) on a device/emulator: the real `getAllSnapshot()` equal-timestamp order and the streamed WDBK fingerprint must agree (null-vs-empty `eventId` edge). A failure is a compatibility finding. Compiled in the WDBK-1 slice; not yet executed on hardware.
 
-## ST-1 Sleep Timer: Finish current track (implemented; PHYSICAL VALIDATION PENDING)
+## ST-1 Sleep Timer: Finish current track (implemented; PHYSICAL VALIDATION PASSED and CLOSED)
 
-Nothing below has been run on a device. Do not tick items until the user has verified them on hardware. Open Sleep Timer from Now Playing, Home or Settings -> Playback: the dialog offers Off, 15/30/45/60 minutes, Custom, End of current song, and an independent **Finish current track** switch ("After the timer ends, stop when the current song finishes."). Use a custom 1-minute timer for the short checks and a song longer than a few minutes.
+The owner validated Sleep Timer Finish Current Track on a real device and closed this section as PASSED. The checks below are kept as the record of what was covered; the individual rows were not itemised in the owner's sign-off and are left as written. Open Sleep Timer from Now Playing, Home or Settings -> Playback: the dialog offers Off, 15/30/45/60 minutes, Custom, End of current song, and an independent **Finish current track** switch ("After the timer ends, stop when the current song finishes."). Use a custom 1-minute timer for the short checks and a song longer than a few minutes.
 
 - [ ] A. Custom 1 minute, Finish current track OFF: playback pauses immediately at expiry and the timer indicator disappears.
 - [ ] B. Custom 1 minute, Finish current track ON: at expiry playback CONTINUES, the label changes from the countdown to "Finishing current track" (no 0:00), and playback stops at the natural end of the song that was playing at expiry (not the one playing when the timer was set).
@@ -657,3 +657,18 @@ Nothing below has been run on a device. Do not tick items until the user has ver
 - [ ] J. Standalone End of current song still works (with and without Repeat One/All and with crossfade); selecting Off clears it.
 - [ ] K. Kill the app process while a timer or the "Finishing current track" state is active: after restart there is no timer and nothing stops playback.
 - [ ] L. Shuffle ON, arm Finish ON, then toggle shuffle: playback still stops at the end of the same song.
+
+## SE-1 Preset scan exclusions (implemented; PHYSICAL VALIDATION PENDING)
+
+Nothing below has been run on a device. Do not tick items until the user has verified them on hardware. Settings -> Library & Scanning -> "Exclude folders" has switches for Telegram, Signal, Messenger, Downloads and Recordings. A switch only changes the scan policy; use **Rescan library** to apply it. Use a library that has audio in Download, in an ordinary Music folder, and (if available) in Telegram/Signal/Messenger/Recordings locations.
+
+- [ ] A. Upgrade / existing install: all five exclusions are OFF and the current library is unchanged (same song count) before and after updating and rescanning.
+- [ ] B. Enable Exclude Downloads, Rescan library: audio in the Download folder disappears from the library; ordinary Music audio (including a folder like Music/My Downloads) stays.
+- [ ] C. Disable Exclude Downloads, Rescan library: the eligible Download audio comes back.
+- [ ] D. Enable one messaging exclusion (Telegram, Signal or Messenger): its media disappears after a rescan without affecting other folders or the other messaging apps.
+- [ ] E. Enable all five and rescan: every recognised preset folder is excluded; look-alike music folders (e.g. Music/Telegram Tribute, Music/Live Recordings) are not.
+- [ ] F. Selected-folder conflict: switch to Selected folders, add Download, enable Exclude Downloads, rescan: the exclusion wins (Download audio is not in the library).
+- [ ] G. WhatsApp: "Include WhatsApp voice notes" still defaults to OFF and still hides WhatsApp / WhatsApp Business voice notes exactly as before, independent of the new switches.
+- [ ] H. Stats / history: exclude a played song's folder, rescan, then re-include and rescan: the song's play history and Insights numbers are neither wiped nor inflated.
+- [ ] I. If ALL otherwise-eligible songs are in an excluded folder (e.g. all your music is in Downloads and Exclude Downloads is on), a rescan legitimately empties the live library: no permission/storage warning and no "existing songs were kept" message is shown, Insights/history numbers are preserved, and disabling the exclusion and rescanning brings the songs back.
+- [ ] J. A rescan that finds no music for another reason (e.g. Selected folders mode pointing at a folder with no audio, or media permission revoked) still keeps the existing library and shows the warning/failure message.

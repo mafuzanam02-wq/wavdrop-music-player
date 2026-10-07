@@ -49,7 +49,7 @@ class SongRepository @Inject constructor(
         // A failed scan (permission revoked, MediaStore failure, cursor error) must NOT be
         // treated as an empty library. Contain it here, before any DB transaction runs, so no
         // songs are deleted and no identity reconciliation runs against an invalid result (WB-02).
-        val found = try {
+        val scan = try {
             scanner.scanSongs(scanSettings)
         } catch (e: MediaStoreScanException) {
             Log.e(TAG, "Library scan failed — existing library preserved, no changes made", e)
@@ -59,13 +59,20 @@ class SongRepository @Inject constructor(
             )
         }
 
+        val found = scan.songs
+
         try {
             db.withTransaction {
                 val existingEntities = dao.getAllSongsSnapshot()
                 val existingIds = existingEntities.mapTo(mutableSetOf()) { it.id }
 
                 if (found.isEmpty()) {
-                    if (SongSyncPolicy.shouldPreserveOnEmptyScan(scanSettings, existingIds.size)) {
+                    val disposition = SongSyncPolicy.emptyScanDisposition(
+                        settings = scanSettings,
+                        existingSongCount = existingIds.size,
+                        eligibleBeforePresetExclusionsCount = scan.eligibleBeforePresetExclusionsCount,
+                    )
+                    if (disposition == EmptyScanDisposition.PRESERVE_AMBIGUOUS) {
                         Log.w(TAG,
                             "Scan returned 0 songs — preserving ${existingIds.size} existing songs. " +
                             "Mode: ${scanSettings.scanMode}"
@@ -77,7 +84,8 @@ class SongRepository @Inject constructor(
                             SongSyncPolicy.emptyPreservedReason(scanSettings)
                         )
                     }
-                    // Legitimately empty library: nothing to delete when the table is already empty.
+                    // Definitive empty: the table is already empty, or the explicit preset exclusions removed every
+                    // otherwise-eligible song. Stats, listen events and identity rows are not deleted here.
                     if (existingIds.isNotEmpty()) dao.deleteAll()
                     // All songs were removed — every identity's referenced song is now absent.
                     reconcileIdentities(emptySet())

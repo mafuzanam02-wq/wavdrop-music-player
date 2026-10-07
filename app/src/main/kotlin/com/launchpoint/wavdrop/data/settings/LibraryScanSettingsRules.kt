@@ -16,7 +16,45 @@ object LibraryScanSettingsRules {
             minimumTrackDurationSeconds = clampMinimumTrackDurationSeconds(
                 settings.minimumTrackDurationSeconds,
             ),
+            excludedPresetFolders = normalizePresetExclusions(settings.excludedPresetFolders),
         )
+
+    /** A set has no duplicates; iteration is made deterministic (declaration order) so equal settings always serialize equally. */
+    fun normalizePresetExclusions(exclusions: Set<LibraryScanExclusion>): Set<LibraryScanExclusion> =
+        LibraryScanExclusion.entries.filterTo(linkedSetOf()) { it in exclusions }
+
+    /** Enables or disables ONE preset exclusion; every other setting and every other exclusion is untouched. */
+    fun withPresetExclusion(
+        settings: LibraryScanSettings,
+        exclusion: LibraryScanExclusion,
+        excluded: Boolean,
+    ): LibraryScanSettings =
+        normalize(
+            settings.copy(
+                excludedPresetFolders = if (excluded) {
+                    settings.excludedPresetFolders + exclusion
+                } else {
+                    settings.excludedPresetFolders - exclusion
+                },
+            ),
+        )
+
+    /** Parses persisted enum names: known values are kept, unknown/future/blank text is ignored. */
+    fun parsePresetExclusions(names: Collection<String>?): Set<LibraryScanExclusion> =
+        normalizePresetExclusions(
+            names.orEmpty().mapNotNull { name -> LibraryScanExclusion.entries.firstOrNull { it.name == name } }.toSet(),
+        )
+
+    /**
+     * SE-1: true when the user enabled the preset exclusion that [song]'s folder belongs to. Classification is
+     * [LibraryScanFolderClassifier] (path segments only); nothing here duplicates a path rule.
+     */
+    fun isExcludedByPreset(song: Song, settings: LibraryScanSettings): Boolean {
+        val enabled = settings.excludedPresetFolders
+        if (enabled.isEmpty()) return false
+        val category = LibraryScanFolderClassifier.classify(song) ?: return false
+        return category in enabled
+    }
 
     fun clampMinimumTrackDurationSeconds(seconds: Int): Int =
         seconds.coerceIn(
@@ -64,12 +102,33 @@ object LibraryScanSettingsRules {
     fun filterSongsForScanSettings(
         songs: List<Song>,
         settings: LibraryScanSettings,
-    ): List<Song> {
+    ): List<Song> = evaluateScanSettings(songs, settings).songs
+
+    /**
+     * Result of the two filter stages. [eligibleBeforePresetExclusionsCount] is how many songs passed the EXISTING rules
+     * (minimum duration, WhatsApp rule, scan mode / selected folders) immediately BEFORE the SE-1 preset exclusions ran;
+     * [songs] is what is left after them. It lets the sync tell "the explicit exclusion emptied the library" from an
+     * ambiguous zero-result scan without a second query or a second path rule.
+     */
+    data class ScanEvaluation(
+        val songs: List<Song>,
+        val eligibleBeforePresetExclusionsCount: Int,
+    )
+
+    fun evaluateScanSettings(
+        songs: List<Song>,
+        settings: LibraryScanSettings,
+    ): ScanEvaluation {
         val normalized = normalize(settings)
-        return songs.filter { isSongAllowedByScanSettings(it, normalized) }
+        val eligible = songs.filter { isSongAllowedBeforePresetExclusions(it, normalized) }
+        return ScanEvaluation(
+            songs = eligible.filterNot { isExcludedByPreset(it, normalized) },
+            eligibleBeforePresetExclusionsCount = eligible.size,
+        )
     }
 
-    fun isSongAllowedByScanSettings(
+    /** Stage 1: minimum duration AND the WhatsApp rule AND the scan mode. No preset exclusion is consulted here. */
+    fun isSongAllowedBeforePresetExclusions(
         song: Song,
         settings: LibraryScanSettings,
     ): Boolean {
@@ -81,6 +140,18 @@ object LibraryScanSettingsRules {
             LibraryScanMode.SELECTED_FOLDERS ->
                 matchesSelectedFolder(song, normalized.selectedFolderUris)
         }
+    }
+
+    /**
+     * Duration AND WhatsApp rule AND scan mode (stage 1) AND NOT a preset exclusion (stage 2). An explicit exclusion
+     * outranks everything, including an explicitly selected folder.
+     */
+    fun isSongAllowedByScanSettings(
+        song: Song,
+        settings: LibraryScanSettings,
+    ): Boolean {
+        val normalized = normalize(settings)
+        return isSongAllowedBeforePresetExclusions(song, normalized) && !isExcludedByPreset(song, normalized)
     }
 
     fun matchesSelectedFolder(
