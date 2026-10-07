@@ -17,8 +17,8 @@ object WavdropBackupParser {
 
     // Capabilities known to this version of the parser. Any required capability
     // not in this set causes the import to be rejected cleanly.
-    private val KNOWN_REQUIRED_CAPABILITIES = emptySet<String>()
-    private val KNOWN_OPTIONAL_CAPABILITIES = emptySet<String>()
+    internal val KNOWN_REQUIRED_CAPABILITIES = emptySet<String>()
+    internal val KNOWN_OPTIONAL_CAPABILITIES = emptySet<String>()
 
     fun parse(
         content: String,
@@ -276,102 +276,18 @@ object WavdropBackupParser {
                 ?: return failure("Missing integrity fingerprint")
 
             // ── 5. Payload sections ───────────────────────────────────────────
-            val songs = root.requiredArray("songs").mapObjects("songs") { index, item ->
-                BackupSong(
-                    id          = item.requiredStringOpaqueId("songs[$index].id", "id"),
-                    uri         = item.requiredString("songs[$index].uri", "uri"),
-                    title       = item.requiredString("songs[$index].title", "title"),
-                    artist      = item.requiredString("songs[$index].artist", "artist"),
-                    album       = item.requiredString("songs[$index].album", "album"),
-                    albumId     = item.requiredStringOpaqueId("songs[$index].albumId", "albumId"),
-                    duration    = item.requiredLongStrict("songs[$index].duration", "duration"),
-                    dateAdded   = item.requiredLongStrict("songs[$index].dateAdded", "dateAdded"),
-                    trackNumber = item.requiredIntStrict("songs[$index].trackNumber", "trackNumber"),
-                    year        = item.requiredIntStrict("songs[$index].year", "year"),
-                    folderPath  = item["folderPath"] as? String,
-                    folderName  = item["folderName"] as? String,
-                )
-            }
-
-            val trackStats = root.requiredArray("trackStats").mapObjects("trackStats") { index, item ->
-                val lastListenedAt = item.requiredLongStrict("trackStats[$index].lastListenedAt", "lastListenedAt")
-                if (lastListenedAt < 0) {
-                    throw BackupParseException("Field trackStats[$index].lastListenedAt must be non-negative")
-                }
-                BackupTrackStats(
-                    songId               = item.requiredStringOpaqueId("trackStats[$index].songId", "songId"),
-                    contentUri           = item.requiredString("trackStats[$index].contentUri", "contentUri"),
-                    playCount            = item.requiredIntStrict("trackStats[$index].playCount", "playCount"),
-                    skipCount            = item.requiredIntStrict("trackStats[$index].skipCount", "skipCount"),
-                    lastPlayedAt         = item.requiredLongStrict("trackStats[$index].lastPlayedAt", "lastPlayedAt"),
-                    totalListeningTimeMs = item.requiredLongStrict("trackStats[$index].totalListeningTimeMs", "totalListeningTimeMs"),
-                    isFavorite           = item.requiredBoolean("trackStats[$index].isFavorite", "isFavorite"),
-                    lastListenedAt       = lastListenedAt,
-                )
-            }
-
-            val importBaselines = root.requiredArray("importBaselines")
-                .mapObjects("importBaselines") { index, item ->
-                    BackupImportBaseline(
-                        songId                = item.requiredStringOpaqueId("importBaselines[$index].songId", "songId"),
-                        sourceType            = item.requiredString("importBaselines[$index].sourceType", "sourceType"),
-                        sourceKey             = item.requiredString("importBaselines[$index].sourceKey", "sourceKey"),
-                        lastImportedPlayCount = item.requiredIntStrict("importBaselines[$index].lastImportedPlayCount", "lastImportedPlayCount"),
-                        lastImportedSkipCount = item.requiredIntStrict("importBaselines[$index].lastImportedSkipCount", "lastImportedSkipCount"),
-                        lastImportedAt        = item.requiredLongStrict("importBaselines[$index].lastImportedAt", "lastImportedAt"),
-                    )
-                }
-
+            // Field mapping lives in [WavdropBackupSectionParser], shared verbatim with the
+            // WDBK container reader so both packagings decode every v2 section identically.
+            val songs = WavdropBackupSectionParser.songs(root.requiredArray("songs"))
+            val trackStats = WavdropBackupSectionParser.trackStats(root.requiredArray("trackStats"))
+            val importBaselines = WavdropBackupSectionParser.importBaselines(root.requiredArray("importBaselines"))
             val lyricsOverrides = (root["lyricsOverrides"] as? List<*>)
-                ?.mapObjects("lyricsOverrides") { index, item ->
-                    BackupLyricsOverride(
-                        songId     = item.requiredStringOpaqueId("lyricsOverrides[$index].songId", "songId"),
-                        contentUri = item.requiredString("lyricsOverrides[$index].contentUri", "contentUri"),
-                        lyrics     = item.requiredString("lyricsOverrides[$index].lyrics", "lyrics"),
-                        updatedAt  = item.requiredLongStrict("lyricsOverrides[$index].updatedAt", "updatedAt"),
-                    )
-                } ?: emptyList()
-
+                ?.let(WavdropBackupSectionParser::lyricsOverrides) ?: emptyList()
             val preferences = root.parseAndroidPreferences()
-
             val playlists = (root["playlists"] as? List<*>)
-                ?.mapObjects("playlists") { pi, playlist ->
-                    BackupPlaylist(
-                        id        = playlist.requiredStringOpaqueId("playlists[$pi].id", "id"),
-                        name      = playlist.requiredString("playlists[$pi].name", "name"),
-                        createdAt = playlist.requiredLongStrict("playlists[$pi].createdAt", "createdAt"),
-                        updatedAt = playlist.requiredLongStrict("playlists[$pi].updatedAt", "updatedAt"),
-                        songs     = (playlist["songs"] as? List<*>)
-                            ?.mapObjects("playlists[$pi].songs") { si, song ->
-                                BackupPlaylistSong(
-                                    songId     = song.requiredStringOpaqueId("playlists[$pi].songs[$si].songId", "songId"),
-                                    contentUri = song.requiredString("playlists[$pi].songs[$si].contentUri", "contentUri"),
-                                    position   = song.requiredIntStrict("playlists[$pi].songs[$si].position", "position"),
-                                    title      = song.requiredString("playlists[$pi].songs[$si].title", "title"),
-                                    artist     = song.requiredString("playlists[$pi].songs[$si].artist", "artist"),
-                                    album      = song.requiredString("playlists[$pi].songs[$si].album", "album"),
-                                )
-                            } ?: emptyList(),
-                    )
-                } ?: emptyList()
-
+                ?.let(WavdropBackupSectionParser::playlists) ?: emptyList()
             val listenEvents = (root["listenEvents"] as? List<*>)
-                ?.mapObjects("listenEvents") { index, item ->
-                    BackupListenEvent(
-                        songId     = item.requiredStringOpaqueId("listenEvents[$index].songId", "songId"),
-                        contentUri = item.requiredString("listenEvents[$index].contentUri", "contentUri"),
-                        title      = item.requiredString("listenEvents[$index].title", "title"),
-                        artist     = item.requiredString("listenEvents[$index].artist", "artist"),
-                        album      = item.requiredString("listenEvents[$index].album", "album"),
-                        eventType  = item.requiredString("listenEvents[$index].eventType", "eventType"),
-                        occurredAt = item.requiredLongStrict("listenEvents[$index].occurredAt", "occurredAt"),
-                        listenedMs = item.requiredLongStrict("listenEvents[$index].listenedMs", "listenedMs"),
-                        durationMs = item.requiredLongStrict("listenEvents[$index].durationMs", "durationMs"),
-                        source     = item.requiredString("listenEvents[$index].source", "source"),
-                        // Optional in v2 — null when absent (legacy events). Never fabricated.
-                        eventId    = item["eventId"] as? String,
-                    )
-                } ?: emptyList()
+                ?.let(WavdropBackupSectionParser::listenEvents) ?: emptyList()
 
             val manifest = (root["manifest"] as? Map<*, *>)?.let { m ->
                 BackupManifest(
@@ -465,10 +381,143 @@ object WavdropBackupParser {
     )
 }
 
+/**
+ * Single authority for mapping parsed v2 JSON sections onto the backup domain model.
+ *
+ * Used by [WavdropBackupParser] (legacy v2 `.json`) and by the WDBK container reader, so the strict
+ * v2 trust rules — opaque string IDs, strict integers, required-field checks — can never drift
+ * between the two packagings. Every function takes values produced by [parseJson] and throws
+ * [BackupParseException] on any violation.
+ */
+internal object WavdropBackupSectionParser {
+
+    /** Parses [text] with the hardened reader (depth limit, duplicate-key rejection, strict numbers). */
+    fun parseJson(text: String): Any? = try {
+        JsonReader(text).parse()
+    } catch (_: JsonParseException) {
+        throw BackupParseException("Malformed JSON")
+    }
+
+    fun songs(array: List<*>): List<BackupSong> = array.mapObjects("songs") { index, item ->
+        BackupSong(
+            id          = item.requiredStringOpaqueId("songs[$index].id", "id"),
+            uri         = item.requiredString("songs[$index].uri", "uri"),
+            title       = item.requiredString("songs[$index].title", "title"),
+            artist      = item.requiredString("songs[$index].artist", "artist"),
+            album       = item.requiredString("songs[$index].album", "album"),
+            albumId     = item.requiredStringOpaqueId("songs[$index].albumId", "albumId"),
+            duration    = item.requiredLongStrict("songs[$index].duration", "duration"),
+            dateAdded   = item.requiredLongStrict("songs[$index].dateAdded", "dateAdded"),
+            trackNumber = item.requiredIntStrict("songs[$index].trackNumber", "trackNumber"),
+            year        = item.requiredIntStrict("songs[$index].year", "year"),
+            folderPath  = item["folderPath"] as? String,
+            folderName  = item["folderName"] as? String,
+        )
+    }
+
+    fun trackStats(array: List<*>): List<BackupTrackStats> = array.mapObjects("trackStats") { index, item ->
+        val lastListenedAt = item.requiredLongStrict("trackStats[$index].lastListenedAt", "lastListenedAt")
+        if (lastListenedAt < 0) {
+            throw BackupParseException("Field trackStats[$index].lastListenedAt must be non-negative")
+        }
+        BackupTrackStats(
+            songId               = item.requiredStringOpaqueId("trackStats[$index].songId", "songId"),
+            contentUri           = item.requiredString("trackStats[$index].contentUri", "contentUri"),
+            playCount            = item.requiredIntStrict("trackStats[$index].playCount", "playCount"),
+            skipCount            = item.requiredIntStrict("trackStats[$index].skipCount", "skipCount"),
+            lastPlayedAt         = item.requiredLongStrict("trackStats[$index].lastPlayedAt", "lastPlayedAt"),
+            totalListeningTimeMs = item.requiredLongStrict("trackStats[$index].totalListeningTimeMs", "totalListeningTimeMs"),
+            isFavorite           = item.requiredBoolean("trackStats[$index].isFavorite", "isFavorite"),
+            lastListenedAt       = lastListenedAt,
+        )
+    }
+
+    fun importBaselines(array: List<*>): List<BackupImportBaseline> =
+        array.mapObjects("importBaselines") { index, item ->
+            BackupImportBaseline(
+                songId                = item.requiredStringOpaqueId("importBaselines[$index].songId", "songId"),
+                sourceType            = item.requiredString("importBaselines[$index].sourceType", "sourceType"),
+                sourceKey             = item.requiredString("importBaselines[$index].sourceKey", "sourceKey"),
+                lastImportedPlayCount = item.requiredIntStrict("importBaselines[$index].lastImportedPlayCount", "lastImportedPlayCount"),
+                lastImportedSkipCount = item.requiredIntStrict("importBaselines[$index].lastImportedSkipCount", "lastImportedSkipCount"),
+                lastImportedAt        = item.requiredLongStrict("importBaselines[$index].lastImportedAt", "lastImportedAt"),
+            )
+        }
+
+    fun lyricsOverrides(array: List<*>): List<BackupLyricsOverride> =
+        array.mapObjects("lyricsOverrides") { index, item ->
+            BackupLyricsOverride(
+                songId     = item.requiredStringOpaqueId("lyricsOverrides[$index].songId", "songId"),
+                contentUri = item.requiredString("lyricsOverrides[$index].contentUri", "contentUri"),
+                lyrics     = item.requiredString("lyricsOverrides[$index].lyrics", "lyrics"),
+                updatedAt  = item.requiredLongStrict("lyricsOverrides[$index].updatedAt", "updatedAt"),
+            )
+        }
+
+    fun playlists(array: List<*>): List<BackupPlaylist> = array.mapObjects("playlists") { pi, playlist ->
+        BackupPlaylist(
+            id        = playlist.requiredStringOpaqueId("playlists[$pi].id", "id"),
+            name      = playlist.requiredString("playlists[$pi].name", "name"),
+            createdAt = playlist.requiredLongStrict("playlists[$pi].createdAt", "createdAt"),
+            updatedAt = playlist.requiredLongStrict("playlists[$pi].updatedAt", "updatedAt"),
+            songs     = (playlist["songs"] as? List<*>)
+                ?.mapObjects("playlists[$pi].songs") { si, song ->
+                    BackupPlaylistSong(
+                        songId     = song.requiredStringOpaqueId("playlists[$pi].songs[$si].songId", "songId"),
+                        contentUri = song.requiredString("playlists[$pi].songs[$si].contentUri", "contentUri"),
+                        position   = song.requiredIntStrict("playlists[$pi].songs[$si].position", "position"),
+                        title      = song.requiredString("playlists[$pi].songs[$si].title", "title"),
+                        artist     = song.requiredString("playlists[$pi].songs[$si].artist", "artist"),
+                        album      = song.requiredString("playlists[$pi].songs[$si].album", "album"),
+                    )
+                } ?: emptyList(),
+        )
+    }
+
+    fun listenEvents(array: List<*>): List<BackupListenEvent> =
+        array.mapObjects("listenEvents") { index, item ->
+            BackupListenEvent(
+                songId     = item.requiredStringOpaqueId("listenEvents[$index].songId", "songId"),
+                contentUri = item.requiredString("listenEvents[$index].contentUri", "contentUri"),
+                title      = item.requiredString("listenEvents[$index].title", "title"),
+                artist     = item.requiredString("listenEvents[$index].artist", "artist"),
+                album      = item.requiredString("listenEvents[$index].album", "album"),
+                eventType  = item.requiredString("listenEvents[$index].eventType", "eventType"),
+                occurredAt = item.requiredLongStrict("listenEvents[$index].occurredAt", "occurredAt"),
+                listenedMs = item.requiredLongStrict("listenEvents[$index].listenedMs", "listenedMs"),
+                durationMs = item.requiredLongStrict("listenEvents[$index].durationMs", "durationMs"),
+                source     = item.requiredString("listenEvents[$index].source", "source"),
+                // Optional in v2 — null when absent (legacy events). Never fabricated.
+                eventId    = item["eventId"] as? String,
+            )
+        }
+
+    /** Android preferences from a `{"android": {...}}`-scoped (or flat legacy) preferences object. */
+    fun androidPreferences(preferencesObject: Map<*, *>): BackupPreferences? =
+        mapOf("preferences" to preferencesObject).parseAndroidPreferences()
+
+    /** Raw Desktop overlay root → model, preserving the raw JSON exactly as the legacy v2 parser does. */
+    fun desktopOverlay(overlayRoot: Map<*, *>): BackupDesktopOverlay = overlayRoot.parseDesktopOverlay()
+
+    /** Same plausibility rule the legacy parser applies after integrity checks (WD-05). */
+    fun trackStatsArePlausible(stats: List<BackupTrackStats>, nowMs: Long): Boolean =
+        stats.all { it.isPlausible(nowMs) }
+
+    fun manifestFromCounts(m: Map<*, *>): BackupManifest = BackupManifest(
+        songCount           = m.optCount("songCount"),
+        trackStatsCount     = m.optCount("trackStatsCount"),
+        listenEventCount    = m.optCount("listenEventCount"),
+        importBaselineCount = m.optCount("importBaselineCount"),
+        lyricsOverrideCount = m.optCount("lyricsOverrideCount"),
+        playlistCount       = m.optCount("playlistCount"),
+        preferenceCount     = m.optCount("preferenceCount"),
+    )
+}
+
 // ── Parse exceptions ──────────────────────────────────────────────────────────
 
-private class BackupParseException(message: String) : IllegalArgumentException(message)
-private class JsonParseException(message: String) : IllegalArgumentException(message)
+internal class BackupParseException(message: String) : IllegalArgumentException(message)
+internal class JsonParseException(message: String) : IllegalArgumentException(message)
 
 // ── Portable-stat plausibility (WD-05) ───────────────────────────────────────
 

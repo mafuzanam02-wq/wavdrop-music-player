@@ -79,8 +79,8 @@ fun SettingsBackupScreen(
     val suggestedExportName by remember {
         derivedStateOf {
             when (backupFileMode) {
-                BackupFileMode.DATED            -> "wavdrop-backup-${LocalDate.now()}.json"
-                BackupFileMode.REPLACE_PREVIOUS -> "wavdrop-backup.json"
+                BackupFileMode.DATED            -> "wavdrop-backup-${LocalDate.now()}.wdbk"
+                BackupFileMode.REPLACE_PREVIOUS -> "wavdrop-backup.wdbk"
             }
         }
     }
@@ -96,7 +96,7 @@ fun SettingsBackupScreen(
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json"),
+        contract = ActivityResultContracts.CreateDocument(BackupPickerTypes.CREATE_BACKUP_MIME),
     ) { uri ->
         if (uri != null) viewModel.exportTo(uri)
     }
@@ -334,7 +334,7 @@ fun SettingsBackupScreen(
             item {
                 ScanModeRow(
                     title    = "Fixed filename",
-                    subtitle = "Always saves as wavdrop-backup.json, replacing the previous file.",
+                    subtitle = "Always saves as wavdrop-backup.wdbk, replacing the previous file.",
                     selected = backupFileMode == BackupFileMode.REPLACE_PREVIOUS,
                     onClick  = { viewModel.setBackupFileMode(BackupFileMode.REPLACE_PREVIOUS) },
                 )
@@ -366,10 +366,10 @@ fun SettingsBackupScreen(
             item {
                 ClickableSettingsRow(
                     title    = "Restore from backup",
-                    subtitle = "Choose a Wavdrop backup JSON file to preview and restore.",
-                    // Narrow filter so the picker hides non-JSON files. Post-selection
-                    // validation still rejects anything a provider lets through.
-                    onClick  = { backupImportLauncher.launch(arrayOf("application/json")) },
+                    subtitle = "Choose a WavDrop backup file to preview and restore.",
+                    // Providers report arbitrary MIME types for .wdbk/.json files, so the picker is not narrowed;
+                    // the selected file is validated strictly by content after selection.
+                    onClick  = { backupImportLauncher.launch(BackupPickerTypes.OPEN_BACKUP_MIME_TYPES) },
                 )
             }
             item { SectionDivider() }

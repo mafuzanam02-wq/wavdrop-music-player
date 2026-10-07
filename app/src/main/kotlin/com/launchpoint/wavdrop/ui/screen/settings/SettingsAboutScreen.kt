@@ -475,7 +475,7 @@ private object WavdropAbout {
             "· FOREGROUND_SERVICE and FOREGROUND_SERVICE_MEDIA_PLAYBACK are used to keep music playing when the screen is off\n\n" +
             "Wavdrop does not request internet, location, contacts, camera, microphone, advertising ID, or any other unnecessary permissions.",
         "Backup and export:\n" +
-            "The Export Wavdrop Data feature saves a JSON file to a location you choose, such as local storage or a cloud service you control. This file may contain your library metadata, statistics, playlists, custom lyrics, app preferences, and listening history. Wavdrop does not upload this file. You are responsible for protecting your backup because it may contain personal listening data.",
+            "The Export Wavdrop Data feature saves a WavDrop backup file to a location you choose, such as local storage or a cloud service you control. This file may contain your library metadata, statistics, playlists, custom lyrics, app preferences, and listening history. Wavdrop does not upload this file. You are responsible for protecting your backup because it may contain personal listening data.",
         "Share:\n" +
             "When you use the Share feature on a track, Wavdrop passes a content link for that audio file to the Android share sheet and to the app you choose. Wavdrop does not transmit any data itself and has no control over how the receiving app handles the shared file.",
         "Delete from device:\n" +
@@ -497,7 +497,7 @@ private object WavdropAbout {
         "Delete from device:\n" +
             "Delete from device permanently removes audio files from your device. This action cannot be undone. Android does not provide a recycle bin for shared media storage. Use this feature with care.",
         "Backup files:\n" +
-            "Backup files you export may contain your listening statistics, playlist names, custom lyrics, app preferences, and other personal library data in plain JSON format. Store them securely and do not share them with people you do not trust.",
+            "Backup files you export may contain your listening statistics, playlist names, custom lyrics, app preferences, and other personal library data in an unencrypted file. Store them securely and do not share them with people you do not trust.",
         "Sharing:\n" +
             "When you share a track, you are responsible for what you share and with whom. Wavdrop opens the Android share sheet; it is not responsible for how the receiving app handles the shared file.",
         "Format support:\n" +

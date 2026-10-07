@@ -19,7 +19,7 @@ targetSdk 36 - Room schema 13.
   lyric overrides. Nothing is fetched online.
 - **Statistics**: per-song counters, Statistics dashboard, Listening Reports, Monthly Reports, Wrapped
   (monthly / yearly / all-time), Insights hub.
-- **Backup and migration**: verified JSON backup/restore (format v2, v1 import supported), automatic
+- **Backup and migration**: verified `.wdbk` backup/restore (logical format v2; legacy v1/v2 JSON import supported), automatic
   backup via a WorkManager check, preservation of unmatched history in a pending (quarantine) store,
   Wavdrop Desktop backup import, and BlackPlayer EX `.bpstat` import.
 - **Personalisation**: theme, accent colour, six launcher icons (default Obsidian Black), home layout,

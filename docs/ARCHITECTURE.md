@@ -313,11 +313,13 @@ format), [BACKUP_PRESERVATION_CONTRACT.md](BACKUP_PRESERVATION_CONTRACT.md) (sem
 [WAVDROP_IMPORT_RULES.md](WAVDROP_IMPORT_RULES.md) (import behaviour),
 [WAVDROP_BACKUP_SCHEMA_V1.md](WAVDROP_BACKUP_SCHEMA_V1.md) (legacy v1).
 
-- **Export** always writes format **v2** (`WavdropBackupExporterV2`): `formatMajor 2 / formatMinor 0`,
+- **Logical format** is always **v2**. New user-facing exports package it as a **WDBK container** (below); the
+  legacy v2 JSON writer (`WavdropBackupExporterV2`) remains for the Recovery safety snapshot, tests and
+  compatibility tooling. The v2 model (`WavdropBackupExporterV2`): `formatMajor 2 / formatMinor 0`,
   `backupId`, `sourceInstallationId`, `exportedAt`, `producer`, capability arrays, `manifest`, mandatory
   `integrity` (fingerprint of the parsed model), string-typed opaque ids, `lastListenedAt`, optional
   `eventId`, platform-scoped `preferences.android`, and any preserved `desktopOverlay` extension root.
-- **Parse** (`WavdropBackupParser`): accepts v1 (legacy adapter, `UNVERIFIED_LEGACY` unless a payload
+- **Parse** (`WavdropBackupParser`, legacy JSON): accepts v1 (legacy adapter, `UNVERIFIED_LEGACY` unless a payload
   checksum exists) and v2 (integrity required); rejects duplicate JSON keys, bounded nesting depth,
   newer versions, unknown required capabilities (none are known today), integrity/manifest mismatches,
   and implausible stat magnitudes. Unknown optional capabilities are tolerated.
@@ -329,15 +331,83 @@ format), [BACKUP_PRESERVATION_CONTRACT.md](BACKUP_PRESERVATION_CONTRACT.md) (sem
 - **Desktop interop**: `DesktopWavdropBackupParser` / planner / repository handle Desktop-origin backups
   (detected by `appName = "wavdrop-desktop-lab"` or `sourcePlatform = "desktop"`); Desktop string ids
   are never written into Android tables.
-- **Reliability**: exports are read back and verified before success is reported
-  (`BackupSaveValidator`); a failed write never replaces the previous verified file; backups are
-  serialized by `BackupExecutionSerializer`.
+- **Reliability**: exports are read back and verified before success is reported (WDBK: re-decoded by the same
+  `WdbkReader` real imports use; the internal JSON snapshot: `BackupSaveValidator`); a failed write never replaces
+  the previous verified file; backups are serialized by `BackupExecutionSerializer`.
+- **WDBK container v1** (`data/backup/wdbk/`, WDBK-1, implemented; physical QA pending): ZIP/DEFLATE + compact
+  UTF-8 JSON sections + chunked listening history, wrapping the unchanged **v2 logical model**. The container version
+  (`containerMajor 1 / containerMinor 0`) is independent of the logical version; there is no "Backup V3".
+  - **Layout** (deterministic names; `manifest.json` is written LAST because it records every entry's hash):
+    `sections/songs.json`, `track-stats.json`, `import-baselines.json`, `lyrics-overrides.json`,
+    `playlists.json` (always present, `[]` when empty), `sections/preferences.json` (present IFF the backup has
+    preferences), `history/listen-events-000000.json` ... (bounded chunks of `WdbkLimits.EVENTS_PER_CHUNK` = 2 000
+    events; none when there is no history), `extensions/desktop-overlay.json` (optional; the raw Desktop overlay,
+    preserved unreinterpreted), `manifest.json`. Section JSON is produced by the same per-section codecs as the legacy
+    exporter and parsed by the same strict parser functions (`WavdropBackupSectionParser`), so field mapping exists once.
+  - **Integrity, two layers**: (1) physical - every entry's byte length and SHA-256 of its exact uncompressed bytes are
+    recorded in the manifest and re-checked on read (ZIP CRC is never the contract); (2) semantic - the manifest stores the
+    existing `WavdropBackupIntegrityV2` fingerprint, recomputed over the reconstructed model. Success needs both, plus
+    matching section counts, per-chunk event counts and contiguous chunk indexes. `WavdropBackupIntegrityV2` now streams
+    its canonical text into SHA-256 (identical hashes; pinned against a verbatim copy of the old implementation).
+  - **Untrusted-input bounds** (`WdbkLimits`, counted on ACTUAL bytes, never `ZipEntry.size`): outer file 100 MiB,
+    4 096 entries, 64 MiB per entry, 256 MiB total decompressed, 4 MiB manifest, 10 000 events per chunk. Entry names use a
+    strict allow-list (no `..`, absolute, backslash or duplicate names); nothing is extracted to the filesystem and nested
+    archives are never opened. A higher `containerMajor` is rejected with the standard "newer version of Wavdrop" message; a
+    higher `containerMinor` is tolerated only for entries the manifest declares OPTIONAL (still hash-verified, content
+    ignored); an unknown REQUIRED entry or section is rejected.
+  - **Entry point**: `WavdropBackupDocumentReader` sniffs CONTENT (ZIP signature vs JSON), never the extension, MIME or
+    display name, and returns the same `WavdropBackup` either way. Legacy JSON still goes through `WavdropBackupParser`
+    (never converted through WDBK); Desktop JSON is routed to its own parser. UI code never inspects ZIP entries.
+  - **Export** (streamed; no complete event list exists on this path): `WavdropBackupRepository.buildWdbkExportSnapshot()`
+    builds a `WdbkExportSnapshot` - the small logical sections, identity metadata and a FACTORY for a `WdbkEventSource` -
+    and captures `MAX(track_listen_events.id)` once as the snapshot boundary. `WdbkWriter` (suspend) pulls the history one
+    chunk at a time (`WdbkLimits.EVENTS_PER_CHUNK`): encode one bounded JSON array, write and SHA-256 it as a ZIP entry, feed
+    the same events into the semantic fingerprint, count them, drop the chunk, pull the next. Manifest event counts and
+    chunk descriptors are counters. The production source, `CanonicalEventStream`, pages
+    `TrackListenEventDao.getExportPage`, a true keyset (no OFFSET, never `getAllSnapshot()`) over the event table in the
+    fingerprint's canonical order reduced to table columns: `occurredAt, songId, eventType, listenedMs, durationMs, source,
+    COALESCE(eventId, ''), id DESC` (`+id <= snapshotMax` bound; resume cursor = all eight values; rows inserted after the
+    boundary are excluded; excluded sources advance the cursor but emit nothing). The reduction is valid because export maps
+    every row through ONE captured song map: contentUri/title/artist/album are equal for equal songId (a missing song maps to
+    the same empty strings) and are never reached for different songIds, so they cannot change the order. `id` is only the
+    physical paging tie-breaker, and it runs DESCENDING because that is what the legacy export did: it read
+    `getAllSnapshot()` (`ORDER BY occurredAt DESC`, served by a backwards scan of the occurredAt index, which visits equal
+    `occurredAt` rows in descending id; observed and pinned in the Room/Robolectric host SQLite test environment) and stable-sorted it, so rows that tie in
+    `EVENT_ORDER` kept descending id order. That only matters where the comparator ties but the canonical records differ:
+    a null `eventId` versus an empty one (regression-tested for both insertion arrangements; swapping them changes the hash).
+    The mixed-direction keyset is one eight-column row-value comparison on `(..., COALESCE(eventId,''), -id)`; an OR form is
+    equivalent but makes SQLite switch to a MULTI-INDEX OR and a full sort per page, so it is not used. Query plan (pinned):
+    `SEARCH ... USING INDEX index_track_listen_events_occurredAt (occurredAt>?)` plus `USE TEMP B-TREE FOR RIGHT PART OF
+    ORDER BY`, i.e. an index seek and a SQLite-internal partial sort of the remaining keys, not app memory. (SQL itself does not specify the order of rows that are equal on `occurredAt`; WDBK deliberately reproduces the
+    observed legacy ordering, descending id, which is observed and pinned in the Room/Robolectric SQLite test environment.
+    It has NOT yet been executed on a real Android device: `LegacyExportTieOrderInstrumentedTest` (androidTest) is the
+    on-device check and device confirmation remains part of WDBK physical validation.) Rows therefore arrive already in
+    `WavdropBackupIntegrityV2.EVENT_ORDER`: nothing is sorted or run-buffered in the app, and every delivered event is
+    checked against the comparator; if SQLite BINARY (code point) text order and the fingerprint UTF-16 order ever disagree for
+    rows tied on every earlier key (eventIds differing at a supplementary character versus U+E000..U+FFFF) the export fails
+    with a clear error rather than writing a wrong fingerprint (app-generated UUID eventIds are safe). The semantic
+    fingerprint is accumulated incrementally (`WavdropBackupIntegrityV2.StreamingFingerprint`: header and non-event sections,
+    then events in order, then preferences) and is byte-for-byte the value the reconstructed model receives on read.
+    `WdbkBackupSaver` re-opens and decodes the saved bytes before reporting success; a `wt`->`w` retry re-streams the same
+    snapshot. Retained for history export: one page plus one chunk, the cursor and the previous event, plus the small sections and the
+    song map. SQLite sorts each page inside the query (it may use its own temp storage). Honest limits: the DECODE side (and therefore Merge/Recovery, which need a `WavdropBackup`) still materializes the complete
+    event list. Legacy v2 JSON export (`buildBackupJson`, used by the Recovery safety snapshot) keeps its full-history read.
+    Folder/automatic backup: temp file -> verify -> stream-copy the SAME verified bytes to the final file -> verify final; the
+    previous file is untouched until the verified copy starts (SAF still has no atomic replace; that risk is unchanged).
+  - **Merge and Recovery are container-unaware**: decode happens before restore semantics, and everything downstream
+    receives the same `WavdropBackup`. For a WDBK, Recovery re-validates by re-reading the selected document and
+    requiring the same semantic fingerprint as the preview (legacy JSON still re-parses its original text).
+  - **The Recovery safety snapshot intentionally stays verified legacy v2 JSON** (`files/recovery-safety/pre-recovery-latest.json`)
+    in WDBK-1: it is an internal artifact on a physically validated destructive path, and packaging has no bearing on its
+    purpose. Migrating it is a possible later slice only if a concrete benefit appears; it is not recorded as debt.
+  - Evidence and the chunk-size rationale: [architecture/WDBK_BENCHMARKS.md](architecture/WDBK_BENCHMARKS.md).
 - **Automatic backup**: `AutoBackupWorkScheduler` enqueues a unique 24-hour periodic WorkManager check
   (storage-not-low constraint); `AutoBackupWorker` calls `AutoBackupRepository.runIfDue()`, which owns the
-  interval due check and the folder write. Scheduling is best-effort under Android's constraints.
+  interval due check and the folder write (a `.wdbk` file: `wavdrop-backup-YYYY-MM-DD.wdbk` or `wavdrop-backup.wdbk`). Scheduling is best-effort under Android's constraints.
   `WavdropApp` reconciles the schedule at startup and when the interval setting changes.
-- **TrackIdentity is not exported**, there is no rematching engine, and restore has no separate
-  "Recovery" mode or pre-restore safety snapshot yet. See the preservation contract for per-area status.
+- **TrackIdentity is not exported** and there is no rematching engine. Restore has explicit Merge and Recovery modes;
+  Recovery requires the verified pre-Recovery safety snapshot. See `docs/BACKUP_PRESERVATION_CONTRACT.md` for the
+  per-area status and the detailed semantics.
 
 BlackPlayer EX import (`data/legacy`): parse -> match (title+artist+album) -> preview -> apply in one
 transaction; MAX-merges the main play count only (field 2 is a period play count, never skips; see WAVDROP_IMPORT_RULES.md); idempotent; never writes events.

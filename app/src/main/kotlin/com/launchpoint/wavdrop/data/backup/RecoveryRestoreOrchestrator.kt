@@ -141,11 +141,18 @@ class RecoveryRestoreOrchestrator @Inject constructor(
     private val backupExecutionSerializer: BackupExecutionSerializer,
 ) {
     suspend fun restore(rawBackupJson: String): RecoveryRestoreOutcome =
-        restoreLock.tryRun { restoreOwned(rawBackupJson) } ?: RecoveryRestoreOutcome.RestoreInProgress
+        restoreFrom { WavdropBackupParser.parse(rawBackupJson) }
 
-    private suspend fun restoreOwned(rawBackupJson: String): RecoveryRestoreOutcome {
-        // A. Validate the selected backup again, from its original text, independent of anything the preview showed.
-        val backup = when (val e = RecoveryEligibility.evaluate(WavdropBackupParser.parse(rawBackupJson))) {
+    /**
+     * Same Recovery, for a backup whose original text is not held (a WDBK container). [revalidate] must re-read and
+     * re-verify the selected document from its source and return the verdict; the semantics below are identical.
+     */
+    suspend fun restoreFrom(revalidate: suspend () -> WavdropBackupImportResult): RecoveryRestoreOutcome =
+        restoreLock.tryRun { restoreOwned(revalidate) } ?: RecoveryRestoreOutcome.RestoreInProgress
+
+    private suspend fun restoreOwned(revalidate: suspend () -> WavdropBackupImportResult): RecoveryRestoreOutcome {
+        // A. Validate the selected backup again, from its original source, independent of anything the preview showed.
+        val backup = when (val e = RecoveryEligibility.evaluate(revalidate())) {
             is RecoveryEligibility.Result.Eligible -> e.backup
             is RecoveryEligibility.Result.Blocked -> return RecoveryRestoreOutcome.InputBackupInvalid(e.reason, e.message)
         }

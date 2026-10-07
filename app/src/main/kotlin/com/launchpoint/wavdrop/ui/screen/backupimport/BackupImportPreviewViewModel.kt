@@ -4,7 +4,13 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.launchpoint.wavdrop.data.backup.BackupContainerKind
+import com.launchpoint.wavdrop.data.backup.BackupDocumentReadResult
 import com.launchpoint.wavdrop.data.backup.BackupInputReader
+import com.launchpoint.wavdrop.data.backup.BackupRejectReason
+import com.launchpoint.wavdrop.data.backup.WavdropBackupDocumentReader
+import com.launchpoint.wavdrop.data.backup.WavdropBackupImportResult
+import com.launchpoint.wavdrop.data.backup.WavdropBackupIntegrityV2
 import com.launchpoint.wavdrop.data.backup.BackupRestoreMode
 import com.launchpoint.wavdrop.data.backup.RecoveryEligibility
 import com.launchpoint.wavdrop.data.backup.RecoveryImpact
@@ -218,9 +224,15 @@ class BackupImportPreviewViewModel @Inject constructor(
     /** Original text of the selected Android backup. Recovery re-validates from THIS, never from the parsed preview model. */
     private var parsedBackupText: String? = null
 
+    /** WDBK source for Recovery re-validation: the picked document and the fingerprint the preview was built from. */
+    private var parsedWdbkSource: WdbkRecoverySource? = null
+
+    private class WdbkRecoverySource(val uri: Uri, val fingerprint: String)
+
     // ── File loading ──────────────────────────────────────────────────────────
 
     fun processFile(uri: Uri) {
+        parsedWdbkSource = null
         parsedBackupText = null // each import starts from scratch, and therefore from the safe default mode (Merge)
         _uiState.value = BackupImportUiState.Loading(BackupLoadingStage("Reading backup file…"))
         viewModelScope.launch {
@@ -235,29 +247,25 @@ class BackupImportPreviewViewModel @Inject constructor(
             _uiState.value = BackupImportUiState.Loading(BackupLoadingStage(label, step, total))
         }
 
-        // Gate by file name first: only .json files belong here. Files without a
-        // usable display name fall through to the content sniff below.
-        val displayName = ImportFileValidation.displayName(context, uri)
-        val nameLooksRight = ImportFileValidation.isLikelyWavdropBackupFileName(displayName)
-        if (displayName != null && !nameLooksRight) {
-            return BackupImportUiState.Error(ImportFileValidation.WAVDROP_WRONG_FILE_MESSAGE)
+        // Content decides the format, never the file name, extension or MIME type: the unified reader sniffs the
+        // bytes and routes legacy JSON (V1/V2, Desktop) or a WDBK container to the matching strict decoder.
+        val document = withContext(Dispatchers.IO) {
+            WavdropBackupDocumentReader.readUri(context, uri)
+        }
+        when (document) {
+            is BackupDocumentReadResult.Rejected -> return BackupImportUiState.Error(
+                when (document.reason) {
+                    BackupRejectReason.TOO_LARGE -> BackupInputReader.TOO_LARGE_MESSAGE
+                    BackupRejectReason.UNREADABLE -> "Could not open the selected file."
+                    BackupRejectReason.EMPTY, BackupRejectReason.NOT_A_BACKUP ->
+                        ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE
+                },
+            )
+            else -> Unit
         }
 
-        val content = try {
-            withContext(Dispatchers.IO) {
-                BackupInputReader.readBackupText(context, uri)
-            }
-        } catch (_: BackupInputReader.InputTooLargeException) {
-            return BackupImportUiState.Error(BackupInputReader.TOO_LARGE_MESSAGE)
-        } ?: return BackupImportUiState.Error("Could not open the selected file.")
-
-        // Structural sniff before full parsing — rejects arbitrary JSON/binary
-        // content without running the parser over it.
-        if (!ImportFileValidation.isLikelyWavdropBackupContent(content)) {
-            return BackupImportUiState.Error(ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE)
-        }
-
-        if (DesktopWavdropBackupParser.isDesktopBackupContent(content)) {
+        if (document is BackupDocumentReadResult.DesktopJson) {
+            val content = document.text
             setStage("Parsing backup data…", 2, 3)
             val result = DesktopWavdropBackupParser.parse(content)
             val backup = result.backup
@@ -290,13 +298,21 @@ class BackupImportPreviewViewModel @Inject constructor(
         }
 
         setStage("Parsing backup data…")
-        val result = withContext(Dispatchers.Default) { WavdropBackupParser.parse(content) }
+        val wavdrop = document as BackupDocumentReadResult.Wavdrop
+        val result = wavdrop.result
         val backup = result.backup
-            ?: return BackupImportUiState.Error(userFacingParseError(result.error))
+            ?: return BackupImportUiState.Error(userFacingParseError(result.error, wavdrop.container))
 
         parsedBackup = backup
         parsedDesktopBackup = null
-        parsedBackupText = content
+        // Legacy JSON: Recovery re-validates from the original text. WDBK: Recovery re-reads this document and requires
+        // the SAME logical fingerprint (the container is not held in memory).
+        parsedBackupText = wavdrop.legacyText
+        parsedWdbkSource = if (wavdrop.container == BackupContainerKind.WDBK) {
+            WdbkRecoverySource(uri, WavdropBackupIntegrityV2.fingerprint(backup))
+        } else {
+            null
+        }
 
         val legacyWarning = if (result.integrityStatus == BackupIntegrityStatus.UNVERIFIED_LEGACY) {
             "This is an older Wavdrop backup without integrity verification. " +
@@ -400,8 +416,36 @@ class BackupImportPreviewViewModel @Inject constructor(
      * fields) to a calm user-facing message. Version errors stay specific so users
      * know a newer backup needs a newer app.
      */
-    private fun userFacingParseError(error: String?): String = when {
+    /**
+     * Recovery's "validate again from the source" step for a WDBK: re-read and re-verify the document, then require the
+     * very logical backup the user previewed (same semantic fingerprint). A file that changed in between is refused.
+     */
+    private fun rereadWdbk(source: WdbkRecoverySource): suspend () -> WavdropBackupImportResult = {
+        val doc = WavdropBackupDocumentReader.readUri(context, source.uri)
+        val again = (doc as? BackupDocumentReadResult.Wavdrop)?.result
+        val backup = again?.backup
+        when {
+            again == null || backup == null -> again ?: WavdropBackupImportResult(
+                backup = null,
+                error = ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE,
+                integrityStatus = BackupIntegrityStatus.INVALID,
+            )
+            WavdropBackupIntegrityV2.fingerprint(backup) != source.fingerprint -> WavdropBackupImportResult(
+                backup = null,
+                error = "The backup file changed after it was selected. Choose it again.",
+                integrityStatus = BackupIntegrityStatus.INVALID,
+            )
+            else -> again
+        }
+    }
+
+    private fun userFacingParseError(
+        error: String?,
+        container: BackupContainerKind = BackupContainerKind.LEGACY_JSON,
+    ): String = when {
         error == null -> ImportFileValidation.WAVDROP_NOT_A_BACKUP_MESSAGE
+        // Every WDBK reader error is already a plain-language message (damaged / newer version / too large / ...).
+        container == BackupContainerKind.WDBK -> error
         // Surfaced verbatim: created by a newer Wavdrop that supports a higher version.
         error == WavdropBackupParser.NEWER_VERSION_ERROR -> error
         // Versioned but lower than supported — still surfaces version number.
@@ -473,12 +517,20 @@ class BackupImportPreviewViewModel @Inject constructor(
     }
 
     private fun applyRecovery(preview: BackupImportUiState.Preview) {
-        val raw = parsedBackupText ?: return setError("No parsed backup to recover.")
+        val raw = parsedBackupText
+        val wdbk = parsedWdbkSource
+        if (raw == null && wdbk == null) return setError("No parsed backup to recover.")
         recoveryPreview = preview
         _uiState.value = BackupImportUiState.Applying(BackupLoadingStage("Creating a verified safety backup…"))
         viewModelScope.launch {
             val outcome = runCatching {
-                withContext(Dispatchers.IO) { recoveryOrchestrator.restore(raw) }
+                withContext(Dispatchers.IO) {
+                    if (raw != null) {
+                        recoveryOrchestrator.restore(raw)
+                    } else {
+                        recoveryOrchestrator.restoreFrom(rereadWdbk(wdbk!!))
+                    }
+                }
             }.getOrElse {
                 _uiState.value = BackupImportUiState.RecoveryBlocked(
                     RecoveryBlockedKind.RECOVERY_APPLY_FAILED,

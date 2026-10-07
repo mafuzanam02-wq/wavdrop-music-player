@@ -177,7 +177,7 @@ not offered there because there is nothing to replace.
 
 **Mandatory safety snapshot.** Recovery never runs before a VERIFIED pre-restore snapshot exists. The snapshot is
 an ordinary current-format (v2) backup produced by the existing exporter, written to the app-private
-`files/recovery-safety/pre-recovery-latest.json` (no SAF folder, external storage, network or cloud), read back,
+`files/recovery-safety/pre-recovery-latest.json` (no SAF folder, external storage, network or cloud; it intentionally stays verified legacy v2 JSON even though user-facing exports are `.wdbk` - WDBK-1 changes backup packaging, not this rollback mechanism), read back,
 required to equal what was written, and accepted by `BackupSaveValidator` and the v2 parser (integrity
 fingerprint, manifest, plausibility). The write goes through a temp file and an atomic replace, so a failed
 attempt never destroys the previous verified snapshot. Any failure at any stage (build, write, read-back,
@@ -358,3 +358,12 @@ All currently defined preservation release-gate conditions are met. This is an i
 a marketing claim: the project is not required to use the term "preservation-grade", and it must not appear in
 public copy unless a deliberate product/marketing decision chooses it. Snapshot retention/receipts remain
 deferred and are not a gate condition.
+
+## 10. WDBK packaging does not change preservation semantics
+
+User-facing exports are `.wdbk` containers (see `WAVDROP_DATA_FORMAT_SPEC.md` section 1a). Every preservation rule in
+this contract - Merge MAX / set-true-only favourites, Recovery authority and eligibility, the verified safety snapshot,
+conservative matching, event dedupe, playlist and lyrics semantics, quarantine, Desktop overlay round-tripping, no
+fabricated events, no audio files - applies identically to a backup decoded from a `.wdbk` and one decoded from legacy
+v1/v2 JSON. The container boundary sits BEFORE restore: restore code receives the same `WavdropBackup` either way and does
+not know which packaging produced it. Legacy v1 and v2 JSON backups remain importable indefinitely.

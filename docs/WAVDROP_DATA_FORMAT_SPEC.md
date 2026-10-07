@@ -24,10 +24,42 @@ today: Wavdrop Android and Wavdrop Desktop (lab); further platforms must follow 
 
 | Version | Status | Notes |
 |---|---|---|
-| Android backup **v2** (`version: 2`) | **Current** - the only format Android exports | mandatory integrity; opaque ids as strings |
+| Android backup **v2** (`version: 2`) | **Current** - the only LOGICAL format Android exports | mandatory integrity; opaque ids as strings; packaged as a WDBK container (see section 1a) |
+| **WDBK container v1** (`.wdbk`) | **Current** - how Android packages new exports | ZIP/DEFLATE + compact JSON sections; wraps the v2 logical model unchanged |
+| Android backup v2 as a bare `.json` | **Legacy** - import only, supported indefinitely | what Android exported before WDBK-1 |
 | Android backup **v1** (`version: 1`) | **Legacy** - import only, supported indefinitely | see [WAVDROP_BACKUP_SCHEMA_V1.md](WAVDROP_BACKUP_SCHEMA_V1.md) |
 | Desktop lab backups (`schemaVersion: 1`) | **Current** (import) | legacy-desktop and shared-desktop shapes, section 7 |
 | Newer major versions | Rejected before parsing/apply | "created by a newer version of Wavdrop" |
+
+## 1a. WDBK container v1 (physical packaging)
+
+Current. A `.wdbk` file is a standard ZIP (DEFLATE) holding the **v2 logical backup** split into compact UTF-8 JSON
+sections. It changes packaging, not meaning: a decoded WDBK is the same model, with the same
+`WavdropBackupIntegrityV2` fingerprint, that the v2 JSON of the same state decodes to. It contains no audio files. The
+container version (`containerMajor 1, containerMinor 0`) is independent of the logical version (`2`); this is not
+"Backup V3".
+
+| Entry | Content | Presence |
+|---|---|---|
+| `sections/songs.json`, `track-stats.json`, `import-baselines.json`, `lyrics-overrides.json`, `playlists.json` | the v2 arrays, element shapes identical to v2 JSON (ids as strings, `lastListenedAt`, `eventId`, ...) | always (`[]` when empty) |
+| `sections/preferences.json` | `{"android":{...}}`, as in v2 JSON | present IFF the backup has preferences |
+| `history/listen-events-NNNNNN.json` | one bounded JSON array of v2 listen-event objects per chunk (6-digit zero-padded index from 0, contiguous, 1..2 000 events written, up to 10 000 accepted) | one per chunk; none for empty history |
+| `extensions/desktop-overlay.json` | the preserved raw `desktopOverlay` root | optional; only when present |
+| `manifest.json` | see below | exactly one; written last |
+
+`manifest.json` fields: `format: "wavdrop_wdbk"`, `containerMajor`, `containerMinor`, `logicalFormat: "wavdrop_backup"`,
+`logicalVersion: 2`, `backupId`, `sourceInstallationId`, `exportedAt` (epoch ms), `producer`
+(`platform`, `appVersionCode`, `appVersionName`), `requiredCapabilities`, `optionalCapabilities`, `counts` (the v2
+manifest counts), `integrity` (`v: 2`, `fingerprint` = the v2 semantic fingerprint) and `entries[]`: per payload entry
+`path`, `section`, `sectionVersion`, `required`, `byteLength`, `sha256` (of the exact uncompressed bytes) and, for
+history chunks, `chunkIndex` and `eventCount`. The manifest does not hash itself.
+
+Rules: a reader verifies every entry's length and SHA-256, requires the physical entry set to equal the declared set,
+checks required sections, contiguous chunk indexes and per-chunk/overall counts, recomputes the semantic fingerprint on
+the reconstructed model, and applies the same strict v2 parsing and WD-05 plausibility rules as v2 JSON. Any failure
+rejects the whole container; no partial model is ever produced. `containerMajor` greater than supported is rejected as a
+newer version. Detection is by content (ZIP signature), never by extension or MIME type. Untrusted-input bounds: see
+`docs/ARCHITECTURE.md` section 6 (`WdbkLimits`).
 
 Version policy (Android parser):
 

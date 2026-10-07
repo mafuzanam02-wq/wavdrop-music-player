@@ -17,7 +17,12 @@ import com.launchpoint.wavdrop.data.local.dao.TrackStatsDao
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
 import com.launchpoint.wavdrop.data.local.entity.LyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.SongEntity
+import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
+import com.launchpoint.wavdrop.data.backup.wdbk.UriBackupHandle
+import com.launchpoint.wavdrop.data.backup.wdbk.WdbkBackupSaver
+import com.launchpoint.wavdrop.data.backup.wdbk.WdbkExportSnapshot
+import com.launchpoint.wavdrop.data.backup.wdbk.WdbkLimits
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.data.settings.AccentColor
@@ -88,36 +93,78 @@ class WavdropBackupRepository @Inject constructor(
         }
         return id
     }
+    /**
+     * Manual export: streams a WDBK container to [uri], then re-opens it and decodes it with the production
+     * [WdbkReader] (per-entry SHA-256 + semantic fingerprint). Returns only after that verification passes; any
+     * failure throws [IOException]. The logical model is built with bounded event paging — never
+     * [TrackListenEventDao.getAllSnapshot] and never one JSON string for the whole backup.
+     */
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
-        val json = buildBackupJson()
-        // "wt" truncates before writing. The default "w" mode does not truncate on all
-        // providers, so overwriting a larger existing file would leave trailing garbage
-        // after the JSON and corrupt the export. Fall back to "w" only for providers
-        // that reject "wt".
-        val wrote = tryWrite(uri, json, "wt") ?: tryWrite(uri, json, "w")
-        if (wrote == null) {
-            throw IOException("Could not save the backup file. Try a different location.")
-        }
-        val readBack = readBackupContent(uri)
-        if (!BackupSaveValidator.isSavedBackupValid(readBack)) {
-            throw IOException(BackupSaveValidator.VALIDATION_FAILED_MESSAGE)
-        }
+        val snapshot = buildWdbkExportSnapshot()
+        WdbkBackupSaver().saveAndVerify(UriBackupHandle(context, uri), snapshot)
+        Unit
     }
 
-    private fun tryWrite(uri: Uri, json: String, mode: String): Unit? = runCatching {
-        context.contentResolver.openOutputStream(uri, mode)?.use { stream ->
-            stream.write(json.toByteArray(Charsets.UTF_8))
+    /**
+     * The WDBK export snapshot: the small logical sections plus a streaming event source. The event history is NOT
+     * collected here. MAX(id) of the event table is captured once as the snapshot boundary; every source the snapshot
+     * opens pages by a full-order keyset up to that boundary, already in the canonical fingerprint order ([CanonicalEventStream]),
+     * so the writer consumes the history one bounded chunk at a time and rows inserted after the boundary never enter
+     * this backup. Playback is never blocked.
+     */
+    suspend fun buildWdbkExportSnapshot(): WdbkExportSnapshot = withContext(Dispatchers.IO) {
+        var songMap: Map<Long, SongEntity> = emptyMap()
+        val small = assembleBackup { songById ->
+            songMap = songById
+            emptyList()
         }
-    }.getOrNull()
+        val boundary = trackListenEventDao.getMaxId()
+        WdbkExportSnapshot(
+            backupId = small.backupId!!,
+            sourceInstallationId = small.sourceInstallationId!!,
+            exportedAtMs = small.exportedAtMs!!,
+            appVersionCode = small.appVersionCode,
+            appVersionName = small.appVersionName,
+            songs = small.songs,
+            trackStats = small.trackStats,
+            importBaselines = small.importBaselines,
+            lyricsOverrides = small.lyricsOverrides,
+            preferences = small.preferences,
+            playlists = small.playlists,
+            desktopOverlayRawJson = small.desktopOverlay?.rawJson,
+            openEvents = {
+                CanonicalEventStream(
+                    upToId = boundary,
+                    pageSize = WdbkLimits.EVENT_EXPORT_PAGE_SIZE,
+                    fetchPage = { c, upTo, limit ->
+                        trackListenEventDao.getExportPage(
+                            c.occurredAt, c.songId, c.eventType, c.listenedMs, c.durationMs, c.source, c.eventKey, c.id, upTo, limit,
+                        )
+                    },
+                    map = { event -> event.toBackupListenEvent(songMap[event.songId]) },
+                )
+            },
+        )
+    }
 
-    private fun readBackupContent(uri: Uri): String? = runCatching {
-        context.contentResolver.openInputStream(uri)
-            ?.bufferedReader()
-            ?.use { it.readText() }
-    }.getOrNull()
-
-    /** Collects all backup data from the database and returns the serialised JSON string. */
+    /**
+     * Legacy v2 JSON for internal consumers (the Recovery safety snapshot, compatibility tooling). Semantics are
+     * unchanged; it deliberately keeps the original whole-history snapshot read.
+     */
     suspend fun buildBackupJson(): String = withContext(Dispatchers.IO) {
+        WavdropBackupExporterV2.toJson(
+            assembleBackup { songById ->
+                trackListenEventDao.getAllSnapshot()
+                    .filter { BackupEventExportRules.shouldExport(it.source) }
+                    .map { event -> event.toBackupListenEvent(songById[event.songId]) }
+            }
+        )
+    }
+
+    /** Single authority for collecting the logical backup; only the listen-event source differs between packagings. */
+    private suspend fun assembleBackup(
+        loadListenEvents: suspend (songById: Map<Long, SongEntity>) -> List<BackupListenEvent>,
+    ): WavdropBackup {
         val songs      = songDao.getAllSongsSnapshot()
         val stats      = trackStatsDao.getAllStatsSnapshot()
         val baselines  = importBaselineDao.getAllImportBaselinesSnapshot()
@@ -125,24 +172,7 @@ class WavdropBackupRepository @Inject constructor(
 
         val songById = songs.associateBy { it.id }
 
-        val listenEvents = trackListenEventDao.getAllSnapshot()
-            .filter { BackupEventExportRules.shouldExport(it.source) }
-            .map { event ->
-                val song = songById[event.songId]
-                BackupListenEvent(
-                    songId     = event.songId,
-                    contentUri = song?.uri ?: "",
-                    title      = song?.title ?: "",
-                    artist     = song?.artist ?: "",
-                    album      = song?.album ?: "",
-                    eventType  = event.eventType,
-                    occurredAt = event.occurredAt,
-                    listenedMs = event.listenedMs,
-                    durationMs = event.durationMs,
-                    source     = event.source,
-                    eventId    = event.eventId,  // preserve if present; null for legacy rows
-            )
-        }
+        val listenEvents = loadListenEvents(songById)
         val preservedDesktopOverlay = pendingBackupExtensionDao
             .getByRootName(DESKTOP_OVERLAY_ROOT)
             ?.rawJson
@@ -269,13 +299,27 @@ class WavdropBackupRepository @Inject constructor(
             },
         )
 
-        WavdropBackupExporterV2.toJson(backup)
+        return backup
     }
 }
 
 const val DESKTOP_OVERLAY_ROOT = "desktopOverlay"
 
 // Entity to backup model mappings.
+
+internal fun TrackListenEventEntity.toBackupListenEvent(song: SongEntity?) = BackupListenEvent(
+    songId     = songId,
+    contentUri = song?.uri ?: "",
+    title      = song?.title ?: "",
+    artist     = song?.artist ?: "",
+    album      = song?.album ?: "",
+    eventType  = eventType,
+    occurredAt = occurredAt,
+    listenedMs = listenedMs,
+    durationMs = durationMs,
+    source     = source,
+    eventId    = eventId,  // preserve if present; null for legacy rows
+)
 
 private fun SongEntity.toBackup() = BackupSong(
     id          = id,

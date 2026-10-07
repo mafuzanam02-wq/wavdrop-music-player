@@ -28,6 +28,55 @@ interface TrackListenEventDao {
     @Query("SELECT * FROM track_listen_events ORDER BY occurredAt DESC")
     suspend fun getAllSnapshot(): List<TrackListenEventEntity>
 
+    /**
+     * Highest event row id, or null for an empty table. WDBK export captures it once as the export snapshot's upper bound so
+     * paging terminates even while playback keeps inserting rows.
+     */
+    @Query("SELECT MAX(id) FROM track_listen_events")
+    suspend fun getMaxId(): Long?
+
+    /**
+     * Keyset page for WDBK export, in the canonical fingerprint order reduced to the event table:
+     * occurredAt, songId, eventType, listenedMs, durationMs, source, COALESCE(eventId, ''), then id DESCENDING.
+     *
+     * The fingerprint orders by occurredAt, songId, contentUri, eventType, listenedMs, durationMs, source, title, artist,
+     * album, eventId. contentUri/title/artist/album are properties of the song, so they are equal for equal songId and are
+     * never reached for different songIds; they drop out.
+     *
+     * Final tie-break: id DESC. The legacy export read the history with getAllSnapshot() (ORDER BY occurredAt DESC) and
+     * stable-sorted it by the fingerprint comparator; SQLite serves that from the occurredAt index scanned backwards, which
+     * visits equal occurredAt entries in DESCENDING id order (observed through real Room/SQLite in a regression test). Rows
+     * that tie on every comparator field therefore reached the fingerprint in descending id order, which matters because a
+     * null eventId and an empty one compare equal yet emit different canonical records. id DESC reproduces exactly that
+     * order. id is only the physical paging tie-breaker; it is not part of the event, the fingerprint or the payload.
+     *
+     * Keyset: rows strictly after the cursor and at or below the export snapshot bound upToId. The last key runs the
+     * opposite way, so it is compared as -id: ONE eight-column row-value comparison
+     * (..., COALESCE(eventId, ''), -id) > (..., :afterEventKey, -:afterId) is exactly "greater on the ascending keys, or equal
+     * on them and a smaller id". (An explicit OR formulation is equivalent but makes SQLite switch to a MULTI-INDEX OR plus a
+     * full sort of every remaining row per page; the single comparison keeps the occurredAt seek and a per-page partial
+     * sort. Pinned by a query-plan test.) Domain: ids are SQLite rowids; positive auto-generated ids are the production case
+     * and every id in [-(2^63-1), 2^63-1] is exact (negating Long.MIN_VALUE would overflow, so that single value is not
+     * supported; it cannot be auto-generated). No OFFSET. The redundant occurredAt >= :afterAt term lets SQLite seek the
+     * occurredAt index, and the unary plus in +id stops the planner from choosing a rowid range scan plus a whole-table sort
+     * instead. Strings compare BINARY, i.e. by code point.
+     * Start with (Long.MIN_VALUE, Long.MIN_VALUE, "", Long.MIN_VALUE, Long.MIN_VALUE, "", "", Long.MAX_VALUE).
+     */
+    @Query("""
+        SELECT * FROM track_listen_events
+        WHERE +id <= :upToId
+          AND occurredAt >= :afterAt
+          AND (occurredAt, songId, eventType, listenedMs, durationMs, source, COALESCE(eventId, ''), -id)
+              > (:afterAt, :afterSongId, :afterEventType, :afterListenedMs, :afterDurationMs, :afterSource, :afterEventKey, -:afterId)
+        ORDER BY occurredAt ASC, songId ASC, eventType ASC, listenedMs ASC, durationMs ASC, source ASC,
+                 COALESCE(eventId, '') ASC, id DESC
+        LIMIT :limit
+    """)
+    suspend fun getExportPage(
+        afterAt: Long, afterSongId: Long, afterEventType: String, afterListenedMs: Long, afterDurationMs: Long,
+        afterSource: String, afterEventKey: String, afterId: Long, upToId: Long, limit: Int,
+    ): List<TrackListenEventEntity>
+
     @Query("""
         SELECT * FROM track_listen_events
         WHERE occurredAt >= :fromMs AND occurredAt <= :toMs

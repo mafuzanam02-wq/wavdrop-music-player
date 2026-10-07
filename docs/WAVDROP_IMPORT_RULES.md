@@ -12,9 +12,23 @@ Read these files before changing backup, import, export, or migration behavior:
 - `docs/WAVDROP_BACKUP_SCHEMA_V1.md` (legacy V1 compatibility)
 - `docs/WAVDROP_IMPORT_RULES.md` (this file)
 
+## Input detection (content, not names)
+
+Every restore/verification entry point (`WavdropBackupDocumentReader`) decides the format from the BYTES, never from the
+file name, extension, MIME type or provider display name:
+
+- starts with the ZIP signature (`PK`): **WDBK container** -> `WdbkReader` (bounded, SHA-256 + semantic-fingerprint
+  verified). A fake or damaged `.wdbk` fails safely with no model;
+- otherwise: **legacy JSON** with the existing 100 MiB cap, structural sniff, then the routing below;
+- empty, oversized or unrecognised input is rejected before any parsing or database access.
+
+A renamed valid JSON or WDBK file still imports; a `.wdbk` that is not a valid container does not. The Restore picker is
+not MIME-filtered (`*/*`) because providers report arbitrary types; validation happens after selection.
+
 ## Routing
 
-Import routes by origin and version before any rule is applied:
+After input detection, import routes by origin and version before any rule is applied. (A WDBK container reconstructs the
+Android v2 model and then follows rule 2 from there: same integrity meaning, same downstream behaviour.)
 
 1. **Desktop origin** (`appName = "wavdrop-desktop-lab"` or `sourcePlatform = "desktop"`): desktop import
    path, regardless of other identity fields.

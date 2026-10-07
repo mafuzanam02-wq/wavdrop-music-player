@@ -67,21 +67,22 @@ class BackupVerificationRepository @Inject constructor(
         val fileSize  = latest.length().takeIf { it > 0 }
         val fileTime  = latest.lastModified().takeIf { it > 0 }
 
-        val content = try {
-            BackupInputReader.readBackupText(context, latest.uri)
-        } catch (_: BackupInputReader.InputTooLargeException) {
-            return failed(fileName, fileSize, fileTime, BackupInputReader.TOO_LARGE_MESSAGE)
+        // Content decides the parser, never the file name: legacy JSON and WDBK go through the same unified reader
+        // that real restore uses.
+        val parseResult = when (val doc = WavdropBackupDocumentReader.readUri(context, latest.uri)) {
+            is BackupDocumentReadResult.Rejected -> return failed(
+                fileName, fileSize, fileTime,
+                when (doc.reason) {
+                    BackupRejectReason.TOO_LARGE -> BackupInputReader.TOO_LARGE_MESSAGE
+                    BackupRejectReason.UNREADABLE -> "The backup file could not be read."
+                    BackupRejectReason.EMPTY -> "The backup file is empty."
+                    BackupRejectReason.NOT_A_BACKUP -> "This file does not look like a Wavdrop backup."
+                },
+            )
+            // A Desktop JSON file is not an Android backup; the Android parser rejects it as before.
+            is BackupDocumentReadResult.DesktopJson -> WavdropBackupParser.parse(doc.text)
+            is BackupDocumentReadResult.Wavdrop -> doc.result
         }
-            ?: return failed(fileName, fileSize, fileTime, "The backup file could not be read.")
-
-        if (content.isBlank()) {
-            return failed(fileName, fileSize, fileTime, "The backup file is empty.")
-        }
-        if (!ImportFileValidation.isLikelyWavdropBackupContent(content)) {
-            return failed(fileName, fileSize, fileTime, "This file does not look like a Wavdrop backup.")
-        }
-
-        val parseResult = WavdropBackupParser.parse(content)
         val backup = parseResult.backup
             ?: return failed(fileName, fileSize, fileTime, verificationMessageFor(parseResult.error))
 
@@ -91,9 +92,10 @@ class BackupVerificationRepository @Inject constructor(
     /** Maps parser errors to plain-language verification messages. */
     private fun verificationMessageFor(error: String?): String = when {
         error == null -> "The backup file could not be read."
-        error.startsWith("Unsupported backup version") ->
+        error.startsWith("Unsupported backup version") || error == WavdropBackupParser.NEWER_VERSION_ERROR ->
             "This backup was created by a newer version of Wavdrop. Update the app to use it."
         error.startsWith("Backup integrity check failed") -> WavdropBackupParser.INTEGRITY_ERROR
+        error == BackupInputReader.TOO_LARGE_MESSAGE -> BackupInputReader.TOO_LARGE_MESSAGE
         else -> "The backup file is damaged and cannot be restored."
     }
 
@@ -169,14 +171,18 @@ class BackupVerificationRepository @Inject constructor(
             runCatching { Instant.parse(value).toEpochMilli() }.getOrNull()
         }
 
-    private fun isBackupFileName(name: String?): Boolean {
-        val lower = name?.lowercase() ?: return false
-        // ".tmp" exclusion: auto-backup writes a temp file alongside the real backup;
-        // a leftover temp must never be verified as the latest backup.
-        return lower.startsWith("wavdrop-backup") && lower.endsWith(".json") && !lower.contains(".tmp")
-    }
+    internal companion object {
+        private const val TAG = "WavdropBackup"
 
-    private companion object {
-        const val TAG = "WavdropBackup"
+        internal fun isBackupFileName(name: String?): Boolean {
+            val lower = name?.lowercase() ?: return false
+            // Accepts the current ".wdbk" container and legacy ".json" backups (the extension only selects CANDIDATES;
+            // the unified reader decides by content). ".tmp" exclusion: auto-backup writes a temp file alongside the real backup;
+            // a leftover temp must never be verified as the latest backup.
+            return lower.startsWith("wavdrop-backup") &&
+                (lower.endsWith(".wdbk") || lower.endsWith(".json")) &&
+                !lower.contains(".tmp")
+        }
+
     }
 }

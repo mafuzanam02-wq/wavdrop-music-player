@@ -78,7 +78,7 @@ edit your own plain-text lyrics for any track inside the app.
 **Migration and backup.**
 · Import listening stats from BlackPlayer EX .bpstat files
 · Export a full local backup covering stats, playlists, lyrics, preferences,
-  and listening history as a local JSON file, verified after it is written
+  and listening history as a local WavDrop backup file, verified after it is written
 · Optional automatic backup checks to a folder you choose (best-effort,
   subject to Android scheduling)
 · Restore a Wavdrop backup on the same or a new device
@@ -128,7 +128,7 @@ For display in promotional copy or feature bullets on the listing:
 - Share tracks via Android native share sheet
 - Delete from device (Android 11+, requires system confirmation)
 - BlackPlayer EX .bpstat import
-- Full backup export and restore (JSON)
+- Full backup export and restore
 - Six launcher icon variants (user-selectable)
 - Accent colour and compact mode
 - No account, no ads, no cloud, no tracking

@@ -63,7 +63,7 @@ object WavdropBackupExporterV2 {
         }.toString(2)
     }
 
-    private fun songsArray(songs: List<BackupSong>): JSONArray = JSONArray().apply {
+    internal fun songsArray(songs: List<BackupSong>): JSONArray = JSONArray().apply {
         songs.forEach { s ->
             put(JSONObject().apply {
                 put("id", s.id.toString())         // opaque ID → string in v2
@@ -82,7 +82,7 @@ object WavdropBackupExporterV2 {
         }
     }
 
-    private fun trackStatsArray(stats: List<BackupTrackStats>): JSONArray = JSONArray().apply {
+    internal fun trackStatsArray(stats: List<BackupTrackStats>): JSONArray = JSONArray().apply {
         stats.forEach { s ->
             put(JSONObject().apply {
                 put("songId", s.songId.toString())   // opaque ID → string in v2
@@ -97,7 +97,7 @@ object WavdropBackupExporterV2 {
         }
     }
 
-    private fun baselinesArray(baselines: List<BackupImportBaseline>): JSONArray = JSONArray().apply {
+    internal fun baselinesArray(baselines: List<BackupImportBaseline>): JSONArray = JSONArray().apply {
         baselines.forEach { b ->
             put(JSONObject().apply {
                 put("songId", b.songId.toString())   // opaque ID → string in v2
@@ -110,7 +110,7 @@ object WavdropBackupExporterV2 {
         }
     }
 
-    private fun lyricsOverridesArray(overrides: List<BackupLyricsOverride>): JSONArray = JSONArray().apply {
+    internal fun lyricsOverridesArray(overrides: List<BackupLyricsOverride>): JSONArray = JSONArray().apply {
         overrides.forEach { o ->
             put(JSONObject().apply {
                 put("songId", o.songId.toString())  // opaque ID → string in v2
@@ -121,7 +121,7 @@ object WavdropBackupExporterV2 {
         }
     }
 
-    private fun playlistsArray(playlists: List<BackupPlaylist>): JSONArray = JSONArray().apply {
+    internal fun playlistsArray(playlists: List<BackupPlaylist>): JSONArray = JSONArray().apply {
         playlists.forEach { p ->
             put(JSONObject().apply {
                 put("id", p.id.toString())  // opaque ID → string in v2
@@ -146,7 +146,7 @@ object WavdropBackupExporterV2 {
         }
     }
 
-    private fun listenEventsArray(events: List<BackupListenEvent>): JSONArray = JSONArray().apply {
+    internal fun listenEventsArray(events: List<BackupListenEvent>): JSONArray = JSONArray().apply {
         events.forEach { e ->
             put(JSONObject().apply {
                 put("songId", e.songId.toString()) // opaque ID → string in v2
@@ -164,7 +164,7 @@ object WavdropBackupExporterV2 {
         }
     }
 
-    private fun manifestObject(manifest: BackupManifest): JSONObject = JSONObject().apply {
+    internal fun manifestObject(manifest: BackupManifest): JSONObject = JSONObject().apply {
         put("songCount", manifest.songCount)
         put("trackStatsCount", manifest.trackStatsCount)
         put("listenEventCount", manifest.listenEventCount)
@@ -174,7 +174,7 @@ object WavdropBackupExporterV2 {
         put("preferenceCount", manifest.preferenceCount)
     }
 
-    private fun platformPreferencesObject(prefs: BackupPreferences): JSONObject = JSONObject().apply {
+    internal fun platformPreferencesObject(prefs: BackupPreferences): JSONObject = JSONObject().apply {
         put("android", preferencesObject(prefs))
     }
 

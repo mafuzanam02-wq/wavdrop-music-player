@@ -206,11 +206,11 @@ background behaviour can only be validated on hardware.
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
-| Export a Wavdrop backup JSON. | File is created through Android file picker. | |
+| Export a Wavdrop backup (`.wdbk`). | File is created through Android file picker and the app reports it as verified. | |
 | Export after creating playlists/favorites/stats. | Backup completes without crash. | |
 | Import a valid Wavdrop backup on the same device. | Preview displays restorable data. | |
 | Apply a valid restore. | Stats/playlists/preferences restore as supported. | |
-| Import an invalid JSON file. | App shows a clear error and does not change data. | |
+| Import an invalid or non-backup file (including a fake `.wdbk`). | App shows a clear error and does not change data. | |
 | Import an unsupported backup version if available. | App rejects it safely. | |
 | Restore does not duplicate playlists unexpectedly. | Playlist results remain understandable. | |
 | Open Settings -> Backup & Migration -> Backup Verification on a fresh backup. | File is reported verified with counts for songs, stats, playlists, events, lyrics. | |
@@ -619,3 +619,24 @@ Use a Wavdrop v2 backup you exported yourself. The pre-Recovery safety snapshot 
 - [ ] K. Verify the safety snapshot itself through Backup Verification / import parsing (VERIFIED v2) and that importing it with Recovery would return the pre-Recovery state.
 - [ ] L. Induced failure where practical (e.g. no free storage): Recovery shows "Recovery wasn't started", nothing changed, Retry / Use Merge / Cancel are offered, and there is no "continue anyway".
 - [ ] M. Note: a second Recovery replaces the first safety snapshot (latest only); keep a copy if you need the earlier one.
+
+## WDBK-1 durable backup container (implemented; PHYSICAL VALIDATION PENDING)
+
+Nothing below has been run on a device. Do not tick items until the user has verified them on hardware. Use a device with real listening history.
+
+- [ ] A. Manual backup (Settings -> Backup -> Save backup file) suggests and creates `wavdrop-backup-YYYY-MM-DD.wdbk` (or `wavdrop-backup.wdbk` in fixed-name mode); the provider does not append `.zip`/`.json`.
+- [ ] B. For a history-containing backup the `.wdbk` is materially smaller than the same state exported as legacy JSON (no fixed ratio is promised).
+- [ ] C. Backup Verification recognises the `.wdbk` in the backup folder and reports VERIFIED with the expected counts (tracks, playlists, favourites, stats, events, lyrics, preferences).
+- [ ] D. Restore -> pick the `.wdbk`: the preview shows the same counts; Merge is selected by default.
+- [ ] E. Merge Restore from the `.wdbk` works and keeps newer local history (unchanged Merge behaviour).
+- [ ] F. Recovery Restore from the `.wdbk` works (warning + confirmation as before; backup-authoritative result).
+- [ ] G. Recovery still creates and verifies the app-private safety snapshot (`files/recovery-safety/pre-recovery-latest.json`, legacy JSON by design) BEFORE anything destructive.
+- [ ] H. A legacy v2 `.json` backup still imports (Merge and Recovery).
+- [ ] I. A legacy v1 `.json` backup still imports (Merge only).
+- [ ] J. Automatic / folder backup (Back up now and the scheduled check) creates a `.wdbk` in the chosen folder; no stray `.tmp` remains and Backup Verification never reports a temp file.
+- [ ] K. Dated and fixed filename modes both work; fixed mode replaces the same file without creating " (1)" duplicates.
+- [ ] L. A corrupt or tampered `.wdbk` (e.g. truncate it, or change bytes with a hex editor) is rejected with a clear error and changes nothing.
+- [ ] M. Renaming a `.json` backup to `.wdbk` (and vice-versa) still imports by content; a non-backup file renamed to `.wdbk` is rejected.
+- [ ] N. Audio files are untouched by backup, verification, Merge and Recovery.
+- [ ] O. After a restore from a `.wdbk`, restart the app: the restored state persists.
+- [ ] P. (Engineering check, not a user workflow.) Run the instrumented `LegacyExportTieOrderInstrumentedTest` (`./gradlew connectedDebugAndroidTest --tests "*LegacyExportTieOrderInstrumentedTest"`) on a device/emulator: the real `getAllSnapshot()` equal-timestamp order and the streamed WDBK fingerprint must agree (null-vs-empty `eventId` edge). A failure is a compatibility finding. Compiled in the WDBK-1 slice; not yet executed on hardware.

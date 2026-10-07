@@ -26,57 +26,97 @@ object WavdropBackupIntegrityV2 {
     private const val FIELD = ''  // ASCII unit separator
     private const val RECORD = '' // ASCII record separator
 
+    /**
+     * The canonical total order of listen events inside the fingerprint. Exposed so a streaming exporter can emit events in
+     * EXACTLY this order. (Records that compare equal are byte-identical, so their relative order cannot change the hash.)
+     */
+    internal val EVENT_ORDER: Comparator<BackupListenEvent> = compareBy<BackupListenEvent>(
+        { it.occurredAt }, { it.songId }, { it.contentUri }, { it.eventType },
+        { it.listenedMs }, { it.durationMs }, { it.source }, { it.title }, { it.artist }, { it.album },
+        // Final tie-breaker added in P2-B1: when two events collide on every field above,
+        // eventId gives a total order so the per-event eventId records are emitted
+        // deterministically (preserving insertion-order invariance). For all-null-eventId
+        // backups this key is a constant "" and leaves the pre-eventId ordering unchanged.
+        { it.eventId ?: "" },
+    )
+
     fun fingerprint(backup: WavdropBackup): String {
-        val canonical = buildString {
+        val stream = StreamingFingerprint(
+            backup.backupId, backup.sourceInstallationId, backup.exportedAtMs,
+            backup.songs, backup.trackStats, backup.importBaselines, backup.lyricsOverrides, backup.playlists,
+        )
+        for (e in backup.listenEvents.sortedWith(EVENT_ORDER)) stream.addEvent(e)
+        return stream.finish(backup.preferences)
+    }
+
+    /**
+     * Incremental form of the same fingerprint, for exporters that cannot hold the whole event history. Usage: construct
+     * (writes the header and every non-event section), call [addEvent] for each event in [EVENT_ORDER] order, then [finish]
+     * with the preferences. The hash input is byte-for-byte what [fingerprint] feeds for a full backup.
+     */
+    internal class StreamingFingerprint(
+        backupId: String?,
+        sourceInstallationId: String?,
+        exportedAtMs: Long?,
+        songs: List<BackupSong>,
+        trackStats: List<BackupTrackStats>,
+        importBaselines: List<BackupImportBaseline>,
+        lyricsOverrides: List<BackupLyricsOverride>,
+        playlists: List<BackupPlaylist>,
+    ) {
+        private val canonical = CanonicalDigest()
+        private var previous: BackupListenEvent? = null
+
+        init {
+            with(canonical) {
             // Header record unique to v2 — covers all three v2 root identity fields.
             record(
                 "v2.header",
-                backup.backupId ?: "",
-                backup.sourceInstallationId ?: "",
-                backup.exportedAtMs?.toString() ?: "",
+                backupId ?: "",
+                sourceInstallationId ?: "",
+                exportedAtMs?.toString() ?: "",
             )
 
             // All collections are sorted by stable keys before hashing so the fingerprint
             // is invariant to insertion order (defensive against non-deterministic DB queries
             // and different construction paths in tests).
-            for (s in backup.songs.sortedBy { it.id }) {
+            for (s in songs.sortedBy { it.id }) {
                 record(
                     "song", s.id, s.uri, s.title, s.artist, s.album, s.albumId,
                     s.duration, s.dateAdded, s.trackNumber, s.year,
                     s.folderPath ?: "", s.folderName ?: "",
                 )
             }
-            for (t in backup.trackStats.sortedBy { it.songId }) {
+            for (t in trackStats.sortedBy { it.songId }) {
                 record(
                     "stat", t.songId, t.contentUri, t.playCount, t.skipCount,
                     t.lastPlayedAt, t.lastListenedAt?.toString() ?: "",
                     t.totalListeningTimeMs, t.isFavorite,
                 )
             }
-            for (b in backup.importBaselines.sortedWith(compareBy({ it.songId }, { it.sourceType }, { it.sourceKey }))) {
+            for (b in importBaselines.sortedWith(compareBy({ it.songId }, { it.sourceType }, { it.sourceKey }))) {
                 record(
                     "baseline", b.songId, b.sourceType, b.sourceKey,
                     b.lastImportedPlayCount, b.lastImportedSkipCount, b.lastImportedAt,
                 )
             }
-            for (o in backup.lyricsOverrides.sortedBy { it.songId }) {
+            for (o in lyricsOverrides.sortedBy { it.songId }) {
                 record("lyrics", o.songId, o.contentUri, o.lyrics, o.updatedAt)
             }
-            for (p in backup.playlists.sortedBy { it.id }) {
+            for (p in playlists.sortedBy { it.id }) {
                 record("playlist", p.id, p.name, p.createdAt, p.updatedAt)
                 for (s in p.songs.sortedBy { it.position }) {
                     record("playlistSong", s.songId, s.contentUri, s.position, s.title, s.artist, s.album)
                 }
             }
-            for (e in backup.listenEvents.sortedWith(compareBy<BackupListenEvent>(
-                { it.occurredAt }, { it.songId }, { it.contentUri }, { it.eventType },
-                { it.listenedMs }, { it.durationMs }, { it.source }, { it.title }, { it.artist }, { it.album },
-                // Final tie-breaker added in P2-B1: when two events collide on every field above,
-                // eventId gives a total order so the per-event eventId records are emitted
-                // deterministically (preserving insertion-order invariance). For all-null-eventId
-                // backups this key is a constant "" and leaves the pre-eventId ordering unchanged.
-                { it.eventId ?: "" },
-            ))) {
+            }
+        }
+
+        /** Events must arrive in [EVENT_ORDER]; a violation would silently change the hash, so it fails loudly instead. */
+        fun addEvent(e: BackupListenEvent) {
+            previous?.let { check(EVENT_ORDER.compare(it, e) <= 0) { "Events must be added in canonical fingerprint order" } }
+            previous = e
+            with(canonical) {
                 record(
                     "event", e.songId, e.contentUri, e.title, e.artist, e.album,
                     e.eventType, e.occurredAt, e.listenedMs, e.durationMs, e.source,
@@ -85,7 +125,11 @@ object WavdropBackupIntegrityV2 {
                 // so an all-null-eventId backup fingerprints identically to the pre-eventId baseline.
                 optionalRecord("eventId", e.eventId)
             }
-            backup.preferences?.let { prefs ->
+        }
+
+        fun finish(preferences: BackupPreferences?): String {
+            with(canonical) {
+                preferences?.let { prefs ->
                 record(
                     "prefs",
                     prefs.startupDestination ?: "",
@@ -123,26 +167,37 @@ object WavdropBackupIntegrityV2 {
                 optionalRecord("prefWrappedBackgroundIntensity", prefs.wrappedBackgroundIntensity)
                 optionalRecord("prefWrappedFallbackTheme", prefs.wrappedFallbackTheme)
                 optionalRecord("prefWrappedVisualStyle", prefs.wrappedVisualStyle)
-            } ?: record("prefs-none")
+                } ?: record("prefs-none")
+            }
+            return canonical.finishHex()
         }
-        return sha256Hex(canonical)
     }
 
-    private fun StringBuilder.optionalRecord(tag: String, value: Any?) {
-        if (value != null) record(tag, value.toString())
-    }
+    /**
+     * Streams the canonical text straight into SHA-256 instead of materialising it. The hash input is byte-for-byte what
+     * the previous `buildString { ... }` produced (each record is encoded as a whole UTF-8 string, and records are
+     * delimited by the separator characters, so no character pair is ever split) — the fingerprint is UNCHANGED — but a
+     * large listening history no longer needs a canonical string the size of the whole backup in memory.
+     */
+    private class CanonicalDigest {
+        private val digest = MessageDigest.getInstance("SHA-256")
+        private val record = StringBuilder()
 
-    private fun StringBuilder.record(tag: String, vararg fields: Any?) {
-        append(tag)
-        for (field in fields) {
-            append(FIELD)
-            append(field.toString())
+        fun optionalRecord(tag: String, value: Any?) {
+            if (value != null) record(tag, value.toString())
         }
-        append(RECORD)
-    }
 
-    private fun sha256Hex(input: String): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest(input.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+        fun record(tag: String, vararg fields: Any?) {
+            record.append(tag)
+            for (field in fields) {
+                record.append(FIELD)
+                record.append(field.toString())
+            }
+            record.append(RECORD)
+            digest.update(record.toString().toByteArray(Charsets.UTF_8))
+            record.setLength(0)
+        }
+
+        fun finishHex(): String = digest.digest().joinToString("") { "%02x".format(it) }
+    }
 }
