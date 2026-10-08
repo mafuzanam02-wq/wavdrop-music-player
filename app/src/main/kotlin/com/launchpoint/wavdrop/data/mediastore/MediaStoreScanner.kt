@@ -20,13 +20,13 @@ import javax.inject.Inject
 class MediaStoreScanException(cause: Throwable) : Exception(cause)
 
 /**
- * A completed scan. [eligibleBeforePresetExclusionsCount] counts the songs that passed the existing rules (IS_MUSIC query,
- * minimum duration, WhatsApp rule, scan mode) before the preset exclusions ran, so an empty [songs] caused only by an
+ * A completed scan. [eligibleBeforeExplicitExclusionsCount] counts the songs that passed the existing rules (IS_MUSIC query,
+ * minimum duration, WhatsApp rule, scan mode) before any explicit (preset or custom-folder) exclusion ran, so an empty [songs] caused only by an
  * explicit exclusion is distinguishable from an ambiguous empty scan.
  */
 data class MediaStoreScanResult(
     val songs: List<Song>,
-    val eligibleBeforePresetExclusionsCount: Int,
+    val eligibleBeforeExplicitExclusionsCount: Int,
 )
 
 open class MediaStoreScanner @Inject constructor(
@@ -128,7 +128,7 @@ open class MediaStoreScanner @Inject constructor(
         )
         return MediaStoreScanResult(
             songs = evaluation.songs,
-            eligibleBeforePresetExclusionsCount = evaluation.eligibleBeforePresetExclusionsCount,
+            eligibleBeforeExplicitExclusionsCount = evaluation.eligibleBeforeExplicitExclusionsCount,
         )
     }
 

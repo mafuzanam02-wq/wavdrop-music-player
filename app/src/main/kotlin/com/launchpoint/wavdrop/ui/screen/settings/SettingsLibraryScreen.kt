@@ -155,6 +155,21 @@ fun SettingsLibraryScreen(
                     onCheckedChange = { viewModel.setPresetScanExclusion(LibraryScanExclusion.RECORDINGS, it) },
                 )
             }
+            item { SectionHeader("Custom excluded folders") }
+            item { SettingsMessageRow("Folders you exclude from Folder Details are listed here. Changes apply the next time you rescan your library.") }
+            if (scanSettings.customExcludedFolderPaths.isEmpty()) {
+                item { SettingsMessageRow("No custom folders excluded.") }
+            } else {
+                items(
+                    items = scanSettings.customExcludedFolderPaths.toList(),
+                    key   = { "custom-excluded:$it" },
+                ) { folderPath ->
+                    ExcludedFolderRow(
+                        folderPath = folderPath,
+                        onRemove  = { viewModel.removeCustomFolderExclusion(folderPath) },
+                    )
+                }
+            }
             item { SectionDivider() }
 
             item { SectionHeader("Filters & Folders") }

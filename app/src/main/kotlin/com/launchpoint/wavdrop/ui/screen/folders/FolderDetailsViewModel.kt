@@ -7,6 +7,8 @@ import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
+import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
+import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRules
 import com.launchpoint.wavdrop.playback.PlayerController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -25,6 +27,8 @@ data class FolderDetailsUiState(
     val favoriteSongIds: Set<Long>,
     val currentSongId: Long?,
     val totalDurationMs: Long,
+    /** CFE-1: true only for a folder with a real, usable path (never Unknown Folder). */
+    val canExcludeFolder: Boolean,
 )
 
 @HiltViewModel
@@ -33,9 +37,11 @@ class FolderDetailsViewModel @Inject constructor(
     private val songRepository: SongRepository,
     private val statsRepository: StatsRepository,
     private val playerController: PlayerController,
+    private val scanSettingsRepository: LibraryScanSettingsRepository,
 ) : ViewModel() {
 
     private val folderKey: String = checkNotNull(savedStateHandle["folderKey"])
+    private val canExcludeFolder: Boolean = LibraryScanSettingsRules.canonicalCustomFolderPath(folderKey) != null
 
     private val folderSongs = songRepository.songs
         .map { songs -> FolderGrouper.songsForFolder(songs, folderKey) }
@@ -53,6 +59,7 @@ class FolderDetailsViewModel @Inject constructor(
             favoriteSongIds = favorites,
             currentSongId = nowPlaying.song?.id,
             totalDurationMs = songs.sumOf { it.duration },
+            canExcludeFolder = canExcludeFolder,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -65,6 +72,7 @@ class FolderDetailsViewModel @Inject constructor(
             favoriteSongIds = emptySet(),
             currentSongId = null,
             totalDurationMs = 0L,
+            canExcludeFolder = canExcludeFolder,
         ),
     )
 
@@ -87,6 +95,16 @@ class FolderDetailsViewModel @Inject constructor(
     fun toggleFavorite(songId: Long) {
         val song = uiState.value.songs.firstOrNull { it.id == songId } ?: return
         viewModelScope.launch { statsRepository.toggleFavorite(songId, song.uri) }
+    }
+
+    /**
+     * CFE-1: records this folder (and its descendants) as a custom scan exclusion. Persistence and path validation live in
+     * [LibraryScanSettingsRepository] / [LibraryScanSettingsRules]; nothing here touches the songs table, stats, identities,
+     * MediaStore or the scanner. The change applies at the next rescan. [onResult] receives whether it was recorded.
+     */
+    fun excludeThisFolder(onResult: (Boolean) -> Unit) {
+        if (!canExcludeFolder) { onResult(false); return }
+        viewModelScope.launch { onResult(scanSettingsRepository.addCustomFolderExclusion(folderKey)) }
     }
 
     private fun displayNameForFolder(songs: List<Song>): String {

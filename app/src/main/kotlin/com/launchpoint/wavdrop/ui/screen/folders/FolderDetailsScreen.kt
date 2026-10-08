@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -73,6 +75,7 @@ fun FolderDetailsScreen(
     val playlists         by playlistVm.playlists.collectAsStateWithLifecycle()
     val allPlaylistSongs  by playlistVm.allPlaylistSongs.collectAsStateWithLifecycle()
     var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
+    var confirmExclude    by remember { mutableStateOf(false) }
     val snackbarHostState  = remember { SnackbarHostState() }
     val coroutineScope     = rememberCoroutineScope()
     val context            = LocalContext.current
@@ -169,6 +172,7 @@ fun FolderDetailsScreen(
                         onPlayNext   = viewModel::playAllNext,
                         onAddToQueue = viewModel::addAllToQueue,
                         onShuffle    = viewModel::shufflePlay,
+                        onExcludeFolder = if (state.canExcludeFolder) ({ confirmExclude = true }) else null,
                         modifier     = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                     HorizontalDivider(
@@ -215,6 +219,41 @@ fun FolderDetailsScreen(
         }
     }
 
+    if (confirmExclude && state.canExcludeFolder) {
+        AlertDialog(
+            onDismissRequest = { confirmExclude = false },
+            title = { Text("Exclude this folder?") },
+            text  = {
+                Column {
+                    Text(
+                        text = state.folderKey,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "This will hide this folder and its subfolders from WavDrop the next time you rescan your library. " +
+                            "Your audio files will stay on your device, and your listening history and statistics will be kept.",
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmExclude = false
+                    viewModel.excludeThisFolder { recorded ->
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (recorded) "Folder excluded. Rescan your library to apply the change."
+                                else "Could not exclude this folder",
+                            )
+                        }
+                    }
+                }) { Text("Exclude folder") }
+            },
+            dismissButton = { TextButton(onClick = { confirmExclude = false }) { Text("Cancel") } },
+        )
+    }
+
     addToPlaylistSong?.let { song ->
         AddToPlaylistDialog(
             playlists           = playlists,
@@ -245,6 +284,7 @@ private fun GroupPlaybackActions(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onShuffle: () -> Unit,
+    onExcludeFolder: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     var moreExpanded by remember { mutableStateOf(false) }
@@ -274,6 +314,12 @@ private fun GroupPlaybackActions(
                     text    = { Text("Add to queue") },
                     onClick = { moreExpanded = false; onAddToQueue() },
                 )
+                if (onExcludeFolder != null) {
+                    DropdownMenuItem(
+                        text    = { Text("Exclude this folder") },
+                        onClick = { moreExpanded = false; onExcludeFolder() },
+                    )
+                }
             }
         }
     }

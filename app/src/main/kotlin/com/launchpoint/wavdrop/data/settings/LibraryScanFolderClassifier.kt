@@ -67,13 +67,22 @@ object LibraryScanFolderClassifier {
         if (s.size >= 3 && s[0] == "android" && (s[1] == "media" || s[1] == "data")) s[2] else null
 
     /** Normalized structural segments with the shared-storage prefix removed (empty for null/blank). */
-    internal fun segments(folderPath: String?): List<String> {
+    internal fun segments(folderPath: String?, lowerCase: Boolean = true, decodeEncodedText: Boolean = true): List<String> {
         if (folderPath.isNullOrBlank()) return emptyList()
-        val raw = runCatching { URLDecoder.decode(folderPath, StandardCharsets.UTF_8.name()) }.getOrDefault(folderPath)
-        val all = raw.replace('\\', '/').split('/')
-            .map { it.trim().lowercase(Locale.ROOT) }
+        // decodeEncodedText applies application/x-www-form-urlencoded semantics ('+' -> space, %XX). It is kept ON for the
+        // existing SE-1 preset classification (unchanged behaviour) and must be OFF for raw filesystem folder paths such as
+        // Song.folderPath, where '+' and '%' are literal folder-name characters.
+        val raw = if (decodeEncodedText) {
+            runCatching { URLDecoder.decode(folderPath, StandardCharsets.UTF_8.name()) }.getOrDefault(folderPath)
+        } else {
+            folderPath
+        }
+        val original = raw.replace('\\', '/').split('/')
+            .map { it.trim() }
             .filter { it.isNotEmpty() }
-        return all.drop(storagePrefixLength(all))
+        val lower = original.map { it.lowercase(Locale.ROOT) }
+        // The shared-storage prefix is always detected case-insensitively; only the returned text differs.
+        return (if (lowerCase) lower else original).drop(storagePrefixLength(lower))
     }
 
     private fun storagePrefixLength(s: List<String>): Int = when {

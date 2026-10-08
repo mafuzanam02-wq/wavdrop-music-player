@@ -695,16 +695,35 @@ The app-layer investigation found the session position healthy in every automate
 - [ ] L. Bluetooth playback (if available): lock-screen progress stays correct.
 - [ ] M. Reproduce on the phone that originally showed the defect. Record: device model; Android version; WavDrop commit; crossfade setting; the `WavdropSessionProgress` `physical=` value; the `session=` value; and whether the visible lock-screen bar moved.
 
-## WPP-1 Public Privacy Policy (code ready; NOT DEPLOYED, nothing below validated)
+## WPP-1 Public Privacy Policy (IMPLEMENTED, PUSHED, DEPLOYED, LIVE HTTPS VALIDATED; CLOSED)
 
-Tick only after the LaunchPoint Digital site is deployed and the URL is opened over HTTPS on real devices.
+LaunchPoint Digital hosting was deployed and the public URL was opened successfully over HTTPS; the owner confirmed the live checklist below.
 
-- [ ] A. `https://launchpointdigital.co.za/wavdrop/privacy` returns 200 over HTTPS in a fresh browser (direct load, no prior navigation).
-- [ ] B. The correct WavDrop Privacy Policy renders (nine sections, one h1).
-- [ ] C. Mobile layout is readable.
-- [ ] D. Desktop layout is readable.
-- [ ] E. Canonical is `https://launchpointdigital.co.za/wavdrop/privacy`.
-- [ ] F. No tracking or network behaviour was introduced (no analytics, cookies, third-party requests, newsletter prompt).
-- [ ] G. The in-app Privacy Policy displays the same substantive policy as the public page.
-- [ ] H. The in-app policy visibly shows the public URL at the bottom.
-- [ ] I. The Play Console privacy-policy field accepts the exact URL.
+- [x] A. `https://launchpointdigital.co.za/wavdrop/privacy` returns 200 over HTTPS in a fresh browser (direct load, no prior navigation).
+- [x] B. The correct WavDrop Privacy Policy renders (nine sections, one h1).
+- [x] C. Mobile layout is readable.
+- [x] D. Desktop layout is readable.
+- [x] E. Canonical is `https://launchpointdigital.co.za/wavdrop/privacy`.
+- [x] F. No tracking or network behaviour was introduced (no analytics, cookies, third-party requests, newsletter prompt).
+- [x] G. The in-app Privacy Policy displays the same substantive policy as the public page.
+- [x] H. The in-app policy visibly shows the public URL at the bottom.
+- [x] I. The Play Console privacy-policy field accepts the exact URL.
+
+## CFE-1 Custom folder exclusions (implemented; PHYSICAL VALIDATION PENDING)
+
+Nothing below has been run on a device. Do not tick items until the user has verified them on hardware. Folder Details -> More options -> "Exclude this folder" records a concrete folder (and its subfolders); Settings -> Library & Scanning -> "Custom excluded folders" lists and removes them. Changes apply at the next rescan; audio files, stats, history and identities are never deleted.
+
+- [ ] A. Exclude a normal folder from Folder Details (More options -> Exclude this folder).
+- [ ] B. The confirmation clearly says audio files stay on the device and history/statistics are kept (no Delete wording).
+- [ ] C. After "Rescan library", that folder is gone from WavDrop.
+- [ ] D. Child subfolders of the excluded folder are gone too.
+- [ ] E. A similarly named sibling folder (for example "Podcasts Archive" next to "Podcasts") remains.
+- [ ] F. Listening stats and history for the excluded tracks are still present (Insights / Wrapped / history).
+- [ ] G. Remove the custom exclusion in Settings -> Library & Scanning -> Custom excluded folders.
+- [ ] H. After another rescan the folder comes back.
+- [ ] I. Selected-folders mode: a selected parent folder with a custom exclusion inside it keeps the rest and drops the excluded folder.
+- [ ] J. A custom exclusion inside the Downloads folder overlaps with the Downloads preset; removing one keeps the other in force.
+- [ ] K. Excluding every folder that holds music leaves a legitimate empty library (no "scan problem" warning), and restoring works.
+- [ ] L. Unknown Folder has no "Exclude this folder" action.
+- [ ] M. Restart the app: the exclusions persist and are still listed.
+- [ ] N. On upgrade / fresh install the list is empty ("No custom folders excluded.") and the library is unchanged.

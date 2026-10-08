@@ -53,7 +53,7 @@ class SongRepositoryPresetExclusionSyncRoomTest {
         override fun scanSongs(settings: LibraryScanSettings): MediaStoreScanResult {
             val raw = device ?: throw MediaStoreScanException(SecurityException("permission revoked"))
             val e = LibraryScanSettingsRules.evaluateScanSettings(raw, settings)
-            return MediaStoreScanResult(e.songs, e.eligibleBeforePresetExclusionsCount)
+            return MediaStoreScanResult(e.songs, e.eligibleBeforeExplicitExclusionsCount)
         }
     }
 

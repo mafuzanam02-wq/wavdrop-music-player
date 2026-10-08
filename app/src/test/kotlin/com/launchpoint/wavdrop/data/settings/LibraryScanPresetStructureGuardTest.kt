@@ -70,15 +70,16 @@ class LibraryScanPresetStructureGuardTest {
 
     @Test fun `the exclusion precedence is documented in the rule where it is applied`() {
         val r = src("data/settings/LibraryScanSettingsRules.kt")
-        val stage1 = r.substringAfter("fun isSongAllowedBeforePresetExclusions").substringBefore("fun isSongAllowedByScanSettings")
+        val stage1 = r.substringAfter("fun isSongAllowedBeforeExplicitExclusions").substringBefore("fun isSongAllowedByScanSettings")
         assertTrue("stage 1 = duration, WhatsApp, scan mode", stage1.indexOf("minimumDurationMs") in 0 until stage1.indexOf("includeWhatsAppVoiceNotes") &&
             stage1.indexOf("includeWhatsAppVoiceNotes") < stage1.indexOf("when (normalized.scanMode)"))
         assertFalse("stage 1 never consults the preset exclusion", stage1.contains("isExcludedByPreset"))
         val allowed = r.substringAfter("fun isSongAllowedByScanSettings").substringBefore("fun matchesSelectedFolder")
-        assertTrue("the public rule is stage 1 AND NOT preset", allowed.contains("isSongAllowedBeforePresetExclusions(song, normalized) && !isExcludedByPreset(song, normalized)"))
+        assertTrue("the public rule is stage 1 AND NOT preset AND NOT custom", allowed.contains("isSongAllowedBeforeExplicitExclusions(song, normalized) &&") &&
+            allowed.contains("!isExcludedByPreset(song, normalized)") && allowed.contains("!isExcludedByCustomFolder(song, normalized)"))
         assertTrue(r.contains("outranks everything, including an explicitly selected folder"))
         val evaluate = r.substringAfter("fun evaluateScanSettings").substringBefore("/** Stage 1")
-        assertTrue("the evidence count is taken between the two stages", evaluate.indexOf("isSongAllowedBeforePresetExclusions") < evaluate.indexOf("isExcludedByPreset") && evaluate.contains("eligible.size"))
+        assertTrue("the evidence count is taken between the two stages", evaluate.indexOf("isSongAllowedBeforeExplicitExclusions") < evaluate.indexOf("isExcludedByPreset") && evaluate.contains("eligible.size"))
     }
 
     // ── what SE-1 deliberately does not touch ───────────────────────────────────────────────────────────────────────────

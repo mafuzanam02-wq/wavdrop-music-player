@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.data.repository
 
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettings
+import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRules
 
 /** How [SongSyncPolicy.emptyScanDisposition] resolves a zero-song scan. */
 enum class EmptyScanDisposition {
@@ -33,18 +34,18 @@ object SongSyncPolicy {
     ): Boolean = existingSongCount > 0
 
     /**
-     * What to do with a scan that produced no songs. An empty result is DEFINITIVE only when the explicit preset
-     * exclusions alone caused it: songs survived every existing rule ([eligibleBeforePresetExclusionsCount] > 0) and the
-     * user has exclusions enabled. Anything else keeps the established preserve-on-empty safety (WB-02): a zero that
+     * What to do with a scan that produced no songs. An empty result is DEFINITIVE only when the explicit exclusions
+     * (preset categories and/or custom folders) alone caused it: songs survived every existing rule
+     * ([eligibleBeforeExplicitExclusionsCount] > 0) and the user has at least one explicit exclusion active. Anything else keeps the established preserve-on-empty safety (WB-02): a zero that
      * existed before the exclusions ran may be a permission, storage or indexing problem.
      */
     fun emptyScanDisposition(
         settings: LibraryScanSettings,
         existingSongCount: Int,
-        eligibleBeforePresetExclusionsCount: Int,
+        eligibleBeforeExplicitExclusionsCount: Int,
     ): EmptyScanDisposition = when {
         !shouldPreserveOnEmptyScan(settings, existingSongCount) -> EmptyScanDisposition.APPLY_DEFINITIVE_EMPTY
-        eligibleBeforePresetExclusionsCount > 0 && settings.excludedPresetFolders.isNotEmpty() ->
+        eligibleBeforeExplicitExclusionsCount > 0 && LibraryScanSettingsRules.hasAnyExplicitExclusion(settings) ->
             EmptyScanDisposition.APPLY_DEFINITIVE_EMPTY
         else -> EmptyScanDisposition.PRESERVE_AMBIGUOUS
     }

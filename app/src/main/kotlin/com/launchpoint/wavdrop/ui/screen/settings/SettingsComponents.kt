@@ -27,6 +27,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -379,6 +380,37 @@ internal fun SelectedFolderRow(
                 tint               = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
             )
         }
+    }
+}
+
+/** CFE-1: one persisted custom folder exclusion (a canonical path, shown as-is) with a Remove action. */
+@Composable
+internal fun ExcludedFolderRow(
+    folderPath: String,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val displayName = remember(folderPath) { folderPath.substringAfterLast('/').ifBlank { folderPath } }
+    Row(
+        modifier          = modifier
+            .fillMaxWidth()
+            .padding(start = ROW_HORIZONTAL_PADDING, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text  = displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text  = folderPath,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = SUBTITLE_ALPHA),
+            )
+        }
+        TextButton(onClick = onRemove) { Text("Remove") }
     }
 }
 

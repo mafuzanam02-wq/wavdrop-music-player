@@ -446,6 +446,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** CFE-1: removes one custom folder exclusion (settings only; takes effect at the next rescan, no automatic rescan). */
+    fun removeCustomFolderExclusion(folderPath: String) {
+        viewModelScope.launch {
+            scanSettingsRepository.removeCustomFolderExclusion(folderPath)
+        }
+    }
+
     fun setStartupDestination(destination: StartupDestination) {
         viewModelScope.launch {
             appSettingsRepository.setStartupDestination(destination)

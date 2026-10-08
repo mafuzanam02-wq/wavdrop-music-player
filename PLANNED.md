@@ -16,9 +16,9 @@ do not duplicate them here.
 
 ## Approved
 
-### Public Privacy Policy Page — IMPLEMENTED (WPP-1); deployment and live validation pending
+### Public Privacy Policy Page — IMPLEMENTED, PUSHED, DEPLOYED, LIVE HTTPS VALIDATED, CLOSED (WPP-1)
 
-Code is ready in both repositories: the in-app policy now carries `WavdropAbout.PRIVACY_POLICY_URL`, and the LaunchPoint Digital site has a prerendered `/wavdrop/privacy` route. NOT yet deployed, so the URL is not live-validated and must not be entered in the Play Console until QA_CHECKLIST "WPP-1" items A–I are verified over HTTPS.
+The in-app policy carries `WavdropAbout.PRIVACY_POLICY_URL`, and the LaunchPoint Digital site serves the prerendered `/wavdrop/privacy` route. Hosting was deployed and `https://launchpointdigital.co.za/wavdrop/privacy` was opened successfully over HTTPS; the owner confirmed the QA_CHECKLIST "WPP-1" items A–I.
 
 Original requirement: publish the Wavdrop Privacy Policy at `https://launchpointdigital.co.za/wavdrop/privacy`. This URL is required for the Google Play store listing Privacy Policy field before public launch. The page should publish the same text as the in-app Privacy Policy dialog. Once the page is live, add a reference line to the bottom of the in-app Privacy Policy copy pointing to the URL.
 
@@ -35,9 +35,11 @@ Original requirement: publish the Wavdrop Privacy Policy at `https://launchpoint
   implementation with a stable third-party library if real-device edge cases surface in
   testing. The current implementation is functional but the auto-scroll and
   virtualization-interrupt paths are non-trivial to maintain.
-- **Broader folder exclusion system**: extending the per-folder scan exclusion beyond the WhatsApp-specific
-  toggle and the shipped preset exclusions (Telegram, Signal, Messenger, Downloads, Recordings; all default
-  OFF) to a general block/allow list that users can configure freely. Arbitrary exclusion is NOT supported yet.
+- **Broader folder exclusion beyond CFE-1**: CFE-1 (implemented, physical validation pending) lets a user exclude a
+  concrete folder already known to WavDrop (and its descendants) from Folder Details, managed in Settings -> Library &
+  Scanning -> Custom excluded folders. Still deferred: arbitrary free-text paths, wildcards, regex, a general allow-list,
+  per-song exclusion, metadata-based filtering, automatic exclusion suggestions, a filesystem browser for exclusions, and
+  exporting exclusions in backups.
 
 ---
 

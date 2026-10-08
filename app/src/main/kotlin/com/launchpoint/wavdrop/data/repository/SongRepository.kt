@@ -70,7 +70,7 @@ class SongRepository @Inject constructor(
                     val disposition = SongSyncPolicy.emptyScanDisposition(
                         settings = scanSettings,
                         existingSongCount = existingIds.size,
-                        eligibleBeforePresetExclusionsCount = scan.eligibleBeforePresetExclusionsCount,
+                        eligibleBeforeExplicitExclusionsCount = scan.eligibleBeforeExplicitExclusionsCount,
                     )
                     if (disposition == EmptyScanDisposition.PRESERVE_AMBIGUOUS) {
                         Log.w(TAG,
@@ -84,7 +84,7 @@ class SongRepository @Inject constructor(
                             SongSyncPolicy.emptyPreservedReason(scanSettings)
                         )
                     }
-                    // Definitive empty: the table is already empty, or the explicit preset exclusions removed every
+                    // Definitive empty: the table is already empty, or the explicit exclusions (preset and/or custom folder) removed every
                     // otherwise-eligible song. Stats, listen events and identity rows are not deleted here.
                     if (existingIds.isNotEmpty()) dao.deleteAll()
                     // All songs were removed — every identity's referenced song is now absent.

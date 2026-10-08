@@ -186,50 +186,50 @@ class LibraryScanPresetExclusionRulesTest {
 
     @Test fun `with no exclusions the evidence equals the final list`() {
         val e = evaluate(all, settings())
-        assertEquals(all.size, e.eligibleBeforePresetExclusionsCount)
+        assertEquals(all.size, e.eligibleBeforeExplicitExclusionsCount)
         assertEquals(all, e.songs)
     }
 
     @Test fun `the preset stage removes songs but leaves the pre-preset count untouched`() {
         val e = evaluate(all, settings(LibraryScanExclusion.DOWNLOADS))
-        assertEquals(6, e.eligibleBeforePresetExclusionsCount)
+        assertEquals(6, e.eligibleBeforeExplicitExclusionsCount)
         assertEquals(listOf(1L, 3L, 4L, 5L, 6L), ids(e.songs))
     }
 
     @Test fun `the count is taken after the minimum duration`() {
         val short = song(10, "Download/x", durationMs = 5_000L)
         val e = evaluate(listOf(short, song(11, "Download/y", durationMs = 20_000L)), settings(LibraryScanExclusion.DOWNLOADS, minSeconds = 60))
-        assertEquals("both are under 60s, so nothing was eligible before the preset stage", 0, e.eligibleBeforePresetExclusionsCount)
+        assertEquals("both are under 60s, so nothing was eligible before the preset stage", 0, e.eligibleBeforeExplicitExclusionsCount)
         assertTrue(e.songs.isEmpty())
         val e2 = evaluate(listOf(short, downloads), settings(LibraryScanExclusion.DOWNLOADS, minSeconds = 10))
-        assertEquals("only the long song counted", 1, e2.eligibleBeforePresetExclusionsCount)
+        assertEquals("only the long song counted", 1, e2.eligibleBeforeExplicitExclusionsCount)
     }
 
     @Test fun `the count is taken after the whatsapp rule`() {
         val voice = song(20, "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Voice Notes/2024")
         val e = evaluate(listOf(voice), settings(LibraryScanExclusion.DOWNLOADS))
-        assertEquals(0, e.eligibleBeforePresetExclusionsCount)
-        assertEquals(1, evaluate(listOf(voice), settings(LibraryScanExclusion.DOWNLOADS, whatsApp = true)).eligibleBeforePresetExclusionsCount)
+        assertEquals(0, e.eligibleBeforeExplicitExclusionsCount)
+        assertEquals(1, evaluate(listOf(voice), settings(LibraryScanExclusion.DOWNLOADS, whatsApp = true)).eligibleBeforeExplicitExclusionsCount)
     }
 
     @Test fun `the count is taken after the scan mode`() {
         val sel = settings(LibraryScanExclusion.DOWNLOADS, mode = LibraryScanMode.SELECTED_FOLDERS, folders = listOf("content://tree/primary:Music"))
         val e = evaluate(listOf(downloads, music), sel)
-        assertEquals("the Download song is outside the selected folder, so it never counted", 1, e.eligibleBeforePresetExclusionsCount)
+        assertEquals("the Download song is outside the selected folder, so it never counted", 1, e.eligibleBeforeExplicitExclusionsCount)
         assertEquals(listOf(1L), ids(e.songs))
     }
 
     @Test fun `a selected folder that the exclusion covers leaves evidence above zero and a final zero`() {
         val sel = settings(LibraryScanExclusion.DOWNLOADS, mode = LibraryScanMode.SELECTED_FOLDERS, folders = listOf("content://tree/primary:Download"))
         val e = evaluate(listOf(downloads), sel)
-        assertEquals(1, e.eligibleBeforePresetExclusionsCount)
+        assertEquals(1, e.eligibleBeforeExplicitExclusionsCount)
         assertTrue(e.songs.isEmpty())
     }
 
     @Test fun `a selected folder that matches nothing has zero evidence`() {
         val sel = settings(LibraryScanExclusion.DOWNLOADS, mode = LibraryScanMode.SELECTED_FOLDERS, folders = listOf("content://tree/primary:Nowhere"))
         val e = evaluate(all, sel)
-        assertEquals(0, e.eligibleBeforePresetExclusionsCount)
+        assertEquals(0, e.eligibleBeforeExplicitExclusionsCount)
         assertTrue(e.songs.isEmpty())
     }
 
@@ -240,7 +240,7 @@ class LibraryScanPresetExclusionRulesTest {
             settings(LibraryScanExclusion.DOWNLOADS, mode = LibraryScanMode.SELECTED_FOLDERS, folders = listOf("content://tree/primary:Download")),
         )
         for (s in combos) for (song in all) {
-            val staged = LibraryScanSettingsRules.isSongAllowedBeforePresetExclusions(song, s) && !LibraryScanSettingsRules.isExcludedByPreset(song, s)
+            val staged = LibraryScanSettingsRules.isSongAllowedBeforeExplicitExclusions(song, s) && !LibraryScanSettingsRules.isExcludedByPreset(song, s)
             assertEquals(staged, LibraryScanSettingsRules.isSongAllowedByScanSettings(song, s))
         }
     }

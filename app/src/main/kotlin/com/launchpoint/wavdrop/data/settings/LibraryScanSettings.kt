@@ -21,4 +21,10 @@ data class LibraryScanSettings(
     val includeWhatsAppVoiceNotes: Boolean = false,
     /** Preset folder categories whose songs are excluded from the library. Empty by default (nothing is excluded). */
     val excludedPresetFolders: Set<LibraryScanExclusion> = emptySet(),
+    /**
+     * CFE-1: concrete folders the user excluded, each a canonical shared-storage-relative path (for example `Music/Podcasts`),
+     * deterministic order, no duplicates. A folder and all of its descendants are excluded. Empty by default. Device-local scan
+     * configuration (never part of a backup). Maintained only through [LibraryScanSettingsRules].
+     */
+    val customExcludedFolderPaths: Set<String> = emptySet(),
 )

@@ -38,6 +38,9 @@ class LibraryScanSettingsRepository @Inject constructor(
                     excludedPresetFolders = LibraryScanSettingsRules.parsePresetExclusions(
                         preferences[EXCLUDED_PRESET_FOLDERS_KEY],
                     ),
+                    customExcludedFolderPaths = LibraryScanSettingsRules.normalizeCustomFolderExclusions(
+                        preferences[CUSTOM_EXCLUDED_FOLDER_PATHS_KEY],
+                    ),
                 ),
             )
         }
@@ -91,6 +94,47 @@ class LibraryScanSettingsRepository @Inject constructor(
         }
     }
 
+    /**
+     * CFE-1: excludes ONE concrete folder (and its descendants) from future scans. The path is canonicalized by
+     * [LibraryScanSettingsRules]; an invalid path (blank, Unknown Folder, empty after prefix removal) is rejected and
+     * nothing is written. Returns whether the folder is now excluded. Read-modify-write inside one DataStore edit; presets
+     * and every other setting are untouched. Takes effect at the next rescan; no song, stat or identity is touched here.
+     */
+    suspend fun addCustomFolderExclusion(folderPath: String): Boolean {
+        if (LibraryScanSettingsRules.canonicalCustomFolderPath(folderPath) == null) return false
+        dataStore.edit { preferences ->
+            val updated = LibraryScanSettingsRules.withCustomFolderExclusion(
+                LibraryScanSettings(
+                    customExcludedFolderPaths = LibraryScanSettingsRules.normalizeCustomFolderExclusions(
+                        preferences[CUSTOM_EXCLUDED_FOLDER_PATHS_KEY],
+                    ),
+                ),
+                folderPath,
+            ).customExcludedFolderPaths
+            preferences[CUSTOM_EXCLUDED_FOLDER_PATHS_KEY] = updated
+        }
+        return true
+    }
+
+    /** CFE-1: removes ONE custom exclusion. Settings only: no rescan, nothing else is touched. */
+    suspend fun removeCustomFolderExclusion(folderPath: String) {
+        dataStore.edit { preferences ->
+            val updated = LibraryScanSettingsRules.withoutCustomFolderExclusion(
+                LibraryScanSettings(
+                    customExcludedFolderPaths = LibraryScanSettingsRules.normalizeCustomFolderExclusions(
+                        preferences[CUSTOM_EXCLUDED_FOLDER_PATHS_KEY],
+                    ),
+                ),
+                folderPath,
+            ).customExcludedFolderPaths
+            if (updated.isEmpty()) {
+                preferences.remove(CUSTOM_EXCLUDED_FOLDER_PATHS_KEY)
+            } else {
+                preferences[CUSTOM_EXCLUDED_FOLDER_PATHS_KEY] = updated
+            }
+        }
+    }
+
     suspend fun addSelectedFolderUri(folderUri: String) {
         dataStore.edit { preferences ->
             val current = preferences[SELECTED_FOLDER_URIS_KEY]?.toList().orEmpty()
@@ -125,5 +169,7 @@ class LibraryScanSettingsRepository @Inject constructor(
             booleanPreferencesKey("library_include_whatsapp_voice_notes")
         val EXCLUDED_PRESET_FOLDERS_KEY =
             stringSetPreferencesKey("library_excluded_preset_folders")
+        val CUSTOM_EXCLUDED_FOLDER_PATHS_KEY =
+            stringSetPreferencesKey("library_custom_excluded_folder_paths")
     }
 }
