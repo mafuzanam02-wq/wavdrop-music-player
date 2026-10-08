@@ -413,6 +413,7 @@ fun NowPlayingScreen(
             onPlayNext   = { viewModel.moveToPlayNext(it) },
             onPlaySongNext = { viewModel.playNext(it) },
             onAddSongToQueue = { viewModel.addToQueue(it) },
+            onSaveQueueAsPlaylist = { name, onResult -> viewModel.saveQueueAsPlaylist(name, onResult) },
             onViewStats  = { songId ->
                 showQueueSheet = false
                 onOpenTrackDetails(songId)

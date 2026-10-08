@@ -727,3 +727,23 @@ Nothing below has been run on a device. Do not tick items until the user has ver
 - [ ] L. Unknown Folder has no "Exclude this folder" action.
 - [ ] M. Restart the app: the exclusions persist and are still listed.
 - [ ] N. On upgrade / fresh install the list is empty ("No custom folders excluded.") and the library is unchanged.
+
+## QSP-1 Save queue as playlist (implemented; PHYSICAL VALIDATION PENDING)
+
+Nothing below has been run on a device. Do not tick items until the user has verified them on hardware. Now Playing -> Queue -> header menu (three dots) -> "Save queue as playlist".
+
+- [ ] A. Build a queue of 5+ songs, save it, and open the new playlist: the order is exactly the queue order (earlier, current, Up Next).
+- [ ] B. A queue containing the same track twice saves that track twice, at both positions.
+- [ ] C. After reordering Up Next, the saved playlist reflects the reorder.
+- [ ] D. Open the name dialog, let playback advance one song naturally, then press Save: the playlist matches the queue as it is at the moment of pressing Save.
+- [ ] E. A blank name keeps the dialog open with "Enter a playlist name".
+- [ ] F. An existing playlist name (any letter case) keeps the dialog open with "A playlist with this name already exists"; the existing playlist is unchanged.
+- [ ] G. Saving while paused works.
+- [ ] H. Saving while playing works.
+- [ ] I. Playback continues uninterrupted when the queue is saved (no restart, no skip, no change to shuffle/repeat).
+- [ ] J. The resulting playlist plays correctly.
+- [ ] K. A backup export includes the resulting playlist through the normal backup.
+- [ ] L. The playlist is still there after restarting the app.
+- [ ] M. With an empty queue the Queue Sheet shows no save action.
+- [ ] N. Success shows "Queue saved as playlist" while the Queue Sheet stays open.
+- [ ] O. Open an audio file from another app (ACTION_VIEW) so it plays through WavDrop: the Queue Sheet shows no "Save queue as playlist" action, and no playlist is created.

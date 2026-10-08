@@ -10,6 +10,7 @@ import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.repository.AddToPlaylistResult
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
+import com.launchpoint.wavdrop.data.repository.QueueSaveResult
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.playback.PlaybackUserMessage
@@ -174,6 +175,24 @@ class NowPlayingViewModel @Inject constructor(
         viewModelScope.launch {
             val result = playlistRepository.addSongToPlaylist(song.id, playlistId)
             onResult(result)
+        }
+    }
+
+    /**
+     * QSP-1: saves the CURRENT logical queue (earlier + current + Up Next, in its live order, duplicate occurrences kept) as a
+     * new playlist. The queue is read when this is called (the user pressed Save), copied to an immutable id list, and handed to
+     * the repository; nothing here touches playback (no queue edit, seek, play/pause or generation change).
+     */
+    fun saveQueueAsPlaylist(name: String, onResult: (QueueSaveResult) -> Unit = {}) {
+        val queue = nowPlayingState.value.queue
+        if (queue.isNotEmpty() && !canSaveQueue(queue)) {
+            // external ACTION_VIEW audio is not a library song: refuse the whole save, never filter it out
+            onResult(QueueSaveResult.UnsavableQueue)
+            return
+        }
+        val songIds = queueSongIdsSnapshot(queue)
+        viewModelScope.launch {
+            onResult(playlistRepository.createPlaylistFromQueue(name, songIds))
         }
     }
 

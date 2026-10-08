@@ -631,7 +631,7 @@ class PlayerController @Inject constructor(
         const val GAPLESS_TAG = "WavdropGapless"
         const val RESUME_TAG = "WavdropResume"
         const val QUEUE_PERF_TAG = "WavdropQueuePerf"
-        const val EXTERNAL_AUDIO_SONG_ID = Long.MIN_VALUE
+        const val EXTERNAL_AUDIO_SONG_ID = com.launchpoint.wavdrop.data.model.ExternalAudioIdentity.SONG_ID
         const val BLUETOOTH_RESUME_DEBOUNCE_MS = 1_500L
         const val MEDIA_ITEM_CACHE_MAX_SIZE = 12_288
         const val QUEUE_REPAIR_CHUNK_ITEMS = 256

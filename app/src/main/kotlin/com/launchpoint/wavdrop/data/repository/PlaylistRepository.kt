@@ -5,6 +5,7 @@ import com.launchpoint.wavdrop.data.local.WavdropDatabase
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.entity.PlaylistEntity
 import com.launchpoint.wavdrop.data.local.entity.PlaylistSongEntity
+import com.launchpoint.wavdrop.data.model.ExternalAudioIdentity
 import com.launchpoint.wavdrop.data.model.PlaylistSong
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.playlists.PlaylistNameRules
@@ -19,6 +20,17 @@ sealed interface PlaylistOperationResult {
     data class Success(val playlistId: Long) : PlaylistOperationResult
     data object BlankName                    : PlaylistOperationResult
     data object DuplicateName               : PlaylistOperationResult
+}
+
+/** Result of [PlaylistRepository.createPlaylistFromQueue]. Separate from [PlaylistOperationResult] (QSP-1 has its own contract). */
+sealed interface QueueSaveResult {
+    data class Success(val playlistId: Long, val songCount: Int) : QueueSaveResult
+    data object BlankName     : QueueSaveResult
+    data object DuplicateName : QueueSaveResult
+    /** Nothing to save: no playlist is created. */
+    data object EmptyQueue    : QueueSaveResult
+    /** The queue holds a song that is not a library song (external ACTION_VIEW audio): nothing is saved, nothing is filtered. */
+    data object UnsavableQueue : QueueSaveResult
 }
 
 data class AddToPlaylistResult(val added: Int, val skipped: Int) {
@@ -73,6 +85,38 @@ class PlaylistRepository @Inject constructor(
             PlaylistEntity(name = trimmed, createdAt = now, updatedAt = now)
         )
         return PlaylistOperationResult.Success(id)
+    }
+
+    /**
+     * QSP-1: persists a queue snapshot as a NEW ordinary playlist, EXACTLY as given: [songIds] is inserted at positions
+     * 0..N-1 in the supplied order and repeated song ids are KEPT (the row identity is playlistId + position, so the same song
+     * may appear at several positions). This deliberately does NOT go through [addSongsToPlaylist], whose duplicate
+     * prevention is the contract of the ordinary "Add to playlist" action and is unchanged.
+     *
+     * The name goes through [PlaylistNameRules] (trimmed, blank rejected, case-insensitive duplicate rejected, nothing is ever
+     * overwritten or auto-numbered). An empty list never creates a playlist. The duplicate check, the playlist row and every
+     * entry (one batched insert) happen in ONE Room transaction, so a failure leaves neither a playlist nor partial entries.
+     * The playlist is created once (createdAt == updatedAt) and not touched again. Playback is never involved.
+     */
+    suspend fun createPlaylistFromQueue(name: String, songIds: List<Long>): QueueSaveResult {
+        val trimmed = PlaylistNameRules.normalize(name)
+        if (trimmed.isBlank()) return QueueSaveResult.BlankName
+        if (songIds.isEmpty()) return QueueSaveResult.EmptyQueue
+        // All-or-nothing: a queue that contains external (non-library) audio is refused whole. The visible sequence is never
+        // silently changed by dropping entries, and the synthetic external id is never persisted.
+        if (songIds.any(ExternalAudioIdentity::isExternalAudioId)) return QueueSaveResult.UnsavableQueue
+        val snapshot = songIds.toList() // immutable copy: later changes to the caller's list cannot reach the write
+        return db.withTransaction {
+            if (dao.countByName(trimmed) > 0) return@withTransaction QueueSaveResult.DuplicateName
+            val now = System.currentTimeMillis()
+            val playlistId = dao.insertPlaylist(PlaylistEntity(name = trimmed, createdAt = now, updatedAt = now))
+            dao.insertSongs(
+                snapshot.mapIndexed { index, songId ->
+                    PlaylistSongEntity(playlistId = playlistId, songId = songId, position = index)
+                },
+            )
+            QueueSaveResult.Success(playlistId = playlistId, songCount = snapshot.size)
+        }
     }
 
     suspend fun renamePlaylist(id: Long, name: String): PlaylistOperationResult {

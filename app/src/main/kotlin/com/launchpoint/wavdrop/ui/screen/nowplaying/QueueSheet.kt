@@ -98,6 +98,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.data.repository.QueueSaveResult
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
@@ -160,6 +161,7 @@ fun QueueSheet(
     onPlayNext: (Int) -> Unit,
     onPlaySongNext: (Song) -> Unit,
     onAddSongToQueue: (Song) -> Unit,
+    onSaveQueueAsPlaylist: (String, (QueueSaveResult) -> Unit) -> Unit,
     onViewStats: (Long) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
@@ -181,6 +183,7 @@ fun QueueSheet(
             onPlayNext = onPlayNext,
             onPlaySongNext = onPlaySongNext,
             onAddSongToQueue = onAddSongToQueue,
+            onSaveQueueAsPlaylist = onSaveQueueAsPlaylist,
             onViewStats = onViewStats,
         )
     }
@@ -200,8 +203,10 @@ private fun QueueSheetContent(
     onPlayNext: (Int) -> Unit,
     onPlaySongNext: (Song) -> Unit,
     onAddSongToQueue: (Song) -> Unit,
+    onSaveQueueAsPlaylist: (String, (QueueSaveResult) -> Unit) -> Unit,
     onViewStats: (Long) -> Unit,
 ) {
+    var showSaveQueueDialog by remember { mutableStateOf(false) }
     val currentIndex = state.currentIndex
     val sections = queueSheetSections(currentIndex = currentIndex, queueSize = state.queue.size)
     val earlierQueueCount = sections.earlierQueueCount
@@ -568,7 +573,11 @@ private fun QueueSheetContent(
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            QueueSheetHeader(onDismiss = onDismiss)
+            QueueSheetHeader(
+                onDismiss = onDismiss,
+                canSaveQueue = canSaveQueue(state.queue),
+                onSaveQueue = { showSaveQueueDialog = true },
+            )
             HorizontalDivider(
                 thickness = 0.5.dp,
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
@@ -942,6 +951,28 @@ private fun QueueSheetContent(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         )
 
+        // ── Save queue as playlist (QSP-1) ──────────────────────────────────────
+        if (showSaveQueueDialog) {
+            if (!canSaveQueue(state.queue)) {
+                // The queue emptied or became external playback underneath the dialog: nothing to save.
+                LaunchedEffect(Unit) { showSaveQueueDialog = false }
+            } else {
+                SaveQueueAsPlaylistDialog(
+                    onDismiss = { showSaveQueueDialog = false },
+                    onSave = { name, reportOutcome ->
+                        onSaveQueueAsPlaylist(name) { result ->
+                            val outcome = queueSaveOutcome(result)
+                            if (outcome is QueueSaveOutcome.Saved) {
+                                showSaveQueueDialog = false
+                                scope.launch { snackbarHostState.showSnackbar(QUEUE_SAVED_MESSAGE) }
+                            }
+                            reportOutcome(outcome)
+                        }
+                    },
+                )
+            }
+        }
+
         // ── Bulk clear confirmation ─────────────────────────────────────────────
         val bulkClear = pendingBulkClear
         if (bulkClear != null) {
@@ -1106,10 +1137,55 @@ private fun MoveDestinationRow(label: String, onClick: () -> Unit) {
     )
 }
 
+// ── Save queue as playlist dialog (QSP-1) ─────────────────────────────────────
+
+/**
+ * Name dialog for QSP-1. Local, ephemeral state only (typed name, error). Cancel writes nothing. Save hands the name to
+ * [onSave], which reports back an outcome: Saved is handled by the caller (dialog closes + snackbar); an Error keeps the
+ * dialog open with an inline message.
+ */
+@Composable
+private fun SaveQueueAsPlaylistDialog(
+    onDismiss: () -> Unit,
+    onSave: (String, (QueueSaveOutcome) -> Unit) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(QUEUE_SAVE_MENU_LABEL) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it; error = null },
+                label = { Text("Playlist name") },
+                singleLine = true,
+                isError = error != null,
+                supportingText = error?.let { message -> { Text(message) } },
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(name) { outcome ->
+                        if (outcome is QueueSaveOutcome.Error) error = outcome.message
+                    }
+                },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 // ── Section header ────────────────────────────────────────────────────────────
 
 @Composable
-private fun QueueSheetHeader(onDismiss: () -> Unit) {
+private fun QueueSheetHeader(
+    onDismiss: () -> Unit,
+    canSaveQueue: Boolean,
+    onSaveQueue: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1121,6 +1197,23 @@ private fun QueueSheetHeader(onDismiss: () -> Unit) {
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f),
         )
+        if (canSaveQueue) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Queue options",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    )
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text(QUEUE_SAVE_MENU_LABEL) },
+                        onClick = { menuExpanded = false; onSaveQueue() },
+                    )
+                }
+            }
+        }
         IconButton(onClick = onDismiss) {
             Icon(
                 imageVector = Icons.Default.Close,

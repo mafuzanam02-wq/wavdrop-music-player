@@ -22,6 +22,10 @@ The in-app policy carries `WavdropAbout.PRIVACY_POLICY_URL`, and the LaunchPoint
 
 Original requirement: publish the Wavdrop Privacy Policy at `https://launchpointdigital.co.za/wavdrop/privacy`. This URL is required for the Google Play store listing Privacy Policy field before public launch. The page should publish the same text as the in-app Privacy Policy dialog. Once the page is live, add a reference line to the bottom of the in-app Privacy Policy copy pointing to the URL.
 
+### Save queue as playlist — IMPLEMENTED (QSP-1); physical validation pending
+
+Queue Sheet header menu -> "Save queue as playlist" saves the current logical queue (earlier + current + Up Next, in live order, repeated occurrences kept) as a new ordinary playlist. Playback is never touched. Still deferred: save only Up Next, overwrite/append/replace an existing playlist, auto-save, queue history, named queue snapshots, temporary playlists, smart-playlist conversion, playlist folders, M3U export, sync, playlist artwork, queue sharing.
+
 ---
 
 ## Under Evaluation
