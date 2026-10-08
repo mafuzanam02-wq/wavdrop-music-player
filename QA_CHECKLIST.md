@@ -694,3 +694,17 @@ The app-layer investigation found the session position healthy in every automate
 - [ ] K. Finish-current boundary armed: progress moves until the natural stop.
 - [ ] L. Bluetooth playback (if available): lock-screen progress stays correct.
 - [ ] M. Reproduce on the phone that originally showed the defect. Record: device model; Android version; WavDrop commit; crossfade setting; the `WavdropSessionProgress` `physical=` value; the `session=` value; and whether the visible lock-screen bar moved.
+
+## WPP-1 Public Privacy Policy (code ready; NOT DEPLOYED, nothing below validated)
+
+Tick only after the LaunchPoint Digital site is deployed and the URL is opened over HTTPS on real devices.
+
+- [ ] A. `https://launchpointdigital.co.za/wavdrop/privacy` returns 200 over HTTPS in a fresh browser (direct load, no prior navigation).
+- [ ] B. The correct WavDrop Privacy Policy renders (nine sections, one h1).
+- [ ] C. Mobile layout is readable.
+- [ ] D. Desktop layout is readable.
+- [ ] E. Canonical is `https://launchpointdigital.co.za/wavdrop/privacy`.
+- [ ] F. No tracking or network behaviour was introduced (no analytics, cookies, third-party requests, newsletter prompt).
+- [ ] G. The in-app Privacy Policy displays the same substantive policy as the public page.
+- [ ] H. The in-app policy visibly shows the public URL at the bottom.
+- [ ] I. The Play Console privacy-policy field accepts the exact URL.

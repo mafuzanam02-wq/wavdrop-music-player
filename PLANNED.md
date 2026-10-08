@@ -16,9 +16,11 @@ do not duplicate them here.
 
 ## Approved
 
-### Public Privacy Policy Page
+### Public Privacy Policy Page — IMPLEMENTED (WPP-1); deployment and live validation pending
 
-Publish the Wavdrop Privacy Policy at `https://launchpointdigital.co.za/wavdrop/privacy`. This URL is required for the Google Play store listing Privacy Policy field before public launch. The page should publish the same text as the in-app Privacy Policy dialog. Once the page is live, add a reference line to the bottom of the in-app Privacy Policy copy pointing to the URL.
+Code is ready in both repositories: the in-app policy now carries `WavdropAbout.PRIVACY_POLICY_URL`, and the LaunchPoint Digital site has a prerendered `/wavdrop/privacy` route. NOT yet deployed, so the URL is not live-validated and must not be entered in the Play Console until QA_CHECKLIST "WPP-1" items A–I are verified over HTTPS.
+
+Original requirement: publish the Wavdrop Privacy Policy at `https://launchpointdigital.co.za/wavdrop/privacy`. This URL is required for the Google Play store listing Privacy Policy field before public launch. The page should publish the same text as the in-app Privacy Policy dialog. Once the page is live, add a reference line to the bottom of the in-app Privacy Policy copy pointing to the URL.
 
 ---
 

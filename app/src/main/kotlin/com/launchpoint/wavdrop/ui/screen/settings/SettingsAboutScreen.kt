@@ -457,6 +457,7 @@ private object WavdropAbout {
     const val PRODUCT_NAME    = "Wavdrop Music Player"
     const val WEBSITE_URL     = "https://launchpointdigital.co.za"
     const val CONTACT_EMAIL   = "info@launchpointdigital.co.za"
+    const val PRIVACY_POLICY_URL = "https://launchpointdigital.co.za/wavdrop/privacy"
     const val SUPPORT_SUBJECT = "Wavdrop Feedback"
     const val COPYRIGHT       = "© 2026 LaunchPoint Digital. All rights reserved."
 
@@ -472,7 +473,8 @@ private object WavdropAbout {
             "None of this data is transmitted to Wavdrop, LaunchPoint Digital, or any third party.",
         "Android permissions:\n" +
             "· READ_EXTERNAL_STORAGE on Android 8–12 or READ_MEDIA_AUDIO on Android 13+ is used to find and play audio files on your device\n" +
-            "· FOREGROUND_SERVICE and FOREGROUND_SERVICE_MEDIA_PLAYBACK are used to keep music playing when the screen is off\n\n" +
+            "· FOREGROUND_SERVICE and FOREGROUND_SERVICE_MEDIA_PLAYBACK are used to keep music playing when the screen is off\n" +
+            "· BLUETOOTH on Android 11 and earlier or BLUETOOTH_CONNECT on Android 12+ is used for Bluetooth audio connection-state handling and optional playback resume when an audio device reconnects. Wavdrop does not scan for or discover nearby Bluetooth devices.\n\n" +
             "Wavdrop does not request internet, location, contacts, camera, microphone, advertising ID, or any other unnecessary permissions.",
         "Backup and export:\n" +
             "The Export Wavdrop Data feature saves a WavDrop backup file to a location you choose, such as local storage or a cloud service you control. This file may contain your library metadata, statistics, playlists, custom lyrics, app preferences, and listening history. Wavdrop does not upload this file. You are responsible for protecting your backup because it may contain personal listening data.",
@@ -486,6 +488,8 @@ private object WavdropAbout {
             "Wavdrop does not use advertising SDKs, analytics services, crash-reporting tools, or third-party tracking. External links, such as the LaunchPoint Digital website and support email, open in your device's browser or email app. Wavdrop itself makes no network requests.",
         "Contact:\n" +
             "Questions about this policy: info@launchpointdigital.co.za",
+        "Public policy:\n" +
+            "View the public version of this Privacy Policy: $PRIVACY_POLICY_URL",
     )
 
     val TERMS_OF_USE = listOf(
