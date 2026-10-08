@@ -672,3 +672,25 @@ Nothing below has been run on a device. Do not tick items until the user has ver
 - [ ] H. Stats / history: exclude a played song's folder, rescan, then re-include and rescan: the song's play history and Insights numbers are neither wiped nor inflated.
 - [ ] I. If ALL otherwise-eligible songs are in an excluded folder (e.g. all your music is in Downloads and Exclude Downloads is on), a rescan legitimately empties the live library: no permission/storage warning and no "existing songs were kept" message is shown, Insights/history numbers are preserved, and disabling the exclusion and rescanning brings the songs back.
 - [ ] J. A rescan that finds no music for another reason (e.g. Selected folders mode pointing at a folder with no audio, or media permission revoked) still keeps the existing library and shows the warning/failure message.
+
+## LS-1 Lock-screen / system media progress (investigated; PHYSICAL REPRODUCTION PENDING)
+
+The app-layer investigation found the session position healthy in every automated scenario, so the intermittent freeze reported on a second phone is NOT yet explained. Nothing below has been run on a device. Do not tick items until the user has verified them on hardware. Use a DEBUG build and capture `adb logcat -s WavdropSessionProgress` while reproducing: each line has `physical=` and `session=` positions. The log reads WavDrop's in-process session-facing Player, not the platform/SystemUI controller state, so it cannot identify OEM SystemUI by itself:
+
+- `physical=` and `session=` both advancing while the lock screen freezes: the freeze is downstream of WavDrop's session-facing Player. Retain the logs and device details.
+- `physical=` advancing but `session=` stale: WavDrop/session-layer divergence. Reopen LS-1 immediately.
+- both stale: investigate the actual playback/player state.
+
+- [ ] A. Start ordinary playback, lock the phone: the lock-screen progress bar moves continuously.
+- [ ] B. Unlock and relock: progress resumes and moves.
+- [ ] C. Pause from the lock screen: progress stops.
+- [ ] D. Resume from the lock screen: progress continues from where it stopped.
+- [ ] E. Seek from the lock screen (if the OEM supports it): the position jumps and continues.
+- [ ] F. Let several tracks transition naturally: progress resets for each song and keeps moving.
+- [ ] G. Crossfade ON: after multiple promotions, progress keeps moving.
+- [ ] H. Crossfade OFF: ordinary transitions keep moving.
+- [ ] I. Background the app / swipe its task away: lock-screen progress continues while the session is alive.
+- [ ] J. Sleep Timer countdown active: progress continues.
+- [ ] K. Finish-current boundary armed: progress moves until the natural stop.
+- [ ] L. Bluetooth playback (if available): lock-screen progress stays correct.
+- [ ] M. Reproduce on the phone that originally showed the defect. Record: device model; Android version; WavDrop commit; crossfade setting; the `WavdropSessionProgress` `physical=` value; the `session=` value; and whether the visible lock-screen bar moved.

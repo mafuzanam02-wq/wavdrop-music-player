@@ -46,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -71,6 +72,8 @@ class PlaybackService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enhancementController: AudioEnhancementController? = null
+    // LS-1: DEBUG-only, read-only evidence of what the session player publishes to system surfaces. Null in release builds.
+    private var sessionProgressDiagnostics: SessionProgressDiagnostics? = null
     // The ONE crossfade architecture (CF-2M, gate-bound): PlaybackAssembly builds the PlayerEngine (CURRENT + NEXT physical
     // players + SessionFacade) only when CrossfadeRolloutPolicy.RUNTIME_ENABLED is true; the two owners below are null otherwise.
     private var playbackAssembly: PlaybackAssembly? = null
@@ -250,6 +253,26 @@ class PlaybackService : MediaLibraryService() {
 
         if (BuildConfig.DEBUG) {
             Log.d(AUDIO_SESSION_TAG, "[init] player created audioSessionId=${player.audioSessionId} ts=${System.currentTimeMillis()}")
+        }
+
+        // LS-1 (DEBUG only): numbers/flags about the SESSION-FACING player, on state changes plus a slow heartbeat while playing.
+        // It reads only; it never seeks, invalidates, rewrites metadata/layout, or keeps a position of its own.
+        if (BuildConfig.DEBUG) {
+            val diagnostics = SessionProgressDiagnostics(
+                sessionPlayer = sessionPlayer,
+                physicalCurrent = { assembly.currentPlayer },
+                promotionActive = { assembly.engine?.promotionActive ?: false },
+                elapsedRealtimeMs = { android.os.SystemClock.elapsedRealtime() },
+                log = { line -> Log.d(SessionProgressDiagnostics.TAG, line) },
+            )
+            sessionProgressDiagnostics = diagnostics
+            diagnostics.start()
+            serviceScope.launch {
+                while (true) {
+                    delay(SessionProgressDiagnostics.HEARTBEAT_MS)
+                    diagnostics.heartbeat()
+                }
+            }
         }
 
         // CF-2M2 listener ownership. LOGICAL consumer (widget state): listens to the session-facing player (the facade when the
@@ -470,6 +493,8 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitQueueReplacementListener(null)
         playerController.setControllerDisconnectedListener(null)
         playerController.setSleepBoundaryListener(null)
+        sessionProgressDiagnostics?.close()
+        sessionProgressDiagnostics = null
         // Unregister the BT listener before cancelling the scope so no callback
         // can enqueue a new coroutine after the scope is cancelled.
         (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
