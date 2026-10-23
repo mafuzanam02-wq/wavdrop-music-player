@@ -274,11 +274,14 @@ class PlayerControllerSessionHardeningTest {
     @Test
     fun `pending request retains exact duplicate occurrence`() {
         val queue = listOf(song(1), song(2), song(1), song(3))
-        val request = PlaybackRequest(queue = queue, startIndex = 2)
+        // The deferred start records the occurrence positionally (the queue itself lives in the controller's logical state).
+        val commands = DeferredPlaybackCommands()
+        val accepted = commands.acceptStart { id -> DeferredStart.LibraryQueue(id, startPlaybackIndex = 2, startSongId = queue[2].id) }
 
-        val resumed = resolveQueueStart(request.queue, request.startIndex)!!
+        val resumed = resolveQueueStart(queue, accepted.startPlaybackIndex)!!
 
         assertEquals(2, resumed.startIndex)
         assertEquals(queue[2], resumed.startSong)
+        assertEquals(2, commands.take().start?.startPlaybackIndex)
     }
 }

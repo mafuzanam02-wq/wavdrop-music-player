@@ -14,6 +14,7 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
@@ -64,13 +65,6 @@ internal fun playbackSessionPersistenceAction(
     queueIsEmpty       -> PlaybackSessionPersistenceAction.CLEAR
     else               -> PlaybackSessionPersistenceAction.SAVE
 }
-
-internal data class PlaybackRequest(
-    val queue: List<Song>,
-    val startIndex: Int,
-    val preservePlaybackOrder: Boolean = false,
-    val source: PlaybackQueueSource = PlaybackQueueSource.Other,
-)
 
 internal data class QueueStart(
     val queue: List<Song>,
@@ -670,21 +664,13 @@ class PlayerController @Inject constructor(
     // nor reset the state of a newer attempt. Main-thread confined like controllerConnectionState.
     private var controllerConnectionGeneration = 0L
 
-    private var pendingPlaybackRequest: PlaybackRequest? = null
-    private var pendingPreserveSearchRequest: PreserveSearchRequest? = null
-    private var pendingExternalPlaybackRequest: ExternalPlaybackRequest? = null
     private var pendingPreserveSearchPlan: SearchPlaybackPlan? = null
-    // Single bounded pending queue-jump (Recently Played tap deferred while the controller is
-    // unavailable). Latest tap wins; drained on reconnect after the queue-replacing requests.
-    private var pendingQueueJumpRequest: QueueJumpRequest? = null
 
-    // Bounded, latest-wins transport intents captured while the controller is unavailable (Phase 7).
-    // Each is a single O(1) slot — no unbounded command list. Drained once in drainPendingRequests
-    // (lowest precedence: a queue-replacing/restore/jump request supersedes them). See
-    // [PendingTransport] for the supersession/stale rules.
-    private var pendingPlayWhenReady: Boolean? = null       // STATE_INTENT: desired play(true)/pause(false)
-    private var pendingSeek: PendingSeek? = null            // latest seek, bound to its queue occurrence
-    private var pendingNavigation: NavigationIntent? = null // latest next/previous; recomputed on drain
+    // THE bounded, latest-wins authority for everything accepted while no usable MediaController exists: one deferred start
+    // (library / search-preserve / external), one held queue jump, and the single-slot transport intents (play-pause, seek,
+    // navigation). The newest explicit user intent wins regardless of command type; see [DeferredPlaybackCommands] for the policy
+    // and [PendingTransport] for the seek stale rules. Main-thread confined, drained exactly once per authoritative connection.
+    private val deferred = DeferredPlaybackCommands()
     private val sessionHydrationMutex = Mutex()
     private val sessionPersistenceGate = PlaybackSessionPersistenceGate()
     private var isExternalPlayback = false
@@ -1226,6 +1212,22 @@ class PlayerController @Inject constructor(
             controller.replaceMeasuredMediaItems("queue_repair", from, to, songs)
         }
 
+    /**
+     * Builds the future that completes with the connected [MediaController]. Production: the real session token for
+     * [PlaybackService]. Internal and replaceable only so a test can drive a connection attempt (start, fail, complete, complete
+     * late) deterministically; production never replaces it.
+     */
+    internal var controllerFutureFactory: () -> ListenableFuture<MediaController> = {
+        val token = SessionToken(
+            context,
+            ComponentName(context, PlaybackService::class.java),
+        )
+        MediaController.Builder(context, token)
+            .setListener(controllerLifecycleListener)
+            .setConnectionHints(Bundle().apply { putBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, true) })
+            .buildAsync()
+    }
+
     init {
         scope.launch {
             appSettingsRepository.previousButtonBehavior.collect { behavior ->
@@ -1256,14 +1258,15 @@ class PlayerController @Inject constructor(
     private fun startControllerConnection() {
         controllerConnectionState = ControllerConnectionState.Connecting
         val generation = ++controllerConnectionGeneration
-        val token = SessionToken(
-            context,
-            ComponentName(context, PlaybackService::class.java),
-        )
-        val future = MediaController.Builder(context, token)
-            .setListener(controllerLifecycleListener)
-            .setConnectionHints(Bundle().apply { putBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, true) })
-            .buildAsync()
+        val future = try {
+            controllerFutureFactory()
+        } catch (e: Exception) {
+            // The attempt could not even be started (e.g. the session token cannot be resolved). Leave the state retry-eligible
+            // instead of stranding it in Connecting forever; a pending deferred command survives for the next demand.
+            controllerConnectionState = ControllerConnectionDecision.onConnectionFailed()
+            Log.w(TAG, "MediaController connection could not be started; will retry on next demand", e)
+            return
+        }
         future.addListener(
             {
                 val result = runCatching { future.get() }
@@ -1308,60 +1311,124 @@ class PlayerController @Inject constructor(
         _progressPlayer.value = controller
     }
 
-    // Main thread only. Consumes any request captured while the controller was unavailable.
+    /**
+     * Main thread only. Executes what the user asked for while no usable controller existed, exactly once, in this order:
+     *  1. the deferred START (the latest accepted selection; older ones were replaced when the newer was accepted). Its physical
+     *     install uses the CURRENT logical queue, so it does not re-derive order, bump the generation or notify again;
+     *  2. with no deferred start: the dirty-queue reconnect sync, then the held queue jump;
+     *  3. navigation, then seek (each stale-validated against its anchor occurrence), then the latest play/pause intent.
+     * Transport issued after a start is therefore honoured against the installed queue, not discarded because a start exists.
+     */
     private fun drainPendingRequests(controller: MediaController) {
-        val playRequest = pendingPlaybackRequest
-        val preserveSearchRequest = pendingPreserveSearchRequest
-        val externalRequest = pendingExternalPlaybackRequest
-        val jumpRequest = pendingQueueJumpRequest
-        pendingPlaybackRequest = null
-        pendingPreserveSearchRequest = null
-        pendingExternalPlaybackRequest = null
-        // A queue jump is subordinate to any queue-replacing request that also accumulated
-        // while disconnected: the later replace supersedes the older jump (the queue it referred to
-        // is gone). Cleared here so a superseded jump can never fire against a replacement queue.
-        pendingQueueJumpRequest = null
-        // Transport intents (Phase 7) are lowest precedence — captured and cleared here so a
-        // queue-replacing/jump branch below supersedes them (a fresh queue invalidates a
-        // stale play/pause/seek/navigation). They apply only in the no-queue-change (else) branch.
-        val navigation = pendingNavigation
-        val playWhenReady = pendingPlayWhenReady
-        val seek = pendingSeek
-        pendingNavigation = null
-        pendingPlayWhenReady = null
-        pendingSeek = null
+        val drained = deferred.take()
         // Debug tracer drain bracket: the end runs in a `finally`, so its drain flag clears even if a drained command throws.
         // The exception still propagates exactly as before.
         PlaybackStartupTrace.withPendingDrain {
-            when {
-                externalRequest != null -> playExternalUriWithoutNotification(
-                    uri = externalRequest.uri,
-                    displayName = externalRequest.displayName,
-                )
-                preserveSearchRequest != null -> playPreservedSearchPlan(
-                    plan = preserveSearchRequest.plan,
-                    startSong = preserveSearchRequest.startSong,
-                )
-                playRequest != null -> playFromQueueInternal(
-                    queue = playRequest.queue,
-                    startIndex = playRequest.startIndex,
-                    preservePlaybackOrder = playRequest.preservePlaybackOrder,
-                    source = playRequest.source,
-                )
-                // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
-                // against the (possibly mutated) queue so it never seeks a different song.
-                jumpRequest != null -> executePendingQueueJump(controller, jumpRequest)
-                else -> {
-                    // No queue-replacing/restore/jump request supersedes the dirty flag in this branch,
-                    // so a warm reconnect after a shuffle change made while disconnected must push the
-                    // app-owned order to the player once, BEFORE any pending transport command runs, so
-                    // navigation/seek resolve against the synchronized queue rather than a stale one.
-                    if (reconnectRequiresQueueSync(playerQueueNeedsSync, supersededByQueueRequest = false)) {
-                        synchronizePlayerQueueOnReconnect(controller)
-                    }
-                    drainPendingTransportCommands(controller, navigation, seek, playWhenReady)
-                }
+            var startInstalled = false
+            var seek = drained.seek
+            // The recorded occurrence is the authority and is installed only while no structural edit has happened since it was
+            // recorded (see resolveDeferredStart); otherwise the start is rejected, never re-aimed by song id.
+            val start = drained.start
+            val resolvedStart = start?.let {
+                resolveDeferredStart(it, drained.startQueueGeneration, queueGeneration, playbackQueue)
             }
+            if (start != null && resolvedStart is DeferredStartResolution.Reject) {
+                Log.w(TAG, "Dropping deferred start selection=${start.selectionId}: ${resolvedStart.reason}")
+                PlaybackStartupTrace.abort("deferred_start_unprovable")
+                markQueueDirty(QueueDirtyReason.Unknown)
+            }
+            if (start != null && resolvedStart is DeferredStartResolution.Install) {
+                // A seek issued after the start targets the started occurrence. Seeking "in current item" right after a fresh
+                // install is not available until the player reports the item seekable (Media3 drops the command), so a seek that
+                // is still valid for the started occurrence is folded into the install position instead. With a Next/Previous
+                // also pending the occurrence is about to change, so the seek keeps its post-navigation stale validation.
+                var startPositionMs = 0L
+                if (seek != null && drained.navigation == null) {
+                    val resolution = PendingTransport.resolveSeek(
+                        seek = seek,
+                        currentQueueGeneration = queueGeneration,
+                        playbackQueue = playbackQueue,
+                        currentPlaybackIndex = resolvedStart.playbackIndex,
+                    )
+                    if (resolution is PendingSeekResolution.Apply) {
+                        startPositionMs = resolution.positionMs
+                        seek = null
+                    }
+                }
+                installDeferredStart(controller, start, resolvedStart.playbackIndex, play = drained.playWhenReady ?: true, positionMs = startPositionMs)
+                startInstalled = true
+            } else {
+                // A warm reconnect after a shuffle change made while disconnected must push the app-owned order to the player once,
+                // BEFORE any pending transport command runs, so navigation/seek resolve against the synchronized queue.
+                if (reconnectRequiresQueueSync(playerQueueNeedsSync, supersededByQueueRequest = false)) {
+                    synchronizePlayerQueueOnReconnect(controller)
+                }
+                drained.queueJump?.let { executePendingQueueJump(controller, it) }
+            }
+            // A start's own install already applied its play/pause intent; otherwise the drain applies it last.
+            drainPendingTransportCommands(
+                controller = controller,
+                navigation = drained.navigation,
+                seek = seek,
+                playWhenReady = if (startInstalled) null else drained.playWhenReady,
+            )
+        }
+    }
+
+    /**
+     * Installs the accepted selection of [command] into the freshly connected [controller]. The queue/order/occurrence/source are
+     * already the logical truth, so this only performs the physical install for the already-proven recorded occurrence [index].
+     */
+    private fun installDeferredStart(controller: MediaController, command: DeferredStart, index: Int, play: Boolean, positionMs: Long) {
+        // [index] is the recorded occurrence, proven unchanged by resolveDeferredStart (no structural edit since it was recorded).
+        // A whole-queue install of the logical queue leaves nothing for the reconciler to repair.
+        playerQueueNeedsSync = false
+        when (command) {
+            is DeferredStart.LibraryQueue -> installLibraryStart(controller, index, play, positionMs)
+            is DeferredStart.PreserveSearch -> installPreservedSearchStart(controller, index, play, positionMs)
+            is DeferredStart.ExternalUri -> installExternalStart(controller, play, positionMs)
+        }
+    }
+
+    /**
+     * An accepted fresh start while no usable controller exists. The caller has already installed the logical queue/order/state.
+     * This records that the PHYSICAL install is owed (latest accepted selection wins; older start and transport payloads are
+     * dropped by [DeferredPlaybackCommands.acceptStart]) and demands the controller through the shared connection machinery,
+     * which never starts a second concurrent attempt.
+     */
+    private fun deferStart(create: (selectionId: Long) -> DeferredStart) {
+        deferred.acceptStart(queueGeneration, create)
+        // A start carries an implicit play intent; show it so a following toggle derives the right desired state.
+        _nowPlayingState.update { it.copy(isPlaying = true) }
+        PlaybackStartupTrace.onControllerParked()
+        ensureControllerConnection()
+    }
+
+    /** A queue jump made while no controller exists: retargets a deferred start (newer than it) or is held as a jump. */
+    private fun deferQueueJump(songId: Long, playbackIndex: Int) {
+        when (deferred.captureQueueJump(songId, playbackIndex, queueGeneration)) {
+            JumpCapture.RetargetedStart -> retargetAcceptedStart(playbackIndex)
+            JumpCapture.DeferredJump -> Unit
+        }
+        ensureControllerConnection()
+    }
+
+    /** The deferred start now targets another occurrence of the same logical queue; mirror what accepting a start there does. */
+    private fun retargetAcceptedStart(playbackIndex: Int) {
+        val song = playbackQueue.getOrNull(playbackIndex) ?: return
+        lastKnownPositionMs = -1L
+        pendingPreserveSearchPlan = null // its recorded index belongs to the previous target
+        statsTracker.onSongSelected(song)
+        PlaybackStartupTrace.expectStart(song.id)
+        _nowPlayingState.update {
+            it.copy(
+                song = song,
+                currentIndex = playbackIndex,
+                positionMs = 0L,
+                durationMs = song.duration.coerceAtLeast(0L),
+                bufferedPositionMs = 0L,
+                isSeekable = false,
+            )
         }
     }
 
@@ -1401,17 +1468,18 @@ class PlayerController @Inject constructor(
 
     /**
      * Main thread only. Applies transport intents captured while disconnected, in an order that
-     * keeps them internally consistent and stale-safe. Runs only when no queue-replacing/restore/
-     * jump request superseded them.
+     * keeps them internally consistent and stale-safe. They survive a deferred start (they were issued after it and the
+     * start's install has already run); anything issued BEFORE a newer start was dropped when that start was accepted.
      *
-     *  1. Navigation — recomputed against the live queue (never a stale index).
+     *  1. Navigation — executed only if the occurrence it was issued from is still the resolved current one
+     *     ([resolvePendingNavigation]); otherwise it is a stale skip and is discarded, never re-aimed by song id.
      *  2. Seek — applied only if its bound track is still current AFTER any navigation (so a seek
      *     issued against the old track is dropped rather than applied to a different one).
      *  3. Play/Pause — the latest desired state.
      */
     private fun drainPendingTransportCommands(
         controller: MediaController,
-        navigation: NavigationIntent?,
+        navigation: PendingNavigation?,
         seek: PendingSeek?,
         playWhenReady: Boolean?,
     ) {
@@ -1419,7 +1487,18 @@ class PlayerController @Inject constructor(
             syncNowPlayingState()
             return
         }
-        navigation?.let { navigate(controller, it) }
+        if (navigation != null) {
+            val intent = resolvePendingNavigation(navigation, playbackQueue, currentPlaybackIndex())
+            if (intent != null) {
+                navigate(controller, intent)
+            } else {
+                Log.w(
+                    TAG,
+                    "Discarding stale pending ${navigation.intent} from index=${navigation.anchorPlaybackIndex} " +
+                        "songId=${navigation.anchorSongId}",
+                )
+            }
+        }
         if (seek != null) {
             when (val resolution = PendingTransport.resolveSeek(
                 seek = seek,
@@ -1586,29 +1665,31 @@ class PlayerController @Inject constructor(
 
         val controller = mediaController
         if (controller == null) {
-            pendingPreserveSearchRequest = PreserveSearchRequest(
-                plan = SearchPlaybackPlan(
-                    queue = playbackQueue,
-                    currentIndex = playbackStartIndex,
-                ),
-                startSong = startSong,
-            )
-            PlaybackStartupTrace.onControllerParked()
+            deferStart { id -> DeferredStart.PreserveSearch(id, playbackStartIndex, startSong.id) }
             return
         }
+        deferred.clear() // a connected accept supersedes anything stale (nothing should exist while connected)
+        installPreservedSearchStart(controller, playbackStartIndex, play = true)
+    }
 
+    /** Physical install of an accepted preserve-search selection (the connected path and the deferred drain share it). */
+    private fun installPreservedSearchStart(controller: MediaController, playbackStartIndex: Int, play: Boolean, positionMs: Long = 0L) {
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         controller.setMeasuredMediaItems(
             operation = "preserve_search",
             songs = playbackQueue,
             startIndex = playbackStartIndex,
-            positionMs = 0L,
+            positionMs = positionMs,
         )
         controller.prepare()
         PlaybackStartupTrace.onPrepareIssued()
-        controller.play()
-        PlaybackStartupTrace.mark("play_issued")
+        if (play) {
+            controller.play()
+            PlaybackStartupTrace.mark("play_issued")
+        } else {
+            controller.pause()
+        }
         saveSessionAsync()
     }
 
@@ -1649,21 +1730,26 @@ class PlayerController @Inject constructor(
 
         val controller = mediaController
         if (controller == null) {
-            pendingExternalPlaybackRequest = ExternalPlaybackRequest(uri, displayName)
+            deferStart { id -> DeferredStart.ExternalUri(id, song.id, uri.toString(), displayName) }
             return
         }
+        deferred.clear() // a connected accept supersedes anything stale (nothing should exist while connected)
+        installExternalStart(controller, play = true)
+    }
 
+    /** Physical install of an accepted external-URI selection (the connected path and the deferred drain share it). */
+    private fun installExternalStart(controller: MediaController, play: Boolean, positionMs: Long = 0L) {
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         controller.setMeasuredMediaItems(
             operation = "external_uri",
-            songs = listOf(song),
+            songs = playbackQueue,
             startIndex = 0,
-            positionMs = 0L,
+            positionMs = positionMs,
         )
         controller.prepare()
         syncNowPlayingState(notifyStats = false)
-        controller.play()
+        if (play) controller.play() else controller.pause()
     }
 
     fun playFromQueue(
@@ -1756,15 +1842,17 @@ class PlayerController @Inject constructor(
 
         val controller = mediaController
         if (controller == null) {
-            pendingPlaybackRequest = PlaybackRequest(
-                queue = normalizedQueue,
-                startIndex = originalStartIndex,
-                preservePlaybackOrder = preservePlaybackOrder,
-                source = source,
-            )
-            PlaybackStartupTrace.onControllerParked()
+            // The queue, the (possibly shuffled) order, the occurrence and the source are now the logical truth; only the
+            // physical install is owed. Latest accepted selection wins, and the controller is demanded.
+            deferStart { id -> DeferredStart.LibraryQueue(id, playbackStartIndex, startSong.id) }
             return
         }
+        deferred.clear() // a connected accept supersedes anything stale (nothing should exist while connected)
+        installLibraryStart(controller, playbackStartIndex, play = true)
+    }
+
+    /** Physical install of an accepted library-queue selection (the connected path and the deferred drain share it). */
+    private fun installLibraryStart(controller: MediaController, playbackStartIndex: Int, play: Boolean, positionMs: Long = 0L) {
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         // ExoPlayer is loaded with playbackQueue so auto-transitions follow shuffle order.
@@ -1772,13 +1860,17 @@ class PlayerController @Inject constructor(
             operation = "play_from_queue",
             songs = playbackQueue,
             startIndex = playbackStartIndex,
-            positionMs = 0L,
+            positionMs = positionMs,
         )
         controller.prepare()
         PlaybackStartupTrace.onPrepareIssued()
         syncNowPlayingState()
-        controller.play()
-        PlaybackStartupTrace.mark("play_issued")
+        if (play) {
+            controller.play()
+            PlaybackStartupTrace.mark("play_issued")
+        } else {
+            controller.pause()
+        }
         saveSessionAsync()
     }
 
@@ -2012,13 +2104,10 @@ class PlayerController @Inject constructor(
             // Defer through the same bounded, stale-safe machinery as jumpToSongById: bind to the
             // song at this occurrence so executePendingQueueJump re-resolves it on reconnect
             // (correcting a mutated index, never jumping to a different song). Latest jump wins.
-            pendingQueueJumpRequest = QueueJumpRequest(
-                songId = playbackQueue[playbackIndex].id,
-                resolvedPlaybackIndex = playbackIndex,
-            )
-            ensureControllerConnection()
+            deferQueueJump(songId = playbackQueue[playbackIndex].id, playbackIndex = playbackIndex)
             return
         }
+        deferred.clear()
         // playbackIndex is directly the ExoPlayer media item index since ExoPlayer holds playbackQueue.
         seekToPlaybackIndex(controller, playbackIndex)
     }
@@ -2046,21 +2135,14 @@ class PlayerController @Inject constructor(
         return when (planQueueJump(resolvedIndex = playbackIndex, controllerAvailable = mediaController != null)) {
             QueueJumpAction.Reject -> false
             QueueJumpAction.ExecuteNow -> {
-                // A newer immediate jump supersedes any older deferred one.
-                pendingQueueJumpRequest = null
+                // jumpToQueueItem clears any older deferred payload: a newer immediate jump supersedes it.
                 jumpToQueueItem(playbackIndex)
                 true
             }
             QueueJumpAction.DeferAndReconnect -> {
-                // Latest explicit tap wins: overwrite any earlier pending jump (single slot).
-                pendingQueueJumpRequest = QueueJumpRequest(
-                    songId = songId,
-                    resolvedPlaybackIndex = playbackIndex,
-                )
-                // Trigger Phase 2's demand-driven acquisition; the jump drains on reconnect. The
-                // controller-null branches of the play* methods do NOT self-reconnect, so this call
-                // is required for the deferred jump to ever execute.
-                ensureControllerConnection()
+                // Latest explicit tap wins: it retargets a deferred start, else replaces the single held jump, and
+                // demands the controller (the drain runs on reconnect).
+                deferQueueJump(songId = songId, playbackIndex = playbackIndex)
                 if (BuildConfig.DEBUG) {
                     Log.d(RESUME_TAG, "jumpToSongById deferred: songId=$songId index=$playbackIndex; reconnecting")
                 }
@@ -2071,7 +2153,7 @@ class PlayerController @Inject constructor(
 
     // Main thread only. Executes a deferred queue jump after the controller reconnects, correcting
     // a stale index if the queue mutated while disconnected (never seeks a different song).
-    private fun executePendingQueueJump(controller: MediaController, request: QueueJumpRequest) {
+    private fun executePendingQueueJump(controller: MediaController, request: PendingQueueJump) {
         when (
             val resolution = resolvePendingQueueJump(
                 queue = playbackQueue,
@@ -2408,8 +2490,8 @@ class PlayerController @Inject constructor(
             // (a later PAUSE overwrites an earlier PLAY). Superseded by any queue-replacing request.
             val current = _nowPlayingState.value
             if (current.song == null) return
-            val desiredPlay = PendingTransport.desiredPlayWhenReady(current.isPlaying)
-            pendingPlayWhenReady = desiredPlay
+            val desiredPlay = !deferred.intendedPlayWhenReady(current.isPlaying)
+            deferred.capturePlayWhenReady(desiredPlay)
             _nowPlayingState.update { it.copy(isPlaying = desiredPlay) } // optimistic; corrected on sync
             ensureControllerConnection()
             return
@@ -2486,8 +2568,7 @@ class PlayerController @Inject constructor(
             // Defer a single latest-direction navigation intent (not an accumulated skip count).
             // Recomputed against the live queue on reconnect, so a mutated queue never replays a
             // stale skip. Superseded by any queue-replacing request.
-            pendingNavigation = NavigationIntent.NEXT
-            ensureControllerConnection()
+            deferNavigation(NavigationIntent.NEXT)
             return
         }
         navigate(controller, NavigationIntent.NEXT)
@@ -2501,11 +2582,19 @@ class PlayerController @Inject constructor(
         resetBadMediaRecoveryEpisode()
         val controller = mediaController
         if (controller == null) {
-            pendingNavigation = NavigationIntent.PREVIOUS
-            ensureControllerConnection()
+            deferNavigation(NavigationIntent.PREVIOUS)
             return
         }
         navigate(controller, NavigationIntent.PREVIOUS)
+    }
+
+    /**
+     * Next/Previous while no controller exists: bound to the exact occurrence it was issued from (latest direction wins). An
+     * occurrence that cannot be proven is not guessed - the skip is dropped, but the controller is still demanded.
+     */
+    private fun deferNavigation(intent: NavigationIntent) {
+        capturePendingNavigation(intent, playbackQueue, currentPlaybackIndex())?.let(deferred::captureNavigation)
+        ensureControllerConnection()
     }
 
     // Main thread only. Executes a next/previous navigation against the CURRENT queue state.
@@ -2802,12 +2891,13 @@ class PlayerController @Inject constructor(
         if (controller == null) {
             // Defer only when the exact app-owned occurrence is known. A song-ID fallback would
             // collapse duplicate occurrences and could seek the wrong copy after reconnect.
-            pendingSeek = capturePendingSeek(
+            val pendingSeek = capturePendingSeek(
                 queueGeneration = queueGeneration,
                 playbackQueue = playbackQueue,
                 currentPlaybackIndex = currentPlaybackIndex(),
                 positionMs = clamped,
             ) ?: return // Conservative no-op when occurrence identity cannot be established.
+            deferred.captureSeek(pendingSeek)
             _nowPlayingState.update { it.copy(positionMs = clamped) } // optimistic; corrected on sync
             ensureControllerConnection()
             return
@@ -3559,6 +3649,8 @@ class PlayerController @Inject constructor(
         // controller or mutate state after release.
         ++controllerConnectionGeneration
         controllerConnectionState = ControllerConnectionState.Disconnected
+        // Teardown must not resurrect a command into a later controller.
+        deferred.clear()
         mediaItemCache.clear()
     }
 
@@ -4321,25 +4413,5 @@ class PlayerController @Inject constructor(
             folderName = null,
         )
     }
-
-    private data class PreserveSearchRequest(
-        val plan: SearchPlaybackPlan,
-        val startSong: Song,
-    )
-
-    private data class ExternalPlaybackRequest(
-        val uri: Uri,
-        val displayName: String?,
-    )
-
-    /**
-     * A Recently-Played queue jump accepted while the controller was unavailable. Carries both the
-     * resolved playback index and the [songId] so [resolvePendingQueueJump] can detect and correct
-     * a stale index if the queue mutated before reconnection — never seeking a different song.
-     */
-    private data class QueueJumpRequest(
-        val songId: Long,
-        val resolvedPlaybackIndex: Int,
-    )
 
 }
