@@ -109,6 +109,9 @@ internal fun defaultPhysicalPlayerFactory(context: Context) = PhysicalPlayerFact
         .setAudioAttributes(attributes, handleFocus)
         .setHandleAudioBecomingNoisy(handleNoisy)
         .build()
+        // DEBUG-only, observation-only startup evidence. Each physical player gets its OWN listener (bound to that player's
+        // serial) so a callback is always attributed to the player that produced it; never touches player state.
+        .also { if (com.launchpoint.wavdrop.BuildConfig.DEBUG) it.addAnalyticsListener(PlaybackStartupTrace.analyticsListenerFor(it)) }
 }
 
 internal fun defaultAudioSessionIdProvider(context: Context) = AudioSessionIdProvider {

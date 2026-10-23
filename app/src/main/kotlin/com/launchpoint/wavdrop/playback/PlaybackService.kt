@@ -306,6 +306,7 @@ class PlaybackService : MediaLibraryService() {
             // neither stopped nor restarted here.
             override fun onPlayerError(error: PlaybackException) {
                 recoverCrossfadeFromPrimaryPlaybackError(crossfadeCancelSink)
+                PlaybackStartupTrace.onPlayerError("svc", error)
             }
 
             // CF-2F5: Media3-authoritative interruption signals only (never generic isPlaying == false, never buffering).
@@ -323,6 +324,7 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onIsPlayingChanged=$isPlaying sessionId=${assembly.currentPlayer.audioSessionId} ts=${System.currentTimeMillis()}")
+                if (isPlaying) PlaybackStartupTrace.onIsPlaying("svc")
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -331,6 +333,7 @@ class PlaybackService : MediaLibraryService() {
                     recoverCrossfadeFromPrimaryTerminalState(crossfadeCancelSink)
                 }
                 if (BuildConfig.DEBUG) Log.d(AUDIO_SESSION_TAG, "[listener] onPlaybackStateChanged=$playbackState sessionId=${assembly.currentPlayer.audioSessionId} ts=${System.currentTimeMillis()}")
+                PlaybackStartupTrace.onPlayerState("svc", playbackState)
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {

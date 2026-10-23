@@ -13,6 +13,7 @@ import com.launchpoint.wavdrop.data.search.LibrarySearchIndex
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.playback.NowPlayingState
+import com.launchpoint.wavdrop.playback.PlaybackStartupTrace
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.ui.components.GroupedSearchResults
 import com.launchpoint.wavdrop.ui.components.groupedSearchResults
@@ -110,14 +111,18 @@ class GlobalSearchViewModel @Inject constructor(
         )
 
     fun playSearchResult(song: Song) {
+        PlaybackStartupTrace.hintEntry("global_search_tap") // starts the tap-to-request clock before the settings read below
         viewModelScope.launch {
             when (appSettingsRepository.searchTapBehavior.first()) {
                 SearchTapBehavior.REPLACE_QUEUE -> {
                     val queue = allSongs.value.ifEmpty { listOf(song) }
+                    PlaybackStartupTrace.hintEntry("global_search_replace_queue")
                     playerController.playFromQueue(queue = queue, startSong = song)
                 }
-                SearchTapBehavior.PRESERVE_QUEUE ->
+                SearchTapBehavior.PRESERVE_QUEUE -> {
+                    PlaybackStartupTrace.hintEntry("global_search_preserve_queue")
                     playerController.playSearchResultPreservingQueue(song)
+                }
             }
         }
     }

@@ -33,6 +33,7 @@ import com.launchpoint.wavdrop.data.settings.SongSortMode
 import com.launchpoint.wavdrop.data.stats.MostPlayedBuilder
 import com.launchpoint.wavdrop.data.stats.HomeWrappedPreviewBuilder
 import com.launchpoint.wavdrop.playback.NowPlayingState
+import com.launchpoint.wavdrop.playback.PlaybackStartupTrace
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -441,33 +442,41 @@ class HomeViewModel @Inject constructor(
 
     fun playSong(song: Song) {
         val queue = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
+        PlaybackStartupTrace.hintEntry("home_list")
         playerController.playFromQueue(queue = queue, startSong = song)
     }
 
     fun playRecentlyPlayedSong(song: Song) {
         if (playerController.jumpToSongById(song.id)) return
         val queue = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()
+        PlaybackStartupTrace.hintEntry("home_recent")
         playerController.playFromQueue(queue = queue, startSong = song)
     }
 
     fun playSongFromLibraryQueue(song: Song) {
         val queue = allSongs.value.orEmpty()
+        PlaybackStartupTrace.hintEntry("search_replace_queue")
         playerController.playFromQueue(queue = queue.ifEmpty { listOf(song) }, startSong = song)
     }
 
     fun playSearchResult(song: Song) {
+        PlaybackStartupTrace.hintEntry("search_tap") // starts the tap-to-request clock before the settings read below
         viewModelScope.launch {
             val behavior = appSettingsRepository.searchTapBehavior.first()
             Log.d(SEARCH_TAG, "search result tap behavior=$behavior songId=${song.id}")
             when (behavior) {
                 SearchTapBehavior.REPLACE_QUEUE -> playSongFromLibraryQueue(song)
-                SearchTapBehavior.PRESERVE_QUEUE -> playerController.playSearchResultPreservingQueue(song)
+                SearchTapBehavior.PRESERVE_QUEUE -> {
+                    PlaybackStartupTrace.hintEntry("search_preserve_queue")
+                    playerController.playSearchResultPreservingQueue(song)
+                }
             }
         }
     }
 
     fun playSongFromSongsList(song: Song) {
         val queue = (songsUiState.value as? HomeUiState.Songs)?.songs.orEmpty()
+        PlaybackStartupTrace.hintEntry("songs_list")
         playerController.playFromQueue(queue = queue.ifEmpty { listOf(song) }, startSong = song)
     }
 

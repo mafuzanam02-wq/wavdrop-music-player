@@ -803,6 +803,7 @@ class PlayerController @Inject constructor(
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) PlaybackStartupTrace.onIsPlaying("ctl")
             if (DEBUG_STATS) {
                 val songId = _nowPlayingState.value.song?.id
                 val pos = mediaController?.currentPosition ?: -1
@@ -897,6 +898,7 @@ class PlayerController @Inject constructor(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            PlaybackStartupTrace.onPlayerState("ctl", playbackState)
             if (DEBUG_STATS) {
                 Log.d(TAG, "[playbackStateChanged] state=$playbackState songId=${_nowPlayingState.value.song?.id} repeatMode=$repeatMode")
             }
@@ -923,6 +925,7 @@ class PlayerController @Inject constructor(
             // the bad item. Recover by bypassing the failing item using the existing skip/stop
             // queue logic, never corrupting queue/session state and never fabricating stats.
             Log.w(TAG, "[playerError] code=${error.errorCodeName} message=${error.message}")
+            PlaybackStartupTrace.onPlayerError("ctl", error)
             recoverFromCurrentPlaybackError()
         }
 
@@ -986,6 +989,7 @@ class PlayerController @Inject constructor(
         // queue is preserved (not cleared) so the user keeps their context.
         if (controller == null || failingIndex == null || failingIndex !in playbackQueue.indices) {
             Log.w(TAG, "[badMedia] UNCLASSIFIED_PLAYBACK_ERROR: unresolved failing index; halting (queueSize=${playbackQueue.size})")
+            PlaybackStartupTrace.abort("bad_media_unclassified")
             haltPlaybackAfterError(controller)
             notifyBadMediaExhaustedOnce()
             return
@@ -1020,6 +1024,7 @@ class PlayerController @Inject constructor(
                 )
                 // Clear the latched error, then advance WITHOUT forcing playback — honour the
                 // captured intent. The failing occurrence is left in the queue (skipped, not removed).
+                PlaybackStartupTrace.mark("bad_media_recovery_advance", step.state.attemptedOccurrences.size)
                 controller.prepare()
                 seekToPlaybackIndex(controller, step.targetIndex, forcePlay = step.state.wasPlaying)
                 notifyBadMediaSkippedOnce()
@@ -1030,6 +1035,7 @@ class PlayerController @Inject constructor(
                     "[badMedia] BAD_MEDIA_EXHAUSTED: queueSize=${playbackQueue.size} " +
                         "failedIndex=$failingIndex attempted=${step.state.attemptedOccurrences.size}",
                 )
+                PlaybackStartupTrace.abort("bad_media_exhausted")
                 haltPlaybackAfterError(controller)
                 notifyBadMediaExhaustedOnce()
             }
@@ -1324,33 +1330,37 @@ class PlayerController @Inject constructor(
         pendingNavigation = null
         pendingPlayWhenReady = null
         pendingSeek = null
-        when {
-            externalRequest != null -> playExternalUriWithoutNotification(
-                uri = externalRequest.uri,
-                displayName = externalRequest.displayName,
-            )
-            preserveSearchRequest != null -> playPreservedSearchPlan(
-                plan = preserveSearchRequest.plan,
-                startSong = preserveSearchRequest.startSong,
-            )
-            playRequest != null -> playFromQueueInternal(
-                queue = playRequest.queue,
-                startIndex = playRequest.startIndex,
-                preservePlaybackOrder = playRequest.preservePlaybackOrder,
-                source = playRequest.source,
-            )
-            // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
-            // against the (possibly mutated) queue so it never seeks a different song.
-            jumpRequest != null -> executePendingQueueJump(controller, jumpRequest)
-            else -> {
-                // No queue-replacing/restore/jump request supersedes the dirty flag in this branch,
-                // so a warm reconnect after a shuffle change made while disconnected must push the
-                // app-owned order to the player once, BEFORE any pending transport command runs, so
-                // navigation/seek resolve against the synchronized queue rather than a stale one.
-                if (reconnectRequiresQueueSync(playerQueueNeedsSync, supersededByQueueRequest = false)) {
-                    synchronizePlayerQueueOnReconnect(controller)
+        // Debug tracer drain bracket: the end runs in a `finally`, so its drain flag clears even if a drained command throws.
+        // The exception still propagates exactly as before.
+        PlaybackStartupTrace.withPendingDrain {
+            when {
+                externalRequest != null -> playExternalUriWithoutNotification(
+                    uri = externalRequest.uri,
+                    displayName = externalRequest.displayName,
+                )
+                preserveSearchRequest != null -> playPreservedSearchPlan(
+                    plan = preserveSearchRequest.plan,
+                    startSong = preserveSearchRequest.startSong,
+                )
+                playRequest != null -> playFromQueueInternal(
+                    queue = playRequest.queue,
+                    startIndex = playRequest.startIndex,
+                    preservePlaybackOrder = playRequest.preservePlaybackOrder,
+                    source = playRequest.source,
+                )
+                // Lowest precedence: only if no queue-replacing/restore request superseded it. Validated
+                // against the (possibly mutated) queue so it never seeks a different song.
+                jumpRequest != null -> executePendingQueueJump(controller, jumpRequest)
+                else -> {
+                    // No queue-replacing/restore/jump request supersedes the dirty flag in this branch,
+                    // so a warm reconnect after a shuffle change made while disconnected must push the
+                    // app-owned order to the player once, BEFORE any pending transport command runs, so
+                    // navigation/seek resolve against the synchronized queue rather than a stale one.
+                    if (reconnectRequiresQueueSync(playerQueueNeedsSync, supersededByQueueRequest = false)) {
+                        synchronizePlayerQueueOnReconnect(controller)
+                    }
+                    drainPendingTransportCommands(controller, navigation, seek, playWhenReady)
                 }
-                drainPendingTransportCommands(controller, navigation, seek, playWhenReady)
             }
         }
     }
@@ -1484,6 +1494,7 @@ class PlayerController @Inject constructor(
         // CF-2H3F: notified first; playPreservedSearchPlan (also used by the pending drain) never notifies.
         notifyQueueReplacement()
         val controller = mediaController
+        PlaybackStartupTrace.begin("search_preserve", playbackQueue.size, controllerConnected = controller != null)
         val currentMediaIndex = controller?.currentMediaItemIndex
         val currentMediaSongId = controller?.currentMediaItem?.mediaId?.toLongOrNull()
         val effectiveQueueBefore = playbackQueue
@@ -1544,6 +1555,8 @@ class PlayerController @Inject constructor(
         playbackOrder = libraryQueue.indices.toList()
         playbackQueue = libraryQueue
         playerQueueNeedsSync = false
+        PlaybackStartupTrace.mark("logical_queue_built", playbackQueue.size)
+        PlaybackStartupTrace.expectStart(startSong.id)
 
         val playbackStartIndex = plan.currentIndex.takeIf { it in playbackQueue.indices }
             ?: playbackQueue.indexOfFirst { it.id == startSong.id }.takeIf { it >= 0 }
@@ -1569,6 +1582,7 @@ class PlayerController @Inject constructor(
                 isSeekable = false,
             )
         }
+        PlaybackStartupTrace.mark("ui_state_published")
 
         val controller = mediaController
         if (controller == null) {
@@ -1579,6 +1593,7 @@ class PlayerController @Inject constructor(
                 ),
                 startSong = startSong,
             )
+            PlaybackStartupTrace.onControllerParked()
             return
         }
 
@@ -1591,7 +1606,9 @@ class PlayerController @Inject constructor(
             positionMs = 0L,
         )
         controller.prepare()
+        PlaybackStartupTrace.onPrepareIssued()
         controller.play()
+        PlaybackStartupTrace.mark("play_issued")
         saveSessionAsync()
     }
 
@@ -1658,6 +1675,7 @@ class PlayerController @Inject constructor(
         notifyQueueReplacement()
         val start = resolveQueueStartBySong(queue, startSong)
         if (start == null) {
+            PlaybackStartupTrace.rejected("play_from_queue", queue.size, "absent_or_ambiguous_start")
             Log.w(TAG, "playFromQueue: start song ${startSong.id} is absent or ambiguous in queue; ignoring")
             return
         }
@@ -1690,10 +1708,15 @@ class PlayerController @Inject constructor(
         preservePlaybackOrder: Boolean,
         source: PlaybackQueueSource = PlaybackQueueSource.Other,
     ) {
-        val start = resolveQueueStart(queue, startIndex) ?: return
+        PlaybackStartupTrace.begin("play_from_queue", queue.size, controllerConnected = mediaController != null)
+        val start = resolveQueueStart(queue, startIndex) ?: run {
+            PlaybackStartupTrace.abort("invalid_start_index")
+            return
+        }
         val normalizedQueue = start.queue
         val originalStartIndex = start.startIndex
         val startSong = start.startSong
+        PlaybackStartupTrace.expectStart(startSong.id)
         isExternalPlayback = false
         // Fresh queue supersedes any in-progress bad-media recovery episode.
         bumpQueueGeneration()
@@ -1708,6 +1731,7 @@ class PlayerController @Inject constructor(
             rebuildPlaybackQueue(currentQueueIndex = originalStartIndex)
         }
         playerQueueNeedsSync = false
+        PlaybackStartupTrace.mark("logical_queue_built")
         // When shuffle is OFF, playbackOrder is identity so playbackStartIndex == originalStartIndex.
         // When shuffle is ON, buildPlaybackOrder places the start song at position 0.
         val playbackStartIndex = playbackOrder.indexOf(originalStartIndex).takeIf { it >= 0 } ?: 0
@@ -1728,6 +1752,7 @@ class PlayerController @Inject constructor(
                 isSeekable = false,
             )
         }
+        PlaybackStartupTrace.mark("ui_state_published")
 
         val controller = mediaController
         if (controller == null) {
@@ -1737,6 +1762,7 @@ class PlayerController @Inject constructor(
                 preservePlaybackOrder = preservePlaybackOrder,
                 source = source,
             )
+            PlaybackStartupTrace.onControllerParked()
             return
         }
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
@@ -1749,8 +1775,10 @@ class PlayerController @Inject constructor(
             positionMs = 0L,
         )
         controller.prepare()
+        PlaybackStartupTrace.onPrepareIssued()
         syncNowPlayingState()
         controller.play()
+        PlaybackStartupTrace.mark("play_issued")
         saveSessionAsync()
     }
 
@@ -2883,6 +2911,8 @@ class PlayerController @Inject constructor(
                 savedPlaybackOrder = snapshot.playbackOrder,
             )
             playerQueueNeedsSync = false
+            PlaybackStartupTrace.begin(operation, playbackQueue.size, controllerConnected = true, playIntended = false)
+            PlaybackStartupTrace.expectStart(startSong.id)
             val startPlaybackIndex = playbackOrder.indexOf(startLibraryIndex).takeIf { it >= 0 } ?: 0
             lastKnownPositionMs = -1L
 
@@ -2900,6 +2930,7 @@ class PlayerController @Inject constructor(
                     isSeekable = false,
                 )
             }
+            PlaybackStartupTrace.mark("ui_state_published")
 
             runCatching {
                 controller.repeatMode = repeatMode.toPlayerRepeatMode()
@@ -2911,6 +2942,7 @@ class PlayerController @Inject constructor(
                     positionMs = snapshot.positionMs,
                 )
                 controller.prepare()
+                PlaybackStartupTrace.onPrepareIssued()
                 syncNowPlayingState()
             }.fold(
                 onSuccess = { PlayerHydrationResult.Hydrated },
@@ -4052,13 +4084,17 @@ class PlayerController @Inject constructor(
             setMediaItems(materializeMediaItems(songs).mediaItems, startIndex, positionMs)
             return
         }
+        // Tracer: fingerprint the list BEFORE the timing window opens, so its cost is not charged to materialization or install.
+        PlaybackStartupTrace.onInstallStarting(operation, songs)
         val totalStartedAtMs = SystemClock.elapsedRealtime()
         val materializationStartedAtMs = SystemClock.elapsedRealtime()
         val materialization = materializeMediaItems(songs)
         val materializationElapsedMs = SystemClock.elapsedRealtime() - materializationStartedAtMs
+        PlaybackStartupTrace.onMaterialized(operation, materialization.mediaItems.size, materialization.cacheHits, materialization.cacheMisses)
         val mutationStartedAtMs = SystemClock.elapsedRealtime()
         setMediaItems(materialization.mediaItems, startIndex, positionMs)
         val mutationElapsedMs = SystemClock.elapsedRealtime() - mutationStartedAtMs
+        PlaybackStartupTrace.onPlaylistInstalled(operation, materialization.mediaItems.size, mutationElapsedMs)
         logQueuePerf(
             operation = operation,
             inputQueueSize = songs.size,
