@@ -61,21 +61,28 @@ val releaseStorePassword = releaseSigningValues["storePassword"]
 val releaseKeyAlias = releaseSigningValues["keyAlias"]
 val releaseKeyPassword = releaseSigningValues["keyPassword"]
 
-// Fail early and clearly if the keystore file is absent. Only the file NAME is
-// surfaced, not the full (potentially sensitive) path. Passwords are never
-// validated at configuration time.
 val releaseStoreFile = if (hasReleaseSigningConfig) {
-    rootProject.file(releaseStoreFilePath!!).also { file ->
-        if (!file.exists()) {
+    rootProject.file(releaseStoreFilePath!!)
+} else {
+    null
+}
+
+// Fail early and clearly if the keystore file is absent, but only when this build
+// will actually sign a release artifact (AGP schedules validateSigningRelease for
+// every release packaging task). Debug-only builds and unit tests do not need the
+// release keystore. Only the file NAME is surfaced, not the full (potentially
+// sensitive) path. Passwords are never validated here.
+if (releaseStoreFile != null) {
+    gradle.taskGraph.whenReady {
+        val signsRelease = allTasks.any { it.project == project && it.name == "validateSigningRelease" }
+        if (signsRelease && !releaseStoreFile.exists()) {
             throw GradleException(
-                "Release keystore file not found: '${file.name}'. Check the storeFile " +
+                "Release keystore file not found: '${releaseStoreFile.name}'. Check the storeFile " +
                     "path in keystore.properties / WAVDROP_UPLOAD_STORE_FILE. " +
                     "The keystore must live outside version control.",
             )
         }
     }
-} else {
-    null
 }
 
 android {
