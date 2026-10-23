@@ -242,6 +242,26 @@ internal class DeferredPlaybackCommands {
         return drained
     }
 
+    /**
+     * Positional continuity of the pending start across ONE structural queue edit whose exact index transformation is known.
+     * [generationBeforeEdit] is the queue generation before the edit bumped it and [generationAfterEdit] the one after. The start
+     * follows the edit only if its recorded index was valid at [generationBeforeEdit] (an earlier opaque edit already made it
+     * unprovable and it stays rejected by [resolveDeferredStart]). [newIndex] is where the selected occurrence went, or null
+     * when the edit removed it, which cancels the start. Returns true when a pending start was rebased or cancelled.
+     */
+    fun rebaseStart(generationBeforeEdit: Long, generationAfterEdit: Long, newIndex: Int?): Boolean {
+        val pending = start ?: return false
+        if (startQueueGeneration != generationBeforeEdit) return false
+        if (newIndex == null) {
+            start = null
+            startQueueGeneration = 0L
+            return true
+        }
+        start = pending.retargeted(newIndex, pending.startSongId)
+        startQueueGeneration = generationAfterEdit
+        return true
+    }
+
     /** Teardown: nothing may be resurrected after this. Selection ids keep increasing. */
     fun clear() {
         start = null
@@ -251,4 +271,48 @@ internal class DeferredPlaybackCommands {
         navigation = null
         playWhenReady = null
     }
+}
+
+/**
+ * Exact playback-index transformations of the structural queue edits, as pure functions: for an old playback index, where the same
+ * ENTRY (not merely the same song id) sits after the edit, or null when the edit removed it. Only edits whose transformation is
+ * fully known by construction appear here; any other edit leaves the deferred start to the conservative generation rejection.
+ */
+internal object OccurrenceMap {
+    fun identity(): (Int) -> Int? = { it }
+
+    /** [count] entries inserted so the first of them lands at [at]. */
+    fun insert(at: Int, count: Int): (Int) -> Int? = { if (it < at) it else it + count }
+
+    fun remove(position: Int): (Int) -> Int? = {
+        when {
+            it < position -> it
+            it == position -> null
+            else -> it - 1
+        }
+    }
+
+    /** Every entry whose position is in [removedPositions] (any order) is gone; the rest close up. */
+    fun removeAll(removedPositions: Collection<Int>): (Int) -> Int? {
+        val sorted = removedPositions.toSortedSet()
+        return { index -> if (index in sorted) null else index - sorted.count { it < index } }
+    }
+
+    /** The entry at [from] is lifted out and re-inserted at [to]. */
+    fun move(from: Int, to: Int): (Int) -> Int? = { index ->
+        when {
+            index == from -> to
+            from < to && index in (from + 1)..to -> index - 1
+            to < from && index in to until from -> index + 1
+            else -> index
+        }
+    }
+
+    fun swap(a: Int, b: Int): (Int) -> Int? = { index -> if (index == a) b else if (index == b) a else index }
+
+    /** Everything strictly before [current] removed. */
+    fun clearEarlier(current: Int): (Int) -> Int? = { if (it < current) null else it - current }
+
+    /** Everything strictly after [current] removed. */
+    fun clearUpNext(current: Int): (Int) -> Int? = { if (it > current) null else it }
 }

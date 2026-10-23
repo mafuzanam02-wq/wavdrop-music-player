@@ -557,82 +557,6 @@ class PlayerControllerDeferredStartRealMedia3Test {
         assertNull("$label: consumed exactly once", (h.field("deferred").get(h.pc) as DeferredPlaybackCommands).start)
     }
 
-    @Test fun anInterveningRemovalBeforeTheSelectedSongRejectsTheStartInsteadOfRebasingByUniqueId() {
-        val h = harness()
-        h.pc.playFromQueue(range(1, 5), startIndex = 2) // song 3
-        h.pc.removeFromQueue(0) // shifts song 3, but occurrence continuity is not provable
-        h.settle(50)
-        h.complete()
-        assertStartRejected(h, "removal before")
-    }
-
-    @Test fun anInterveningInsertionAfterTheSelectedOccurrenceRejectsTheStart() {
-        val h = harness()
-        h.pc.playFromQueue(range(1, 4), startIndex = 1)
-        h.pc.playNext(song(99))
-        h.settle(50)
-        h.complete()
-        assertStartRejected(h, "insertion after")
-    }
-
-    @Test fun anEditAroundASelectedDuplicateNeverPlaysTheSiblingCopyAsTheSelectedOccurrence() {
-        val h = harness()
-        val a = song(1)
-        h.pc.playFromQueue(listOf(a, song(2), a), startIndex = 2) // selected = the LAST A
-        h.pc.removeFromQueue(2) // refused: the current item cannot be removed (the selected copy stays)
-        h.pc.removeFromQueue(1) // [A(first), A(selected)]: the surviving siblings are indistinguishable by id
-        h.settle(50)
-        h.complete()
-        assertStartRejected(h, "[A(first), B, A(selected)] edited") // the exact [A, B] shape is covered by the pure resolver test
-        assertTrue("the remaining first A is never started as the selected occurrence: ${h.calls}", h.calls.none { it.startsWith("seekTo(0,") })
-    }
-
-    @Test fun removalFollowedByReinsertionOfTheSameIdDoesNotRevalidateTheStart() {
-        val h = harness()
-        h.pc.playFromQueue(range(1, 4), startIndex = 3) // song 4 selected at the end
-        h.pc.removeFromQueue(0)
-        h.pc.playNext(song(1)) // the same id comes back, at a different position
-        h.settle(50)
-        h.complete()
-        assertStartRejected(h, "remove then reinsert")
-    }
-    @Test fun aDuplicateSelectionWhoseOccurrenceCannotBeProvenAfterAMutationIsRejectedNotGuessedByTheSameId() {
-        val h = harness()
-        val a = song(1)
-        h.pc.playFromQueue(listOf(a, song(2), a), startIndex = 2) // second copy of song 1
-        h.pc.removeFromQueue(1) // [1, 1]: which copy was selected is no longer provable
-        h.settle(50)
-        h.complete()
-
-        assertFalse("the ambiguous start is not executed (no play)", h.calls.contains("play"))
-        assertFalse(h.serverPlayWhenReady)
-        assertTrue("it is not installed as a fresh start on a guessed copy: ${h.calls}", h.calls.none { it == "seekTo(0,0)" })
-        assertNull(h.pc.let { h.field("deferred").get(it) as DeferredPlaybackCommands }.start)
-    }
-
-    @Test fun aDeferredJumpToADuplicateFollowedByAStructuralEditIsRejectedAsAmbiguous() {
-        val h = harness()
-        val a = song(1)
-        h.pc.playFromQueue(listOf(a, song(2), a, song(3), a), startIndex = 0)
-        h.pc.jumpToQueueItem(4) // last copy of song 1
-        h.pc.removeFromQueue(1)
-        h.settle(50)
-        h.complete()
-
-        assertFalse("ambiguous after the edit: no start executes", h.calls.contains("play"))
-        assertFalse(h.serverPlayWhenReady)
-    }
-
-    @Test fun aDeferredJumpToAUniqueSongFollowedByAStructuralEditIsRejected() {
-        val h = harness()
-        val a = song(1)
-        h.pc.playFromQueue(listOf(a, song(2), a, song(3), a), startIndex = 0)
-        h.pc.jumpToQueueItem(3) // the unique song 3
-        h.pc.removeFromQueue(0)
-        h.settle(50)
-        h.complete()
-        assertStartRejected(h, "unique jump then edit")
-    }
     @Test fun aJumpWithNoEditAfterwardsInstallsTheExactDuplicateOccurrence() {
         val h = harness()
         val a = song(1)
@@ -696,6 +620,186 @@ class PlayerControllerDeferredStartRealMedia3Test {
         assertEquals(listOf("2", "3", "4", "5"), after.serverIds)
         assertEquals(2, after.serverIndex)
         assertEquals("4", after.rig.player.currentMediaItem?.mediaId)
+    }
+    /** Simulates an edit with NO known occurrence transformation (it only bumps the generation). */
+    private fun opaqueEdit(h: Harness) {
+        PlayerController::class.java.getDeclaredMethod("bumpQueueGeneration").apply { isAccessible = true }.invoke(h.pc)
+    }
+
+    @Test fun anEditWithNoKnownOccurrenceTransformationRejectsTheStart() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 5), startIndex = 2)
+        opaqueEdit(h)
+        h.complete()
+        assertStartRejected(h, "opaque edit")
+    }
+
+    @Test fun anOpaqueEditAroundADuplicateSelectionNeverStartsTheSiblingCopy() {
+        val h = harness()
+        val a = song(1)
+        h.pc.playFromQueue(listOf(a, song(2), a), startIndex = 2)
+        opaqueEdit(h)
+        h.complete()
+        assertStartRejected(h, "opaque edit with duplicates")
+        assertTrue(h.calls.none { it.startsWith("seekTo(0,") })
+    }
+
+    @Test fun anOpaqueEditAfterAKnownEditStillRejects() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 5), startIndex = 2)
+        h.pc.removeFromQueue(0) // known: rebased
+        opaqueEdit(h) // unknown: continuity lost
+        h.complete()
+        assertStartRejected(h, "known then opaque")
+    }
+
+    @Test fun aRemovalBeforeTheSelectedSongRebasesTheStartToItsExactNewPosition() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 5), startIndex = 2) // song 3
+        h.pc.removeFromQueue(0)
+        h.settle(50)
+        assertEquals(1, h.logical.currentIndex)
+        h.complete()
+
+        assertEquals(listOf("2", "3", "4", "5"), h.serverIds)
+        assertEquals(1, h.serverIndex)
+        assertEquals("3", h.rig.player.currentMediaItem?.mediaId)
+        assertTrue(h.serverPlayWhenReady)
+        assertEquals(1, h.count("setMediaItems"))
+    }
+
+    @Test fun anAppendOrInsertionAfterTheSelectedOccurrenceDoesNotInvalidateTheStart() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 4), startIndex = 1)
+        h.pc.addToQueue(song(50))
+        h.pc.playNext(song(99))
+        h.settle(50)
+        h.complete()
+
+        assertEquals(listOf("1", "2", "99", "3", "4", "50"), h.serverIds)
+        assertEquals(1, h.serverIndex)
+        assertEquals("2", h.rig.player.currentMediaItem?.mediaId)
+        assertTrue(h.serverPlayWhenReady)
+        assertEquals(1, h.count("setMediaItems"))
+    }
+
+    @Test fun removingTheFirstDuplicateKeepsTheSelectedSecondCopy() {
+        val h = harness()
+        val a = song(1)
+        h.pc.playFromQueue(listOf(a, song(2), a), startIndex = 2) // the SECOND A
+        h.pc.removeFromQueue(0) // the FIRST A goes
+        h.settle(50)
+        h.complete()
+
+        assertEquals(listOf("2", "1"), h.serverIds)
+        assertEquals("the selected copy, now at index 1", 1, h.serverIndex)
+        assertEquals("1", h.rig.player.currentMediaItem?.mediaId)
+        assertEquals(1, h.logical.currentIndex)
+    }
+
+    @Test fun removingTheSecondDuplicateKeepsTheSelectedFirstCopy() {
+        val h = harness()
+        val a = song(1)
+        h.pc.playFromQueue(listOf(a, song(2), a), startIndex = 0) // the FIRST A
+        h.pc.removeFromQueue(2) // the SECOND A goes
+        h.settle(50)
+        h.complete()
+
+        assertEquals(listOf("1", "2"), h.serverIds)
+        assertEquals(0, h.serverIndex)
+        assertEquals("1", h.rig.player.currentMediaItem?.mediaId)
+    }
+
+    @Test fun aDeferredJumpToADuplicateThenAnEditKeepsTheExactJumpedCopy() {
+        val h = harness()
+        val a = song(1)
+        h.pc.playFromQueue(listOf(a, song(2), a, song(3), a), startIndex = 0)
+        h.pc.jumpToQueueItem(4) // the LAST copy
+        h.pc.removeFromQueue(1) // an earlier entry (song 2) goes
+        h.settle(50)
+        h.complete()
+
+        assertEquals(listOf("1", "1", "3", "1"), h.serverIds)
+        assertEquals("the exact jumped copy shifted from 4 to 3", 3, h.serverIndex)
+        assertEquals(3, h.logical.currentIndex)
+    }
+
+    @Test fun aDeferredJumpToAUniqueSongThenAnEditFollowsThatEntry() {
+        val h = harness()
+        val a = song(1)
+        h.pc.playFromQueue(listOf(a, song(2), a, song(3), a), startIndex = 0)
+        h.pc.jumpToQueueItem(3)
+        h.pc.removeFromQueue(0)
+        h.settle(50)
+        h.complete()
+
+        assertEquals(listOf("2", "1", "3", "1"), h.serverIds)
+        assertEquals(2, h.serverIndex)
+        assertEquals("3", h.rig.player.currentMediaItem?.mediaId)
+    }
+
+    @Test fun movingEntriesAroundTheSelectedOccurrenceKeepsTheStartOnTheSameEntry() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 6), startIndex = 1)
+        h.pc.moveQueueItemTo(4, 2)
+        h.pc.moveToPlayNext(5)
+        h.pc.moveQueueItemDown(3)
+        h.settle(50)
+        val expected = h.logical.queue.map { it.id.toString() }
+        h.complete()
+
+        assertEquals(expected, h.serverIds)
+        assertEquals(1, h.serverIndex)
+        assertEquals("2", h.rig.player.currentMediaItem?.mediaId)
+        assertTrue(h.serverPlayWhenReady)
+    }
+
+    @Test fun deletingTheCurrentSongOfADeferredStartWithSurvivorsStartsTheSurvivorAtItsExactOccurrence() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 4), startIndex = 1) // song 2
+        h.pc.handleSongDeleted(2L)
+        h.settle(50)
+        h.complete()
+
+        assertEquals(listOf("1", "3", "4"), h.serverIds)
+        assertEquals("the survivor that took the current slot", 1, h.serverIndex)
+        assertEquals("3", h.rig.player.currentMediaItem?.mediaId)
+        assertTrue("the play intent survives", h.serverPlayWhenReady)
+        assertTrue(h.rig.player.currentPosition < 5_000L)
+    }
+
+    @Test fun aSeekCapturedBeforeAnAppendIsStaleAndDiscardedConservatively() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 4), startIndex = 1)
+        h.pc.seekTo(30_000L)
+        h.pc.addToQueue(song(50))
+        h.complete()
+
+        assertEquals(1, h.serverIndex)
+        assertTrue("the older generation's seek is not replayed: ${h.calls}", h.calls.none { it.startsWith("seekTo(") && it.contains("30000") })
+    }
+
+    @Test fun aSeekIssuedAfterAKnownEditIsHonoured() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 4), startIndex = 1)
+        h.pc.addToQueue(song(50))
+        h.pc.seekTo(30_000L)
+        h.complete()
+
+        assertEquals(1, h.serverIndex)
+        assertTrue(h.rig.player.currentPosition >= 29_000L)
+    }
+
+    @Test fun aNewerSelectionSupersedesARebasedOne() {
+        val h = harness()
+        h.pc.playFromQueue(range(1, 5), startIndex = 2)
+        h.pc.removeFromQueue(0)
+        h.pc.playFromQueue(range(21, 24), startIndex = 3)
+        h.complete()
+
+        assertEquals(listOf("21", "22", "23", "24"), h.serverIds)
+        assertEquals(3, h.serverIndex)
+        assertEquals(1, h.count("setMediaItems"))
     }
     // ------------------------------------------------------------------------------------------------ races
 
