@@ -10,6 +10,9 @@ import androidx.core.content.ContextCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.launchpoint.wavdrop.playback.PlaybackService
+import com.launchpoint.wavdrop.playback.PlayerController
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Non-exported receiver that turns Wavdrop home-screen widget button taps into
@@ -29,7 +32,12 @@ import com.launchpoint.wavdrop.playback.PlaybackService
  *  - the custom previous-button threshold behavior (seekToPrevious on the
  *    session player).
  */
+@AndroidEntryPoint
 class WidgetActionReceiver : BroadcastReceiver() {
+
+    // Resolves PLAY_PAUSE against the user's DESIRED state (a still-hydrating cold PLAY counts as playing), so a second tap
+    // during hydration is a PAUSE instead of another PLAY.
+    @Inject lateinit var playerController: PlayerController
 
     internal enum class WidgetCommand { PLAY_PAUSE, NEXT, PREVIOUS }
 
@@ -72,7 +80,7 @@ class WidgetActionReceiver : BroadcastReceiver() {
     private fun dispatch(controller: MediaController, command: WidgetCommand) {
         when (command) {
             WidgetCommand.PLAY_PAUSE ->
-                if (controller.isPlaying) controller.pause() else controller.play()
+                if (playerController.coldPlayAuthority.desiredPlaying(controller.isPlaying)) controller.pause() else controller.play()
             WidgetCommand.NEXT -> controller.seekToNext()
             WidgetCommand.PREVIOUS -> controller.seekToPrevious()
         }

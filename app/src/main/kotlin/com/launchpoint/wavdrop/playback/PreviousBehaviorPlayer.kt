@@ -7,6 +7,7 @@ import androidx.media3.session.MediaSession
 import com.launchpoint.wavdrop.data.model.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The WavDrop behaviour wrapper at the session boundary (previous-button semantics, explicit external transport
@@ -45,6 +46,11 @@ internal class PreviousBehaviorPlayer(
     private val onExplicitRepeatChange: () -> Unit,
     // DEBUG-only transport diagnostics (null in release). Logging never issues or alters transport.
     private val transportLog: ((String) -> Unit)? = null,
+    // Request ownership for a PLAY that must hydrate first. Owned by PlayerController in production so selections share it.
+    private val coldPlayAuthority: ColdPlayAuthority = ColdPlayAuthority(),
+    // Invoked for an EXTERNAL user PLAY(true)/PAUSE(false), so a play/pause intent still deferred in PlayerController (no
+    // controller yet) is overwritten by this newer command instead of replaying after reconnect.
+    private val onExternalPlayIntent: (Boolean) -> Unit = {},
 ) : ForwardingPlayer(player) {
 
     private fun logTransport(name: String) {
@@ -88,7 +94,11 @@ internal class PreviousBehaviorPlayer(
 
     override fun pause() {
         logTransport("TRANSPORT_PAUSE")
+        // A PAUSE from any controller is a newer decision than every suspended cold PLAY: invalidate synchronously, before
+        // anything can suspend.
+        coldPlayAuthority.supersede()
         noteExternalTransport()
+        if (isExternalUserTransportRequest()) onExternalPlayIntent(false)
         onExplicitPause() // cancel any owned crossfade first, then forward the pause
         super.pause()
     }
@@ -96,21 +106,53 @@ internal class PreviousBehaviorPlayer(
     override fun play() {
         logTransport("TRANSPORT_PLAY")
         noteExternalTransport()
+        if (isExternalUserTransportRequest()) onExternalPlayIntent(true)
         if (currentMediaItem != null || mediaItemCount > 0) {
+            coldPlayAuthority.supersede() // a direct PLAY ends any older cold PLAY still pending
             playForwarded()
             return
         }
+        // Cold PLAY: capture authority NOW (synchronously, with this command); the hydration below suspends.
+        val ticket = coldPlayAuthority.begin()
         scope.launch {
-            val result = runCatching {
-                hydrateForPlay(songsProvider())
-            }.getOrElse { error ->
-                logResume("explicit PLAY hydration failed: ${error::class.simpleName} ${error.message}")
-                PlayerHydrationResult.MediaSetupFailed
+            try {
+                val songs = runCatching { songsProvider() }.getOrNull()
+                if (songs == null || !coldPlayAuthority.isCurrent(ticket)) {
+                    // Superseded (or songs unavailable) before hydration even started: nothing to hydrate or play.
+                    logResume("explicit PLAY dropped before hydration: superseded=${!coldPlayAuthority.isCurrent(ticket)}")
+                    return@launch
+                }
+                val result = runCatching {
+                    // Only the hydration started for THIS PLAY carries its ownership element.
+                    withContext(ticket.ownedHydration) { hydrateForPlay(songs) }
+                }.getOrElse { error ->
+                    logResume("explicit PLAY hydration failed: ${error::class.simpleName} ${error.message}")
+                    PlayerHydrationResult.MediaSetupFailed
+                }
+                logResume("explicit PLAY hydration result=$result")
+                // Hydration may have retained a valid saved queue, but audible playback needs fresh authority: no newer
+                // PAUSE/PLAY/selection, and the queue generation moved only through hydration.
+                val authorization = coldPlayAuthority.authorize(ticket)
+                if (authorization != ColdPlayAuthorization.ALLOWED) {
+                    logResume("explicit PLAY denied after hydration: $authorization")
+                    return@launch
+                }
+                if (playerHydrationAllowsPlay(result)) {
+                    playForwarded()
+                }
+            } finally {
+                coldPlayAuthority.complete(ticket)
             }
-            logResume("explicit PLAY hydration result=$result")
-            if (playerHydrationAllowsPlay(result)) {
-                playForwarded()
-            }
+        }
+    }
+
+    // Media3 can deliver a play/pause as a play-when-ready change; route an EXTERNAL one through the same policy as
+    // play()/pause() so it cannot bypass cold-PLAY authority. Internal/app calls forward untouched.
+    override fun setPlayWhenReady(playWhenReady: Boolean) {
+        if (isExternalUserTransportRequest()) {
+            if (playWhenReady) play() else pause()
+        } else {
+            super.setPlayWhenReady(playWhenReady)
         }
     }
 

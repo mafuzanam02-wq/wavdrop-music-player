@@ -5,7 +5,7 @@ internal enum class ResumeInvalidation {
     /** The user explicitly played/paused after the request began. Definitive. */
     USER_TRANSPORT,
 
-    /** The Bluetooth output disappeared. The request is void, but the device may return. */
+    /** The request's output (Bluetooth or wired) disappeared. The request is void, but the device may return. */
     ROUTE_LOST,
 
     /** A newer automatic request now owns authority. */
@@ -18,10 +18,13 @@ internal enum class PlayAuthorization {
     STALE,
     ROUTE_LOST,
     QUEUE_CHANGED,
+
+    /** The MediaController the request captured was released or replaced; it can no longer safely be acted on. */
+    CONTROLLER_REPLACED,
 }
 
 /**
- * Request ownership for automatic Bluetooth resume. Precedence:
+ * Request ownership for automatic resume (one instance per output kind: Bluetooth, wired). Precedence:
  * explicit user play/pause > newer automatic request > older automatic request, and route loss
  * voids the pending request. At most one token is current; every other token is a no-op.
  *
@@ -48,7 +51,7 @@ internal class AutomaticResumeAuthority {
         activeToken = NO_TOKEN
     }
 
-    /** Bluetooth output disappeared: voids every request begun so far. */
+    /** This instance's output disappeared: voids every request begun so far. */
     @Synchronized
     fun supersedeByRouteLoss() {
         routeLostUpTo = latestGeneration
@@ -79,9 +82,11 @@ internal class AutomaticResumeAuthority {
         capturedQueueGeneration: Long,
         currentQueueGeneration: Long,
         queueGenerationAllowedBumps: Int = 0,
+        controllerCurrent: Boolean = true,
     ): PlayAuthorization = when {
         !isCurrent(token) -> PlayAuthorization.STALE
         !routeConnected -> PlayAuthorization.ROUTE_LOST
+        !controllerCurrent -> PlayAuthorization.CONTROLLER_REPLACED
         currentQueueGeneration != capturedQueueGeneration + queueGenerationAllowedBumps ->
             PlayAuthorization.QUEUE_CHANGED
         else -> PlayAuthorization.ALLOWED
@@ -106,6 +111,10 @@ internal enum class AutomaticResumeOutcome {
     SUPERSEDED_BY_NEWER_REQUEST,
 }
 
+/**
+ * Entitlement policy shared by the Bluetooth and wired automatic-resume requests (the name predates the wired route; the
+ * semantics are identical for both on purpose: one table, one set of settlement rules).
+ */
 internal object BluetoothEntitlementPolicy {
     /**
      * The persisted "interrupted by Bluetooth" entitlement is consumed only when the request
@@ -155,6 +164,7 @@ internal object BluetoothEntitlementPolicy {
             PlayAuthorization.ALLOWED -> AutomaticResumeOutcome.PLAY_ISSUED
             PlayAuthorization.ROUTE_LOST -> AutomaticResumeOutcome.ROUTE_LOST
             PlayAuthorization.QUEUE_CHANGED -> AutomaticResumeOutcome.QUEUE_CHANGED
+            PlayAuthorization.CONTROLLER_REPLACED -> AutomaticResumeOutcome.CONTROLLER_UNAVAILABLE
             PlayAuthorization.STALE -> outcomeFor(invalidation ?: ResumeInvalidation.NEWER_REQUEST)
         }
 }
@@ -174,4 +184,153 @@ internal object ExternalTransportPolicy {
 
     fun isExternalUserController(hasController: Boolean, isAppController: Boolean): Boolean =
         hasController && !isAppController
+}
+
+/**
+ * Rides the coroutine context of the hydration a cold PLAY runs, so the production hydration path can revalidate, right
+ * before its first mutation, that the logical queue has not been moved by anything other than a session hydration since that
+ * PLAY began (a newer selection or edit). Hydration STATE may be shared and reused by later PLAYs; PLAYBACK AUTHORITY never is.
+ */
+internal class OwnedHydration(
+    val isQueueUndisturbed: () -> Boolean = { true },
+) : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    internal companion object Key : kotlin.coroutines.CoroutineContext.Key<OwnedHydration>
+}
+
+/** Captured when a cold (empty-player) PLAY begins; proves later that the same PLAY is still the newest decision. */
+internal class ColdPlayTicket(
+    val epoch: Long,
+    /** Queue generation / hydration count at the start of this PLAY's uninterrupted run of PLAYs (its baseline). */
+    val baseGeneration: Long,
+    val baseHydrations: Long,
+    val ownedHydration: OwnedHydration = OwnedHydration(),
+)
+
+internal enum class ColdPlayAuthorization {
+    ALLOWED,
+
+    /** A newer explicit PLAY / PAUSE / selection happened after this PLAY began. */
+    SUPERSEDED,
+
+    /** The queue generation moved by something other than a session hydration. */
+    QUEUE_CHANGED,
+}
+
+/**
+ * Request ownership for an explicit PLAY that must first hydrate the saved session asynchronously (widget, media button,
+ * notification on an empty player).
+ *
+ * AUTHORITY is the [epoch]: every explicit transport command or selection calls [supersede]/[begin], so an older suspended
+ * PLAY can never become authoritative again, synchronously, before any suspension. Only the newest PLAY can ever play, and
+ * it plays on its OWN authority, never on a superseded PLAY's.
+ *
+ * HYDRATION STATE is separate: the loaded saved queue is reusable by whichever PLAY is newest. The queue generation may have
+ * moved since the PLAY's baseline only through session hydrations ([hydrations] counts those); any other movement (a queue
+ * edit or replacement) rejects the PLAY, so a stale hydration or an old ticket can never excuse an edit. A PLAY that
+ * directly supersedes a still-pending one keeps the pending run's baseline (so an edit in between is still caught); after a
+ * [supersede] or a completed PLAY the next one starts a fresh baseline. Bounded state: an epoch, a flag and one baseline.
+ */
+internal class ColdPlayAuthority(
+    private val queueGeneration: () -> Long = { 0L },
+    private val hydrations: () -> Long = { 0L },
+) {
+    private var epoch = 0L
+    private var pending = false
+    private var baseGeneration = 0L
+    private var baseHydrations = 0L
+
+    /** True while the newest cold PLAY is still hydrating: the user's DESIRED state is "playing" even though nothing plays yet. */
+    val hasPendingPlay: Boolean
+        @Synchronized get() = pending
+
+    /**
+     * Resolves a PLAY_PAUSE toggle to the state the user currently intends, at the moment the toggle is received (never a
+     * stale toggle replayed later): a still-hydrating cold PLAY counts as playing, so the next toggle is a PAUSE.
+     */
+    @Synchronized
+    fun desiredPlaying(physicallyPlaying: Boolean): Boolean = pending || physicallyPlaying
+
+    /** Starts a cold PLAY: every earlier one becomes stale. */
+    @Synchronized
+    fun begin(): ColdPlayTicket {
+        epoch++
+        if (!pending) {
+            baseGeneration = queueGeneration()
+            baseHydrations = hydrations()
+        }
+        pending = true
+        val generation = baseGeneration
+        val hydrated = baseHydrations
+        return ColdPlayTicket(epoch, generation, hydrated, OwnedHydration { onlyHydrationsSince(generation, hydrated) })
+    }
+
+    /** Explicit PAUSE, external transport, selection, navigation or teardown: voids every cold PLAY. */
+    @Synchronized
+    fun supersede() {
+        epoch++
+        pending = false
+    }
+
+    /** The cold PLAY for [ticket] finished (played or was dropped); only the newest one clears the pending state. */
+    @Synchronized
+    fun complete(ticket: ColdPlayTicket) {
+        if (ticket.epoch == epoch) pending = false
+    }
+
+    @Synchronized
+    fun isCurrent(ticket: ColdPlayTicket): Boolean = ticket.epoch == epoch
+
+    private fun onlyHydrationsSince(generation: Long, hydrated: Long): Boolean =
+        queueGeneration() - generation == hydrations() - hydrated
+
+    @Synchronized
+    fun authorize(ticket: ColdPlayTicket): ColdPlayAuthorization = when {
+        ticket.epoch != epoch -> ColdPlayAuthorization.SUPERSEDED
+        !onlyHydrationsSince(ticket.baseGeneration, ticket.baseHydrations) -> ColdPlayAuthorization.QUEUE_CHANGED
+        else -> ColdPlayAuthorization.ALLOWED
+    }
+}
+
+/**
+ * A media-button PLAY_PAUSE is resolved by Media3 against the PHYSICAL player, which is still empty while a cold PLAY
+ * hydrates, so it would re-issue PLAY forever. While a cold PLAY is pending the desired state is already "playing", so the
+ * toggle must become a PAUSE (resolved now, at receipt).
+ */
+internal object MediaButtonPlayPausePolicy {
+    fun shouldPauseForPendingColdPlay(keyCode: Int, action: Int, repeatCount: Int, hasPendingColdPlay: Boolean): Boolean =
+        hasPendingColdPlay &&
+            action == android.view.KeyEvent.ACTION_DOWN &&
+            repeatCount == 0 &&
+            (keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || keyCode == android.view.KeyEvent.KEYCODE_HEADSETHOOK)
+}
+
+/**
+ * The production handler for a raw media-button intent while a cold PLAY hydrates. The default Media3 notification buttons are
+ * delivered exactly this way (an ACTION_MEDIA_BUTTON intent whose key code is derived from the player command), as are headset
+ * and media keys, so one entry point serves all of them. Returns true when it consumed the event (as a PAUSE); false leaves
+ * Media3's normal PLAY_PAUSE handling untouched.
+ */
+internal object ColdPlayMediaButton {
+    fun handle(
+        intent: android.content.Intent,
+        authority: ColdPlayAuthority,
+        onExplicitTransport: () -> Unit,
+        pause: () -> Unit,
+    ): Boolean {
+        val event = androidx.core.content.IntentCompat.getParcelableExtra(
+            intent, android.content.Intent.EXTRA_KEY_EVENT, android.view.KeyEvent::class.java,
+        ) ?: return false
+        if (!MediaButtonPlayPausePolicy.shouldPauseForPendingColdPlay(
+                keyCode = event.keyCode,
+                action = event.action,
+                repeatCount = event.repeatCount,
+                hasPendingColdPlay = authority.hasPendingPlay,
+            )
+        ) {
+            return false
+        }
+        onExplicitTransport()
+        pause()
+        return true
+    }
 }

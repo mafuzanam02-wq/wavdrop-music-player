@@ -18,3 +18,11 @@ internal object WiredHeadphoneDetector {
         deviceType == TYPE_USB_HEADSET      ||
         deviceType == TYPE_USB_DEVICE
 }
+
+/** Single current-route query for wired outputs, used by the pre-play revalidation (never a historical connect event). */
+internal object WiredOutputQuery {
+    fun isConnected(audioManager: android.media.AudioManager): Boolean =
+        audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).any { device ->
+            device.isSink && WiredHeadphoneDetector.isWiredOutputType(device.type)
+        }
+}

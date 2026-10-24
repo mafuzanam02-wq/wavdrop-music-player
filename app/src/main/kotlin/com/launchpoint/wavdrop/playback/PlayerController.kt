@@ -634,16 +634,12 @@ class PlayerController @Inject constructor(
         /** ST-1: the second AUTO callback of one escaped boundary arrives within this window and is swallowed. */
         const val SLEEP_ESCAPE_ECHO_WINDOW_MS = 2_000L
 
-        const val DEBUG_STATS = false
-    }
+        /** Wired plug events precede a usable output; the first automatic play waits this long (re-checking authority). */
+        const val WIRED_RESUME_SETTLE_MS = 1_000L
+        /** Granularity at which waiting automatic resumes re-check their authority. */
+        const val RESUME_WAIT_SLICE_MS = 100L
 
-    private enum class ResumeAttemptResult {
-        STARTED,
-        SKIPPED_BY_SETTING,
-        SKIPPED_NO_SESSION,
-        SKIPPED_CONTROLLER_NOT_READY,
-        ALREADY_PLAYING,
-        FAILED,
+        const val DEBUG_STATS = false
     }
 
     private var mediaController: MediaController? = null
@@ -770,13 +766,34 @@ class PlayerController @Inject constructor(
     // Request ownership for automatic Bluetooth resume (debounce is not identity).
     private val automaticResumeAuthority = AutomaticResumeAuthority()
 
+    // Same primitive, separate instance for the wired route: a wired removal must not void a Bluetooth request (and vice
+    // versa), while explicit user transport voids both.
+    private val wiredResumeAuthority = AutomaticResumeAuthority()
+
     // Serializes automatic Bluetooth resume attempts + entitlement settlement only (not user
     // transport, wired resume, or queue work), so the newest request mutates entitlement last.
     private val bluetoothResumeMutex = Mutex()
 
+    // Same, for wired attempts.
+    private val wiredResumeMutex = Mutex()
+
+    // Session hydrations (saved-queue loads, by whoever ran them) among the queue-generation bumps: lets a cold PLAY tell
+    // "the saved session got loaded" apart from "the queue was edited or replaced".
+    private var hydrationCount = 0L
+
+    // Request ownership for an explicit PLAY that hydrates the saved session asynchronously. Shared with the session
+    // player (PlaybackService) so PAUSE, a newer PLAY and every selection invalidate an older suspended PLAY.
+    internal val coldPlayAuthority = ColdPlayAuthority(
+        queueGeneration = { queueGeneration },
+        hydrations = { hydrationCount },
+    )
+
+    // Current-route queries for the final pre-play check. Injectable so tests can script route loss deterministically.
+    internal var bluetoothOutputConnectedQuery: () -> Boolean = { queryAudioRoute(BluetoothOutputQuery::isConnected) }
+    internal var wiredOutputConnectedQuery: () -> Boolean = { queryAudioRoute(WiredOutputQuery::isConnected) }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var positionTickerJob: Job? = null
-    private var wiredResumeJob: Job? = null
     private var sleepTimerJob: Job? = null
 
     // ST-1: the lifecycle-scoped owner (PlaybackService) is told when the terminal boundary arms/releases so it can end any
@@ -1069,6 +1086,16 @@ class PlayerController @Inject constructor(
         badMediaRecoveryEpisode = null
         badMediaRecoverySkipNotified = false
         badMediaRecoveryExhaustionNotified = false
+    }
+
+    /**
+     * Explicit user intent (selection, transport, external transport) outranks every pending automatic resume (Bluetooth
+     * and wired) and every suspended cold PLAY.
+     */
+    private fun supersedeAutomaticResumeByUser(includingColdPlay: Boolean = true) {
+        automaticResumeAuthority.supersedeByUser()
+        wiredResumeAuthority.supersedeByUser()
+        if (includingColdPlay) coldPlayAuthority.supersede()
     }
 
     /**
@@ -1667,7 +1694,7 @@ class PlayerController @Inject constructor(
         // Fresh queue supersedes any in-progress bad-media recovery episode.
         bumpQueueGeneration()
         // Explicit user play supersedes any pending automatic Bluetooth resume.
-        automaticResumeAuthority.supersedeByUser()
+        supersedeAutomaticResumeByUser()
         // Shuffle-truthfulness invariant: `plan.queue` is derived from the current visible
         // `playbackQueue` (see playSearchResultPreservingQueue), so when shuffle is ON it already
         // carries the active shuffled order. We adopt it verbatim as the new libraryQueue with an
@@ -1751,7 +1778,7 @@ class PlayerController @Inject constructor(
         // Fresh queue supersedes any in-progress bad-media recovery episode.
         bumpQueueGeneration()
         // Explicit user play supersedes any pending automatic Bluetooth resume.
-        automaticResumeAuthority.supersedeByUser()
+        supersedeAutomaticResumeByUser()
         libraryQueue = listOf(song)
         playbackOrder = listOf(0)
         playbackQueue = libraryQueue
@@ -1852,7 +1879,7 @@ class PlayerController @Inject constructor(
         // Fresh queue supersedes any in-progress bad-media recovery episode.
         bumpQueueGeneration()
         // Explicit user play supersedes any pending automatic Bluetooth resume.
-        automaticResumeAuthority.supersedeByUser()
+        supersedeAutomaticResumeByUser()
 
         libraryQueue = normalizedQueue
         if (preservePlaybackOrder) {
@@ -2150,6 +2177,8 @@ class PlayerController @Inject constructor(
         if (playbackIndex !in playbackQueue.indices) return
         // Explicit user selection supersedes automatic bad-media recovery.
         resetBadMediaRecoveryEpisode()
+        // ...and any pending automatic resume / suspended cold PLAY aimed at the previously selected occurrence.
+        supersedeAutomaticResumeByUser()
         val controller = mediaController
         if (controller == null) {
             // Defer through the same bounded, stale-safe machinery as jumpToSongById: bind to the
@@ -2575,7 +2604,7 @@ class PlayerController @Inject constructor(
 
     fun togglePlayPause() {
         // Explicit user transport intent outranks any pending automatic Bluetooth resume.
-        automaticResumeAuthority.supersedeByUser()
+        supersedeAutomaticResumeByUser()
         val controller = mediaController
         if (controller == null) {
             // No controller: derive the DESIRED play/pause state now (STATE_INTENT) and defer it —
@@ -2602,7 +2631,20 @@ class PlayerController @Inject constructor(
      * pending automatic Bluetooth resume.
      */
     fun onExplicitExternalTransport() {
-        automaticResumeAuthority.supersedeByUser()
+        // Automatic resumes only: the session player itself decides the cold-PLAY authority per command (a PAUSE ends the
+        // lineage; a PLAY begins/joins one), so a repeated PLAY must not end the lineage it is continuing.
+        supersedeAutomaticResumeByUser(includingColdPlay = false)
+    }
+
+    /**
+     * An external PLAY ([play] = true) or PAUSE (false) reached the session player. With no usable controller, a deferred
+     * start / play-pause intent would otherwise replay on reconnect and undo this newer command, so the newest desired state
+     * overwrites it (same latest-wins slot the UI toggle uses). Nothing is created when nothing is deferred.
+     */
+    fun onExplicitExternalPlayIntent(play: Boolean) {
+        if (mediaController != null) return
+        if (deferred.start == null && deferred.playWhenReady == null) return
+        deferred.capturePlayWhenReady(play)
     }
 
     /**
@@ -2657,6 +2699,7 @@ class PlayerController @Inject constructor(
         applySleepTransition(SleepTimerPolicy.onExplicitNavigation(_sleepTimerState.value))
         // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
         resetBadMediaRecoveryEpisode()
+        supersedeAutomaticResumeByUser() // a different selection than the one an automatic resume was begun for
         val controller = mediaController
         if (controller == null) {
             // Defer a single latest-direction navigation intent (not an accumulated skip count).
@@ -2674,6 +2717,7 @@ class PlayerController @Inject constructor(
         applySleepTransition(SleepTimerPolicy.onExplicitNavigation(_sleepTimerState.value))
         // Explicit user navigation is distinct from automatic bad-media recovery: end any episode.
         resetBadMediaRecoveryEpisode()
+        supersedeAutomaticResumeByUser()
         val controller = mediaController
         if (controller == null) {
             deferNavigation(NavigationIntent.PREVIOUS)
@@ -3080,6 +3124,14 @@ class PlayerController @Inject constructor(
                 return@withLock PlayerHydrationResult.SkippedActiveQueue
             }
 
+            // A cold PLAY's hydration must not mutate a logical queue that something OTHER than a session hydration moved since that PLAY began (a newer
+            // selection or edit): revalidate immediately before the first mutation.
+            val owned = kotlin.coroutines.coroutineContext[OwnedHydration.Key]
+            if (owned != null && !owned.isQueueUndisturbed()) {
+                logHydrationDecision(operation, "owner_stale", controller, HydrationDecision.NEEDS_HYDRATION)
+                return@withLock PlayerHydrationResult.SkippedActiveQueue
+            }
+
             val previousLibraryQueue = libraryQueue
             val previousPlaybackOrder = playbackOrder
             val previousPlaybackQueue = playbackQueue
@@ -3090,6 +3142,7 @@ class PlayerController @Inject constructor(
             val previousState = _nowPlayingState.value
 
             // A restored session is a fresh queue identity; end any stale recovery episode.
+            hydrationCount++
             bumpQueueGeneration()
             libraryQueue = mappedQueue
             shuffleEnabled = snapshot.shuffleEnabled
@@ -3152,6 +3205,7 @@ class PlayerController @Inject constructor(
 
     /** Mirrors a service-owned Media3 resumption without connecting back to the same session. */
     internal fun adoptPlaybackResumption(plan: PlaybackResumptionPlan) {
+        hydrationCount++ // a service-owned resumption is a session load, not a queue edit
         bumpQueueGeneration()
         isExternalPlayback = false
         libraryQueue = plan.libraryQueue
@@ -3197,9 +3251,10 @@ class PlayerController @Inject constructor(
     /**
      * Called by PlaybackService when a wired audio output is removed.
      * Records whether playback was active at that moment so [resumeForWiredHeadphones] can
-     * honour the RESUME_IF_INTERRUPTED mode.
+     * honour the RESUME_IF_INTERRUPTED mode. The removal also voids every pending wired resume request.
      */
     fun onWiredDeviceRemoved() {
+        wiredResumeAuthority.supersedeByRouteLoss()
         val wasPlaying = mediaController?.isPlaying == true
         wasInterruptedByWired = wasPlaying
         logResume("onWiredDeviceRemoved: wasPlaying=$wasPlaying")
@@ -3230,66 +3285,129 @@ class PlayerController @Inject constructor(
             return
         }
         lastBluetoothResumeAttemptAtMs = nowMs
-        // The debounce only thins bursts; this token is what actually owns play authority.
-        val request = BluetoothResumeRequest(
-            token = automaticResumeAuthority.begin(),
-            queueGeneration = queueGeneration,
-        )
-        scope.launch {
-            // Token was created above (outside the lock) so a newer request invalidates this one
-            // immediately; attempts and their entitlement settlement then run one at a time.
-            val result = bluetoothResumeMutex.withLock { attemptBluetoothResume(availableSongs, request) }
-            logResume("resumeForBluetooth: token=${request.token} result=$result")
-        }
+        launchAutomaticResume(bluetoothRoute, availableSongs)
     }
 
     /**
      * Resumes playback after wired headphones connect.
      *
-     * Debounced by checking whether a resume job is already in flight.
+     * There is no job-based debounce: every connect event begins a new request that voids the older one (a duplicate event
+     * simply supersedes its predecessor, which ends without playing). A job being active is not authority; the request
+     * token is.
      */
+    @Synchronized
     fun resumeForWiredHeadphones(availableSongs: List<Song>) {
-        if (wiredResumeJob?.isActive == true) {
-            logResume("resumeForWiredHeadphones: debounced — wiredResumeJob already active")
-            return
-        }
-        wiredResumeJob = scope.launch {
-            val result = attemptWiredResume(availableSongs)
-            logResume("resumeForWiredHeadphones: result=$result")
-        }
+        launchAutomaticResume(wiredRoute, availableSongs)
     }
 
-    /** Identity of one automatic Bluetooth resume request. See [AutomaticResumeAuthority]. */
-    private data class BluetoothResumeRequest(val token: Long, val queueGeneration: Long)
-
-    private fun isBluetoothOutputConnected(): Boolean {
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
-        return runCatching { BluetoothOutputQuery.isConnected(audioManager) }.getOrDefault(false)
+    private fun launchAutomaticResume(route: ResumeRoute, availableSongs: List<Song>) {
+        // The token is created here (outside the route's lock) so a newer request, a user command or a route loss
+        // invalidates this one immediately; attempts and their entitlement settlement then run one at a time.
+        val request = AutomaticResumeRequest(
+            route = route,
+            token = route.authority.begin(),
+            queueGeneration = queueGeneration,
+        )
+        scope.launch {
+            val result = route.mutex.withLock { attemptAutomaticResume(availableSongs, request) }
+            logResume("resumeFor${route.label}: token=${request.token} result=$result")
+        }
     }
 
     /**
-     * Final gate immediately before an automatic Bluetooth play: request still current, output
-     * still connected (fresh query, not the earlier readiness result), queue not mutated.
+     * Everything that differs between the Bluetooth and the wired automatic-resume request. All decisions (authority,
+     * final authorization, entitlement settlement) are otherwise one shared implementation.
      */
-    private fun authorizeBluetoothPlay(
-        request: BluetoothResumeRequest,
+    private class ResumeRoute(
+        val label: String,
+        val authority: AutomaticResumeAuthority,
+        val mutex: Mutex,
+        /** Time allowed for the output to become usable before the first play (a wired plug event precedes a usable route). */
+        val settleMs: Long,
+        val isOutputConnected: () -> Boolean,
+        val mode: (ResumeBehaviorSettings) -> HeadphoneResumeMode,
+        val inMemoryInterrupted: () -> Boolean,
+        val setInMemoryInterrupted: (Boolean) -> Unit,
+        val persistedInterrupted: suspend () -> Boolean,
+        val setPersistedInterrupted: suspend (Boolean) -> Unit,
+    )
+
+    private val bluetoothRoute = ResumeRoute(
+        label = "Bluetooth",
+        authority = automaticResumeAuthority,
+        mutex = bluetoothResumeMutex,
+        settleMs = 0L,
+        isOutputConnected = { bluetoothOutputConnectedQuery() },
+        mode = { it.bluetoothResumeMode },
+        inMemoryInterrupted = { wasInterruptedByBluetooth },
+        setInMemoryInterrupted = { wasInterruptedByBluetooth = it },
+        persistedInterrupted = { resumeBehaviorRepository.hasBluetoothInterruptedResumePending() },
+        setPersistedInterrupted = { resumeBehaviorRepository.setBluetoothInterruptedResumePending(it) },
+    )
+
+    private val wiredRoute = ResumeRoute(
+        label = "Wired",
+        authority = wiredResumeAuthority,
+        mutex = wiredResumeMutex,
+        settleMs = WIRED_RESUME_SETTLE_MS,
+        isOutputConnected = { wiredOutputConnectedQuery() },
+        mode = { it.wiredResumeMode },
+        inMemoryInterrupted = { wasInterruptedByWired },
+        setInMemoryInterrupted = { wasInterruptedByWired = it },
+        persistedInterrupted = { resumeBehaviorRepository.hasWiredInterruptedResumePending() },
+        setPersistedInterrupted = { resumeBehaviorRepository.setWiredInterruptedResumePending(it) },
+    )
+
+    /** Identity of one automatic resume request. See [AutomaticResumeAuthority]. */
+    private data class AutomaticResumeRequest(val route: ResumeRoute, val token: Long, val queueGeneration: Long)
+
+    private fun queryAudioRoute(query: (AudioManager) -> Boolean): Boolean {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        return runCatching { query(audioManager) }.getOrDefault(false)
+    }
+
+    /**
+     * Final gate immediately before an automatic play: request still current, output still connected (a fresh route
+     * query, never an earlier readiness result or connect event), queue not mutated, and the [controller] the caller is
+     * about to act on is still the live one. [controller] null means the caller reads the live controller itself.
+     */
+    private fun authorizeAutomaticPlay(
+        request: AutomaticResumeRequest,
+        controller: MediaController?,
         queueGenerationAllowedBumps: Int = 0,
     ): PlayAuthorization {
-        val authorization = automaticResumeAuthority.authorizePlay(
+        val route = request.route
+        val authorization = route.authority.authorizePlay(
             token = request.token,
-            routeConnected = isBluetoothOutputConnected(),
+            routeConnected = route.isOutputConnected(),
             capturedQueueGeneration = request.queueGeneration,
             currentQueueGeneration = queueGeneration,
             queueGenerationAllowedBumps = queueGenerationAllowedBumps,
+            controllerCurrent = controller == null || mediaController === controller,
         )
         if (authorization != PlayAuthorization.ALLOWED) {
-            logResume("bluetooth play denied token=${request.token}: $authorization")
+            logResume("${route.label} play denied token=${request.token}: $authorization")
         }
         return authorization
     }
 
-    private fun denialOutcome(request: BluetoothResumeRequest, denial: PlayAuthorization): AutomaticResumeOutcome =
-        BluetoothEntitlementPolicy.outcomeFor(denial, automaticResumeAuthority.invalidationOf(request.token))
+    private fun denialOutcome(request: AutomaticResumeRequest, denial: PlayAuthorization): AutomaticResumeOutcome =
+        BluetoothEntitlementPolicy.outcomeFor(denial, request.route.authority.invalidationOf(request.token))
+
+    /**
+     * Waits [totalMs] in short slices and stops early as soon as the request loses authority, so a superseded attempt
+     * neither holds its route's lock nor lingers. Returns whether the request is still current.
+     */
+    private suspend fun delayWhileCurrent(request: AutomaticResumeRequest, totalMs: Long): Boolean {
+        var remaining = totalMs
+        while (remaining > 0L) {
+            val slice = minOf(remaining, RESUME_WAIT_SLICE_MS)
+            delay(slice)
+            remaining -= slice
+            if (!request.route.authority.isCurrent(request.token)) return false
+        }
+        return request.route.authority.isCurrent(request.token)
+    }
 
     /**
      * Clears the entitlement, then rechecks ownership after the suspending write. If the request
@@ -3297,96 +3415,113 @@ class PlayerController @Inject constructor(
      * entitlement is restored (persisted + in-memory) so a fresh interruption is never erased.
      * The in-memory flag is only cleared once the request is known to still be allowed to clear.
      */
-    private suspend fun consumeBluetoothEntitlement(request: BluetoothResumeRequest) {
-        resumeBehaviorRepository.setBluetoothInterruptedResumePending(false)
-        val invalidation = automaticResumeAuthority.invalidationOf(request.token)
+    private suspend fun consumeEntitlement(request: AutomaticResumeRequest) {
+        val route = request.route
+        route.setPersistedInterrupted(false)
+        val invalidation = route.authority.invalidationOf(request.token)
         if (BluetoothEntitlementPolicy.shouldRestoreAfterClear(invalidation)) {
-            wasInterruptedByBluetooth = true
-            resumeBehaviorRepository.setBluetoothInterruptedResumePending(true)
-            logResume("consumeBluetoothEntitlement: token=${request.token} lost ownership ($invalidation) during clear — restored")
+            route.setInMemoryInterrupted(true)
+            route.setPersistedInterrupted(true)
+            logResume("consumeEntitlement(${route.label}): token=${request.token} lost ownership ($invalidation) during clear — restored")
         } else {
-            wasInterruptedByBluetooth = false
+            route.setInMemoryInterrupted(false)
         }
     }
 
     /**
-     * Core Bluetooth resume logic. The interruption entitlement (in-memory + persisted) is read
+     * Core automatic-resume logic for Bluetooth and wired. The interruption entitlement (in-memory + persisted) is read
      * but NOT consumed up front; it is consumed once, at the end, and only when
      * [BluetoothEntitlementPolicy] says the outcome is definitive. Transient failures (controller
      * unavailable, setup failure, route lost, queue changed, superseded by a newer request) keep
      * it so the next reconnect can still resume. Every suspension point rechecks the token.
      */
-    private suspend fun attemptBluetoothResume(
+    private suspend fun attemptAutomaticResume(
         availableSongs: List<Song>,
-        request: BluetoothResumeRequest,
+        request: AutomaticResumeRequest,
     ): AutomaticResumeOutcome {
-        val rawOutcome = runBluetoothResume(availableSongs, request)
+        val rawOutcome = runAutomaticResume(availableSongs, request)
         // Reconcile with the request's latest invalidation immediately before settling, so an
         // old request cannot clear an entitlement owned by a newer route-loss or request.
         val outcome = BluetoothEntitlementPolicy.settle(
             rawOutcome,
-            automaticResumeAuthority.invalidationOf(request.token),
+            request.route.authority.invalidationOf(request.token),
         )
-        if (outcome != rawOutcome) logResume("attemptBluetoothResume: token=${request.token} settled $rawOutcome -> $outcome")
-        if (BluetoothEntitlementPolicy.shouldConsume(outcome)) consumeBluetoothEntitlement(request)
+        if (outcome != rawOutcome) {
+            logResume("attemptAutomaticResume(${request.route.label}): token=${request.token} settled $rawOutcome -> $outcome")
+        }
+        if (BluetoothEntitlementPolicy.shouldConsume(outcome)) consumeEntitlement(request)
         return outcome
     }
 
-    private suspend fun runBluetoothResume(
+    private suspend fun runAutomaticResume(
         availableSongs: List<Song>,
-        request: BluetoothResumeRequest,
+        request: AutomaticResumeRequest,
     ): AutomaticResumeOutcome {
+        val route = request.route
         fun supersededOutcome(): AutomaticResumeOutcome? =
-            automaticResumeAuthority.invalidationOf(request.token)?.let(BluetoothEntitlementPolicy::outcomeFor)
+            route.authority.invalidationOf(request.token)?.let(BluetoothEntitlementPolicy::outcomeFor)
 
         val settings = resumeBehaviorRepository.settings.first()
-        val persistedInterrupted = resumeBehaviorRepository.hasBluetoothInterruptedResumePending()
-        val interrupted = wasInterruptedByBluetooth || persistedInterrupted
+        val persistedInterrupted = route.persistedInterrupted()
+        val interrupted = route.inMemoryInterrupted() || persistedInterrupted
+        val mode = route.mode(settings)
 
         logResume(
-            "attemptBluetoothResume: token=${request.token} mode=${settings.bluetoothResumeMode} " +
+            "attemptResume(${route.label}): token=${request.token} mode=$mode " +
                 "interrupted=$interrupted rememberLastTrack=${settings.rememberLastTrack}",
         )
 
         supersededOutcome()?.let { return it }
 
         if (!settings.rememberLastTrack) {
-            logResume("attemptBluetoothResume: skipped — rememberLastTrack=false")
+            logResume("attemptResume(${route.label}): skipped — rememberLastTrack=false")
             return AutomaticResumeOutcome.SKIPPED_BY_SETTING
         }
 
-        if (!settings.bluetoothResumeMode.shouldResume(interrupted)) {
-            logResume("attemptBluetoothResume: skipped — mode=${settings.bluetoothResumeMode} does not resume for interrupted=$interrupted")
+        if (!mode.shouldResume(interrupted)) {
+            logResume("attemptResume(${route.label}): skipped — mode=$mode does not resume for interrupted=$interrupted")
             return AutomaticResumeOutcome.SKIPPED_BY_SETTING
         }
 
-        val controller = awaitMediaController()
+        val controller = awaitMediaController { route.authority.isCurrent(request.token) }
         if (controller == null) {
-            logResume("attemptBluetoothResume: giving up — mediaController not ready after timeout")
-            return AutomaticResumeOutcome.CONTROLLER_UNAVAILABLE
+            logResume("attemptResume(${route.label}): giving up — mediaController not ready")
+            return supersededOutcome() ?: AutomaticResumeOutcome.CONTROLLER_UNAVAILABLE
         }
 
         supersededOutcome()?.let { return it }
 
         if (controller.isPlaying) {
-            logResume("attemptBluetoothResume: already playing, nothing to do")
+            logResume("attemptResume(${route.label}): already playing, nothing to do")
+            return AutomaticResumeOutcome.ALREADY_PLAYING
+        }
+
+        if (route.settleMs > 0L && !delayWhileCurrent(request, route.settleMs)) {
+            return supersededOutcome() ?: AutomaticResumeOutcome.SUPERSEDED_BY_NEWER_REQUEST
+        }
+        if (mediaController !== controller) {
+            logResume("attemptResume(${route.label}): controller replaced during settle")
+            return AutomaticResumeOutcome.CONTROLLER_UNAVAILABLE
+        }
+        if (controller.isPlaying) {
+            logResume("attemptResume(${route.label}): already playing after settle, nothing to do")
             return AutomaticResumeOutcome.ALREADY_PLAYING
         }
 
         val song = _nowPlayingState.value.song
         logResume(
-            "attemptBluetoothResume: queueSize=${libraryQueue.size} " +
+            "attemptResume(${route.label}): queueSize=${libraryQueue.size} " +
                 "mediaItemCount=${controller.mediaItemCount} " +
                 "playbackState=${stateString(controller.playbackState)}",
         )
         if (song != null && libraryQueue.isNotEmpty()) {
-            authorizeBluetoothPlay(request).let { if (it != PlayAuthorization.ALLOWED) return denialOutcome(request, it) }
+            authorizeAutomaticPlay(request, controller).let { if (it != PlayAuthorization.ALLOWED) return denialOutcome(request, it) }
             lastKnownPositionMs = -1L
             statsTracker.onSongSelected(song)
-            return performHotResume(controller, availableSongs, settings, "bluetooth", request)
+            return performHotResume(controller, availableSongs, request)
         }
 
-        logResume("attemptBluetoothResume: no active queue — loading session cold")
+        logResume("attemptResume(${route.label}): no active queue — loading session cold")
         val cold = resumeSessionCold(availableSongs, request)
         cold.denied?.let { return denialOutcome(request, it) }
         return when (cold.result) {
@@ -3402,76 +3537,6 @@ class PlayerController @Inject constructor(
         }
     }
 
-    /** Core wired-headphone resume logic — same structure as [attemptBluetoothResume]. */
-    private suspend fun attemptWiredResume(availableSongs: List<Song>): ResumeAttemptResult {
-        val settings = resumeBehaviorRepository.settings.first()
-
-        val inMemoryInterrupted = wasInterruptedByWired
-        wasInterruptedByWired = false
-        val persistedInterrupted = resumeBehaviorRepository.hasWiredInterruptedResumePending()
-        val interrupted = inMemoryInterrupted || persistedInterrupted
-
-        logResume(
-            "attemptWiredResume: mode=${settings.wiredResumeMode} " +
-                "interrupted=$interrupted rememberLastTrack=${settings.rememberLastTrack}",
-        )
-
-        if (!settings.rememberLastTrack) {
-            if (persistedInterrupted) resumeBehaviorRepository.setWiredInterruptedResumePending(false)
-            logResume("attemptWiredResume: skipped — rememberLastTrack=false")
-            return ResumeAttemptResult.SKIPPED_BY_SETTING
-        }
-
-        if (!settings.wiredResumeMode.shouldResume(interrupted)) {
-            if (persistedInterrupted) resumeBehaviorRepository.setWiredInterruptedResumePending(false)
-            logResume("attemptWiredResume: skipped — mode=${settings.wiredResumeMode} does not resume for interrupted=$interrupted")
-            return ResumeAttemptResult.SKIPPED_BY_SETTING
-        }
-
-        val controller = awaitMediaController()
-        if (controller == null) {
-            logResume("attemptWiredResume: giving up — mediaController not ready after timeout")
-            return ResumeAttemptResult.SKIPPED_CONTROLLER_NOT_READY
-        }
-
-        if (controller.isPlaying) {
-            if (persistedInterrupted) resumeBehaviorRepository.setWiredInterruptedResumePending(false)
-            logResume("attemptWiredResume: already playing before delay, nothing to do")
-            return ResumeAttemptResult.ALREADY_PLAYING
-        }
-
-        delay(1_000L)
-
-        if (controller.isPlaying) {
-            if (persistedInterrupted) resumeBehaviorRepository.setWiredInterruptedResumePending(false)
-            logResume("attemptWiredResume: already playing after delay, nothing to do")
-            return ResumeAttemptResult.ALREADY_PLAYING
-        }
-
-        if (persistedInterrupted) resumeBehaviorRepository.setWiredInterruptedResumePending(false)
-
-        val song = _nowPlayingState.value.song
-        logResume(
-            "attemptWiredResume: queueSize=${libraryQueue.size} " +
-                "mediaItemCount=${controller.mediaItemCount} " +
-                "playbackState=${stateString(controller.playbackState)}",
-        )
-        return if (song != null && libraryQueue.isNotEmpty()) {
-            lastKnownPositionMs = -1L
-            statsTracker.onSongSelected(song)
-            performHotResume(controller, availableSongs, settings, "wired")
-            ResumeAttemptResult.STARTED
-        } else {
-            logResume("attemptWiredResume: no active queue — loading session cold")
-            when (resumeSessionCold(availableSongs).result) {
-                PlayerHydrationResult.Hydrated,
-                PlayerHydrationResult.AlreadyHydrated -> ResumeAttemptResult.STARTED
-                PlayerHydrationResult.ControllerUnavailable -> ResumeAttemptResult.SKIPPED_CONTROLLER_NOT_READY
-                else -> ResumeAttemptResult.SKIPPED_NO_SESSION
-            }
-        }
-    }
-
     private data class ColdResumeResult(
         val result: PlayerHydrationResult,
         /** Non-null when an automatic request was denied play authority; play was NOT issued. */
@@ -3481,13 +3546,22 @@ class PlayerController @Inject constructor(
     /**
      * Hydrates the persisted session if needed, then applies reconnect autoplay policy.
      * The hydration primitive itself never calls play and never consumes retry eligibility.
-     * For an automatic Bluetooth [request], authority is rechecked after the (suspending)
-     * hydration and immediately before play; hydration may bump the queue generation once.
+     * Authority is checked BEFORE hydration (an invalidated request must not replace the physical queue) and
+     * rechecked after the (suspending) hydration, immediately before play; hydration may bump the queue generation once.
      */
     private suspend fun resumeSessionCold(
         availableSongs: List<Song>,
-        request: BluetoothResumeRequest? = null,
+        request: AutomaticResumeRequest,
     ): ColdResumeResult {
+        // An already-invalid request (superseded, route gone, queue changed, controller replaced) must not replace the
+        // physical queue either, so the full gate runs before hydration as well as before play.
+        authorizeAutomaticPlay(request, null).let { denial ->
+            if (denial != PlayAuthorization.ALLOWED) {
+                logResume("resumeSessionCold: token=${request.token} denied before hydration: $denial")
+                // Hydration was never attempted; the result is a placeholder because `denied` takes precedence.
+                return ColdResumeResult(PlayerHydrationResult.SkippedActiveQueue, denial)
+            }
+        }
         val result = ensurePlayerHydratedFromSession(
             availableSongs = availableSongs,
             operation = "cold_resume",
@@ -3501,11 +3575,9 @@ class PlayerController @Inject constructor(
             logResume("resumeSessionCold: mediaController null at play step, aborting")
             return ColdResumeResult(PlayerHydrationResult.ControllerUnavailable)
         }
-        if (request != null) {
-            val bumps = if (result == PlayerHydrationResult.Hydrated) 1 else 0
-            val authorization = authorizeBluetoothPlay(request, queueGenerationAllowedBumps = bumps)
-            if (authorization != PlayAuthorization.ALLOWED) return ColdResumeResult(result, authorization)
-        }
+        val bumps = if (result == PlayerHydrationResult.Hydrated) 1 else 0
+        val authorization = authorizeAutomaticPlay(request, null, queueGenerationAllowedBumps = bumps)
+        if (authorization != PlayAuthorization.ALLOWED) return ColdResumeResult(result, authorization)
         _nowPlayingState.value.song?.let { song ->
             if (!isExternalPlayback) statsTracker.onSongSelected(song)
         }
@@ -3524,29 +3596,25 @@ class PlayerController @Inject constructor(
      *   no error), performs one controlled retry — this covers transient audio-focus or
      *   audio-route suppression that resolves shortly after reconnect.
      *
-     * For an automatic Bluetooth [request], both the initial play and the delayed retry are gated
-     * by [authorizeBluetoothPlay]; a stale request never plays. Wired passes null (unchanged).
+     * The request keeps its authority through every step: the cold fallback, the prepare/play sequence, the 700 ms wait
+     * and the delayed retry are each gated by [authorizeAutomaticPlay]; a stale request never plays. `playWhenReady`
+     * remaining true is never authority.
      */
     private suspend fun performHotResume(
         controller: MediaController,
         availableSongs: List<Song>,
-        settings: ResumeBehaviorSettings,
-        source: String,
-        request: BluetoothResumeRequest? = null,
+        request: AutomaticResumeRequest,
     ): AutomaticResumeOutcome {
+        val source = request.route.label
         if (controller.currentMediaItem == null || controller.mediaItemCount == 0) {
             logResume("$source: hot resume has no media item (mediaItemCount=${controller.mediaItemCount}) — falling back to cold resume")
             val cold = resumeSessionCold(availableSongs, request)
-            if (request != null) {
-                cold.denied?.let { return denialOutcome(request, it) }
-                if (!playerHydrationAllowsPlay(cold.result)) return AutomaticResumeOutcome.SETUP_FAILED
-            }
+            cold.denied?.let { return denialOutcome(request, it) }
+            if (!playerHydrationAllowsPlay(cold.result)) return AutomaticResumeOutcome.SETUP_FAILED
             return AutomaticResumeOutcome.PLAY_ISSUED
         }
 
-        if (request != null) {
-            authorizeBluetoothPlay(request).let { if (it != PlayAuthorization.ALLOWED) return denialOutcome(request, it) }
-        }
+        authorizeAutomaticPlay(request, controller).let { if (it != PlayAuthorization.ALLOWED) return denialOutcome(request, it) }
 
         // Issue prepare() if the pipeline is not ready — play() is a no-op in STATE_IDLE/ENDED.
         when (controller.playbackState) {
@@ -3563,10 +3631,16 @@ class PlayerController @Inject constructor(
 
         logResumePlayDiagnostics(controller, "$source: immediate post-play")
 
-        // Give ExoPlayer time to settle audio focus and routing after reconnect, then verify.
-        delay(700L)
+        // Give ExoPlayer time to settle audio focus and routing after reconnect, then verify. The wait ends early
+        // if the request loses authority (user pause, route loss, newer request).
+        val stillCurrent = delayWhileCurrent(request, 700L)
 
         logResumePlayDiagnostics(controller, "$source: delayed post-play")
+
+        if (!stillCurrent) {
+            logResume("$source: request lost authority during settle wait — no retry")
+            return AutomaticResumeOutcome.PLAY_ISSUED
+        }
 
         val suppression = controller.playbackSuppressionReason
         if (suppression != Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
@@ -3579,7 +3653,7 @@ class PlayerController @Inject constructor(
             && controller.mediaItemCount > 0
         ) {
             // The initial play already happened, so a denied retry does not undo the outcome.
-            if (request != null && authorizeBluetoothPlay(request) != PlayAuthorization.ALLOWED) {
+            if (authorizeAutomaticPlay(request, controller) != PlayAuthorization.ALLOWED) {
                 logResume("$source: hot resume retry aborted — request no longer authorized")
                 return AutomaticResumeOutcome.PLAY_ISSUED
             }
@@ -3631,13 +3705,17 @@ class PlayerController @Inject constructor(
      * [PlaybackService.onStartCommand] before the async [MediaController] future completes,
      * especially on cold start (broadcast-receiver wakeup after process death).
      */
-    private suspend fun awaitMediaController(timeoutMs: Long = 3_000L): MediaController? {
+    private suspend fun awaitMediaController(
+        timeoutMs: Long = 3_000L,
+        // An automatic request that lost authority stops waiting instead of holding its route lock for the full timeout.
+        keepWaiting: () -> Boolean = { true },
+    ): MediaController? {
         mediaController?.let { return it }
         // Demand-driven retry: if a previous connection attempt failed (or the controller was
         // disconnected), this starts a fresh build instead of waiting forever on a dead attempt.
         ensureControllerConnection()
         val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
+        while (System.currentTimeMillis() < deadline && keepWaiting()) {
             val c = mediaController
             if (c != null) return c
             delay(100L)
@@ -3731,6 +3809,11 @@ class PlayerController @Inject constructor(
     }
 
     fun release() {
+        // Lifecycle teardown voids every pending automatic resume and suspended cold PLAY (their coroutines are cancelled
+        // below; this also closes the window before they next reach a suspension point).
+        supersedeAutomaticResumeByUser()
+        wiredResumeAuthority.supersedeByRouteLoss()
+        automaticResumeAuthority.supersedeByRouteLoss()
         stopPositionTicker()
         sleepTimerJob?.cancel()
         sleepTimerJob = null

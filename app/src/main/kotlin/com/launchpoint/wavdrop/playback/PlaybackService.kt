@@ -237,6 +237,8 @@ class PlaybackService : MediaLibraryService() {
             thresholdProvider = { previousRestartThresholdMs },
             scope = serviceScope,
             onExternalTransport = { playerController.onExplicitExternalTransport() },
+            coldPlayAuthority = playerController.coldPlayAuthority,
+            onExternalPlayIntent = { play -> playerController.onExplicitExternalPlayIntent(play) },
             hydrateForPlay = { songs ->
                 playerController.ensurePlayerHydratedFromSession(availableSongs = songs, operation = "explicit_play")
             },
@@ -592,6 +594,22 @@ class PlaybackService : MediaLibraryService() {
             LibraryResult.ofItemList(WavdropMediaLibrary.page(items, page, pageSize), params)
         }
         else -> Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+    }
+
+    // Media-button PLAY_PAUSE while a cold PLAY is still hydrating: Media3 would resolve it against the empty physical
+    // player and re-issue PLAY. Resolve it to the desired state (pause) now, at receipt.
+    @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+    override fun onMediaButtonEvent(
+        session: MediaSession,
+        controllerInfo: MediaSession.ControllerInfo,
+        intent: Intent,
+    ): Boolean {
+        return ColdPlayMediaButton.handle(
+            intent = intent,
+            authority = playerController.coldPlayAuthority,
+            onExplicitTransport = { playerController.onExplicitExternalTransport() },
+            pause = { session.player.pause() },
+        )
     }
 
     override fun onCustomCommand(
