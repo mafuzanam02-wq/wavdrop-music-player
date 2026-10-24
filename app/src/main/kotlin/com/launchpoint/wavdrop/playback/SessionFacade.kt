@@ -1,5 +1,6 @@
 package com.launchpoint.wavdrop.playback
 
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
@@ -37,7 +38,12 @@ internal interface LogicalPlayWhenReadyOwner {
  * run synchronously on the session request exactly as before, and are not duplicated inside `handle*`.
  */
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
-internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(delegate) {
+internal class SessionFacade private constructor(
+    delegate: Player,
+    private val occurrenceIds: OccurrenceIdSource,
+) : ForwardingSimpleBasePlayer(OccurrenceIdentityPlayer(delegate, occurrenceIds)) {
+
+    constructor(delegate: Player) : this(delegate, OccurrenceIdSource())
 
     // CF-2M5: stable timeline identity across a delegate swap (see getState). Declared BEFORE the init block below, which reads state.
     private var lastPresentedPlaylist: List<SimpleBasePlayer.MediaItemData>? = null
@@ -70,7 +76,7 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
     fun invalidateLogicalState() = invalidateState()
 
     /** The physical player this façade currently forwards to. Read-only; for diagnostics and tests. */
-    val delegatePlayer: Player get() = getPlayer()
+    val delegatePlayer: Player get() = (getPlayer() as ForwardingPlayer).wrappedPlayer
 
     /**
      * Future promotion seam (unused by production in CF-2M2). Makes [newDelegate] the only physical player this façade
@@ -83,7 +89,7 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
      * derives; it fabricates no event.
      */
     fun replaceDelegate(newDelegate: Player, presentAsAutoTransition: Boolean = false) {
-        val current = getPlayer()
+        val current = delegatePlayer
         if (current === newDelegate) return
         require(newDelegate.applicationLooper === current.applicationLooper) {
             "SessionFacade delegate must share the application looper (current=${current.applicationLooper}, " +
@@ -92,7 +98,7 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
         pinnedAutoTransitionPositionMs = if (presentAsAutoTransition) newDelegate.currentPosition else null
         aliasPending = true // the next state evaluation (setPlayer invalidates synchronously) establishes the uid aliases
         try {
-            setPlayer(newDelegate)
+            setPlayer(OccurrenceIdentityPlayer(newDelegate, occurrenceIds))
         } finally {
             // setPlayer invalidates synchronously, so the pin has been consumed by exactly that one state evaluation.
             pinnedAutoTransitionPositionMs = null
@@ -198,22 +204,14 @@ internal class SessionFacade(delegate: Player) : ForwardingSimpleBasePlayer(dele
             lastPresentedPlaylist = playlist
             return state
         }
-        val presented = playlist.map { item ->
-            val window = windowAlias[item.uid]
-            val periodsNeedAlias = item.periods.any { periodAlias.containsKey(it.uid) }
-            if (window == null && !periodsNeedAlias) {
-                item
-            } else {
-                val builder = item.buildUpon()
-                if (window != null) builder.setUid(window)
-                if (periodsNeedAlias) {
-                    builder.setPeriods(item.periods.map { p -> periodAlias[p.uid]?.let { p.buildUpon().setUid(it).build() } ?: p })
-                }
-                builder.build()
-            }
-        }
-        lastPresentedPlaylist = presented
-        return state.buildUpon().setPlaylist(presented).build()
+        // Re-label uids through a Timeline VIEW (O(1) per lookup, O(N) only when something reads every window), never by
+        // rebuilding a MediaItemData list: that list-built PlaylistTimeline is the structure whose Pair(window, period) hash keys
+        // used to cancel (see OccurrenceTimelineIdentity.kt). The pre-promotion state is timeline-backed too, so the two compare equal.
+        val aliased = state.buildUpon()
+            .setPlaylist(AliasedTimeline(state.timeline, windowAlias, periodAlias), state.currentTracks, state.currentMetadata)
+            .build()
+        lastPresentedPlaylist = aliased.playlist
+        return aliased
     }
 
     private fun clearAliases() {
