@@ -9,6 +9,10 @@ import com.launchpoint.wavdrop.data.model.Song
  *
  * [currentPlaybackIndex] comes from the controller's existing occurrence-safe resolution and is
  * null when the current occurrence cannot be safely established (never a first-song-id guess).
+ *
+ * [playbackQueue] is a SHARED REFERENCE to the controller's queue, not a copy: the controller replaces that list on every structural
+ * change and never mutates it in place, so a snapshot keeps describing the queue it was captured from. Consumers must treat it as
+ * read-only (it is typed `List`; nothing may cast it).
  * [controllerConnected] is a runtime ownership signal only; CF-1 deliberately ignores it.
  */
 internal data class CrossfadeRuntimeSnapshot(

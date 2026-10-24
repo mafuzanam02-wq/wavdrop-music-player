@@ -673,6 +673,8 @@ class PlayerController @Inject constructor(
 
     // libraryQueue: source order. playbackOrder: indices into libraryQueue (identity or shuffled).
     // playbackQueue: songs in playback order = playbackOrder.map { libraryQueue[it] }.
+    // IMMUTABLE-BY-REPLACEMENT: libraryQueue / playbackOrder / playbackQueue are never mutated in place; every change assigns a
+    // freshly built list. Readers (NowPlayingState.queue, CrossfadeRuntimeSnapshot.playbackQueue) rely on this to share the reference.
     // ExoPlayer is ALWAYS loaded with playbackQueue, so currentMediaItemIndex == playback index.
     private var libraryQueue: List<Song> = emptyList()
     private var playbackOrder: List<Int> = emptyList()
@@ -4303,7 +4305,10 @@ class PlayerController @Inject constructor(
         val controller = mediaController
         return CrossfadeRuntimeSnapshot(
             queueGeneration = queueGeneration,
-            playbackQueue = playbackQueue.toList(),
+            // Shared reference, not a copy: `playbackQueue` is replaced wholesale on every structural change and never mutated in
+            // place (every producer allocates a fresh list; see CrossfadeRuntimeSnapshot), so a snapshot keeps describing the
+            // queue it was captured from while this runs every 250 ms (twice while a NEXT is Ready) without an O(N) copy.
+            playbackQueue = playbackQueue,
             currentPlaybackIndex = currentPlaybackIndex(),
             repeatMode = repeatMode,
             shuffleEnabled = shuffleEnabled,
