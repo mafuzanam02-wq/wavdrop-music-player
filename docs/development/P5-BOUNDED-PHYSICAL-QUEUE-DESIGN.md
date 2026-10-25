@@ -844,6 +844,67 @@ OFF until P5-F.
 - **Dependencies:** P5-B. **Rollback:** gate off. **Done when:** Next/Previous/jump/AUTO all pass the real-Media3 matrix at 25k
   with call-shape guards.
 
+#### P5-C implementation record (window movement and navigation; gate still `false`)
+
+- **Owner.** `PhysicalWindowAdapter` owns the active window, the ONE pending operation (install or adjustment), the monotonic window
+  generation, the tracked logical occurrence, the bounded recovery counter and every cancellation. `PlayerController` only routes to
+  it (`isBounded()` branches in `currentPlaybackIndex`, `seekToPlaybackIndex`, the automatic-transition path, reconnect, repeat and
+  the mutation guards). `isBounded()` is the mode of the CURRENT install (`installedQueueMode`), decided once per install.
+- **Movement.** `maintain()` asks `PhysicalWindowPolicy.planAdjustment` from the PROVEN current and submits at most one bounded batch:
+  `removeMediaItems` (tail, then front) before `addMediaItems` (prepend at 0, append at the end), so the playlist never exceeds
+  W_MAX at any step; batches are <= REFILL_BATCH/HISTORY_TARGET. It re-runs after every transition/discontinuity and after each
+  acknowledged operation and stops at `NoChange` (no polling, no timers). Repeat changes re-plan the same way (leaving ALL trims the
+  ring or re-anchors).
+- **Publication.** Every adjustment is bound to `(logicalGeneration, windowGeneration)` and published only after the physical
+- **Current-occurrence rule for adjustments (P5-C correction).** An adjustment has two phases. Phase 1 (baseline) mutates nothing: the
+  PHYSICAL player is asked for its exact current index, its playlist ids and its own count of natural (Media3 AUTO) transitions, and
+  the plan is re-derived from that observation, so the occurrence to preserve is captured authoritatively. Phase 2 submits the bounded
+  mutation. It is acknowledged only if the physical playlist is exactly the intended window AND the physical current is exactly the
+  baseline logical occurrence advanced by the natural transitions the physical player counted since (each by the logical
+  automatic-next rule, repeat-all wraps included), located in the RESULTING window. Any other current index - an uncounted move, a
+  seek, a removal under the current item, a neighbouring duplicate, a counted transition plus an extra move - fails closed:
+  `Incomplete`, nothing published, and the existing single bounded re-anchor around the last authoritative occurrence. A mismatch is
+  re-probed up to `MAX_ACK_ATTEMPTS` times first because a transition callback or the applied mutation may simply lag. An in-window
+  navigation that arrives while an adjustment is in flight is HELD (latest wins) and applied when the window settles, because a seek
+  would move the current item under the proof; the held target is the authoritative logical current meanwhile. Media3 semantics relied
+  on (asserted by tests): removing before the current shifts its index down and keeps the item, prepend shifts it up, append and tail
+  trim leave it, and none of these reports a transition. Limitation: the AUTO classification in the adjustment tests is delivered
+  through the physical player's own tally listener right after a real physical move, because a trackless JVM source cannot play to
+  its end.
+  acknowledgement (P5-B probe, same authorization) shows the exact intended window: count, every positional id, current inside the
+  window. An append-only adjustment keeps the previous window active (indices unchanged); a front trim/prepend moves indices, so state
+  is `Adjusting` and there is NO active mapping until acknowledged. Failure/mismatch/timeout leaves `NeedsReinstall` and triggers at
+  most ONE bounded re-anchor around the last proven occurrence (`MAX_RECOVERY_ATTEMPTS`), reset by the next verified window.
+- **Navigation.** Next/Previous/jump compute the target on the LOGICAL queue (`QueueNavigator`, unchanged). `navigateTo(target)`:
+  verified window contains it -> plain `seekTo(mappedPhysical)`; otherwise (outside, provisional, adjusting, failed, no window) ->
+  bounded re-anchor install around the EXACT logical target (chosen behavior for an unverified mapping: never an estimated index,
+  never a song-id search, never the full queue). The newest accepted target supersedes any pending operation. Play/pause intent is
+  applied exactly as in Full mode. Previous-restart, rapid presses and deferred navigation after reconnect reuse the Full-mode code.
+- **Current occurrence.** `currentPlaybackIndex()` in a bounded window = the physical current mapped through the ACTIVE window AND the
+  id verified at that position (`resolveCurrent`); a mismatch is `Unproven`, never a search for another occurrence. While an
+  operation is in flight the adapter's tracked occurrence is returned for DISPLAY only (index-bearing calls never use it).
+  An unprovable landing while Active triggers one bounded recovery re-anchor around the tracked occurrence.
+- **Automatic transitions.** Media3 advances natively inside the window; the callbacks translate the new physical current and top the
+  window up. No seek, no reinstall and no `syncPlayerQueueAt` on a correct boundary (structural guard). Window upkeep runs from every
+  transition/discontinuity callback, independent of the Full-mode stale-echo logic.
+- **Window edge vs logical end.** `STATE_ENDED` in a bounded window continues at `QueueNavigator.automaticNextIndex` of the PROVEN
+  current (repeat ALL wraps through the complete queue via a bounded re-anchor / ring window); with repeat OFF at the genuine logical
+  end nothing is done. Physical repeat is OFF or ONE only; ALL is window geometry.
+- **Reconnect.** A new controller drops the mapping (`onPlayerReplaced`); the drain re-anchors around the exact logical current
+  (position kept) with a bounded install, then pending navigation runs against it.
+- **Not supported yet (rejected with a log, never run through Full-mode logic):** `toggleShuffle`, `playNext`, `playAllNext`,
+  `addToQueue`, `addAllToQueue`, `removeFromQueue`, `clearEarlierQueue`, `clearUpNext`, `handleSongDeleted`, `moveQueueItem*`,
+  `moveToPlayNext` (P5-D). An external change of the physical repeat mode is reasserted. Queue repair/reconciler never run in a window.
+- **Crossfade.** Unchanged engine. In a bounded window `captureCrossfadeRuntimeSnapshot` reports `playerQueueNeedsSync = true`, so the
+  unchanged planner answers `Unavailable(PlayerQueueNeedsSync)` and no NEXT slot is prepared. P5-E must window-shift CURRENT and NEXT in
+  lock-step under one window generation, re-graft or cancel a prepared NEXT, and feed `OccurrenceTimelineIdentity` the logical position.
+- **External MediaSession.** The session player still exposes the physical window; external index-bearing commands (`seekTo(index)`,
+  `add/remove`, notification/widget next/previous that carry an index) are NOT made logical here. P5-E must provide the logical public
+  timeline (N, logical index, logical repeat) and translate external commands through the active window, and point the P5-B
+  probe at the physical engine rather than `session.player`.
+- **Known harness limit.** A trackless test source does not report a post-seek position back through the controller reliably, so the
+  Previous "restart past the threshold" position check is covered through its position-independent twin (index 0, repeat OFF).
+
 ### P5-D — Queue-mutation integration
 
 - **Files:** `PlayerController.kt` mutation sites (§7.2), `ShuffleQueueSyncPlanner.kt`, `PlaybackAssembly`/`PlayerEngine` untouched.

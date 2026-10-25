@@ -465,10 +465,12 @@ class PhysicalWindowAdapterTest {
         val code = File("src/main/kotlin/com/launchpoint/wavdrop/playback/PhysicalWindowAdapter.kt").readLines()
             .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("//") || it.trimStart().startsWith("/*") }
             .joinToString("\n")
-        for (forbidden in listOf("queue.map", "queue.toList", "queue.forEach", "queue.subList", "addMediaItems", "replaceMediaItems")) {
+        for (forbidden in listOf("queue.map", "queue.toList", "queue.forEach", "queue.subList", "replaceMediaItems", "clearMediaItems", "toMutableList")) {
             assertFalse("adapter must not use $forbidden", code.contains(forbidden))
         }
-        assertEquals("exactly one list push", 1, Regex("""\.setMediaItems\(""").findAll(code).count())
+        assertEquals("exactly one list install", 1, Regex("""\.setMediaItems\(""").findAll(code).count())
+        // P5-C: the only incremental additions are the bounded prepend and append batches of one adjustment.
+        assertEquals(2, Regex("""\.addMediaItems\(""").findAll(code).count())
     }
 
     @Test fun gateIsOffAndTheControllerReachesTheAdapterOnlyThroughTheSeam() {
