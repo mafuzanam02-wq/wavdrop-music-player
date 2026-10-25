@@ -1750,9 +1750,8 @@ class PlayerController @Inject constructor(
     private fun installPreservedSearchStart(controller: MediaController, playbackStartIndex: Int, play: Boolean, positionMs: Long = 0L) {
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
-        controller.setMeasuredMediaItems(
+        controller.installPlaybackQueue(
             operation = "preserve_search",
-            songs = playbackQueue,
             startIndex = playbackStartIndex,
             positionMs = positionMs,
         )
@@ -1930,9 +1929,8 @@ class PlayerController @Inject constructor(
         controller.repeatMode = repeatMode.toPlayerRepeatMode()
         controller.shuffleModeEnabled = false
         // ExoPlayer is loaded with playbackQueue so auto-transitions follow shuffle order.
-        controller.setMeasuredMediaItems(
+        controller.installPlaybackQueue(
             operation = "play_from_queue",
-            songs = playbackQueue,
             startIndex = playbackStartIndex,
             positionMs = positionMs,
         )
@@ -3178,9 +3176,8 @@ class PlayerController @Inject constructor(
             runCatching {
                 controller.repeatMode = repeatMode.toPlayerRepeatMode()
                 controller.shuffleModeEnabled = false
-                controller.setMeasuredMediaItems(
+                controller.installPlaybackQueue(
                     operation = operation,
-                    songs = playbackQueue,
                     startIndex = startPlaybackIndex,
                     positionMs = snapshot.positionMs,
                 )
@@ -4148,10 +4145,10 @@ class PlayerController @Inject constructor(
                 "full_queue_sync reason=$reason queueSize=${playbackQueue.size} currentIndex=$playbackIndex dirtyReason=$queueDirtyReason",
             )
         }
-        playerQueueNeedsSync = false
-        controller.setMeasuredMediaItems(
+        // Bounded (inactive): the queue is clean only once the installed window is VERIFIED (see installPlaybackQueue).
+        if (!isBoundedInstall()) playerQueueNeedsSync = false
+        controller.installPlaybackQueue(
             operation = "sync_player_queue:$reason",
-            songs = playbackQueue,
             startIndex = playbackIndex,
             positionMs = positionMs,
         )
@@ -4350,6 +4347,62 @@ class PlayerController @Inject constructor(
             verifiedLogicalIndices = verifiedLogicalIndices,
             physicalIndexOffset = physicalIndexOffset,
         )
+    }
+
+    /**
+     * P5-B: test-only switch that lets [PhysicalQueuePolicy.modeFor] answer Bounded for queues above the Full limit. It is never
+     * set in production and is not a setting; with it false (always) every install below is the unchanged Full path.
+     */
+    internal var boundedInstallEnabledForTesting: Boolean = false
+
+    private val physicalWindowAdapter = PhysicalWindowAdapter(
+        currentLogicalGeneration = { queueGeneration },
+        materialize = { songs -> materializeMediaItems(songs).mediaItems },
+    )
+
+    /** The mode of the queue install that is about to happen, decided once from the logical queue size. */
+    private fun isBoundedInstall(): Boolean =
+        PhysicalQueuePolicy.modeFor(
+            playbackQueue.size,
+            boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || boundedInstallEnabledForTesting,
+        ) == QueueMode.Bounded
+
+    /**
+     * THE queue-installation seam for a whole playbackQueue (library start, preserved search, hydration, queue repair).
+     * Full: exactly the previous `setMeasuredMediaItems(playbackQueue)`. Bounded (unreachable while the gate is off): one
+     * bounded window via [physicalWindowAdapter]; there is no full-queue fallback. [startIndex] is a LOGICAL playbackQueue index.
+     * Not converted yet (P5-C..E): navigation, queue edits, crossfade and the session facade still assume Full.
+     */
+    private fun MediaController.installPlaybackQueue(operation: String, startIndex: Int, positionMs: Long) {
+        if (!isBoundedInstall()) {
+            if (physicalWindowAdapter.state != WindowInstallState.Idle) physicalWindowAdapter.reset()
+            setMeasuredMediaItems(operation = operation, songs = playbackQueue, startIndex = startIndex, positionMs = positionMs)
+            return
+        }
+        val outcome = physicalWindowAdapter.install(
+            player = this,
+            queue = playbackQueue,
+            logicalGeneration = queueGeneration,
+            startIndex = startIndex,
+            positionMs = positionMs,
+            repeatMode = this@PlayerController.repeatMode,
+            verifier = PhysicalQueueObservationCommand.verifier(this), // Active only on the physical player's own acknowledgement
+        ) { result ->
+            when (result) {
+                is BoundedInstallOutcome.Active -> playerQueueNeedsSync = false
+                is BoundedInstallOutcome.Stale -> Unit // newer intent won; it owns the queue state
+                else -> {
+                    playerQueueNeedsSync = true // explicit recoverable state: nothing was published
+                    Log.w(TAG, "bounded install ($operation) not verified: $result")
+                }
+            }
+        }
+        when (outcome) {
+            is BoundedInstallOutcome.Submitted -> playerQueueNeedsSync = true // dirty until the window is verified
+            is BoundedInstallOutcome.Rejected -> error("bounded install rejected: ${outcome.reason}")
+            is BoundedInstallOutcome.Failed -> throw outcome.cause
+            else -> error("unexpected immediate bounded install outcome: $outcome")
+        }
     }
 
     private fun MediaController.setMeasuredMediaItems(

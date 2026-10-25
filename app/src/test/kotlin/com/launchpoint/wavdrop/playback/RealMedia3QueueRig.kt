@@ -20,10 +20,12 @@ import org.robolectric.RuntimeEnvironment
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 /** Records which Media3 mutations/commands actually reach the session player (server side), to prove what was NOT called. */
 internal class RecordingPlayer(player: androidx.media3.common.Player) : androidx.media3.common.ForwardingPlayer(player) {
+    /** When true the physical player silently ignores list installs (the controller still masks them optimistically). */
+    @Volatile var dropSetMediaItems = false
     val calls = mutableListOf<String>()
     override fun setMediaItems(mediaItems: MutableList<MediaItem>) { calls += "setMediaItems(${mediaItems.size})"; super.setMediaItems(mediaItems) }
     override fun setMediaItems(mediaItems: MutableList<MediaItem>, resetPosition: Boolean) { calls += "setMediaItems(${mediaItems.size})"; super.setMediaItems(mediaItems, resetPosition) }
-    override fun setMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long) { calls += "setMediaItems(${mediaItems.size})"; super.setMediaItems(mediaItems, startIndex, startPositionMs) }
+    override fun setMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long) { calls += "setMediaItems(${mediaItems.size})"; if (!dropSetMediaItems) super.setMediaItems(mediaItems, startIndex, startPositionMs) }
     override fun replaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: MutableList<MediaItem>) { calls += "replace($fromIndex,$toIndex,${mediaItems.size})"; super.replaceMediaItems(fromIndex, toIndex, mediaItems) }
     override fun removeMediaItems(fromIndex: Int, toIndex: Int) { calls += "remove($fromIndex,$toIndex)"; super.removeMediaItems(fromIndex, toIndex) }
     override fun addMediaItems(index: Int, mediaItems: MutableList<MediaItem>) { calls += "add($index,${mediaItems.size})"; super.addMediaItems(index, mediaItems) }
@@ -43,15 +45,18 @@ internal class RealMedia3QueueRig(
     playing: Boolean = false,
     sessionName: String = "lq",
     loadInitialQueue: Boolean = true,
+    physicalAck: Boolean = false,
 ) {
     private val context: Context get() = RuntimeEnvironment.getApplication()
     val player: ExoPlayer = TestMediaSource.newPlayer(context)
     val recording = RecordingPlayer(player)
-    val session: MediaSession = MediaSession.Builder(context, recording).setId("$sessionName-${counter++}").build()
+    val session: MediaSession = MediaSession.Builder(context, recording).setId("$sessionName-${counter++}").apply { if (physicalAck) setCallback(AckCallback()) }.build()
     val controller: MediaController
 
     init {
-        val future = MediaController.Builder(context, session.token).setConnectionHints(Bundle()).buildAsync()
+        val future = MediaController.Builder(context, session.token)
+            .setConnectionHints(Bundle().apply { if (physicalAck) putBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, true) })
+            .buildAsync()
         var guard = 0
         while (!future.isDone && guard++ < 100) idleMainLooper()
         controller = future.get(5, TimeUnit.SECONDS)
@@ -118,4 +123,28 @@ internal class RealMedia3QueueRig(
 
         fun songs(vararg ids: Long) = ids.map(::song)
     }
+}
+
+/**
+ * Test stand-in for PlaybackService's session callback. It uses the PRODUCTION connection-result builder and the PRODUCTION
+ * authorized executor, so an unmarked controller is neither advertised the probe nor answered.
+ */
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+internal class AckCallback : MediaSession.Callback {
+    override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+        PlaybackService.withWavdropCommands(session, controller)
+
+    override fun onCustomCommand(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        customCommand: androidx.media3.session.SessionCommand,
+        args: Bundle,
+    ): com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.SessionResult> =
+        if (customCommand.customAction == PhysicalQueueObservationCommand.ACTION) {
+            PhysicalQueueObservationCommand.execute(controller, session.player, args)
+        } else {
+            com.google.common.util.concurrent.Futures.immediateFuture(
+                androidx.media3.session.SessionResult(androidx.media3.session.SessionResult.RESULT_SUCCESS),
+            )
+        }
 }

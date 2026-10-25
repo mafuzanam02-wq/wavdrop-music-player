@@ -618,6 +618,11 @@ class PlaybackService : MediaLibraryService() {
         customCommand: SessionCommand,
         args: Bundle,
     ): ListenableFuture<SessionResult> {
+        if (customCommand.customAction == PhysicalQueueObservationCommand.ACTION) {
+            // P5-B (inactive): read-only probe of the physical player, used to acknowledge a bounded-window install.
+            // Authorized per caller (in-app controller only), not by knowing the action string.
+            return PhysicalQueueObservationCommand.execute(controller, session.player, args)
+        }
         when (customCommand.customAction) {
             CMD_TOGGLE_SHUFFLE -> playerController.toggleShuffle()
             CMD_CYCLE_REPEAT -> playerController.cycleRepeatMode()
@@ -762,6 +767,10 @@ class PlaybackService : MediaLibraryService() {
             val enrichedCommands = defaultResult.availableSessionCommands.buildUpon()
                 .add(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
                 .add(SessionCommand(CMD_CYCLE_REPEAT, Bundle.EMPTY))
+                .apply {
+                    // Advertised to the in-app controller only; external controllers never see it.
+                    if (PhysicalQueueObservationCommand.isAuthorizedController(controller)) add(PhysicalQueueObservationCommand.command)
+                }
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
                 .setAvailableSessionCommands(enrichedCommands)

@@ -60,7 +60,11 @@ class PhysicalQueuePolicyTest {
             .firstOrNull { File(it, "app/src/main/kotlin").isDirectory }
             ?: return // not run from inside the repository checkout (e.g. a sandboxed runner): nothing to inspect
         val mainDir = File(root, "app/src/main/kotlin")
-        val own = setOf("PhysicalWindow.kt", "PhysicalWindowPolicy.kt", "PhysicalQueuePolicy.kt")
+        // P5-B deliberately updated this: the installer, and PlayerController's single installPlaybackQueue seam (Full unless the
+        // gate or the test-only switch says Bounded), may reference the types. Nothing else may.
+        val own = setOf(
+            "PhysicalWindow.kt", "PhysicalWindowPolicy.kt", "PhysicalQueuePolicy.kt", "PhysicalWindowAdapter.kt", "PlayerController.kt",
+        )
         val tokens = listOf(
             "PhysicalWindow", "PhysicalWindowPolicy", "PhysicalQueuePolicy", "QueueMode", "PlanToken",
             "WindowAdjustment", "NavigationStep", "AheadDecision", "HistoryDecision", "Localization",

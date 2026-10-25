@@ -799,6 +799,40 @@ OFF until P5-F.
 - **Dependencies:** P5-A. **Rollback:** gate stays off; revert. **Done when:** with the debug override on, a 25k queue starts and
   plays its first track with ≤ W items, and the suite with the override off is unchanged.
 
+#### P5-B implementation record (installation only; gate still `false`)
+
+- **Code:** `PhysicalWindowAdapter.kt` (pure `PhysicalWindowInstallPlanner`; `PhysicalWindowAdapter` = submit + verify + publish) and one
+  seam in `PlayerController.installPlaybackQueue`. Full branch = the previous `setMeasuredMediaItems(playbackQueue)` call, unchanged.
+  Bounded branch is reachable only if `PhysicalQueuePolicy.modeFor` answers Bounded, i.e. never in production, or in tests through
+  `PlayerController.boundedInstallEnabledForTesting` (default `false`, not a setting).
+- **Lifecycle:** Planned → Submitted → Provisional → Active. `active` (the only mapping later code may use) is cleared the moment a
+  new install is submitted. Media3 1.11.1 has no completion callback for `setMediaItems`, and a `MediaController` masks the mutation
+  optimistically, so observing the controller (count, current index, every positional id) can only reach **Provisional**, which
+  carries no mapping. **Active** requires an acknowledgement from the physical (session) player: a read-only session command
+  (`PhysicalQueueObservationCommand`, answered in `PlaybackService.onCustomCommand` from the session player, from a task posted to
+  that player's looper) returns count, current index, capped ids and the echoed `PlanToken`; the adapter activates only if the token
+  and the whole intended window match. Observed in tests: a probe can be answered before the install is applied, so a content
+  mismatch re-probes up to 3 times (no timers) before the install is Incomplete. With no verifier an install never becomes Active.
+  Late acknowledgements are ignored after a newer install, `reset()`, a moved `queueGeneration` or expiry. Failed/incomplete →
+  `WindowInstallState.NeedsReinstall(recovery)`; nothing is published and `playerQueueNeedsSync` stays true. There is no
+  full-queue fallback. Limitation: the probe reads `session.player`; once P5-E makes that a logical façade the probe must read the
+  physical engine instead.
+- **Install entry points (inventory):**
+  | Entry point | P5-B status |
+  |---|---|
+  | `installLibraryStart`, `installPreservedSearchStart` (connected and deferred-drain) | through the seam |
+  | `ensurePlayerHydratedFromSession` (cold PLAY, startup restore) | through the seam; its `runCatching` rollback covers sync rejection/failure only, async non-verification is left dirty |
+  | `syncPlayerQueueAt` (queue repair) | through the seam; in Bounded it re-anchors instead of re-pushing the full queue |
+  | `installExternalStart` | 1 song: always Full |
+  | `PlaybackResumption` (`mediaItems = playbackQueue.map(toPlaybackMediaItem)`), `PlaybackService.onPlaybackResumption`, `adoptPlaybackResumption` | NOT converted: service-side full item list; P5-E |
+- **Not converted (P5-C..E):** `currentPlaybackIndex` / `resolveCurrentPlaybackIndex` (still treats Media3 index as logical), seek/Next/Previous,
+  `physicalIndexOffset`/reconciler repair, queue mutations, shuffle/repeat toggles after install, `SessionFacade`, crossfade.
+  Enabling bounded mode before those exist would mis-translate indices; hence the gate.
+- **Crossfade lock-step (for P5-E):** an install on CURRENT alone is not a crossfade-ready swap. The NEXT slot holds the same window
+  geometry; a window install, shift, trim or refill must be applied to both players in one main-thread turn under one window
+  generation, with the prepared NEXT cancelled or re-grafted, and `OccurrenceTimelineIdentity` fed by the logical position. P5-B
+  tests assume no prepared NEXT.
+
 ### P5-C — Window movement and navigation
 
 - **Files:** `PhysicalWindowAdapter.kt` (refill/trim/re-anchor jobs, generation-bound), `PlayerController.kt`

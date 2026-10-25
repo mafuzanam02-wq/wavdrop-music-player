@@ -13,9 +13,13 @@ class LargeQueueHardeningGuardTest {
 
     @Test fun `whole queue pushes are limited to fresh loads and the labelled last resort`() {
         val operations = Regex("""setMeasuredMediaItems\(\s*operation = ([^,\n]+),""").findAll(source).map { it.groupValues[1] }.toList()
+        // P5-B: the four whole-playbackQueue installs go through the installPlaybackQueue seam, whose Full branch is the only
+        // remaining whole-queue setMeasuredMediaItems besides the one-song external-URI install.
+        assertEquals(listOf("\"external_uri\"", "operation"), operations)
+        val seamCallers = Regex("""installPlaybackQueue\(\s*operation = ([^,\n]+),""").findAll(source).map { it.groupValues[1] }.toList()
         assertEquals(
-            listOf("\"preserve_search\"", "\"external_uri\"", "\"play_from_queue\"", "operation", "\"sync_player_queue:\$reason\""),
-            operations,
+            listOf("\"preserve_search\"", "\"play_from_queue\"", "operation", "\"sync_player_queue:\$reason\""),
+            seamCallers,
         )
     }
 
