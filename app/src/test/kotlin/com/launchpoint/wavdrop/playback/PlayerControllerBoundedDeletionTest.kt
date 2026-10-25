@@ -82,6 +82,7 @@ class PlayerControllerBoundedDeletionTest {
         init {
             pc.boundedInstallEnabledForTesting = bounded
             pc.boundedVerifierFactory = { ctl }
+            pc.attachPhysicalWindowPort(rig.port)
             field("controllerConnectionState").set(pc, ControllerConnectionState.Connected)
             invoke("onControllerConnected", arrayOf(MediaController::class.java), arrayOf(rig.controller))
             rig.settle(100)

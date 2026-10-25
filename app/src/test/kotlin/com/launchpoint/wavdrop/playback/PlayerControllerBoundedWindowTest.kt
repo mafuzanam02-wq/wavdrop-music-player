@@ -64,6 +64,7 @@ class PlayerControllerBoundedWindowTest {
 
         init {
             pc.boundedInstallEnabledForTesting = bounded
+            pc.attachPhysicalWindowPort(rig.port)
             field("controllerConnectionState").set(pc, ControllerConnectionState.Connected)
             invoke("onControllerConnected", arrayOf(MediaController::class.java), arrayOf(rig.controller))
             rig.settle(100)
@@ -88,6 +89,18 @@ class PlayerControllerBoundedWindowTest {
         fun logical(): Int = pc.nowPlayingState.value.currentIndex
         fun currentId(): String? = controller.currentMediaItem?.mediaId
         fun releaseAll() { runCatching { pc.release() }; rig.releaseAll() }
+        /**
+         * The physical player runs off the end of its window (a genuine window end: it sits on its last item) and Media3 reports ENDED
+         * in the same turn, before the controller can have refilled. Returns the logical occurrence the window ended on.
+         */
+        fun endPhysicalWindow(): Int {
+            val last = rig.player.mediaItemCount - 1
+            val atEnd = adapter.active!!.physicalToLogical(last)!!
+            rig.player.seekTo(last, 0L)
+            listener.onPlaybackStateChanged(Player.STATE_ENDED)
+            quiesce()
+            return atEnd
+        }
 
         /** What Media3 does at a natural boundary, then the production callbacks that report it. */
         fun naturalAdvance() {
@@ -262,11 +275,11 @@ class PlayerControllerBoundedWindowTest {
     @Test fun physicalEndReportedMidQueueContinuesAtTheNextLogicalOccurrence() {
         val h = harness()
         h.start(queue(25_000), 12_000)
-        // The physical player reports the end of its window although the logical queue has much more (window outrun).
-        h.listener.onPlaybackStateChanged(Player.STATE_ENDED)
-        h.quiesce()
-        assertEquals(12_001, h.logical())
-        assertEquals("12002", h.currentId())
+        // The physical player reaches the end of its window although the logical queue has much more (window outrun).
+        val atEnd = h.endPhysicalWindow()
+        assertTrue("mid-queue, not the logical end", atEnd in 12_000 until 24_999)
+        assertEquals(atEnd + 1, h.logical())
+        assertEquals((atEnd + 2).toString(), h.currentId())
         assertBounded(h)
     }
 
@@ -274,9 +287,9 @@ class PlayerControllerBoundedWindowTest {
         val h = harness()
         h.start(queue(25_000), 24_999)
         h.pc.cycleRepeatMode(); h.quiesce() // ALL
-        h.listener.onPlaybackStateChanged(Player.STATE_ENDED)
-        h.quiesce()
-        assertEquals(0, h.logical()); assertEquals("1", h.currentId())
+        val atEnd = h.endPhysicalWindow()
+        val expected = (atEnd + 1) % 25_000
+        assertEquals(expected, h.logical()); assertEquals((expected + 1).toString(), h.currentId())
         assertBounded(h)
     }
 
@@ -337,23 +350,25 @@ class PlayerControllerBoundedWindowTest {
         assertBounded(h)
     }
 
-    @Test fun reconnectReanchorsAroundTheExactCurrentWithoutTheFullQueue() {
+    @Test fun aPlainReconnectOfAVerifiedWindowInstallsNothingAndKeepsTheExactCurrent() {
         val h = harness()
         h.start(queue(25_000), 9_000)
         val before = h.calls.size
         h.invoke("onControllerConnected", arrayOf(MediaController::class.java), arrayOf(h.rig.controller))
         h.quiesce()
         assertEquals(9_000, h.logical())
-        val installs = h.calls.drop(before).filter { it.startsWith("setMediaItems") }
-        assertEquals(listOf("setMediaItems(100)"), installs)
+        // P5-E: the window is observed in-process through the port, so a new controller says nothing about it.
+        assertEquals(emptyList<String>(), h.calls.drop(before).filter { it.startsWith("setMediaItems") })
     }
 
-    @Test fun crossfadePlanningIsUnavailableInABoundedWindow() {
+    @Test fun crossfadePlanningIsUnavailableOnlyWhileTheBoundedWindowIsNotVerified() {
         val h = harness()
         h.start(queue(25_000), 500)
-        assertTrue(h.pc.captureCrossfadeRuntimeSnapshot().playerQueueNeedsSync)
-        val plan = planCrossfadeFromRuntimeSnapshot(6_000L, h.pc.captureCrossfadeRuntimeSnapshot(), 180_000L)
-        assertTrue(plan is CrossfadeTransitionPlan.Unavailable)
+        assertFalse("a verified window with ample margin may host a NEXT", h.pc.captureCrossfadeRuntimeSnapshot().playerQueueNeedsSync)
+        h.pc.jumpToQueueItem(20_000) // re-anchor in flight
+        val busy = h.pc.captureCrossfadeRuntimeSnapshot()
+        assertTrue(busy.playerQueueNeedsSync)
+        assertTrue(planCrossfadeFromRuntimeSnapshot(6_000L, busy, 180_000L) is CrossfadeTransitionPlan.Unavailable)
     }
 
     @Test fun boundedControllerCodeNeverReachesAFullQueuePush() {

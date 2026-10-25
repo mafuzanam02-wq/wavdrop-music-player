@@ -984,6 +984,77 @@ OFF until P5-F.
   cold widget; `onPlaybackResumption`.
 - **Dependencies:** P5-D. **Rollback:** gate off. **Done when:** G3, G4, G5 are green.
 
+#### P5-E implementation record (crossfade, logical MediaSession, restoration; gate still `false`)
+
+Status: implemented and tested under Robolectric/JVM against real Media3 1.11.1 and real ExoPlayers; **nothing here is device
+evidence**. `PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED` remains `false`; Full mode keeps its routing.
+
+**A. Physical command ownership.** All index-bearing and all proving operations on the bounded window go through the in-process
+`PhysicalWindowPort` (`PhysicalWindowPort.kt`): `EnginePhysicalPort` (production, always fronts the engine's CURRENT; `owner` changes at
+promotion) and `PhysicalPlayerPort` (one physical player; tests, single-player topology). The service attaches it. `PlayerController`
+never sends a physical index through the public `MediaController`; index-free commands (prepare/play/pause) stay on the controller.
+Verification is `PhysicalObservation.observe` on the physical player, synchronous and in-process; the session probe command
+`OBSERVE_PHYSICAL_QUEUE` and `PhysicalQueueObservationCommand` were **removed** (not advertised to, nor executable by, any controller;
+asserted by `PhysicalQueueCommandAuthorizationTest`). A pending operation records its `owner`; a different owner at acknowledgement time
+yields `Stale(PhysicalPlayerReplaced)`, and a mapping whose owner was replaced is unprovable. Repeat/native-shuffle for the physical
+player go through the port while the queue is (or is about to be) bounded. A stale `STATE_ENDED` that arrives while the physical player is
+not on its last item is no longer treated as a window end.
+
+**B. Logical timeline and external commands.** `LogicalQueueTimeline` is a lazy `Timeline`: one window and one period per logical entry,
+produced on demand from the immutable song list; uid = avalanche-hashed `(queue generation, index, window|period)`; duplicates are
+distinct, a generation change voids every identity. Equality ignores the current index/duration (otherwise every step re-sends the whole
+queue to every controller: measured about 8 window reads per entry per step before the fix, about 60 per step after).
+`SessionFacade.bindLogicalQueue` makes the façade present, while the queue is bounded, the logical timeline, the logical current index
+(read in-process from the physical CURRENT through the adapter at the instant of the state read), logical repeat/shuffle, and the physical
+CURRENT's position/duration/play state. External commands: Next/Previous/seek-to-index go to `LogicalQueueCommands`
+(`PlayerController.skipToNext/skipToPrevious/jumpToQueueItem`); repeat/shuffle go to the logical owner; a seek inside the item reaches the
+physical CURRENT at its own index. **Structural playlist commands (set/add/move/replace/remove/clear) are unavailable
+(`COMMAND_CHANGE_MEDIA_ITEMS`, `COMMAND_SET_MEDIA_ITEM` removed) and rejected** in bounded mode; mapping them to the P5-D mutation authority
+was not attempted (a Media3 `MediaItem` carries no queue occurrence). `seekTo(index, positionMs)` honours the index only. Physical
+refill/trim produce no timeline event for any controller (tested).
+Media3 observation: through the façade, real controllers receive the **complete** timeline (counts 301 to 50,000 observed; no slimming in
+Robolectric); each connecting controller pulls about N windows once. On-device binder/transaction limits at 25k-50k are a P5-F question.
+
+**C. Crossfade.** The unchanged crossfade stack is handed the verified window as its queue in **physical** coordinates
+(`PlayerController.boundedCrossfadeSnapshot`): queue = window songs (cached per window revision, at most 100), current = physical index,
+keys = physical from/to, `queueGeneration` = ownership epoch `(logical generation << 24) | window generation`. Readiness contract: window
+Active, no pending install/adjust/mutation, no held navigation or deletion continuation, the physical CURRENT proves its occurrence, and at
+least `AHEAD_FLOOR` items after the target (or the window ends the logical queue); otherwise `playerQueueNeedsSync` and the planner answers a
+transient Unavailable. Any window change is a new epoch, so the existing ownership rules invalidate a NEXT built on the old window. Rule:
+CURRENT is authoritative; NEXT is **invalidated and rebuilt, never patched in lock-step**, so no atomicity across two players is claimed.
+Promotion validation falls out of the same snapshot (`ownsCrossfadeSource` requires not-needs-sync). After promotion the port follows
+CURRENT and the mapping stays valid because NEXT was verified to equal the window. Fade curve/timing untouched. Tested with two real
+ExoPlayers: 40 consecutive promotions across refills, wrap under repeat ALL, no next under repeat OFF at the end, logical-only append,
+play-next inside the window, remove next, delete current, shuffle, jump outside window, failed adjustment, Full mode.
+
+**D. Restoration.** Only the persisted logical snapshot exists. `PlaybackResumptionMapper.map(..., boundedModeFor)` marks a plan `bounded`
+and does not materialize 25k `MediaItem`s. `PlayerController.adoptPlaybackResumption` now returns what Media3 installs: for a bounded plan it
+installs ONE window through the port at the saved position (verified in-process) and returns that window with the **physical** start index.
+Real Media3 contract (from `MediaSessionImpl`/`MediaUtils` bytecode): the result is applied by
+`MediaUtils.setMediaItemsWithStartIndexAndPosition`, which skips the install when `COMMAND_CHANGE_MEDIA_ITEMS` is unavailable, and then runs
+`Util.handlePlayButtonAction`; the façade is already bounded, so Media3's own install is skipped (exactly one physical install, asserted by
+calling that very function). A bounded plan is adopted even when `isForPlayback == false`. Reconnecting the app controller no longer
+re-anchors a verified window; only an unverified window or work owed from offline edits is repaired. A refused bounded install restores the
+previous mode.
+
+**E. Evidence.** `PhysicalWindowPortTest` (A1-A7), `LogicalQueueSessionTest`, `BoundedCrossfadeTest`, `BoundedRestorationTest`,
+`BoundedIntegrationMatrixTest` (restore, Next, promotion; N-1 under OFF/ALL; logical-only append; play-next; jump with NEXT ready; remove
+next; delete current; shuffle; external seek/previous; repeat at ring boundary; play during restore; disconnect mid re-anchor; subscriber sees
+one AUTO per promotion and no queue change; duplicates across promotions; failed adjustment; Full mode) plus structural guards at 1k-50k:
+CURRENT at most 100, NEXT mirrors CURRENT, NEXT materialization at most 100 songs, snapshot queue cached and at most 100, one install.
+Counts are structural; there are no wall-clock thresholds.
+
+**Correction (review of the first P5-E patch).** (a) *Resumption query vs adoption.* In Media3 1.11.1 `onPlaybackResumption` is called with `isForPlayback=true` only from a play request on a session player with no media (the result is applied with `MediaUtils.setMediaItemsWithStartIndexAndPosition` + `Util.handlePlayButtonAction`), and with `false` only from `MediaLibrarySessionImpl.getRecentMediaItemAtDeviceBootTime` (browse item list; never installed). `PlaybackResumptionHandler` therefore adopts only for `true`; a query never touches `PlayerController` (no queue, generation, window, intent, position or crossfade change) and a bounded query returns just the saved current item. Adoption captures the queue generation at request time and is dropped if a newer authority arrived while the snapshot was being mapped. (b) *External index seek.* `LogicalQueueCommands.seekToQueueItem(index, positionMs)` carries the position (`C.TIME_UNSET` = default position); a seek to the current logical item is an in-item physical seek; others use the existing latest-wins navigation (mapped seek in window, bounded re-anchor outside, both at the position; a deferred jump carries the position; a jump that retargets an already-pending deferred start replaces BOTH its occurrence and its `startPositionMs`, a rebase across a known queue edit keeps the position, and a newer start or jump never inherits an older position).
+
+**Deviations / limits.** (1) Bounded needs the façade (two-slot topology, `RUNTIME_ENABLED`); otherwise `logicalPresentationAvailable` is
+false and the queue stays Full. (2) Structural external edits are unavailable, not mapped. (3) NEXT is rebuilt (O(window)) after every window
+change instead of being adjusted in lock-step. (4) The current window's live duration is not part of the timeline identity; controllers get
+the live duration from position info. (5) Existing reconnect tests were rewritten for the new contract (plain reconnect installs nothing).
+
+**Device-only / outstanding for P5-F.** Binder transaction size and latency for 25k-50k timelines; notification/lock-screen/Android
+Auto/AVRCP Next-Previous with the logical façade; real audio at promotion with a shifted window; process-death restore at 25k; whether
+`onPlaybackResumption` reaches the service before the app controller on cold start; memory/GC under repeated promotions.
+
 ### P5-F — Device validation and activation
 
 - **Work:** capture Full baseline, run the A/B scripted workloads (§11) at 1k–50k, rehearse rollback (G8), then flip

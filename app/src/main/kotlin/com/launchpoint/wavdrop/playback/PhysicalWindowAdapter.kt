@@ -51,6 +51,9 @@ internal enum class StaleReason {
     /** A newer accepted install (or [PhysicalWindowAdapter.reset]) took over before this one was verified. */
     Superseded,
 
+    /** The physical player the operation was issued to is no longer the CURRENT physical player (promotion or replacement). */
+    PhysicalPlayerReplaced,
+
     /** The logical queue moved (`queueGeneration` bumped) before this one was verified. */
     LogicalGenerationMoved,
 }
@@ -116,40 +119,9 @@ internal data class PhysicalObservation(
     val ids: List<String>,
     val autoTransitions: Long = 0L,
 ) {
-    fun toBundle(): Bundle = Bundle().apply {
-        putLong(KEY_LOGICAL, token.logicalGeneration)
-        putLong(KEY_WINDOW, token.windowGeneration)
-        putInt(KEY_COUNT, count)
-        putInt(KEY_INDEX, currentIndex)
-        putStringArrayList(KEY_IDS, ArrayList(ids))
-        putLong(KEY_AUTO, autoTransitions)
-    }
-
     companion object {
-        private const val KEY_LOGICAL = "logicalGeneration"
-        private const val KEY_WINDOW = "windowGeneration"
-        private const val KEY_COUNT = "count"
-        private const val KEY_INDEX = "currentIndex"
-        private const val KEY_IDS = "ids"
-        private const val KEY_AUTO = "autoTransitions"
-
         /** Physical player -> natural-transition tally. Weak, so a released player is never retained. */
         private val tallies = java.util.WeakHashMap<Player, Tally>()
-
-        fun tokenToBundle(token: PlanToken): Bundle = Bundle().apply {
-            putLong(KEY_LOGICAL, token.logicalGeneration)
-            putLong(KEY_WINDOW, token.windowGeneration)
-        }
-
-        fun tokenFromBundle(bundle: Bundle): PlanToken = PlanToken(bundle.getLong(KEY_LOGICAL, -1L), bundle.getLong(KEY_WINDOW, -1L))
-
-        fun fromBundle(bundle: Bundle): PhysicalObservation = PhysicalObservation(
-            token = tokenFromBundle(bundle),
-            count = bundle.getInt(KEY_COUNT, -1),
-            currentIndex = bundle.getInt(KEY_INDEX, -1),
-            ids = bundle.getStringArrayList(KEY_IDS) ?: emptyList(),
-            autoTransitions = bundle.getLong(KEY_AUTO, 0L),
-        )
 
         private class Tally(val count: LongArray, val listener: Player.Listener)
 
@@ -192,62 +164,6 @@ internal data class PhysicalObservation(
  */
 internal fun interface PhysicalInstallVerifier {
     fun observe(token: PlanToken): ListenableFuture<PhysicalObservation>
-}
-
-/**
- * Media3 has no completion callback for `setMediaItems` (it is void, and a controller masks the mutation optimistically). The
- * smallest ordered probe available through the controller abstraction is a session command: it is queued behind the install on
- * the same connection and answered by the session side with the physical player's actual state ([PhysicalObservation]). Correctness
- * does not rely on that ordering: the adapter compares the returned state with the intended window and refuses to activate on any
- * difference.
- */
-internal object PhysicalQueueObservationCommand {
-    const val ACTION = "com.launchpoint.wavdrop.OBSERVE_PHYSICAL_QUEUE"
-    val command: SessionCommand get() = SessionCommand(ACTION, Bundle.EMPTY)
-
-    /**
-     * Only Wavdrop's own in-app controller may see or use this probe. Two independent facts are required: the controller carries the
-     * app-controller hint (the existing convention, see [ExternalTransportPolicy.APP_CONTROLLER_HINT]; a hint is client-supplied,
-     * so it is never enough alone) AND its uid, which the platform attests and a caller cannot choose, is this process's uid.
-     * The command name is not a credential.
-     */
-    fun isAuthorizedController(controller: MediaSession.ControllerInfo, ownUid: Int = Process.myUid()): Boolean =
-        controller.uid == ownUid &&
-            controller.connectionHints.getBoolean(ExternalTransportPolicy.APP_CONTROLLER_HINT, false)
-
-    /** Service side entry point: refuses (with no playlist data) any controller that is not the in-app one. */
-    fun execute(controller: MediaSession.ControllerInfo, player: Player, args: Bundle): ListenableFuture<SessionResult> =
-        if (isAuthorizedController(controller)) {
-            handle(player, args)
-        } else {
-            Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
-        }
-
-    /**
-     * Service side: answers from the session's physical player. The answer is taken from a task posted to the player's own looper,
-     * i.e. behind work already queued there (an install that is still being applied), not inline.
-     */
-    private fun handle(player: Player, args: Bundle): ListenableFuture<SessionResult> {
-        val token = PhysicalObservation.tokenFromBundle(args)
-        val future = SettableFuture.create<SessionResult>()
-        Handler(player.applicationLooper).post {
-            future.set(runCatching { SessionResult(SessionResult.RESULT_SUCCESS, PhysicalObservation.observe(player, token).toBundle()) }
-                .getOrElse { SessionResult(SessionResult.RESULT_ERROR_UNKNOWN) })
-        }
-        return future
-    }
-
-    /** Client side: a verifier that asks the session behind [controller]. */
-    fun verifier(controller: MediaController): PhysicalInstallVerifier = PhysicalInstallVerifier { token ->
-        Futures.transform(
-            controller.sendCustomCommand(command, PhysicalObservation.tokenToBundle(token)),
-            { result ->
-                check(result.resultCode == SessionResult.RESULT_SUCCESS) { "physical observation refused: ${result.resultCode}" }
-                PhysicalObservation.fromBundle(result.extras)
-            },
-            MoreExecutors.directExecutor(),
-        )
-    }
 }
 
 /** A pure installation plan: which window, where the player starts in it, and which physical repeat mode applies. */
@@ -361,7 +277,7 @@ internal sealed interface BoundedNavigationResult {
  * controller exists.
  */
 internal class QueueMutationRequest(
-    val player: Player?,
+    val player: PhysicalWindowPort?,
     val queue: List<Song>,
     val repeatMode: RepeatMode,
     val oldCurrent: Int?,
@@ -397,7 +313,7 @@ internal sealed interface MaintenanceResult {
  * Completion: `setMediaItems`/`addMediaItems`/`removeMediaItems` returning proves nothing (a controller masks the mutation
  * optimistically; listeners may even fire inside the call), and Media3 offers no completion callback for them. Observing the
  * controller can therefore only make an INSTALL PROVISIONAL (it carries no mapping). A window becomes ACTIVE solely when the
- * physical player acknowledges it through a [PhysicalInstallVerifier] (in production [PhysicalQueueObservationCommand], answered
+ * physical player acknowledges it through a [PhysicalInstallVerifier] (in production the port verifier, answered
  * service-side from the session player) and the acknowledged state equals the intended window. With no verifier nothing ever
  * becomes active. No blocking waits.
  *
@@ -432,6 +348,9 @@ internal class PhysicalWindowAdapter(
     /** True while an install or adjustment awaits its physical acknowledgement. */
     val isBusy: Boolean get() = pending != null
 
+    /** True while a navigation target is held until the in-flight adjustment settles. */
+    val hasHeldNavigation: Boolean get() = held != null
+
     /**
      * The logical occurrence the adapter last PROVED or accepted as the target of a navigation/install. Owned here (not by the
      * physical index) and used for display and as the exact anchor of a recovery re-anchor; never to translate an index.
@@ -460,7 +379,7 @@ internal class PhysicalWindowAdapter(
 
     private class Pending(
         val kind: Kind,
-        val player: Player,
+        val player: PhysicalWindowPort,
         val queue: List<Song>,
         val window: PhysicalWindow,
         val expectedIds: LongArray,
@@ -482,6 +401,8 @@ internal class PhysicalWindowAdapter(
         val lineage: List<Candidate> = emptyList(),
         /** Mutation baseline only. */
         val request: QueueMutationRequest? = null,
+        /** The physical player this operation was issued to. A different owner at acknowledgement time means it was promoted away. */
+        val owner: Any = player.owner,
     ) {
         var listener: Player.Listener? = null
         var handler: Handler? = null
@@ -494,7 +415,7 @@ internal class PhysicalWindowAdapter(
 
     /** Latest in-window navigation that arrived while an adjustment was in flight; applied when it settles. Latest wins. */
     private class HeldNavigation(
-        val player: Player,
+        val player: PhysicalWindowPort,
         val queue: List<Song>,
         val target: Int,
         val positionMs: Long,
@@ -514,12 +435,12 @@ internal class PhysicalWindowAdapter(
      * Proves the logical occurrence [player] is on through the ACTIVE window: the physical current index must map into the window
      * and the song id there must equal the id the window was verified to hold at that position. Anything else is unproven.
      */
-    fun resolveCurrent(player: Player): CurrentResolution {
+    fun resolveCurrent(player: PhysicalWindowPort): CurrentResolution {
         val a = active ?: return CurrentResolution.Unproven("no_active_window")
         if (a.window.logicalGeneration != currentLogicalGeneration()) return CurrentResolution.Unproven("logical_generation_moved")
         val physical = player.currentMediaItemIndex
         val logical = a.physicalToLogical(physical) ?: return CurrentResolution.Unproven("outside_window")
-        val id = player.currentMediaItem?.mediaId?.toLongOrNull()
+        val id = player.currentMediaId?.toLongOrNull()
         if (id == null || id != a.expectedSongIdAt(physical)) return CurrentResolution.Unproven("id_mismatch")
         if (held == null) trackedLogical = logical // a held navigation target outranks the (stale) physical position
         return CurrentResolution.Proven(logical, physical)
@@ -529,7 +450,7 @@ internal class PhysicalWindowAdapter(
      * The current logical occurrence for state display: proven through the active window when there is one; the adapter's tracked
      * occurrence while an operation is in flight (display only); null once the occurrence is unproven or the window failed.
      */
-    fun currentLogical(player: Player): Int? = when (state) {
+    fun currentLogical(player: PhysicalWindowPort): Int? = when (state) {
         // A held navigation is the newest accepted intent: it IS the authoritative current until it is applied.
         is WindowInstallState.Active -> held?.target ?: (resolveCurrent(player) as? CurrentResolution.Proven)?.logical
         is WindowInstallState.Submitted, is WindowInstallState.Provisional, is WindowInstallState.Adjusting ->
@@ -546,7 +467,7 @@ internal class PhysicalWindowAdapter(
      * supersedes any pending operation.
      */
     fun install(
-        player: Player,
+        player: PhysicalWindowPort,
         queue: List<Song>,
         logicalGeneration: Long,
         startIndex: Int,
@@ -625,7 +546,7 @@ internal class PhysicalWindowAdapter(
      *    installed, and the newest accepted target supersedes any older pending operation.
      */
     fun navigateTo(
-        player: Player,
+        player: PhysicalWindowPort,
         queue: List<Song>,
         target: Int,
         positionMs: Long,
@@ -672,7 +593,7 @@ internal class PhysicalWindowAdapter(
      * transition; [MaintenanceResult.NoChange] ends the chain, so there is no polling and no unbounded repeat.
      */
     fun maintain(
-        player: Player,
+        player: PhysicalWindowPort,
         queue: List<Song>,
         repeatMode: RepeatMode,
         verifier: PhysicalInstallVerifier?,
@@ -706,17 +627,17 @@ internal class PhysicalWindowAdapter(
      * so the occurrence an adjustment must preserve is captured authoritatively at planning time.
      */
     private fun startBaseline(
-        player: Player,
+        player: PhysicalWindowPort,
         queue: List<Song>,
         a: InstalledWindow,
         repeatMode: RepeatMode,
         verifier: PhysicalInstallVerifier?,
         onOutcome: (BoundedInstallOutcome) -> Unit,
     ): MaintenanceResult {
-        if (verifier == null) return MaintenanceResult.Unprovable("no_verifier")
+        val resolvedVerifier = verifier ?: player.verifier ?: return MaintenanceResult.Unprovable("no_verifier")
         val entry = Pending(
             Kind.Baseline, player, queue, a.window, LongArray(0), 0, a.installedCount - 1, 0L, repeatMode, trackedLogical,
-            verifier, onOutcome,
+            resolvedVerifier, onOutcome,
         )
         pending = entry
         try {
@@ -843,7 +764,7 @@ internal class PhysicalWindowAdapter(
      * last proven/accepted occurrence ([trackedLogical]). Bounded by [MAX_RECOVERY_ATTEMPTS] until a window verifies again.
      */
     fun recoverUnprovable(
-        player: Player,
+        player: PhysicalWindowPort,
         queue: List<Song>,
         repeatMode: RepeatMode,
         verifier: PhysicalInstallVerifier?,
@@ -936,7 +857,7 @@ internal class PhysicalWindowAdapter(
                 else -> MutationSubmission.Rejected("unexpected_$outcome")
             }
         }
-        val verifier = req.verifier ?: return MutationSubmission.Rejected("no_verifier")
+        val verifier = req.verifier ?: player.verifier ?: return MutationSubmission.Rejected("no_verifier")
         val token = PlanToken(generation, nextWindowGeneration)
         nextWindowGeneration = token.windowGeneration + 1L
         val entry = Pending(
@@ -1105,7 +1026,7 @@ internal class PhysicalWindowAdapter(
     // ── verification ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private fun armAcknowledgement(entry: Pending) {
-        val handler = Handler(entry.player.applicationLooper)
+        val handler = Handler(entry.player.looper)
         entry.handler = handler
         entry.submitting = false
         if (entry.kind == Kind.Install) handler.post { evaluate(entry) }
@@ -1124,6 +1045,7 @@ internal class PhysicalWindowAdapter(
      */
     private fun evaluate(entry: Pending) {
         if (pending !== entry || entry.submitting || entry.kind != Kind.Install) return
+        if (ownerReplaced(entry)) return
         if (staleByGeneration(entry)) return
         val observed = observedIds(entry.player)
         val player = entry.player
@@ -1137,7 +1059,7 @@ internal class PhysicalWindowAdapter(
      * No timers: each probe is a fresh round trip to the session.
      */
     private fun requestAcknowledgement(entry: Pending) {
-        val verifier = entry.verifier ?: return
+        val verifier = entry.verifier ?: entry.player.verifier ?: return
         val handler = entry.handler ?: return
         entry.attempts++
         val ack = verifier.observe(entry.token)
@@ -1147,6 +1069,7 @@ internal class PhysicalWindowAdapter(
     /** The physical player answered. Activates the window only for the still-pending operation whose token it echoes and matches. */
     private fun onAcknowledged(entry: Pending, ack: ListenableFuture<PhysicalObservation>) {
         if (pending !== entry || entry.submitting) return // superseded, reset, expired or already finished: a late ack is ignored
+        if (ownerReplaced(entry)) return
         if (staleByGeneration(entry)) return
         val token = entry.token
         val observation = try {
@@ -1187,6 +1110,18 @@ internal class PhysicalWindowAdapter(
         }
     }
 
+    /**
+     * True (and the operation is ended) when the physical player it was issued to is no longer the CURRENT one (a promotion or a
+     * replacement moved the port's owner). Nothing a retired player says may publish a window; the state is the explicit,
+     * recoverable NeedsReinstall and the next upkeep/navigation re-establishes the window around the tracked occurrence.
+     */
+    private fun ownerReplaced(entry: Pending): Boolean {
+        if (entry.player.owner === entry.owner) return false
+        state = WindowInstallState.NeedsReinstall(recovery(entry, "physical_player_replaced"))
+        finish(entry, BoundedInstallOutcome.Stale(entry.token, StaleReason.PhysicalPlayerReplaced))
+        return true
+    }
+
     /** True (and the operation is ended) when the logical queue moved since [entry] was planned. */
     private fun staleByGeneration(entry: Pending): Boolean {
         if (currentLogicalGeneration() == entry.generation) return false
@@ -1219,9 +1154,9 @@ internal class PhysicalWindowAdapter(
     }
 
     /** Song ids the player currently holds, by physical index. Capped so a runaway timeline cannot make this unbounded. */
-    private fun observedIds(player: Player): List<String> {
+    private fun observedIds(player: PhysicalWindowPort): List<String> {
         val count = minOf(player.mediaItemCount, policy.config.wMax + 1)
-        return List(count) { player.getMediaItemAt(it).mediaId }
+        return List(count) { player.mediaIdAt(it) }
     }
 
     /**

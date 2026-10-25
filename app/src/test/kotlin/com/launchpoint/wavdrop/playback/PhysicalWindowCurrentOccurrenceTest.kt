@@ -80,17 +80,17 @@ class PhysicalWindowCurrentOccurrenceTest {
         fun idle() = TestMediaSource.awaitCondition { !adapter.isBusy }
 
         fun install(start: Int) {
-            adapter.install(r.controller, q, generation, start, 0L, repeat, ctl) { outcomes += it }
+            adapter.install(r.port, q, generation, start, 0L, repeat, ctl) { outcomes += it }
             idle()
         }
 
         fun navigate(target: Int): BoundedNavigationResult {
-            val result = adapter.navigateTo(r.controller, q, target, 0L, repeat, ctl) { outcomes += it }
+            val result = adapter.navigateTo(r.port, q, target, 0L, repeat, ctl) { outcomes += it }
             idle()
             return result
         }
 
-        fun maintain(): MaintenanceResult = adapter.maintain(r.controller, q, repeat, ctl) { outcomes += it }
+        fun maintain(): MaintenanceResult = adapter.maintain(r.port, q, repeat, ctl) { outcomes += it }
 
         fun quiet(max: Int = 30) {
             repeat(max) {

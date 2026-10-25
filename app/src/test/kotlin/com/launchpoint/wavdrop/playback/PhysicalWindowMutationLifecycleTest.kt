@@ -68,14 +68,14 @@ class PhysicalWindowMutationLifecycleTest {
         val ctl = Controlled(r)
 
         fun idle() = TestMediaSource.awaitCondition { !adapter.isBusy }
-        fun install(start: Int) { adapter.install(r.controller, q, generation, start, 0L, repeat, ctl) { outcomes += it }; idle() }
-        fun navigate(target: Int) = adapter.navigateTo(r.controller, q, target, 0L, repeat, ctl) { outcomes += it }
-        fun quiet() { repeat(30) { when (adapter.maintain(r.controller, q, repeat, ctl) { outcomes += it }) { is MaintenanceResult.NoChange -> return; else -> idle() } }; error("no quiesce") }
+        fun install(start: Int) { adapter.install(r.port, q, generation, start, 0L, repeat, ctl) { outcomes += it }; idle() }
+        fun navigate(target: Int) = adapter.navigateTo(r.port, q, target, 0L, repeat, ctl) { outcomes += it }
+        fun quiet() { repeat(30) { when (adapter.maintain(r.port, q, repeat, ctl) { outcomes += it }) { is MaintenanceResult.NoChange -> return; else -> idle() } }; error("no quiesce") }
 
         /** What PlayerController does: the logical queue and generation are final BEFORE the adapter hears about it. */
         fun mutate(
             newQueue: List<Song>, oldCurrent: Int?, map: (Int) -> Int?, continuation: Int? = null,
-            player: Player? = r.controller, verifier: PhysicalInstallVerifier? = ctl,
+            player: PhysicalWindowPort? = r.port, verifier: PhysicalInstallVerifier? = ctl,
         ): MutationSubmission {
             generation++
             q = newQueue
@@ -93,7 +93,7 @@ class PhysicalWindowMutationLifecycleTest {
             assertNotNull("$label: active (state=${adapter.state}, outcomes=${outcomes.takeLast(3)})", a)
             a!!
             assertEquals("$label: ids", (0 until a.installedCount).map { q[a.physicalToLogical(it)!!].id.toString() }, serverIds())
-            val live = TestMediaSource.awaitCondition { adapter.resolveCurrent(r.controller) is CurrentResolution.Proven }.let { adapter.resolveCurrent(r.controller) as CurrentResolution.Proven }
+            val live = TestMediaSource.awaitCondition { adapter.resolveCurrent(r.port) is CurrentResolution.Proven }.let { adapter.resolveCurrent(r.port) as CurrentResolution.Proven }
             assertEquals("$label: logical current (proven live through the active window)", expectedLogicalCurrent, live.logical)
             assertEquals("$label: physical current song", q[expectedLogicalCurrent].id.toString(), r.player.currentMediaItem?.mediaId)
             assertEquals("$label: generation", generation, a.window.logicalGeneration)
@@ -111,7 +111,7 @@ class PhysicalWindowMutationLifecycleTest {
         w.install(100)
         w.navigate(150); w.idle()
         w.ctl.hold(answerFirst = 1)                    // refill: baseline answered, its acknowledgement HELD
-        assertTrue(w.adapter.maintain(w.r.controller, w.q, w.repeat, w.ctl) { w.outcomes += it } is MaintenanceResult.Submitted)
+        assertTrue(w.adapter.maintain(w.r.port, w.q, w.repeat, w.ctl) { w.outcomes += it } is MaintenanceResult.Submitted)
         TestMediaSource.awaitCondition { w.ctl.held.isNotEmpty() }
         TestMediaSource.awaitCondition { w.r.player.getMediaItemAt(0).mediaId != "81" } // the trim reached the physical player
         w.ctl.live = true
@@ -143,7 +143,7 @@ class PhysicalWindowMutationLifecycleTest {
         w.install(0)                                   // window [0..79]
         w.navigate(50); w.idle()
         w.ctl.hold(answerFirst = 1)
-        assertTrue(w.adapter.maintain(w.r.controller, w.q, w.repeat, w.ctl) { w.outcomes += it } is MaintenanceResult.Submitted)
+        assertTrue(w.adapter.maintain(w.r.port, w.q, w.repeat, w.ctl) { w.outcomes += it } is MaintenanceResult.Submitted)
         TestMediaSource.awaitCondition { w.ctl.held.isNotEmpty() }
         assertTrue("held while the refill is verified", w.navigate(55) is BoundedNavigationResult.Held)
         val newQ = insertAt(w.q, 52, s(90_003L))       // an insertion before the held target shifts it
@@ -180,13 +180,13 @@ class PhysicalWindowMutationLifecycleTest {
     @Test fun aFailedPhysicalOperationLeavesTheLogicalEditAndRecoversWithOneBoundedInstall() {
         val w = W(distinct(25_000))
         w.install(500)
-        val dropping = object : ForwardingPlayer(w.r.controller) {
+        val dropping = object : ForwardingPlayer(w.r.recording) {
             override fun addMediaItems(index: Int, mediaItems: MutableList<MediaItem>) = Unit
             override fun removeMediaItems(fromIndex: Int, toIndex: Int) = Unit
         }
         val before = w.r.recording.calls.size
         val newQ = insertAt(w.q, 501, s(90_006L))
-        w.mutate(newQ, 500, OccurrenceMap.insert(501, 1), player = dropping)
+        w.mutate(newQ, 500, OccurrenceMap.insert(501, 1), player = PhysicalPlayerPort(dropping))
         TestMediaSource.awaitCondition { w.outcomes.any { it is BoundedInstallOutcome.Incomplete } }
         w.idle()
         assertEquals("the accepted logical edit stands", 25_001, w.q.size)
@@ -254,7 +254,7 @@ class PhysicalWindowMutationLifecycleTest {
         // Reconnect: one bounded install around the exact current of the NEW queue.
         w.adapter.onPlayerReplaced()
         val before = w.r.recording.calls.size
-        assertTrue(w.adapter.navigateTo(w.r.controller, w.q, 501, 0L, w.repeat, w.ctl) { w.outcomes += it } is BoundedNavigationResult.Reanchoring)
+        assertTrue(w.adapter.navigateTo(w.r.port, w.q, 501, 0L, w.repeat, w.ctl) { w.outcomes += it } is BoundedNavigationResult.Reanchoring)
         w.idle()
         w.assertConsistent(501, "after reconnect")
         assertEquals(1, w.r.recording.calls.drop(before).count { it.startsWith("setMediaItems(") })
@@ -264,7 +264,7 @@ class PhysicalWindowMutationLifecycleTest {
         val w = W(distinct(25_000))
         w.install(500)
         val newQ = insertAt(w.q, 501, s(90_010L))
-        assertTrue(w.mutate(newQ, 500, OccurrenceMap.insert(501, 1), verifier = null) is MutationSubmission.Rejected)
+        assertTrue(w.mutate(newQ, 500, OccurrenceMap.insert(501, 1), player = w.r.unverifiablePort, verifier = null) is MutationSubmission.Rejected)
         assertNull("the old mapping must not describe the new queue", w.adapter.active)
     }
 

@@ -55,8 +55,8 @@ class PhysicalWindowAdapterTest {
         start: Int,
         positionMs: Long = 0L,
         repeat: RepeatMode = RepeatMode.OFF,
-        player: Player = rig.controller,
-        verifier: PhysicalInstallVerifier? = PhysicalQueueObservationCommand.verifier(rig.controller),
+        player: PhysicalWindowPort = rig.port,
+        verifier: PhysicalInstallVerifier? = PhysicalPlayerPort(rig.recording).verifier,
     ): BoundedInstallOutcome = adapter.install(player, queue, currentGeneration, start, positionMs, repeat, verifier) { outcomes += it }
 
     private fun settle(rig: RealMedia3QueueRig) = rig.settle(150)
@@ -230,10 +230,10 @@ class PhysicalWindowAdapterTest {
         val r = rig(queue)
         val h = Harness()
         // A player that swallows the install: the observed timeline never reflects the intended window.
-        val dropping = object : ForwardingPlayer(r.controller) {
+        val dropping = object : ForwardingPlayer(r.recording) {
             override fun setMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long) = Unit
         }
-        assertTrue(h.install(r, queue, 400, positionMs = 900L, player = dropping) is BoundedInstallOutcome.Submitted)
+        assertTrue(h.install(r, queue, 400, positionMs = 900L, player = PhysicalPlayerPort(dropping)) is BoundedInstallOutcome.Submitted)
         settle(r)
         assertNull(h.adapter.active)
         assertNull(h.adapter.active)
@@ -249,13 +249,13 @@ class PhysicalWindowAdapterTest {
         val queue = distinct(1_000)
         val r = rig(queue)
         val throwing = PhysicalWindowAdapter(currentLogicalGeneration = { 1L }, materialize = { error("boom") })
-        assertTrue(throwing.install(r.controller, queue, 1L, 10, 0L, RepeatMode.OFF) is BoundedInstallOutcome.Failed)
+        assertTrue(throwing.install(r.port, queue, 1L, 10, 0L, RepeatMode.OFF) is BoundedInstallOutcome.Failed)
         assertTrue(throwing.state is WindowInstallState.NeedsReinstall)
         val oversized = PhysicalWindowAdapter(
             currentLogicalGeneration = { 1L },
             materialize = { songs -> List(songs.size + 1) { songs[0].toPlaybackMediaItem() } },
         )
-        assertTrue(oversized.install(r.controller, queue, 1L, 10, 0L, RepeatMode.OFF) is BoundedInstallOutcome.Failed)
+        assertTrue(oversized.install(r.port, queue, 1L, 10, 0L, RepeatMode.OFF) is BoundedInstallOutcome.Failed)
         assertNull(oversized.active)
         assertTrue("no list was ever pushed", r.recording.calls.none { it.startsWith("setMediaItems") })
         assertEquals(0, r.controller.mediaItemCount)
@@ -266,11 +266,11 @@ class PhysicalWindowAdapterTest {
         val r = rig(queue)
         val h = Harness()
         // The player receives the right window but starts at the wrong physical item.
-        val wrongStart = object : ForwardingPlayer(r.controller) {
+        val wrongStart = object : ForwardingPlayer(r.recording) {
             override fun setMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long) =
                 super.setMediaItems(mediaItems, startIndex + 1, startPositionMs)
         }
-        h.install(r, queue, 400, player = wrongStart)
+        h.install(r, queue, 400, player = PhysicalPlayerPort(wrongStart))
         settle(r)
         assertNull(h.adapter.active)
         assertTrue((h.outcomes.single() as BoundedInstallOutcome.Incomplete).detail.contains("physical: current index"))
@@ -427,7 +427,7 @@ class PhysicalWindowAdapterTest {
         val queue = distinct(1_000)
         val r = rig(queue)
         val h = Harness()
-        h.install(r, queue, 400, verifier = null)
+        h.install(r, queue, 400, player = r.unverifiablePort, verifier = null)
         awaitPhysical(r, 100)
         TestMediaSource.awaitCondition { h.adapter.state is WindowInstallState.Provisional }
         h.adapter.verifyPending()
@@ -478,7 +478,8 @@ class PhysicalWindowAdapterTest {
         assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
         val source = File("src/main/kotlin/com/launchpoint/wavdrop/playback/PlayerController.kt").readText()
         assertTrue(source.contains("internal var boundedInstallEnabledForTesting: Boolean = false"))
-        assertEquals(1, Regex("""physicalWindowAdapter\.install\(""").findAll(source).count())
+        // the install seam and the bounded resumption window (P5-E), both through the physical port
+        assertEquals(2, Regex("""physicalWindowAdapter\.install\(""").findAll(source).count())
         // Every whole-playbackQueue push goes through the seam; direct calls left: the seam's Full branch and the 1-song external-URI install.
         val direct = Regex("""setMeasuredMediaItems\(\s*operation\s*=[^)]*songs = playbackQueue""").findAll(source).count()
         assertEquals(2, direct)

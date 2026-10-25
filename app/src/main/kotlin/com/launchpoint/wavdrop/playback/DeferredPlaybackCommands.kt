@@ -24,16 +24,24 @@ internal sealed interface DeferredStart {
     /** Identity check for [startPlaybackIndex] at install time. */
     val startSongId: Long
 
-    /** The same command aimed at another occurrence of the same logical queue (a queue jump made while still disconnected). */
-    fun retargeted(playbackIndex: Int, songId: Long): DeferredStart
+    /** Where in the started item to land (an external index-and-position seek that retargeted this start); 0 = the start of the item. */
+    val startPositionMs: Long
+
+    /**
+     * The same command aimed at another occurrence of the same logical queue (a queue jump made while still disconnected), at
+     * [positionMs] (the newest request replaces the target AND the position; an ordinary jump passes 0).
+     */
+    fun retargeted(playbackIndex: Int, songId: Long, positionMs: Long = 0L): DeferredStart
 
     /** Album / artist / folder / playlist / collection / library / search-replace start (the common queue path). */
     data class LibraryQueue(
         override val selectionId: Long,
         override val startPlaybackIndex: Int,
         override val startSongId: Long,
+        override val startPositionMs: Long = 0L,
     ) : DeferredStart {
-        override fun retargeted(playbackIndex: Int, songId: Long) = copy(startPlaybackIndex = playbackIndex, startSongId = songId)
+        override fun retargeted(playbackIndex: Int, songId: Long, positionMs: Long) =
+            copy(startPlaybackIndex = playbackIndex, startSongId = songId, startPositionMs = positionMs)
     }
 
     /** Search tap that preserves the existing queue (history + tapped song + continuation). */
@@ -41,8 +49,10 @@ internal sealed interface DeferredStart {
         override val selectionId: Long,
         override val startPlaybackIndex: Int,
         override val startSongId: Long,
+        override val startPositionMs: Long = 0L,
     ) : DeferredStart {
-        override fun retargeted(playbackIndex: Int, songId: Long) = copy(startPlaybackIndex = playbackIndex, startSongId = songId)
+        override fun retargeted(playbackIndex: Int, songId: Long, positionMs: Long) =
+            copy(startPlaybackIndex = playbackIndex, startSongId = songId, startPositionMs = positionMs)
     }
 
     /** ACTION_VIEW audio: a one-item external queue, never persisted as a library session. */
@@ -51,9 +61,11 @@ internal sealed interface DeferredStart {
         override val startSongId: Long,
         val uri: String,
         val displayName: String?,
+        override val startPositionMs: Long = 0L,
     ) : DeferredStart {
         override val startPlaybackIndex: Int get() = 0
-        override fun retargeted(playbackIndex: Int, songId: Long) = this // a one-item queue has exactly one occurrence
+        override fun retargeted(playbackIndex: Int, songId: Long, positionMs: Long) =
+            copy(startPositionMs = positionMs) // a one-item queue has exactly one occurrence; only the position can change
     }
 }
 
@@ -61,6 +73,8 @@ internal sealed interface DeferredStart {
 internal data class PendingQueueJump(
     val songId: Long,
     val resolvedPlaybackIndex: Int,
+    /** Where in the target item to land (an external index-and-position seek); 0 for an ordinary jump. */
+    val positionMs: Long = 0L,
 )
 
 /**
@@ -207,17 +221,17 @@ internal class DeferredPlaybackCommands {
         return command
     }
 
-    fun captureQueueJump(songId: Long, playbackIndex: Int, queueGeneration: Long? = null): JumpCapture {
+    fun captureQueueJump(songId: Long, playbackIndex: Int, queueGeneration: Long? = null, positionMs: Long = 0L): JumpCapture {
         seek = null
         navigation = null
         val pending = start
         return if (pending != null) {
-            start = pending.retargeted(playbackIndex, songId)
+            start = pending.retargeted(playbackIndex, songId, positionMs)
             queueGeneration?.let { startQueueGeneration = it }
             queueJump = null
             JumpCapture.RetargetedStart
         } else {
-            queueJump = PendingQueueJump(songId = songId, resolvedPlaybackIndex = playbackIndex)
+            queueJump = PendingQueueJump(songId = songId, resolvedPlaybackIndex = playbackIndex, positionMs = positionMs)
             JumpCapture.DeferredJump
         }
     }
@@ -257,7 +271,7 @@ internal class DeferredPlaybackCommands {
             startQueueGeneration = 0L
             return true
         }
-        start = pending.retargeted(newIndex, pending.startSongId)
+        start = pending.retargeted(newIndex, pending.startSongId, pending.startPositionMs) // a rebase keeps the requested position
         startQueueGeneration = generationAfterEdit
         return true
     }

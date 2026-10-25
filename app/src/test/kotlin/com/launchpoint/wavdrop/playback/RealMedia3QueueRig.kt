@@ -46,11 +46,17 @@ internal class RealMedia3QueueRig(
     sessionName: String = "lq",
     loadInitialQueue: Boolean = true,
     physicalAck: Boolean = false,
+    /** P5-E: put the production [SessionFacade] between the physical player and the session (the production chain). */
+    withFacade: Boolean = false,
 ) {
     private val context: Context get() = RuntimeEnvironment.getApplication()
     val player: ExoPlayer = TestMediaSource.newPlayer(context)
     val recording = RecordingPlayer(player)
-    val session: MediaSession = MediaSession.Builder(context, recording).setId("$sessionName-${counter++}").apply { if (physicalAck) setCallback(AckCallback()) }.build()
+    val port: PhysicalWindowPort = PhysicalPlayerPort(recording)
+    /** A port that cannot observe the physical player: nothing may ever be acknowledged through it. */
+    val unverifiablePort: PhysicalWindowPort = object : PhysicalWindowPort by PhysicalPlayerPort(recording) { override val verifier: PhysicalInstallVerifier? = null }
+    val facade: SessionFacade? = if (withFacade) SessionFacade(recording) else null
+    val session: MediaSession = MediaSession.Builder(context, facade ?: recording).setId("$sessionName-${counter++}").apply { if (physicalAck) setCallback(AckCallback()) }.build()
     val controller: MediaController
 
     init {
@@ -126,25 +132,11 @@ internal class RealMedia3QueueRig(
 }
 
 /**
- * Test stand-in for PlaybackService's session callback. It uses the PRODUCTION connection-result builder and the PRODUCTION
- * authorized executor, so an unmarked controller is neither advertised the probe nor answered.
+ * Test stand-in for PlaybackService's session callback: the PRODUCTION connection-result builder. (P5-E: there is no physical
+ * diagnostic command any more; physical verification is in-process through the port.)
  */
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 internal class AckCallback : MediaSession.Callback {
     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
         PlaybackService.withWavdropCommands(session, controller)
-
-    override fun onCustomCommand(
-        session: MediaSession,
-        controller: MediaSession.ControllerInfo,
-        customCommand: androidx.media3.session.SessionCommand,
-        args: Bundle,
-    ): com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.SessionResult> =
-        if (customCommand.customAction == PhysicalQueueObservationCommand.ACTION) {
-            PhysicalQueueObservationCommand.execute(controller, session.player, args)
-        } else {
-            com.google.common.util.concurrent.Futures.immediateFuture(
-                androidx.media3.session.SessionResult(androidx.media3.session.SessionResult.RESULT_SUCCESS),
-            )
-        }
 }

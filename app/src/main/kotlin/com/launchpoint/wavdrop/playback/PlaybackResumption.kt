@@ -25,6 +25,12 @@ internal data class PlaybackResumptionPlan(
     val startPositionMs: Long,
     val repeatMode: RepeatMode,
     val shuffleEnabled: Boolean,
+    /**
+     * P5-E: a plan for a queue that is installed as a bounded physical window. [mediaItems] is then EMPTY (the full queue is never
+     * materialized for Media3): the controller builds the window, installs it, and hands Media3 the window items with the PHYSICAL
+     * start index ([PlayerController.adoptPlaybackResumption]). [startPlaybackIndex] is always the LOGICAL index.
+     */
+    val bounded: Boolean = false,
 )
 
 internal sealed interface PlaybackResumptionResult {
@@ -34,6 +40,7 @@ internal sealed interface PlaybackResumptionResult {
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 internal fun PlaybackResumptionPlan.toMedia3Resumption(): MediaSession.MediaItemsWithStartPosition =
+    if (bounded) error("a bounded plan is converted by PlayerController.adoptPlaybackResumption (physical window, physical start index)") else
     MediaSession.MediaItemsWithStartPosition(
         mediaItems,
         startPlaybackIndex,
@@ -46,6 +53,8 @@ internal object PlaybackResumptionMapper {
         snapshot: PlaybackSessionSnapshot?,
         settings: ResumeBehaviorSettings,
         availableSongs: List<Song>,
+        /** Whether a queue of this size is installed as a bounded window (the policy, plus the topology that can present it). */
+        boundedModeFor: (queueSize: Int) -> Boolean = { false },
     ): PlaybackResumptionResult {
         val rawSnapshot = snapshot
             ?: return PlaybackResumptionResult.Unavailable(PlaybackResumptionFailure.NO_SAVED_SESSION)
@@ -77,17 +86,19 @@ internal object PlaybackResumptionMapper {
             )
         }
         val playbackQueue = playbackOrder.map(libraryQueue::get)
+        val bounded = boundedModeFor(playbackQueue.size)
         return PlaybackResumptionResult.Ready(
             PlaybackResumptionPlan(
                 libraryQueue = libraryQueue,
                 playbackOrder = playbackOrder,
                 playbackQueue = playbackQueue,
-                mediaItems = playbackQueue.map(Song::toPlaybackMediaItem),
+                mediaItems = if (bounded) emptyList() else playbackQueue.map(Song::toPlaybackMediaItem),
                 currentLibraryIndex = currentLibraryIndex,
                 startPlaybackIndex = startPlaybackIndex,
                 startPositionMs = adjusted.positionMs,
                 repeatMode = adjusted.repeatMode,
                 shuffleEnabled = adjusted.shuffleEnabled,
+                bounded = bounded,
             )
         )
     }

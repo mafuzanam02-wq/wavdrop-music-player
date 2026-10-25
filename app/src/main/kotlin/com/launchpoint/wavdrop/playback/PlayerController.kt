@@ -956,10 +956,8 @@ class PlayerController @Inject constructor(
             // paths) the mapped value already equals `repeatMode`, so this early-returns without
             // re-touching the player or re-emitting.
             if (isBounded()) {
-                // The physical repeat mode is only a mirror of the logical one (ALL is window geometry, never a physical loop). A
-                // different value is an external change that cannot be honoured until P5-D: reassert the mirror.
-                val mirror = physicalRepeatModeFor(repeatMode)
-                if (newRepeatMode != mirror) mediaController?.repeatMode = mirror
+                // P5-E: in bounded mode this controller observes the LOGICAL repeat the façade presents. An external change is routed
+                // to the logical command port instead, and the physical mirror is managed through the physical port only.
                 return
             }
             val mapped = repeatModeFromPlayerMode(newRepeatMode)
@@ -978,6 +976,8 @@ class PlayerController @Inject constructor(
             //
             // Loop safety: setting it back to false re-enters this callback with
             // shuffleModeEnabled=false, which falls through the guard and does nothing.
+            // P5-E: bounded mode presents the logical shuffle state to this controller; it is never a native-shuffle intrusion.
+            if (isBounded()) return
             if (shouldReassertMediaShuffleOff(shuffleModeEnabled)) {
                 if (DEBUG_STATS) Log.d(TAG, "[shuffleModeChanged] external shuffle=true -> reasserting false")
                 mediaController?.shuffleModeEnabled = false
@@ -1127,6 +1127,7 @@ class PlayerController @Inject constructor(
      */
     private fun bumpQueueGeneration() {
         queueGeneration++
+        notifyLogicalPresentationChanged()
         pendingDeletionContinuation = null // a bounded deleted-current continuation belongs to the generation that made it
         resetBadMediaRecoveryEpisode()
         // The logical queue is about to change: whatever was verified, and any in-flight repair, no longer applies. A dirty
@@ -1402,13 +1403,17 @@ class PlayerController @Inject constructor(
         controllerConnectionState = ControllerConnectionDecision.onConnected()
         controller.addListener(playerListener)
         if (isBounded()) {
-            // P5-C: a new controller invalidates the verified window; the drain re-anchors it (see synchronizePlayerQueueOnReconnect).
-            physicalWindowAdapter.onPlayerReplaced()
+            // P5-E: the physical window lives in the physical player and is observed in-process through the port, so a new controller
+            // says nothing about it and a plain reconnect needs no re-anchor. Only a window that is not verified (or work owed from
+            // edits accepted while disconnected) is repaired, by the drain that follows.
             pendingDeletionContinuation = null
-            playerQueueNeedsSync = true
+            val verified = physicalWindowAdapter.active != null && !physicalWindowAdapter.isBusy
+            if (!verified || playerQueueNeedsSync) {
+                physicalWindowAdapter.onPlayerReplaced()
+                playerQueueNeedsSync = true
+            }
         }
-        controller.repeatMode = physicalRepeatModeFor(repeatMode)
-        controller.shuffleModeEnabled = false
+        applyPhysicalTransportModes(controller)
         drainPendingRequests(controller)
         _progressPlayer.value = controller
     }
@@ -1444,7 +1449,7 @@ class PlayerController @Inject constructor(
                 // install is not available until the player reports the item seekable (Media3 drops the command), so a seek that
                 // is still valid for the started occurrence is folded into the install position instead. With a Next/Previous
                 // also pending the occurrence is about to change, so the seek keeps its post-navigation stale validation.
-                var startPositionMs = 0L
+                var startPositionMs = start.startPositionMs
                 if (seek != null && drained.navigation == null) {
                     val resolution = PendingTransport.resolveSeek(
                         seek = seek,
@@ -1507,16 +1512,16 @@ class PlayerController @Inject constructor(
     }
 
     /** A queue jump made while no controller exists: retargets a deferred start (newer than it) or is held as a jump. */
-    private fun deferQueueJump(songId: Long, playbackIndex: Int) {
-        when (deferred.captureQueueJump(songId, playbackIndex, queueGeneration)) {
-            JumpCapture.RetargetedStart -> retargetAcceptedStart(playbackIndex)
+    private fun deferQueueJump(songId: Long, playbackIndex: Int, positionMs: Long = 0L) {
+        when (deferred.captureQueueJump(songId, playbackIndex, queueGeneration, positionMs)) {
+            JumpCapture.RetargetedStart -> retargetAcceptedStart(playbackIndex, positionMs)
             JumpCapture.DeferredJump -> Unit
         }
         ensureControllerConnection()
     }
 
     /** The deferred start now targets another occurrence of the same logical queue; mirror what accepting a start there does. */
-    private fun retargetAcceptedStart(playbackIndex: Int) {
+    private fun retargetAcceptedStart(playbackIndex: Int, positionMs: Long = 0L) {
         val song = playbackQueue.getOrNull(playbackIndex) ?: return
         lastKnownPositionMs = -1L
         pendingPreserveSearchPlan = null // its recorded index belongs to the previous target
@@ -1526,7 +1531,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = song,
                 currentIndex = playbackIndex,
-                positionMs = 0L,
+                positionMs = positionMs,
                 durationMs = song.duration.coerceAtLeast(0L),
                 bufferedPositionMs = 0L,
                 isSeekable = false,
@@ -1783,8 +1788,7 @@ class PlayerController @Inject constructor(
 
     /** Physical install of an accepted preserve-search selection (the connected path and the deferred drain share it). */
     private fun installPreservedSearchStart(controller: MediaController, playbackStartIndex: Int, play: Boolean, positionMs: Long = 0L) {
-        controller.repeatMode = repeatMode.toPlayerRepeatMode()
-        controller.shuffleModeEnabled = false
+        applyPhysicalTransportModes(controller)
         controller.installPlaybackQueue(
             operation = "preserve_search",
             startIndex = playbackStartIndex,
@@ -1847,8 +1851,7 @@ class PlayerController @Inject constructor(
 
     /** Physical install of an accepted external-URI selection (the connected path and the deferred drain share it). */
     private fun installExternalStart(controller: MediaController, play: Boolean, positionMs: Long = 0L) {
-        controller.repeatMode = repeatMode.toPlayerRepeatMode()
-        controller.shuffleModeEnabled = false
+        applyPhysicalTransportModes(controller)
         controller.setMeasuredMediaItems(
             operation = "external_uri",
             songs = playbackQueue,
@@ -1961,8 +1964,7 @@ class PlayerController @Inject constructor(
 
     /** Physical install of an accepted library-queue selection (the connected path and the deferred drain share it). */
     private fun installLibraryStart(controller: MediaController, playbackStartIndex: Int, play: Boolean, positionMs: Long = 0L) {
-        controller.repeatMode = repeatMode.toPlayerRepeatMode()
-        controller.shuffleModeEnabled = false
+        applyPhysicalTransportModes(controller)
         // ExoPlayer is loaded with playbackQueue so auto-transitions follow shuffle order.
         controller.installPlaybackQueue(
             operation = "play_from_queue",
@@ -2228,7 +2230,15 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
-    fun jumpToQueueItem(playbackIndex: Int) {
+    fun jumpToQueueItem(playbackIndex: Int) = seekToQueueItem(playbackIndex, 0L)
+
+    /**
+     * The one queue-selection entry for an index AND a position (an external index-bearing seek reaches it through the logical
+     * command port). [positionMs] is where to land in the target item; the default position is 0. In a bounded window an in-window
+     * target is a mapped physical seek, an out-of-window target a bounded re-anchor, both at [positionMs]; the same latest-wins
+     * navigation authority as every other selection applies.
+     */
+    fun seekToQueueItem(playbackIndex: Int, positionMs: Long) {
         if (playbackIndex !in playbackQueue.indices) return
         // Explicit user selection supersedes automatic bad-media recovery.
         resetBadMediaRecoveryEpisode()
@@ -2239,12 +2249,12 @@ class PlayerController @Inject constructor(
             // Defer through the same bounded, stale-safe machinery as jumpToSongById: bind to the
             // song at this occurrence so executePendingQueueJump re-resolves it on reconnect
             // (correcting a mutated index, never jumping to a different song). Latest jump wins.
-            deferQueueJump(songId = playbackQueue[playbackIndex].id, playbackIndex = playbackIndex)
+            deferQueueJump(songId = playbackQueue[playbackIndex].id, playbackIndex = playbackIndex, positionMs = positionMs)
             return
         }
         deferred.clear()
         // playbackIndex is directly the ExoPlayer media item index since ExoPlayer holds playbackQueue.
-        seekToPlaybackIndex(controller, playbackIndex)
+        seekToPlaybackIndex(controller, playbackIndex, positionMs = positionMs)
     }
 
     /**
@@ -2297,7 +2307,7 @@ class PlayerController @Inject constructor(
                 resolvedPlaybackIndex = request.resolvedPlaybackIndex,
             )
         ) {
-            is PendingQueueJumpResolution.Seek -> seekToPlaybackIndex(controller, resolution.playbackIndex)
+            is PendingQueueJumpResolution.Seek -> seekToPlaybackIndex(controller, resolution.playbackIndex, positionMs = request.positionMs)
             PendingQueueJumpResolution.Discard -> {
                 Log.w(TAG, "Discarding stale pending queue jump songId=${request.songId}")
                 syncNowPlayingState()
@@ -2500,7 +2510,7 @@ class PlayerController @Inject constructor(
                 deferred.clear()
                 // An empty queue has no window. The adapter is reset and the mode left BEFORE the physical clear: the clear fires its
                 // listener callbacks synchronously, and bounded upkeep must not see the old queue and re-install it.
-                if (isBounded()) { physicalWindowAdapter.reset(); installedQueueMode = QueueMode.Full }
+                if (isBounded()) { physicalWindowAdapter.reset(); installedQueueMode = QueueMode.Full; notifyLogicalPresentationChanged() }
                 mediaController?.pause()
                 mediaController?.clearMediaItems()
                 libraryQueue        = emptyList()
@@ -3042,20 +3052,32 @@ class PlayerController @Inject constructor(
     }.isSuccess
 
     fun cycleRepeatMode() {
+        setRepeatModeExplicit(
+            when (repeatMode) {
+                RepeatMode.OFF -> RepeatMode.ALL
+                RepeatMode.ALL -> RepeatMode.ONE
+                RepeatMode.ONE -> RepeatMode.OFF
+            },
+        )
+    }
+
+    /** One explicit repeat change (the cycle, or an external controller's setRepeatMode through the logical command port). */
+    private fun setRepeatModeExplicit(target: RepeatMode) {
         // CF-2H1: user intent cancels an owned crossfade BEFORE the repeat topology changes (every explicit command,
         // whether or not the new mode would invalidate the planned target). Also the path of the service's custom
         // CYCLE_REPEAT command, so one user command yields one notification.
         explicitRepeatChangeListeners.notifyExplicitRepeatChange()
-        repeatMode = when (repeatMode) {
-            RepeatMode.OFF -> RepeatMode.ALL
-            RepeatMode.ALL -> RepeatMode.ONE
-            RepeatMode.ONE -> RepeatMode.OFF
-        }
-        mediaController?.repeatMode = physicalRepeatModeFor(repeatMode)
+        repeatMode = target
+        // P5-E: in bounded mode the physical mirror is set through the physical port; the controller's repeat is the logical one.
+        if (isBounded()) physicalPort?.repeatMode = physicalRepeatModeFor(repeatMode)
+        else mediaController?.repeatMode = physicalRepeatModeFor(repeatMode)
         _nowPlayingState.update { it.copy(repeatMode = repeatMode) }
         saveSessionAsync()
         // Bounded: leaving/entering ALL changes the window geometry (ring wrap); the policy re-plans it from the verified window.
-        if (isBounded()) maintainBoundedWindow()
+        if (isBounded()) {
+            maintainBoundedWindow()
+            notifyLogicalPresentationChanged()
+        }
     }
 
     private val explicitSeekListeners = ExplicitSeekListenerRegistry()
@@ -3316,8 +3338,7 @@ class PlayerController @Inject constructor(
             PlaybackStartupTrace.mark("ui_state_published")
 
             runCatching {
-                controller.repeatMode = repeatMode.toPlayerRepeatMode()
-                controller.shuffleModeEnabled = false
+                applyPhysicalTransportModes(controller)
                 controller.installPlaybackQueue(
                     operation = operation,
                     startIndex = startPlaybackIndex,
@@ -3344,8 +3365,14 @@ class PlayerController @Inject constructor(
         }
     }
 
-    /** Mirrors a service-owned Media3 resumption without connecting back to the same session. */
-    internal fun adoptPlaybackResumption(plan: PlaybackResumptionPlan) {
+    /**
+     * Mirrors a service-owned Media3 resumption without connecting back to the same session, and returns what Media3 must install.
+     * Full: the whole queue, exactly as before. Bounded (P5-E): the restored LOGICAL queue is adopted, ONE bounded window around the
+     * exact saved occurrence is installed through the physical port at the saved position and verified in-process, and Media3 is
+     * handed that window with the PHYSICAL start index. Once the façade presents the logical queue Media3's own install is skipped
+     * (the change-items commands are unavailable), so there is no second install and no whole-queue install ever.
+     */
+    internal fun adoptPlaybackResumption(plan: PlaybackResumptionPlan): androidx.media3.session.MediaSession.MediaItemsWithStartPosition {
         hydrationCount++ // a service-owned resumption is a session load, not a queue edit
         bumpQueueGeneration()
         isExternalPlayback = false
@@ -3372,6 +3399,44 @@ class PlayerController @Inject constructor(
                 isSeekable = false,
             )
         }
+        if (!plan.bounded) return plan.toMedia3Resumption()
+        return installBoundedResumptionWindow(plan)
+    }
+
+    /** The queue authority a resumption request captured when it arrived; a newer selection/queue change moves it. */
+    internal fun resumptionAuthority(): Long = queueGeneration
+
+    internal fun isResumptionAuthorityCurrent(token: Long): Boolean = queueGeneration == token
+
+    /** Whether a restored queue of [queueSize] songs is installed as a bounded window (the service passes this to the resumption mapper). */
+    internal fun boundedModeForResumption(queueSize: Int): Boolean =
+        logicalPresentationAvailable &&
+            PhysicalQueuePolicy.modeFor(queueSize, boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || boundedInstallEnabledForTesting) == QueueMode.Bounded
+
+    /** The bounded half of a resumption: see [adoptPlaybackResumption]. Nothing here touches a MediaController. */
+    private fun installBoundedResumptionWindow(plan: PlaybackResumptionPlan): androidx.media3.session.MediaSession.MediaItemsWithStartPosition {
+        val port = requireBoundedPort()
+        installedQueueMode = QueueMode.Bounded
+        playerQueueNeedsSync = true // owed until the physical player acknowledges the window
+        port.repeatMode = if (repeatMode == RepeatMode.ONE) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        port.shuffleModeEnabled = false
+        val outcome = physicalWindowAdapter.install(
+            player = port,
+            queue = playbackQueue,
+            logicalGeneration = queueGeneration,
+            startIndex = plan.startPlaybackIndex,
+            positionMs = plan.startPositionMs,
+            repeatMode = repeatMode,
+            verifier = boundedVerifier(port),
+            onOutcome = boundedOutcomeHandler("resumption"),
+        )
+        if (outcome !is BoundedInstallOutcome.Submitted) {
+            installedQueueMode = QueueMode.Full
+            error("bounded resumption install was not issued: $outcome")
+        }
+        notifyLogicalPresentationChanged()
+        val items = List(port.mediaItemCount) { port.mediaItemAt(it) }
+        return androidx.media3.session.MediaSession.MediaItemsWithStartPosition(items, port.currentMediaItemIndex, plan.startPositionMs)
     }
 
     /**
@@ -4184,11 +4249,12 @@ class PlayerController @Inject constructor(
         controller: MediaController,
         playbackIndex: Int,
         forcePlay: Boolean? = null,
+        positionMs: Long = 0L,
     ) {
         lastKnownPositionMs = -1L
         val shouldPlay = forcePlay ?: controller.isPlaying
         if (isBounded()) {
-            seekBoundedToLogical(controller, playbackIndex, shouldPlay, forcePlay)
+            seekBoundedToLogical(controller, playbackIndex, shouldPlay, forcePlay, positionMs)
             return
         }
         if (playerQueueNeedsSync) {
@@ -4451,11 +4517,66 @@ class PlayerController @Inject constructor(
         materializeMediaItems(songs).mediaItems
 
     /**
+     * P5-E Checkpoint C: the crossfade view of a BOUNDED queue. NEXT mirrors CURRENT's verified physical window, so the unchanged
+     * crossfade stack is handed the WINDOW as its queue, in PHYSICAL coordinates (queue = the window's songs in physical order,
+     * current = the physical index, keys = physical from/to). Logical indices never reach it.
+     *
+     * The explicit readiness contract: a NEXT may be prepared or promoted only when the window is VERIFIED (Active), nothing is in
+     * flight (no pending install/adjust/mutation, no held navigation, no deleted-current continuation), the physical CURRENT proves
+     * its occurrence, and enough of the window lies AHEAD of the target (or the window genuinely ends the logical queue).
+     * Otherwise the snapshot reports `playerQueueNeedsSync`, the unchanged planner answers a transient Unavailable, and an existing
+     * NEXT loses ownership and is invalidated: CURRENT is authoritative and a NEXT built on a window that changed is never promoted.
+     *
+     * `queueGeneration` is an ownership EPOCH: the logical generation joined with the window revision, so any window change
+     * (refill, trim, re-anchor, mutation) is a new epoch and the existing ownership rules cancel the NEXT built on the old one.
+     */
+    private fun boundedCrossfadeSnapshot(controller: MediaController?): CrossfadeRuntimeSnapshot {
+        val port = physicalPort
+        val adapter = physicalWindowAdapter
+        val active = adapter.active
+        val resolution = if (port != null && active != null) adapter.resolveCurrent(port) else null
+        val proven = resolution as? CurrentResolution.Proven
+        val physicalCurrent = proven?.physical
+        val aheadOfTarget = if (physicalCurrent != null && active != null) active.installedCount - 2 - physicalCurrent else -1
+        val enoughAhead = active != null && physicalCurrent != null &&
+            (aheadOfTarget >= PhysicalWindowPolicy.AHEAD_FLOOR || active.window.endsAtLogicalEnd)
+        val ready = controller != null && active != null && proven != null && !adapter.isBusy && !adapter.hasHeldNavigation &&
+            pendingDeletionContinuation == null && !playerQueueNeedsSync && enoughAhead
+        val slice = if (active != null) boundedWindowSongs(active) else emptyList()
+        val epoch = if (active != null) (queueGeneration shl 24) or (active.window.windowGeneration and 0xFFFFFFL) else queueGeneration
+        return CrossfadeRuntimeSnapshot(
+            queueGeneration = epoch,
+            playbackQueue = slice,
+            currentPlaybackIndex = physicalCurrent,
+            // The window already contains the wrapped successor of a ring, and ALL is never a physical loop: plan on the physical mirror.
+            repeatMode = if (repeatMode == RepeatMode.ONE) RepeatMode.ONE else RepeatMode.OFF,
+            shuffleEnabled = shuffleEnabled,
+            isPlaying = controller?.isPlaying ?: _nowPlayingState.value.isPlaying,
+            isExternalPlayback = isExternalPlayback,
+            playerQueueNeedsSync = !ready,
+            controllerConnected = controller != null && controllerConnectionState == ControllerConnectionState.Connected,
+            sleepBoundaryArmed = _sleepTimerState.value.isFinishingCurrentTrack,
+        )
+    }
+
+    private var windowSongsCache: Triple<InstalledWindow, List<Song>, List<Song>>? = null
+
+    /** The songs of the verified window in physical order; cached per window revision and queue (O(window), never O(queue)). */
+    private fun boundedWindowSongs(active: InstalledWindow): List<Song> {
+        val queue = playbackQueue
+        windowSongsCache?.let { (window, source, songs) -> if (window === active && source === queue) return songs }
+        val songs = List(active.installedCount) { queue[active.physicalToLogical(it)!!] }
+        windowSongsCache = Triple(active, queue, songs)
+        return songs
+    }
+
+    /**
      * Read-only snapshot of the logical playback state for the future crossfade engine (CF-2B1).
      * No side effects: reads in-memory state and the existing occurrence resolution only.
      */
     internal fun captureCrossfadeRuntimeSnapshot(): CrossfadeRuntimeSnapshot {
         val controller = mediaController
+        if (isBounded()) return boundedCrossfadeSnapshot(controller)
         return CrossfadeRuntimeSnapshot(
             queueGeneration = queueGeneration,
             // Shared reference, not a copy: `playbackQueue` is replaced wholesale on every structural change and never mutated in
@@ -4467,9 +4588,8 @@ class PlayerController @Inject constructor(
             shuffleEnabled = shuffleEnabled,
             isPlaying = controller?.isPlaying ?: _nowPlayingState.value.isPlaying,
             isExternalPlayback = isExternalPlayback,
-            // P5-C: a bounded physical window cannot host a crossfade NEXT slot until P5-E synchronizes both players; reporting the
-            // queue as "needs sync" makes the unchanged planner answer Unavailable(PlayerQueueNeedsSync).
-            playerQueueNeedsSync = playerQueueNeedsSync || isBounded(),
+            // Full mode only (a bounded queue returns boundedCrossfadeSnapshot above).
+            playerQueueNeedsSync = playerQueueNeedsSync,
             controllerConnected = controller != null &&
                 controllerConnectionState == ControllerConnectionState.Connected,
             sleepBoundaryArmed = _sleepTimerState.value.isFinishingCurrentTrack,
@@ -4482,8 +4602,8 @@ class PlayerController @Inject constructor(
             // P5-C: the physical index is only a position inside the window. The logical occurrence is PROVEN through the active
             // window (position + the id verified at it) or taken from the adapter's tracked occurrence while an operation is in
             // flight; nothing here searches the queue for a song id.
-            val controller = mediaController
-            val logical = if (controller != null) physicalWindowAdapter.currentLogical(controller)
+            val port = physicalPort
+            val logical = if (mediaController != null && port != null) physicalWindowAdapter.currentLogical(port)
             else physicalWindowAdapter.trackedLogical
             return logical?.takeIf { it in playbackQueue.indices }
         }
@@ -4529,18 +4649,32 @@ class PlayerController @Inject constructor(
 
     /**
      * Test seam: how the physical player's acknowledgement is requested. Production is always the session probe
-     * ([PhysicalQueueObservationCommand]); a test replaces it to control the ORDER of acknowledgements against other events.
+     * (the port verifier); a test replaces it to control the ORDER of acknowledgements against other events.
      */
-    internal var boundedVerifierFactory: (MediaController) -> PhysicalInstallVerifier = { PhysicalQueueObservationCommand.verifier(it) }
+    internal var boundedVerifierFactory: (PhysicalWindowPort) -> PhysicalInstallVerifier? = { it.verifier }
 
-    private fun boundedVerifier(controller: MediaController): PhysicalInstallVerifier = boundedVerifierFactory(controller)
+    private fun boundedVerifier(port: PhysicalWindowPort): PhysicalInstallVerifier? = boundedVerifierFactory(port)
+
+    /**
+     * P5-E: the physical CURRENT player, as the service attached it. Every index-bearing or proving operation of a bounded window goes
+     * through this port and NEVER through the logical `MediaController`, whose indices are logical once the session façade presents the
+     * complete queue. Full mode never reads it.
+     */
+    private var physicalPort: PhysicalWindowPort? = null
+
+    /** Attached by the service (production: [EnginePhysicalPort]) or a test; null detaches. Bounded mode refuses to run without it. */
+    internal fun attachPhysicalWindowPort(port: PhysicalWindowPort?) { physicalPort = port }
+
+    private fun requireBoundedPort(): PhysicalWindowPort =
+        physicalPort ?: error("bounded mode requires an attached PhysicalWindowPort (the logical controller must not carry physical indices)")
 
     /** The mode of the queue install that is about to happen, decided once from the logical queue size. */
     private fun isBoundedInstall(): Boolean =
-        PhysicalQueuePolicy.modeFor(
-            playbackQueue.size,
-            boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || boundedInstallEnabledForTesting,
-        ) == QueueMode.Bounded
+        logicalPresentationAvailable &&
+            PhysicalQueuePolicy.modeFor(
+                playbackQueue.size,
+                boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || boundedInstallEnabledForTesting,
+            ) == QueueMode.Bounded
 
     /**
      * THE queue-installation seam for a whole playbackQueue (library start, preserved search, hydration, queue repair).
@@ -4550,27 +4684,120 @@ class PlayerController @Inject constructor(
      */
     private fun MediaController.installPlaybackQueue(operation: String, startIndex: Int, positionMs: Long) {
         if (!isBoundedInstall()) {
+            if (installedQueueMode != QueueMode.Full) notifyLogicalPresentationChanged()
             installedQueueMode = QueueMode.Full
             if (physicalWindowAdapter.state != WindowInstallState.Idle) physicalWindowAdapter.reset()
             setMeasuredMediaItems(operation = operation, songs = playbackQueue, startIndex = startIndex, positionMs = positionMs)
             return
         }
+        val modeBeforeInstall = installedQueueMode
         installedQueueMode = QueueMode.Bounded // decided once per install; later navigation/transition code reads this
+        notifyLogicalPresentationChanged()
         val outcome = physicalWindowAdapter.install(
-            player = this,
+            player = requireBoundedPort(),
             queue = playbackQueue,
             logicalGeneration = queueGeneration,
             startIndex = startIndex,
             positionMs = positionMs,
             repeatMode = this@PlayerController.repeatMode,
-            verifier = boundedVerifier(this), // Active only on the physical player's own acknowledgement
+            verifier = boundedVerifier(requireBoundedPort()), // Active only on the physical player's own acknowledgement
             onOutcome = boundedOutcomeHandler(operation),
         )
         when (outcome) {
             is BoundedInstallOutcome.Submitted -> playerQueueNeedsSync = true // dirty until the window is verified
-            is BoundedInstallOutcome.Rejected -> error("bounded install rejected: ${outcome.reason}")
-            is BoundedInstallOutcome.Failed -> throw outcome.cause
+            is BoundedInstallOutcome.Rejected -> { revertRefusedBoundedInstall(modeBeforeInstall); error("bounded install rejected: ${outcome.reason}") }
+            is BoundedInstallOutcome.Failed -> { revertRefusedBoundedInstall(modeBeforeInstall); throw outcome.cause }
             else -> error("unexpected immediate bounded install outcome: $outcome")
+        }
+    }
+
+
+    /** A bounded install that was refused or failed immediately changed nothing physical: the mode returns to what it was. */
+    private fun revertRefusedBoundedInstall(modeBeforeInstall: QueueMode) {
+        installedQueueMode = modeBeforeInstall
+        if (modeBeforeInstall == QueueMode.Full) physicalWindowAdapter.reset()
+        notifyLogicalPresentationChanged()
+    }
+    // ── P5-E: the logical presentation of a bounded queue ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Whether a session façade exists that can present the LOGICAL queue to controllers. Bounded installs need it (without it a
+     * controller would see the 100-item physical window as the whole queue), so the service clears it for a topology without the
+     * façade. Defaults to true so a test harness decides for itself.
+     */
+    internal var logicalPresentationAvailable: Boolean = true
+
+    private var logicalPresentationInvalidator: (() -> Unit)? = null
+
+    /** The façade registers how to re-read the presentation; cleared with null on teardown. */
+    internal fun setLogicalPresentationInvalidator(invalidator: (() -> Unit)?) { logicalPresentationInvalidator = invalidator }
+
+    private var presentationNotifyPosted = false
+
+    /**
+     * Coalesced to the end of the current main-thread turn: every logical queue mutation touches several fields (list,
+     * generation, window), and the façade must evaluate the finished state, never a half-applied one.
+     */
+    private fun notifyLogicalPresentationChanged() {
+        if (logicalPresentationInvalidator == null || presentationNotifyPosted) return
+        presentationNotifyPosted = true
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            presentationNotifyPosted = false
+            logicalPresentationInvalidator?.invoke()
+        }
+    }
+
+    /**
+     * What the façade presents while the installed queue is bounded; null in Full mode (the façade is then a pure forwarder).
+     * The current occurrence is read in-process from the physical CURRENT through the adapter at the instant of the read, so the
+     * presented index can never lag a physical advance; while an operation is in flight it is the adapter's tracked occurrence.
+     */
+    internal val logicalQueuePresentation: LogicalQueuePresentation = object : LogicalQueuePresentation {
+        override fun snapshot(): LogicalQueueSnapshot? {
+            if (!isBounded()) return null
+            val queue = playbackQueue
+            if (queue.isEmpty()) return null
+            val port = physicalPort
+            val index = (port?.let { physicalWindowAdapter.currentLogical(it) }
+                ?: physicalWindowAdapter.trackedLogical.takeIf { it >= 0 }
+                ?: _nowPlayingState.value.currentIndex).coerceIn(queue.indices)
+            return LogicalQueueSnapshot(queueGeneration, queue, index, repeatMode, shuffleEnabled)
+        }
+    }
+
+    /** The explicit logical command port the façade routes external navigation/repeat/shuffle commands to in bounded mode. */
+    internal val logicalQueueCommands: LogicalQueueCommands = object : LogicalQueueCommands {
+        override fun skipToNext() = this@PlayerController.skipToNext()
+        override fun skipToPrevious() = this@PlayerController.skipToPrevious()
+        override fun seekToQueueItem(index: Int, positionMs: Long) =
+            this@PlayerController.seekToQueueItem(index, if (positionMs == androidx.media3.common.C.TIME_UNSET) 0L else positionMs)
+        override fun setRepeatMode(media3RepeatMode: Int) {
+            val target = repeatModeFromPlayerMode(media3RepeatMode)
+            if (target != repeatMode) setRepeatModeExplicit(target)
+        }
+        override fun setShuffleModeEnabled(enabled: Boolean) {
+            if (enabled != shuffleEnabled) toggleShuffle()
+        }
+    }
+
+    /**
+     * Repeat and native-shuffle OFF for the PHYSICAL CURRENT player. While the installed queue is (or is about to become) bounded
+     * these go through the physical port: the controller's repeat/shuffle are the LOGICAL ones the façade presents, and a command
+     * sent through it would be interpreted as an external logical change. Full to Full keeps the unchanged controller routing.
+     */
+    private fun applyPhysicalTransportModes(controller: MediaController) {
+        val targetBounded = isBoundedInstall()
+        val port = physicalPort
+        if ((isBounded() || targetBounded) && port != null) {
+            port.repeatMode = if (targetBounded) {
+                if (repeatMode == RepeatMode.ONE) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            } else {
+                repeatMode.toPlayerRepeatMode()
+            }
+            port.shuffleModeEnabled = false
+        } else {
+            controller.repeatMode = repeatMode.toPlayerRepeatMode()
+            controller.shuffleModeEnabled = false
         }
     }
 
@@ -4606,23 +4833,25 @@ class PlayerController @Inject constructor(
         onVerified: (() -> Unit)? = null,
     ) {
         val controller = mediaController
+        // With no controller the edit stays logical (offline); with one, the physical window is reached through the port only.
+        val port = if (controller != null) requireBoundedPort() else null
         playerQueueNeedsSync = true // owed until the adapter publishes a verified window (or reconnect re-anchors)
         val result = physicalWindowAdapter.applyMutation(
             QueueMutationRequest(
-                player = controller,
+                player = port,
                 queue = playbackQueue,
                 repeatMode = repeatMode,
                 oldCurrent = oldCurrent,
                 occurrenceMap = occurrenceMap,
                 continuation = continuation,
-                verifier = controller?.let { boundedVerifier(it) },
+                verifier = port?.let { boundedVerifier(it) },
                 onOutcome = boundedOutcomeHandler(operation, onVerified),
             ),
         )
         when (result) {
             is MutationSubmission.Submitted -> {
                 if (controller == null) ensureControllerConnection() // the repair obligation is discharged on reconnect
-                if (playbackQueue.isEmpty()) installedQueueMode = QueueMode.Full
+                if (playbackQueue.isEmpty()) { installedQueueMode = QueueMode.Full; notifyLogicalPresentationChanged() }
             }
             is MutationSubmission.Rejected -> Log.w(TAG, "[bounded] $operation: physical effect rejected (${result.reason}); the logical edit stands, a bounded re-install is owed")
             is MutationSubmission.Failed -> Log.w(TAG, "[bounded] $operation: physical effect failed (${result.cause.message}); the logical edit stands, a bounded re-install is owed")
@@ -4638,6 +4867,7 @@ class PlayerController @Inject constructor(
 
     /** Terminal handling of ONE bounded install or adjustment; never publishes anything the adapter did not verify. */
     private fun boundedOutcomeHandler(operation: String, onVerified: (() -> Unit)? = null): (BoundedInstallOutcome) -> Unit = { result ->
+        notifyLogicalPresentationChanged()
         when (result) {
             is BoundedInstallOutcome.Active -> {
                 playerQueueNeedsSync = false
@@ -4655,42 +4885,44 @@ class PlayerController @Inject constructor(
 
     /** One policy-driven window adjustment around the PROVEN current occurrence, if none is in flight. */
     private fun maintainBoundedWindow() {
-        val controller = mediaController ?: return
+        if (mediaController == null) return
+        val port = physicalPort ?: return
         when (
             val result = physicalWindowAdapter.maintain(
-                player = controller,
+                player = port,
                 queue = playbackQueue,
                 repeatMode = repeatMode,
-                verifier = boundedVerifier(controller),
+                verifier = boundedVerifier(port),
                 onOutcome = boundedOutcomeHandler("maintain"),
             )
         ) {
             is MaintenanceResult.Unprovable -> {
-                if (result.reason == "id_mismatch" || result.reason == "outside_window") recoverBoundedFromUnprovable(controller)
+                if (result.reason == "id_mismatch" || result.reason == "outside_window") recoverBoundedFromUnprovable(port)
             }
             is MaintenanceResult.Failed -> Log.w(TAG, "bounded window maintenance failed: ${result.cause.message}")
             else -> Unit
         }
     }
 
-    private fun recoverBoundedFromUnprovable(controller: MediaController) {
+    private fun recoverBoundedFromUnprovable(port: PhysicalWindowPort) {
         Log.w(TAG, "[bounded] current occurrence unprovable; bounded re-anchor around ${physicalWindowAdapter.trackedLogical}")
         physicalWindowAdapter.recoverUnprovable(
-            player = controller,
+            player = port,
             queue = playbackQueue,
             repeatMode = repeatMode,
-            verifier = boundedVerifier(controller),
+            verifier = boundedVerifier(port),
             onOutcome = boundedOutcomeHandler("recover_unprovable"),
         )
     }
 
     /** Media3 advanced natively inside the verified window: translate it, keep the window topped up, never re-push. */
     private fun onBoundedAutomaticTransition() {
-        val controller = mediaController ?: return
-        when (val resolution = physicalWindowAdapter.resolveCurrent(controller)) {
+        if (mediaController == null) return
+        val port = physicalPort ?: return
+        when (val resolution = physicalWindowAdapter.resolveCurrent(port)) {
             is CurrentResolution.Proven -> maintainBoundedWindow()
             is CurrentResolution.Unproven ->
-                if (physicalWindowAdapter.state is WindowInstallState.Active) recoverBoundedFromUnprovable(controller)
+                if (physicalWindowAdapter.state is WindowInstallState.Active) recoverBoundedFromUnprovable(port)
                 else Log.d(TAG, "[bounded] automatic transition while the window is unverified (${resolution.reason}); state follows the tracked occurrence")
         }
     }
@@ -4700,14 +4932,15 @@ class PlayerController @Inject constructor(
      * otherwise a bounded re-anchor around the exact target. Chosen behavior for an unverified mapping: re-anchor around the exact
      * logical target (never an estimated index, never the full queue). Play intent is applied exactly like the Full branch.
      */
-    private fun seekBoundedToLogical(controller: MediaController, logicalIndex: Int, shouldPlay: Boolean, forcePlay: Boolean?) {
+    private fun seekBoundedToLogical(controller: MediaController, logicalIndex: Int, shouldPlay: Boolean, forcePlay: Boolean?, positionMs: Long = 0L) {
+        val port = requireBoundedPort()
         val result = physicalWindowAdapter.navigateTo(
-            player = controller,
+            player = port,
             queue = playbackQueue,
             target = logicalIndex,
-            positionMs = 0L,
+            positionMs = positionMs.coerceAtLeast(0L),
             repeatMode = repeatMode,
-            verifier = boundedVerifier(controller),
+            verifier = boundedVerifier(port),
             onOutcome = boundedOutcomeHandler("navigate"),
         )
         when (result) {
@@ -4738,7 +4971,10 @@ class PlayerController @Inject constructor(
      */
     private fun continueAfterPhysicalWindowEnd() {
         val controller = mediaController ?: return
-        val current = physicalWindowAdapter.currentLogical(controller) ?: return
+        val port = physicalPort ?: return
+        // The physical player is observed directly: an ENDED that arrives while it is not on its last item is stale, never a window end.
+        if (port.currentMediaItemIndex < port.mediaItemCount - 1) return
+        val current = physicalWindowAdapter.currentLogical(port) ?: return
         val next = QueueNavigator.automaticNextIndex(playbackQueue.size, current, repeatMode) ?: return
         Log.w(TAG, "[bounded] physical window ended before the logical end; continuing at $next")
         seekToPlaybackIndex(controller, next, forcePlay = true)
@@ -4749,13 +4985,14 @@ class PlayerController @Inject constructor(
             ?: physicalWindowAdapter.trackedLogical.takeIf { it in playbackQueue.indices }
             ?: return
         val positionMs = _nowPlayingState.value.positionMs.coerceAtLeast(0L)
+        val port = requireBoundedPort()
         val result = physicalWindowAdapter.navigateTo(
-            player = controller,
+            player = port,
             queue = playbackQueue,
             target = occurrence,
             positionMs = positionMs,
             repeatMode = repeatMode,
-            verifier = boundedVerifier(controller),
+            verifier = boundedVerifier(port),
             onOutcome = boundedOutcomeHandler("reconnect"),
         )
         if (result is BoundedNavigationResult.Reanchoring) controller.prepare()

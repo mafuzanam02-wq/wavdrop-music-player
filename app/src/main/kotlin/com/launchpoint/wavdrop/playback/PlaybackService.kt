@@ -149,6 +149,17 @@ class PlaybackService : MediaLibraryService() {
         // CF-2M5: `player` is the INITIAL physical player (the only one when the gate is false). It must never be read where the
         // LOGICAL CURRENT is meant: after a promotion that physical may be the retiring/NEXT slot. Use assembly.currentPlayer.
         val player = assembly.primaryPlayer
+        // P5-E: bounded-window code reaches the physical playlist only through this in-process port (never the logical controller).
+        playerController.attachPhysicalWindowPort(
+            assembly.engine?.let { EnginePhysicalPort(it) } ?: PhysicalPlayerPort(player),
+        )
+        // P5-E: a bounded queue is presented to controllers as the complete LOGICAL queue by the session façade. Without the façade
+        // (single-player topology) bounded mode is unavailable, because a controller would otherwise see the physical window as the queue.
+        playerController.logicalPresentationAvailable = assembly.engine != null
+        assembly.engine?.facade?.let { facade ->
+            facade.bindLogicalQueue(playerController.logicalQueuePresentation, playerController.logicalQueueCommands)
+            playerController.setLogicalPresentationInvalidator { facade.invalidateLogicalState() }
+        }
         assembly.engine?.let { engine ->
             // CF-2M4: NEXT preparation owner. Reuses the existing plan/key/ownership rules; started by the same persisted-duration
             // activation policy below. Nothing starts or promotes B.
@@ -498,6 +509,9 @@ class PlaybackService : MediaLibraryService() {
         playerController.setExplicitQueueReplacementListener(null)
         playerController.setControllerDisconnectedListener(null)
         playerController.setSleepBoundaryListener(null)
+        playerController.attachPhysicalWindowPort(null)
+        playerController.setLogicalPresentationInvalidator(null)
+        playbackAssembly?.engine?.facade?.bindLogicalQueue(null, null)
         sessionProgressDiagnostics?.close()
         sessionProgressDiagnostics = null
         // Unregister the BT listener before cancelling the scope so no callback
@@ -618,11 +632,6 @@ class PlaybackService : MediaLibraryService() {
         customCommand: SessionCommand,
         args: Bundle,
     ): ListenableFuture<SessionResult> {
-        if (customCommand.customAction == PhysicalQueueObservationCommand.ACTION) {
-            // P5-B (inactive): read-only probe of the physical player, used to acknowledge a bounded-window install.
-            // Authorized per caller (in-app controller only), not by knowing the action string.
-            return PhysicalQueueObservationCommand.execute(controller, session.player, args)
-        }
         when (customCommand.customAction) {
             CMD_TOGGLE_SHUFFLE -> playerController.toggleShuffle()
             CMD_CYCLE_REPEAT -> playerController.cycleRepeatMode()
@@ -635,56 +644,20 @@ class PlaybackService : MediaLibraryService() {
         mediaSession: MediaSession,
         controller: MediaSession.ControllerInfo,
         isForPlayback: Boolean,
-    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-        val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
-        logResume("onPlaybackResumption invoked isForPlayback=$isForPlayback")
-        serviceScope.launch {
-            runCatching {
-                PlaybackResumptionMapper.map(
-                    snapshot = sessionRepository.load(),
-                    settings = resumeBehaviorRepository.settings.first(),
-                    availableSongs = songRepository.songs.first(),
-                )
-            }.fold(
-                onSuccess = { result ->
-                    when (result) {
-                        is PlaybackResumptionResult.Ready -> {
-                            val plan = result.plan
-                            // CF-2H3G: cancel only when this resumption will really be adopted (Ready + isForPlayback),
-                            // before the generation bump and queue replacement. Queries, Unavailable and failures never cancel.
-                            if (shouldCancelCrossfadeForPlaybackResumption(resultReady = true, isForPlayback = isForPlayback)) {
-                                recoverCrossfadeFromPlaybackResumption(crossfadeCancelSink)
-                            }
-                            if (isForPlayback) {
-                                playerController.adoptPlaybackResumption(plan)
-                                mediaSession.player.repeatMode = plan.repeatMode.toPlayerRepeatMode()
-                                mediaSession.player.shuffleModeEnabled = false
-                            }
-                            logResume(
-                                "onPlaybackResumption ready queueSize=${plan.mediaItems.size} " +
-                                    "startIndex=${plan.startPlaybackIndex} " +
-                                    "startPositionMs=${plan.startPositionMs}",
-                            )
-                            future.set(plan.toMedia3Resumption())
-                        }
-                        is PlaybackResumptionResult.Unavailable -> {
-                            logResume("onPlaybackResumption unavailable reason=${result.reason}")
-                            future.setException(
-                                IllegalStateException("Playback resumption unavailable: ${result.reason}"),
-                            )
-                        }
-                    }
-                },
-                onFailure = { error ->
-                    logResume(
-                        "onPlaybackResumption failed: ${error::class.simpleName} ${error.message}",
-                    )
-                    future.setException(error)
-                },
-            )
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
+        // Retrieval vs adoption is decided in PlaybackResumptionHandler (see its header for the verified Media3 contract).
+        PlaybackResumptionHandler(
+            scope = serviceScope,
+            loadSnapshot = { sessionRepository.load() },
+            loadSettings = { resumeBehaviorRepository.settings.first() },
+            loadSongs = { songRepository.songs.first() },
+            playerController = playerController,
+            cancelCrossfade = { recoverCrossfadeFromPlaybackResumption(crossfadeCancelSink) },
+            log = ::logResume,
+        ).resume(isForPlayback) { plan ->
+            mediaSession.player.repeatMode = plan.repeatMode.toPlayerRepeatMode()
+            mediaSession.player.shuffleModeEnabled = false
         }
-        return future
-    }
 }
 
     // Builds the list of CommandButton instances for the notification based on the user's
@@ -767,10 +740,6 @@ class PlaybackService : MediaLibraryService() {
             val enrichedCommands = defaultResult.availableSessionCommands.buildUpon()
                 .add(SessionCommand(CMD_TOGGLE_SHUFFLE, Bundle.EMPTY))
                 .add(SessionCommand(CMD_CYCLE_REPEAT, Bundle.EMPTY))
-                .apply {
-                    // Advertised to the in-app controller only; external controllers never see it.
-                    if (PhysicalQueueObservationCommand.isAuthorizedController(controller)) add(PhysicalQueueObservationCommand.command)
-                }
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
                 .setAvailableSessionCommands(enrichedCommands)

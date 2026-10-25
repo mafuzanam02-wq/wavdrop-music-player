@@ -21,12 +21,18 @@ class LockScreenProgressStructureGuardTest {
         for (forbidden in listOf("setContentPositionMs(", "setAdPositionMs(", "setContentBufferedPositionMs(", "setAdBufferedPositionMs(", "setTotalBufferedDurationMs(")) {
             assertFalse("SessionFacade must not call $forbidden (it would replace the live supplier)", facade.contains(forbidden))
         }
-        val getState = facade.substringAfter("override fun getState()").substringBefore("private fun withStableTimelineIdentity")
+        val getState = facade.substringAfter("override fun getState()").substringBefore("private fun withLogicalQueue")
         val builderCalls = Regex("""\.set[A-Za-z]+\(""").findAll(getState).map { it.value }.toSet()
         assertEquals(
             "getState overlays exactly the logical play state, the alias playlist and the one-shot discontinuity",
             setOf(".setPlayWhenReady(", ".setPlaybackSuppressionReason(", ".setPositionDiscontinuity("),
             builderCalls,
+        )
+        val logical = facade.substringAfter("private fun withLogicalQueue").substringBefore("private fun withStableTimelineIdentity")
+        assertEquals(
+            "the logical-queue overlay rewrites only queue-shaped fields, never a position field",
+            setOf(".setPlaylist(", ".setCurrentMediaItemIndex(", ".setRepeatMode(", ".setShuffleModeEnabled(", ".setAvailableCommands("),
+            Regex("""\.set[A-Za-z]+\(""").findAll(logical).map { it.value }.toSet(),
         )
     }
 
@@ -34,7 +40,7 @@ class LockScreenProgressStructureGuardTest {
         val facade = code("playback/SessionFacade.kt")
         val replace = facade.substringAfter("fun replaceDelegate").substringBefore("var commandBoundary")
         assertTrue(replace.contains("finally {") && replace.substringAfter("finally {").contains("pinnedAutoTransitionPositionMs = null"))
-        assertEquals("invalidateState is called only by bindPlayWhenReadyOwner and invalidateLogicalState", 2, Regex("""invalidateState\(\)""").findAll(facade).count())
+        assertEquals("invalidateState is called only by bindPlayWhenReadyOwner, invalidateLogicalState and bindLogicalQueue", 3, Regex("""invalidateState\(\)""").findAll(facade).count())
     }
 
     @Test fun `no session-side component depends on the UI position ticker or runs its own timer`() {
@@ -51,7 +57,8 @@ class LockScreenProgressStructureGuardTest {
         val service = code("playback/PlaybackService.kt")
         assertFalse(service.contains("PositionTicker") || service.contains("positionTicker"))
         assertFalse(service.contains("postDelayed"))
-        assertFalse("the service never forces a session state refresh", service.contains("invalidateState") || service.contains("invalidateLogicalState"))
+        assertFalse("the service never forces a session state refresh", service.contains("invalidateState("))
+        assertEquals("the only refresh hook is the logical-queue-change invalidator, never a timer or position", 1, service.split("invalidateLogicalState()").size - 1)
     }
 
     @Test fun `the custom layout is rebuilt only for the notification setting or shuffle and repeat, never for position`() {

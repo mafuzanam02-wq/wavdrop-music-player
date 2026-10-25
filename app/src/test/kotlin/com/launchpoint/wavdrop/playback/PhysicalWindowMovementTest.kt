@@ -45,10 +45,10 @@ class PhysicalWindowMovementTest {
             currentLogicalGeneration = { generation },
             materialize = { songs -> materialized += songs.size; songs.map(Song::toPlaybackMediaItem) },
         )
-        val verifier = PhysicalQueueObservationCommand.verifier(r.controller)
+        val verifier = PhysicalPlayerPort(r.recording).verifier
 
         fun install(start: Int, positionMs: Long = 0L) {
-            adapter.install(r.controller, queue, generation, start, positionMs, repeat, verifier) { outcomes += it }
+            adapter.install(r.port, queue, generation, start, positionMs, repeat, verifier) { outcomes += it }
             awaitIdle()
         }
 
@@ -60,7 +60,7 @@ class PhysicalWindowMovementTest {
         fun maintainUntilQuiet(maxRounds: Int = 50): Int {
             var rounds = 0
             while (rounds < maxRounds) {
-                when (val m = adapter.maintain(r.controller, queue, repeat, verifier) { outcomes += it }) {
+                when (val m = adapter.maintain(r.port, queue, repeat, verifier) { outcomes += it }) {
                     is MaintenanceResult.NoChange -> return rounds
                     is MaintenanceResult.Submitted -> { rounds++; awaitIdle() }
                     is MaintenanceResult.Busy -> awaitIdle()
@@ -71,14 +71,14 @@ class PhysicalWindowMovementTest {
         }
 
         fun navigate(target: Int, positionMs: Long = 0L): BoundedNavigationResult {
-            val result = adapter.navigateTo(r.controller, queue, target, positionMs, repeat, verifier) { outcomes += it }
+            val result = adapter.navigateTo(r.port, queue, target, positionMs, repeat, verifier) { outcomes += it }
             awaitIdle()
             return result
         }
 
         fun physicalIds(): List<String> = r.serverIds()
         fun logicalIds(): List<Long> = physicalIds().map { it.toLong() }
-        fun currentLogical(): Int? = adapter.currentLogical(r.controller)
+        fun currentLogical(): Int? = adapter.currentLogical(r.port)
     }
 
     private fun h(queue: List<Song>, repeat: RepeatMode = RepeatMode.OFF) = H(rig(queue), queue, repeat)
@@ -151,9 +151,9 @@ class PhysicalWindowMovementTest {
     @Test fun latestOfSeveralRapidJumpsWins() {
         val q = distinct(25_000); val h = h(q)
         h.install(100)
-        h.adapter.navigateTo(h.r.controller, q, 5_000, 0L, h.repeat, h.verifier) { h.outcomes += it }
-        h.adapter.navigateTo(h.r.controller, q, 9_000, 0L, h.repeat, h.verifier) { h.outcomes += it }
-        h.adapter.navigateTo(h.r.controller, q, 15_000, 0L, h.repeat, h.verifier) { h.outcomes += it }
+        h.adapter.navigateTo(h.r.port, q, 5_000, 0L, h.repeat, h.verifier) { h.outcomes += it }
+        h.adapter.navigateTo(h.r.port, q, 9_000, 0L, h.repeat, h.verifier) { h.outcomes += it }
+        h.adapter.navigateTo(h.r.port, q, 15_000, 0L, h.repeat, h.verifier) { h.outcomes += it }
         h.awaitIdle()
         assertEquals(15_000, h.adapter.active!!.logicalCurrent)
         assertEquals(q[15_000].id.toString(), h.r.snapshot().mediaId)
@@ -170,11 +170,11 @@ class PhysicalWindowMovementTest {
         // Provisional (unacknowledged) mapping must not authorize a seek: with a stub verifier that never answers.
         val r2 = rig(q); val h2 = H(r2, q)
         val silent = PhysicalInstallVerifier { SettableFuture.create<PhysicalObservation>() }
-        h2.adapter.install(r2.controller, q, h2.generation, 100, 0L, RepeatMode.OFF, silent)
+        h2.adapter.install(r2.port, q, h2.generation, 100, 0L, RepeatMode.OFF, silent)
         TestMediaSource.awaitCondition { h2.adapter.state is WindowInstallState.Provisional }
         assertNull(h2.adapter.active)
         val before = r2.recording.calls.size
-        val result = h2.adapter.navigateTo(r2.controller, q, 105, 0L, RepeatMode.OFF, silent)
+        val result = h2.adapter.navigateTo(r2.port, q, 105, 0L, RepeatMode.OFF, silent)
         assertTrue("provisional mapping must not seek: $result", result is BoundedNavigationResult.Reanchoring)
         assertEquals(0, r2.recording.calls.drop(before).count { it.startsWith("seekTo") })
     }
@@ -309,7 +309,7 @@ class PhysicalWindowMovementTest {
         val phys = h.r.controller.currentMediaItemIndex
         h.r.player.replaceMediaItem(phys, RealMedia3QueueRig.song(99_999L).toPlaybackMediaItem())
         TestMediaSource.awaitCondition { h.r.controller.currentMediaItem?.mediaId == "99999" }
-        assertTrue(h.adapter.resolveCurrent(h.r.controller) is CurrentResolution.Unproven)
+        assertTrue(h.adapter.resolveCurrent(h.r.port) is CurrentResolution.Unproven)
         assertNull(h.currentLogical())
     }
 
@@ -330,7 +330,7 @@ class PhysicalWindowMovementTest {
         h.install(100)
         h.navigate(150)
         val stub = StubAckVerifier()
-        h.adapter.maintain(h.r.controller, q, h.repeat, stub) { h.outcomes += it }
+        h.adapter.maintain(h.r.port, q, h.repeat, stub) { h.outcomes += it }
         assertTrue(h.adapter.isBusy)
         h.generation += 1
         val (token, ack) = stub.requests.single()
@@ -345,7 +345,7 @@ class PhysicalWindowMovementTest {
         h.install(100)
         h.navigate(150)
         val stub = StubAckVerifier()
-        h.adapter.maintain(h.r.controller, q, h.repeat, stub) { h.outcomes += it }
+        h.adapter.maintain(h.r.port, q, h.repeat, stub) { h.outcomes += it }
         val (oldToken, oldAck) = stub.requests.single()
         h.navigate(20_000) // out of window: newer install supersedes the pending adjustment
         assertEquals(20_000, h.adapter.active!!.logicalCurrent)
@@ -363,7 +363,7 @@ class PhysicalWindowMovementTest {
         h.navigate(150) // history 70 -> trimFront (indices shift)
         val old = h.adapter.active!!
         val stub = StubAckVerifier()
-        assertTrue(h.adapter.maintain(h.r.controller, q, h.repeat, stub) { h.outcomes += it } is MaintenanceResult.Submitted)
+        assertTrue(h.adapter.maintain(h.r.port, q, h.repeat, stub) { h.outcomes += it } is MaintenanceResult.Submitted)
         val (baselineToken, baselineAck) = stub.requests[0]
         baselineAck.set(PhysicalObservation.observe(h.r.player, baselineToken)) // the physical baseline, answered for real
         TestMediaSource.awaitCondition { stub.requests.size == 2 }
@@ -388,7 +388,7 @@ class PhysicalWindowMovementTest {
         val failing = SettableFuture.create<PhysicalObservation>()
         var asked = 0
         val flaky = PhysicalInstallVerifier { token -> if (asked++ == 1) failing else h.verifier.observe(token) }
-        h.adapter.maintain(h.r.controller, q, h.repeat, flaky) { h.outcomes += it }
+        h.adapter.maintain(h.r.port, q, h.repeat, flaky) { h.outcomes += it }
         val callsBefore = h.r.recording.calls.size
         failing.setException(IllegalStateException("session refused"))
         TestMediaSource.awaitCondition { h.outcomes.any { it is BoundedInstallOutcome.Active && it.installed.token.windowGeneration > 1L } }
@@ -404,7 +404,7 @@ class PhysicalWindowMovementTest {
         h.install(100)
         h.navigate(150)
         val stub = StubAckVerifier()
-        h.adapter.maintain(h.r.controller, q, h.repeat, stub) { h.outcomes += it }
+        h.adapter.maintain(h.r.port, q, h.repeat, stub) { h.outcomes += it }
         h.adapter.reset()
         val (token, ack) = stub.requests.single()
         ack.set(PhysicalObservation.observe(h.r.player, token))
@@ -431,9 +431,9 @@ class PhysicalWindowMovementTest {
         h.install(100)
         h.navigate(150)
         // The physical player ignores removals (the controller still masks them optimistically).
-        val dropping = object : ForwardingPlayer(h.r.controller) {
+        val dropping = PhysicalPlayerPort(object : ForwardingPlayer(h.r.recording) {
             override fun removeMediaItems(fromIndex: Int, toIndex: Int) = Unit
-        }
+        })
         val result = h.adapter.maintain(dropping, q, h.repeat, h.verifier) { h.outcomes += it }
         assertTrue(result is MaintenanceResult.Submitted)
         TestMediaSource.awaitCondition { !h.adapter.isBusy }
