@@ -914,6 +914,65 @@ OFF until P5-F.
   conversion on growth (Q2).
 - **Dependencies:** P5-C. **Rollback:** gate off. **Done when:** the whole Slice 1–3 queue-correctness matrix passes in Bounded mode.
 
+#### P5-D implementation record (queue mutations in a bounded window; gate still `false`)
+
+- **One mechanism for every mutation.** Each `PlayerController` mutation site (Play Next, Play All Next, add/append, remove, clear
+  earlier/up-next, move up/down/to, move-to-play-next, swap, shuffle toggle, non-current and current library deletion) still plans and
+  applies the LOGICAL change exactly as in Full mode, then - when `isBounded()` - calls `applyBoundedQueueMutation(operation,
+  oldCurrent, occurrenceMap, continuation)` instead of its Full-mode physical edit. `occurrenceMap` is the same exact old->new
+  `OccurrenceMap` the deferred commands already use (shuffle: derived from the two playback orders by library index); `continuation`
+  is the deletion-continuation choice. No song id is ever used to find an occurrence. The P5-C rejection guards are gone.
+- **Ownership.** `PhysicalWindowAdapter.applyMutation(QueueMutationRequest)` owns everything physical: superseding pending refill or
+  navigation, rebasing the tracked/held logical current through the map, the physical baseline probe, classification, execution,
+  acknowledgement, publication and the single bounded recovery. `PlayerController` has no second repair state machine.
+- **Lifecycle of one edit.** (1) the logical queue/generation are final (user-accepted edits are never rolled back for Media3
+  availability); (2) the old mapping is dropped (state `Adjusting`: it does not describe the new queue); (3) the physical player is
+  probed against every window it may still hold - the verified one, an in-flight refill's target, an earlier mutation's - each with
+  its own map into the new queue (mutations chain); (4) the exact physical current occurrence is located in the NEW queue
+  (`oldToNew(physicalToLogical(current))`); (5) `WindowMutationPlanner` classifies; (6) execute; (7) the P5-C occurrence-exact
+  acknowledgement (baseline logical + natural transitions counted by the physical player) publishes the new window under the new
+  logical generation and a fresh window generation; (8) the caller persists via the existing `saveSessionAsync`.
+- **Classification (pure, `PhysicalWindowMutationPlanner.kt`).** The target is the window over the NEW queue with the same history and
+  ahead counts around the current (clamped by what the queue can supply; ring only for repeat-all). It is compared with the ids the
+  physical player holds. *LogicalOnly*: identical -> no Media3 playlist operation; the baseline probe is the physical proof and the
+  window is re-expressed over the new queue (new positions, new generation). *BoundedEdit*: the current survives; an LCS script per
+  side of the current gives the minimal removals (first, descending) and insertions (then, ascending in final coordinates), each
+  smaller than a window, the current item never touched; the playlist never exceeds the larger of the old and new window. *Reanchor*:
+  the current occurrence was removed (or cannot be located) -> a bounded install around the continuation. *Recover*: nothing to anchor
+  on -> fail closed. A 5,000-song Play All Next therefore submits at most the ~79 songs that fit after the current.
+- **Offline.** With no controller the edit stays logical, the mapping is dropped and `NeedsReinstall` carries the rebased current;
+  reconnect (P5-C) re-anchors one bounded window around the exact current. Deferred starts use `rebaseDeferredStart` as before;
+  deferred queue jumps re-resolve by song id and index exactly as in Full mode.
+- **Fail closed.** A baseline that matches no window the edit could start from, a mismatching acknowledgement, a failed Media3 call, a
+  missing verifier or a stale generation never publishes; at most ONE bounded re-anchor follows. An external index-bearing edit of
+  the physical playlist never reaches the logical queue; it is noticed (`onTimelineChanged`, transitions, or the next edit's
+  baseline) and healed by a bounded re-anchor.
+- **Ordering hazard fixed.** `clearMediaItems()` fires listener callbacks synchronously, while the logical queue is still the old one:
+  the adapter is reset and the mode left BEFORE the physical clear so bounded upkeep cannot re-install the deleted queue.
+- **Playback authority of a deleted-current continuation (P5-D correction).** The bounded re-anchor only starts after the physical
+  baseline answers, so at deletion time the physical player still holds the OLD window (including the deleted item). The deletion
+  therefore issues NO playback command: no prepare, no play. The continuation is bound (`DeletionContinuation`) to the logical
+  generation it was made in and to the exact successor POSITION (never a song id), and its follow-up runs only from the operation's own
+  verified-outcome hook. The latest authorized intent is the physical `playWhenReady` itself - every Pause or Play, from the app or any
+  controller, writes it - so a Pause issued while verification is pending is simply kept; nothing replays a captured state. The only
+  command after verification is a `prepare` for an IDLE player, and only if the binding is still current, the generation unchanged
+  and the tracked occurrence still the successor. Any queue-generation bump (a newer selection or edit), a second deletion (replaces the
+  binding), a controller disconnect and a replaced controller clear it, so a late or stale acknowledgement cannot act for a superseded
+  continuation. A failed verification leaves the explicit repair obligation (`NeedsReinstall`, at most the one bounded recovery install
+  around the exact planned successor); the deleted item is never started and the Full queue is never installed. The deleted item may
+  keep playing for the length of one session round trip (it was already playing by the user's intent); the successor takes over at the
+  install. Full-mode deletion is unchanged. Sibling check: no other P5-D branch issues a playback or index-bearing command after an
+  asynchronous physical step (the other mutation sites return after handing off; navigation installs submit synchronously, so their
+  trailing play/pause is ordered after the install).
+- **Mode.** An edit never switches architecture: a queue that shrinks below the Full limit inside a bounded session keeps working
+  (`boundedSession`). A later FRESH install decides by size again (documented: an offline current-song deletion that leaves a small
+  queue installs Full on reconnect).
+- **Crossfade/MediaSession (unchanged limits).** Crossfade stays unavailable in a bounded window (the snapshot reports needs-sync); the
+  explicit cancellation hooks run before each mutation in their established order. The public session timeline is still the physical
+  window; P5-E must (a) window-shift CURRENT and NEXT in lock-step under one generation, (b) provide the logical timeline and translate
+  external `add/remove/move/seek(index)` through the active window, (c) point the probe at the physical engine, (d) redesign the
+  service-side `PlaybackResumption` full item list.
+
 ### P5-E — Crossfade, MediaSession façade and restoration integration
 
 - **Files:** `NextSlotPreparation.kt`, `NextSlotPreparationDriver.kt`, `PlayerEngine.kt`, `CrossfadeRuntimeSnapshot.kt`,

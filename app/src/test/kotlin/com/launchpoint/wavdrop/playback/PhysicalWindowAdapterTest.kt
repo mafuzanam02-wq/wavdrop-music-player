@@ -470,7 +470,8 @@ class PhysicalWindowAdapterTest {
         }
         assertEquals("exactly one list install", 1, Regex("""\.setMediaItems\(""").findAll(code).count())
         // P5-C: the only incremental additions are the bounded prepend and append batches of one adjustment.
-        assertEquals(2, Regex("""\.addMediaItems\(""").findAll(code).count())
+        // P5-D adds the bounded insertions of a mutation script to the refill's prepend/append (three call sites, all window-bounded).
+        assertEquals(3, Regex("""\.addMediaItems\(""").findAll(code).count())
     }
 
     @Test fun gateIsOffAndTheControllerReachesTheAdapterOnlyThroughTheSeam() {

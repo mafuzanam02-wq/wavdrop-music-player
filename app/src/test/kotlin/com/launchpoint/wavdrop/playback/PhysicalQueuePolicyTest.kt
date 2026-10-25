@@ -63,7 +63,7 @@ class PhysicalQueuePolicyTest {
         // P5-B deliberately updated this: the installer, and PlayerController's single installPlaybackQueue seam (Full unless the
         // gate or the test-only switch says Bounded), may reference the types. Nothing else may.
         val own = setOf(
-            "PhysicalWindow.kt", "PhysicalWindowPolicy.kt", "PhysicalQueuePolicy.kt", "PhysicalWindowAdapter.kt", "PlayerController.kt",
+            "PhysicalWindow.kt", "PhysicalWindowPolicy.kt", "PhysicalQueuePolicy.kt", "PhysicalWindowAdapter.kt", "PhysicalWindowMutationPlanner.kt", "PlayerController.kt",
         )
         val tokens = listOf(
             "PhysicalWindow", "PhysicalWindowPolicy", "PhysicalQueuePolicy", "QueueMode", "PlanToken",

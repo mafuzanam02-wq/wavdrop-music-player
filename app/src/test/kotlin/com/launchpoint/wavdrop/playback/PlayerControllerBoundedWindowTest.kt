@@ -348,23 +348,6 @@ class PlayerControllerBoundedWindowTest {
         assertEquals(listOf("setMediaItems(100)"), installs)
     }
 
-    @Test fun queueMutationsAndShuffleAreRejectedInABoundedWindowUntilP5D() {
-        val h = harness()
-        val q = queue(25_000)
-        h.start(q, 500)
-        val before = h.calls.size
-        h.pc.playNext(RealMedia3QueueRig.song(77_777L))
-        h.pc.addToQueue(RealMedia3QueueRig.song(77_778L))
-        h.pc.removeFromQueue(510)
-        h.pc.moveQueueItemDown(510)
-        h.pc.toggleShuffle()
-        h.rig.settle(50)
-        assertEquals(25_000, h.pc.nowPlayingState.value.queue.size)
-        assertEquals(500, h.logical())
-        assertEquals(0, h.calls.drop(before).count { it.startsWith("add") || it.startsWith("append") || it.startsWith("remove") || it.startsWith("replace") || it.startsWith("setMediaItems") })
-        assertFalse(h.pc.nowPlayingState.value.shuffleEnabled)
-    }
-
     @Test fun crossfadePlanningIsUnavailableInABoundedWindow() {
         val h = harness()
         h.start(queue(25_000), 500)

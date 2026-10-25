@@ -907,6 +907,13 @@ class PlayerController @Inject constructor(
             if (ownership.persistsSession) saveSessionAsync()
         }
 
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            // P5-D: a physical playlist change nobody in the adapter asked for (an external index-bearing edit) is noticed here, not
+            // only at the next transition. The adapter's own operations hold the pending slot / leave the Active state, so they never
+            // reach the recovery branch; an unprovable current while Active fails closed with one bounded re-anchor.
+            if (isBounded() && !physicalWindowAdapter.isBusy) onBoundedAutomaticTransition()
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             PlaybackStartupTrace.onPlayerState("ctl", playbackState)
             if (DEBUG_STATS) {
@@ -1120,6 +1127,7 @@ class PlayerController @Inject constructor(
      */
     private fun bumpQueueGeneration() {
         queueGeneration++
+        pendingDeletionContinuation = null // a bounded deleted-current continuation belongs to the generation that made it
         resetBadMediaRecoveryEpisode()
         // The logical queue is about to change: whatever was verified, and any in-flight repair, no longer applies. A dirty
         // queue is repaired again from the new facts (the repair starts after this main-thread turn finishes).
@@ -1396,6 +1404,7 @@ class PlayerController @Inject constructor(
         if (isBounded()) {
             // P5-C: a new controller invalidates the verified window; the drain re-anchors it (see synchronizePlayerQueueOnReconnect).
             physicalWindowAdapter.onPlayerReplaced()
+            pendingDeletionContinuation = null
             playerQueueNeedsSync = true
         }
         controller.repeatMode = physicalRepeatModeFor(repeatMode)
@@ -1637,6 +1646,7 @@ class PlayerController @Inject constructor(
                 // CF-2F4: only an authoritative disconnect notifies, and BEFORE the controller reference is cleared so an
                 // audible crossfade cleanup can still reach the live primary. Stale disconnects never get here.
                 controllerDisconnectedListeners.notifyControllerDisconnected()
+                pendingDeletionContinuation = null // its acknowledgement can only have been requested through this controller
                 mediaController = null
                 _progressPlayer.value = null
                 controllerConnectionState = ControllerConnectionDecision.onDisconnected()
@@ -1987,7 +1997,6 @@ class PlayerController @Inject constructor(
     }
 
     fun playNext(song: Song) {
-        if (rejectBoundedQueueMutation("playNext")) return
         // CF-2H3A: explicit Play Next intent cancels an owned crossfade before any queue inspection or mutation, even if
         // this then falls back (empty queue -> playSong, unresolved index -> append). Internal paths never notify.
         explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
@@ -2021,7 +2030,11 @@ class PlayerController @Inject constructor(
         rebaseDeferredStart(generationBefore, OccurrenceMap.insert(insertPlaybackIndex, 1))
 
         // addMediaItem at playback position — no setMediaItems/prepare/play needed; otherwise a dirty repair obligation.
-        applyPhysicalEdit { it.addMediaItem(insertPlaybackIndex, song.toCachedMediaItem()) }
+        if (isBounded()) {
+            applyBoundedQueueMutation("play_next", currentPlaybackIndex, OccurrenceMap.insert(insertPlaybackIndex, 1))
+        } else {
+            applyPhysicalEdit { it.addMediaItem(insertPlaybackIndex, song.toCachedMediaItem()) }
+        }
 
         _nowPlayingState.update {
             it.copy(queue = playbackQueue, currentIndex = currentPlaybackIndex)
@@ -2031,7 +2044,6 @@ class PlayerController @Inject constructor(
 
     /** Inserts [songs] immediately after the current item in their original order. */
     fun playAllNext(songs: List<Song>) {
-        if (rejectBoundedQueueMutation("playAllNext")) return
         // CF-2H3A: one notification per command, before planning (NoOp, StartQueue and InsertAfterCurrent alike).
         // insertAllAfterCurrent / appendAllPreservingQueue / playFromQueue reached from here never notify again.
         explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
@@ -2051,7 +2063,6 @@ class PlayerController @Inject constructor(
 
     /** Appends [songs] to the end of the queue in their original order. */
     fun addAllToQueue(songs: List<Song>) {
-        if (rejectBoundedQueueMutation("addAllToQueue")) return
         // CF-2H3B: one notification per command, before planning (NoOp, StartNewQueue and AppendPreservingQueue alike).
         // appendAllPreservingQueue (shared with the Play Next fallbacks) and playFromQueue never notify.
         explicitAddToQueueMutationListeners.notifyExplicitAddToQueueMutation()
@@ -2072,7 +2083,6 @@ class PlayerController @Inject constructor(
     }
 
     fun addToQueue(song: Song) {
-        if (rejectBoundedQueueMutation("addToQueue")) return
         // CF-2H3B: notified before planning; see addAllToQueue.
         explicitAddToQueueMutationListeners.notifyExplicitAddToQueueMutation()
         when (
@@ -2121,6 +2131,15 @@ class PlayerController @Inject constructor(
         playbackQueue = result.playbackQueue
         rebaseDeferredStart(generationBefore, OccurrenceMap.insert(currentPlaybackIndex + 1, songs.size))
 
+        if (isBounded()) {
+            // The whole batch enters the logical queue; the adapter submits only the physically relevant span after the current.
+            applyBoundedQueueMutation("play_all_next", currentPlaybackIndex, OccurrenceMap.insert(currentPlaybackIndex + 1, songs.size))
+            _nowPlayingState.update {
+                it.copy(queue = playbackQueue, currentIndex = currentPlaybackIndex, shuffleEnabled = shuffleEnabled, repeatMode = repeatMode)
+            }
+            saveSessionAsync()
+            return
+        }
         val syncPlan = planBatchQueuePlayerSync(
             oldPlaybackQueue = oldPlaybackQueue,
             newPlaybackQueue = playbackQueue,
@@ -2170,6 +2189,7 @@ class PlayerController @Inject constructor(
      */
     private fun appendAllPreservingQueue(songs: List<Song>) {
         if (songs.isEmpty()) return
+        val oldCurrentForBounded = if (isBounded()) currentPlaybackIndex() else null // resolved BEFORE the generation moves
         val generationBefore = queueGeneration
         bumpQueueGeneration()
         val result = QueueMutation.appendAll(
@@ -2182,11 +2202,17 @@ class PlayerController @Inject constructor(
         playbackQueue = result.playbackQueue
         rebaseDeferredStart(generationBefore, OccurrenceMap.identity()) // an append moves no existing entry
 
-        applyPhysicalEdit {
-            it.addMeasuredMediaItems(
-                operation = "append_fallback",
-                songs = songs,
-            )
+        if (isBounded()) {
+            // An append moves no existing entry. Outside the window it is logical-only; at the genuine end (or a repeat-all ring)
+            // the adapter re-derives the window, so appended entries never land before the current item.
+            applyBoundedQueueMutation("append", oldCurrentForBounded, OccurrenceMap.identity())
+        } else {
+            applyPhysicalEdit {
+                it.addMeasuredMediaItems(
+                    operation = "append_fallback",
+                    songs = songs,
+                )
+            }
         }
 
         // Appending to the end does not move the current item, so keep the existing current index
@@ -2280,7 +2306,6 @@ class PlayerController @Inject constructor(
     }
 
     fun removeFromQueue(playbackIndex: Int) {
-        if (rejectBoundedQueueMutation("removeFromQueue")) return
         // CF-2H3D: explicit removal intent cancels an owned crossfade first, even if validation then no-ops (e.g. current).
         explicitQueueRemovalListeners.notifyExplicitQueueRemoval()
         // The boundary is the authoritative current occurrence (Media3 can advance before Now Playing syncs). Unprovable current:
@@ -2302,7 +2327,11 @@ class PlayerController @Inject constructor(
         rebaseDeferredStart(generationBefore, OccurrenceMap.remove(playbackIndex))
 
         // playbackIndex is the ExoPlayer media item index.
-        applyPhysicalEdit { it.removeMediaItem(playbackIndex) }
+        if (isBounded()) {
+            applyBoundedQueueMutation("remove_from_queue", currentPlaybackIndex, OccurrenceMap.remove(playbackIndex))
+        } else {
+            applyPhysicalEdit { it.removeMediaItem(playbackIndex) }
+        }
 
         val newCurrentPlaybackIndex = if (playbackIndex < currentPlaybackIndex) {
             currentPlaybackIndex - 1
@@ -2328,7 +2357,6 @@ class PlayerController @Inject constructor(
      * playing untouched and becomes index 0. Returns true only when something was removed.
      */
     fun clearEarlierQueue(): Boolean {
-        if (rejectBoundedQueueMutation("clearEarlierQueue")) return false
         // CF-2H3D: one notification per public command, before planning; applyBulkClear never notifies.
         explicitQueueRemovalListeners.notifyExplicitQueueRemoval()
         return applyBulkClear { currentIndex ->
@@ -2338,7 +2366,6 @@ class PlayerController @Inject constructor(
 
     /** Removes every queue occurrence strictly after the current one. Returns true only on a real clear. */
     fun clearUpNext(): Boolean {
-        if (rejectBoundedQueueMutation("clearUpNext")) return false
         // CF-2H3D: one notification per public command, before planning; applyBulkClear never notifies.
         explicitQueueRemovalListeners.notifyExplicitQueueRemoval()
         return applyBulkClear { currentIndex ->
@@ -2361,16 +2388,21 @@ class PlayerController @Inject constructor(
         playbackOrder = mutation.playbackOrder
         playbackQueue = mutation.playbackQueue
         // Everything before (clearEarlier) or after (clearUpNext) the current entry is gone; the current entry itself survives.
-        rebaseDeferredStart(generationBefore) { old ->
+        val clearMap: (Int) -> Int? = { old ->
             when {
                 mutation.mediaRemoveFrom == 0 -> if (old < mutation.mediaRemoveToExclusive) null else old - mutation.mediaRemoveToExclusive
                 else -> if (old >= mutation.mediaRemoveFrom) null else old
             }
         }
+        rebaseDeferredStart(generationBefore, clearMap)
 
         // Media3's playlist mirrors playbackOrder, so one range removal keeps it aligned. Removing
         // items before/after the current one never interrupts the current item or its position.
-        applyPhysicalEdit { it.removeMediaItems(mutation.mediaRemoveFrom, mutation.mediaRemoveToExclusive) }
+        if (isBounded()) {
+            applyBoundedQueueMutation("bulk_clear", currentPlaybackIndex, clearMap)
+        } else {
+            applyPhysicalEdit { it.removeMediaItems(mutation.mediaRemoveFrom, mutation.mediaRemoveToExclusive) }
+        }
 
         _nowPlayingState.update {
             it.copy(
@@ -2386,7 +2418,6 @@ class PlayerController @Inject constructor(
     }
 
     fun handleSongDeleted(songId: Long) {
-        if (rejectBoundedQueueMutation("handleSongDeleted")) return
         // CF-2H3E: a deletion event ends crossfade ownership first (even when routing is Unresolved or the plan no-ops).
         // The private deletion helpers (applyNonCurrentSongDeletion, handleCurrentSongDeleted, ...) never notify.
         explicitLibraryDeletionListeners.notifyExplicitLibraryDeletion()
@@ -2423,7 +2454,11 @@ class PlayerController @Inject constructor(
 
         // Aligned Media3 playlist mirrors the old playback order: remove the old positions, descending.
         // A dirty playlist is not authoritative and is left for the reconciler; no controller is a repair obligation.
-        applyPhysicalEdit { controller -> plan.removedPlaybackPositions.forEach { controller.removeMediaItem(it) } }
+        if (isBounded()) {
+            applyBoundedQueueMutation("song_deleted", currentIdx, OccurrenceMap.removeAll(plan.removedPlaybackPositions))
+        } else {
+            applyPhysicalEdit { controller -> plan.removedPlaybackPositions.forEach { controller.removeMediaItem(it) } }
+        }
 
         // Only queue/index are refreshed: the current song itself did not change, so Now Playing's song is
         // left to the normal Media3 sync (touching it here could hide a pending stats transition).
@@ -2451,16 +2486,21 @@ class PlayerController @Inject constructor(
             deletedSongId = deletedSongId,
             repeatMode = repeatMode,
         )
+        // Bounded: the exact occurrences that disappear, in the OLD queue's coordinates (every occurrence of the deleted song).
+        val boundedDeletion = if (isBounded()) BoundedDeletion(currentIdx, playbackQueue.indices.filter { playbackQueue[it].id == deletedSongId }) else null
         val controller = mediaController
         when {
             plan is QueueMutation.CurrentDeletionPlan.NoOp -> return
             plan is QueueMutation.CurrentDeletionPlan.Continue && controller != null ->
-                applyCurrentDeletionContinuation(controller, plan)
-            plan is QueueMutation.CurrentDeletionPlan.Continue -> applyCurrentDeletionWithoutController(plan)
+                applyCurrentDeletionContinuation(controller, plan, boundedDeletion)
+            plan is QueueMutation.CurrentDeletionPlan.Continue -> applyCurrentDeletionWithoutController(plan, boundedDeletion)
             else -> {
                 // No survivor to continue with - clear queue and stop. Anything deferred referred to the removed queue.
                 bumpQueueGeneration()
                 deferred.clear()
+                // An empty queue has no window. The adapter is reset and the mode left BEFORE the physical clear: the clear fires its
+                // listener callbacks synchronously, and bounded upkeep must not see the old queue and re-install it.
+                if (isBounded()) { physicalWindowAdapter.reset(); installedQueueMode = QueueMode.Full }
                 mediaController?.pause()
                 mediaController?.clearMediaItems()
                 libraryQueue        = emptyList()
@@ -2487,7 +2527,32 @@ class PlayerController @Inject constructor(
      * planned survivor becomes the selected occurrence as a deferred start that keeps the user's play/pause intent, so the
      * reconnect installs the surviving queue at that exact occurrence from position 0 (never a stale physical position).
      */
-    private fun applyCurrentDeletionWithoutController(plan: QueueMutation.CurrentDeletionPlan.Continue) {
+    private class BoundedDeletion(val oldCurrent: Int, val removedPositions: List<Int>)
+
+    /**
+     * P5-D: the continuation chosen by a bounded current-song deletion, bound to the logical generation it was made in and to the
+     * exact occurrence (position, not song id) it must land on. Any newer queue change bumps the generation, a second deletion
+     * replaces it, and a controller disconnect clears it, so a late acknowledgement can never act for a superseded continuation.
+     */
+    private class DeletionContinuation(val generation: Long, val occurrence: Int, val songId: Long)
+
+    private var pendingDeletionContinuation: DeletionContinuation? = null
+
+    /**
+     * Runs when the replacement window of [binding] was physically verified. It issues no Play/Pause: the physical playWhenReady
+     * already is the latest authorized intent (a Pause during verification stays a Pause). The only command is a prepare when the
+     * player was idle, and only if this is still the current continuation, generation and occurrence.
+     */
+    private fun completeDeletionContinuation(binding: DeletionContinuation) {
+        if (pendingDeletionContinuation !== binding) return // superseded (another deletion) or cleared (disconnect)
+        pendingDeletionContinuation = null
+        if (binding.generation != queueGeneration) return // a newer queue change owns the queue now
+        if (physicalWindowAdapter.trackedLogical != binding.occurrence) return // a newer navigation owns the current occurrence
+        val controller = mediaController ?: return
+        if (controller.playbackState == Player.STATE_IDLE) controller.prepare()
+    }
+
+    private fun applyCurrentDeletionWithoutController(plan: QueueMutation.CurrentDeletionPlan.Continue, bounded: BoundedDeletion? = null) {
         val wasPlaying = _nowPlayingState.value.isPlaying
         bumpQueueGeneration()
         libraryQueue = plan.libraryQueue
@@ -2498,6 +2563,13 @@ class PlayerController @Inject constructor(
         deferred.acceptStart(queueGeneration) { id -> DeferredStart.LibraryQueue(id, plan.currentPlaybackIndex, newSong.id) }
         deferred.capturePlayWhenReady(wasPlaying)
         markQueueDirty(QueueDirtyReason.ControllerUnavailable)
+        if (bounded != null) {
+            // The window is unprovable without a player: drop it and owe a bounded re-install around the continuation.
+            applyBoundedQueueMutation(
+                "current_song_deleted_offline", bounded.oldCurrent, OccurrenceMap.removeAll(bounded.removedPositions),
+                continuation = plan.currentPlaybackIndex,
+            )
+        }
         _nowPlayingState.update {
             it.copy(
                 song = newSong,
@@ -2519,6 +2591,7 @@ class PlayerController @Inject constructor(
     private fun applyCurrentDeletionContinuation(
         controller: MediaController,
         plan: QueueMutation.CurrentDeletionPlan.Continue,
+        bounded: BoundedDeletion? = null,
     ) {
         // Original play intent (playWhenReady survives buffering); a paused user is never auto-started.
         val wasPlaying = controller.playWhenReady || controller.isPlaying
@@ -2531,10 +2604,27 @@ class PlayerController @Inject constructor(
         // Explicit destructive library mutation (not a natural G-1 boundary): push the resulting
         // queue at the planned occurrence. Now Playing is updated from the plan below, never from a
         // controller index that may not be observable yet.
-        syncPlayerQueueAt(
-            controller, plan.currentPlaybackIndex, positionMs = 0L, playWhenReady = wasPlaying,
-            reason = FullQueueSyncReason.CurrentSongDeleted,
-        )
+        if (bounded != null) {
+            // Bounded: every occurrence of the deleted song leaves the logical queue; the continuation chosen by the deletion
+            // policy is installed as a bounded window (never the Full-queue push). The install happens only after the physical
+            // baseline answers, so NO playback command is issued here: the physical player still holds the OLD window, and a
+            // prepare()/play() now would act on it. The continuation is bound to its generation and exact occurrence; when (and only
+            // when) the replacement window is verified and the binding is still current, [completeDeletionContinuation] runs.
+            // The latest intent is the physical playWhenReady itself - every pause/play, from any controller, writes it - so a
+            // Pause issued while verification is pending is simply kept: nothing replays a captured state.
+            val binding = DeletionContinuation(queueGeneration, plan.currentPlaybackIndex, plan.currentSong.id)
+            pendingDeletionContinuation = binding
+            applyBoundedQueueMutation(
+                "current_song_deleted", bounded.oldCurrent, OccurrenceMap.removeAll(bounded.removedPositions),
+                continuation = plan.currentPlaybackIndex,
+                onVerified = { completeDeletionContinuation(binding) },
+            )
+        } else {
+            syncPlayerQueueAt(
+                controller, plan.currentPlaybackIndex, positionMs = 0L, playWhenReady = wasPlaying,
+                reason = FullQueueSyncReason.CurrentSongDeleted,
+            )
+        }
 
         val newSong = plan.currentSong
         // StatsTracker song transition and session persistence are owned by the Media3 transition callback
@@ -2557,7 +2647,6 @@ class PlayerController @Inject constructor(
     }
 
     fun moveQueueItemUp(playbackIndex: Int) {
-        if (rejectBoundedQueueMutation("moveQueueItemUp")) return
         // CF-2H3C: explicit reorder intent cancels an owned crossfade first, even if validation then no-ops.
         explicitQueueReorderListeners.notifyExplicitQueueReorder()
         val currentPlaybackIndex = currentPlaybackIndex() ?: return // unprovable current: reorder nothing
@@ -2566,7 +2655,6 @@ class PlayerController @Inject constructor(
     }
 
     fun moveQueueItemDown(playbackIndex: Int) {
-        if (rejectBoundedQueueMutation("moveQueueItemDown")) return
         // CF-2H3C: explicit reorder intent cancels an owned crossfade first, even if validation then no-ops.
         explicitQueueReorderListeners.notifyExplicitQueueReorder()
         val currentPlaybackIndex = currentPlaybackIndex() ?: return // unprovable current: reorder nothing
@@ -2575,7 +2663,6 @@ class PlayerController @Inject constructor(
     }
 
     fun moveQueueItemTo(fromPlaybackIndex: Int, toPlaybackIndex: Int) {
-        if (rejectBoundedQueueMutation("moveQueueItemTo")) return
         // CF-2H3C: explicit reorder intent cancels an owned crossfade first, even if validation then no-ops.
         explicitQueueReorderListeners.notifyExplicitQueueReorder()
         val currentPlaybackIndex = currentPlaybackIndex() ?: return // unprovable current: reorder nothing
@@ -2592,7 +2679,11 @@ class PlayerController @Inject constructor(
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
         rebaseDeferredStart(generationBefore, OccurrenceMap.move(fromPlaybackIndex, toPlaybackIndex))
 
-        applyPhysicalEdit { it.moveMediaItem(fromPlaybackIndex, toPlaybackIndex) }
+        if (isBounded()) {
+            applyBoundedQueueMutation("move_queue_item", currentPlaybackIndex, OccurrenceMap.move(fromPlaybackIndex, toPlaybackIndex))
+        } else {
+            applyPhysicalEdit { it.moveMediaItem(fromPlaybackIndex, toPlaybackIndex) }
+        }
 
         _nowPlayingState.update {
             it.copy(
@@ -2606,7 +2697,6 @@ class PlayerController @Inject constructor(
     }
 
     fun moveToPlayNext(playbackIndex: Int) {
-        if (rejectBoundedQueueMutation("moveToPlayNext")) return
         // CF-2H3A: notified before index validation so an invalid or already-immediate move still ends ownership.
         explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
         val currentPlaybackIndex = currentPlaybackIndex() ?: return // unprovable current: reorder nothing
@@ -2626,7 +2716,11 @@ class PlayerController @Inject constructor(
         rebaseDeferredStart(generationBefore, OccurrenceMap.move(playbackIndex, immediateNextIndex))
 
         // Move the item in ExoPlayer's playlist using playback indices.
-        applyPhysicalEdit { it.moveMediaItem(playbackIndex, immediateNextIndex) }
+        if (isBounded()) {
+            applyBoundedQueueMutation("move_to_play_next", currentPlaybackIndex, OccurrenceMap.move(playbackIndex, immediateNextIndex))
+        } else {
+            applyPhysicalEdit { it.moveMediaItem(playbackIndex, immediateNextIndex) }
+        }
 
         _nowPlayingState.update {
             it.copy(
@@ -2811,7 +2905,6 @@ class PlayerController @Inject constructor(
         // the toggle then no-ops (unresolved index, null plan). Native Media3 shuffle is not routed here. The service
         // custom TOGGLE_SHUFFLE command calls this method, so one user command yields one notification.
         explicitShuffleChangeListeners.notifyExplicitShuffleChange()
-        if (rejectBoundedQueueMutation("toggleShuffle")) return
         val controller = mediaController
         val currentIndex = currentPlaybackIndex() ?: return
         val positionMs = controller?.currentPosition?.coerceAtLeast(0L)
@@ -2829,6 +2922,7 @@ class PlayerController @Inject constructor(
         // Captured while the player queue is still in its pre-toggle state, to decide whether the
         // physical playlist can be reordered live (G-1).
         val oldPlaybackQueue = playbackQueue
+        val oldPlaybackOrderForBounded = playbackOrder
         val wasPlayerQueueNeedsSync = playerQueueNeedsSync
         val controllerIndexBeforeToggle = controller?.currentMediaItemIndex
         val controllerCountBeforeToggle = controller?.mediaItemCount
@@ -2861,7 +2955,15 @@ class PlayerController @Inject constructor(
         // The toggle keeps the current ENTRY playing and moves it to toggleModel.currentPlaybackIndex. A pending start selects the
         // current entry, so it follows; any other index is not known here and stays rejected.
         rebaseDeferredStart(generationBeforeShuffle) { old -> if (old == currentIndex) toggleModel.currentPlaybackIndex else null }
-        if (syncPlan is ShufflePhysicalSyncPlan.ReplaceAroundCurrent && controller != null) {
+        if (isBounded()) {
+            // Bounded: the toggle is a logical reorder. The current occurrence keeps playing (the adapter replaces only the spans
+            // before/after it inside the window, never restarting it); the exact old->new map comes from the two orders.
+            applyBoundedQueueMutation(
+                "toggle_shuffle", currentIndex,
+                occurrenceMapBetweenOrders(oldPlaybackOrderForBounded, toggleModel.playbackOrder),
+                continuation = toggleModel.currentPlaybackIndex,
+            )
+        } else if (syncPlan is ShufflePhysicalSyncPlan.ReplaceAroundCurrent && controller != null) {
             // Aligned player + controller: reorder the physical playlist around the untouched
             // current item right now, so the next natural boundary is a pure Media3 AUTO
             // transition. The queue stays marked dirty during the live Media3 mutation because
@@ -4241,7 +4343,11 @@ class PlayerController @Inject constructor(
         playbackQueue = playbackOrder.mapNotNull { libraryQueue.getOrNull(it) }
         rebaseDeferredStart(generationBefore, OccurrenceMap.swap(fromIndex, toIndex))
 
-        applyPhysicalEdit { it.moveMediaItem(fromIndex, toIndex) }
+        if (isBounded()) {
+            applyBoundedQueueMutation("swap_queue_items", currentPlaybackIndex, OccurrenceMap.swap(fromIndex, toIndex))
+        } else {
+            applyPhysicalEdit { it.moveMediaItem(fromIndex, toIndex) }
+        }
 
         _nowPlayingState.update {
             it.copy(
@@ -4421,6 +4527,14 @@ class PlayerController @Inject constructor(
         materialize = { songs -> materializeMediaItems(songs).mediaItems },
     )
 
+    /**
+     * Test seam: how the physical player's acknowledgement is requested. Production is always the session probe
+     * ([PhysicalQueueObservationCommand]); a test replaces it to control the ORDER of acknowledgements against other events.
+     */
+    internal var boundedVerifierFactory: (MediaController) -> PhysicalInstallVerifier = { PhysicalQueueObservationCommand.verifier(it) }
+
+    private fun boundedVerifier(controller: MediaController): PhysicalInstallVerifier = boundedVerifierFactory(controller)
+
     /** The mode of the queue install that is about to happen, decided once from the logical queue size. */
     private fun isBoundedInstall(): Boolean =
         PhysicalQueuePolicy.modeFor(
@@ -4449,7 +4563,7 @@ class PlayerController @Inject constructor(
             startIndex = startIndex,
             positionMs = positionMs,
             repeatMode = this@PlayerController.repeatMode,
-            verifier = PhysicalQueueObservationCommand.verifier(this), // Active only on the physical player's own acknowledgement
+            verifier = boundedVerifier(this), // Active only on the physical player's own acknowledgement
             onOutcome = boundedOutcomeHandler(operation),
         )
         when (outcome) {
@@ -4476,21 +4590,59 @@ class PlayerController @Inject constructor(
         }
 
     /**
-     * P5-D has not converted queue edits and shuffle rebuilds to a window. In bounded (test-only) mode they are REJECTED rather
-     * than run through the Full-queue mutation logic, which would treat window indices as logical ones. True = rejected.
+     * P5-D: the physical effect of an already-applied LOGICAL queue mutation in a bounded window. The caller has finished the
+     * logical state (queue, order, generation bump) and passes the exact occurrence it was on ([oldCurrent], in the OLD queue's
+     * coordinates), the exact old->new occurrence map ([occurrenceMap], the same maps the deferred commands use) and, if the current
+     * occurrence was removed, the continuation chosen by the deletion policy. The adapter owns everything physical: it classifies
+     * (logical-only / bounded edit / re-anchor / recover), verifies through the physical acknowledgement and publishes only a proven
+     * window. With no controller the edit stays logical and a bounded re-install around the exact current is owed on reconnect.
+     * Never a Full-queue push.
      */
-    private fun rejectBoundedQueueMutation(operation: String): Boolean {
-        if (!isBounded()) return false
-        Log.w(TAG, "[bounded] $operation rejected: queue mutation in a bounded window is not supported until P5-D")
-        return true
+    private fun applyBoundedQueueMutation(
+        operation: String,
+        oldCurrent: Int?,
+        occurrenceMap: (Int) -> Int?,
+        continuation: Int? = null,
+        onVerified: (() -> Unit)? = null,
+    ) {
+        val controller = mediaController
+        playerQueueNeedsSync = true // owed until the adapter publishes a verified window (or reconnect re-anchors)
+        val result = physicalWindowAdapter.applyMutation(
+            QueueMutationRequest(
+                player = controller,
+                queue = playbackQueue,
+                repeatMode = repeatMode,
+                oldCurrent = oldCurrent,
+                occurrenceMap = occurrenceMap,
+                continuation = continuation,
+                verifier = controller?.let { boundedVerifier(it) },
+                onOutcome = boundedOutcomeHandler(operation, onVerified),
+            ),
+        )
+        when (result) {
+            is MutationSubmission.Submitted -> {
+                if (controller == null) ensureControllerConnection() // the repair obligation is discharged on reconnect
+                if (playbackQueue.isEmpty()) installedQueueMode = QueueMode.Full
+            }
+            is MutationSubmission.Rejected -> Log.w(TAG, "[bounded] $operation: physical effect rejected (${result.reason}); the logical edit stands, a bounded re-install is owed")
+            is MutationSubmission.Failed -> Log.w(TAG, "[bounded] $operation: physical effect failed (${result.cause.message}); the logical edit stands, a bounded re-install is owed")
+        }
+    }
+
+    /** Exact old->new occurrence map for a reorder that is described only by the two playback orders (shuffle toggle). */
+    private fun occurrenceMapBetweenOrders(oldOrder: List<Int>, newOrder: List<Int>): (Int) -> Int? {
+        val newPositionByLibraryIndex = HashMap<Int, Int>(newOrder.size)
+        newOrder.forEachIndexed { position, libraryIndex -> newPositionByLibraryIndex[libraryIndex] = position }
+        return { old -> oldOrder.getOrNull(old)?.let { newPositionByLibraryIndex[it] } }
     }
 
     /** Terminal handling of ONE bounded install or adjustment; never publishes anything the adapter did not verify. */
-    private fun boundedOutcomeHandler(operation: String): (BoundedInstallOutcome) -> Unit = { result ->
+    private fun boundedOutcomeHandler(operation: String, onVerified: (() -> Unit)? = null): (BoundedInstallOutcome) -> Unit = { result ->
         when (result) {
             is BoundedInstallOutcome.Active -> {
                 playerQueueNeedsSync = false
                 syncNowPlayingState(notifyStats = false)
+                onVerified?.invoke() // an operation-bound follow-up runs only now, and only if it is still the current intent
                 maintainBoundedWindow() // chain: ends at NoChange, so no polling and no unbounded repeat
             }
             is BoundedInstallOutcome.Stale -> Unit // newer intent won; it owns the queue state
@@ -4509,7 +4661,7 @@ class PlayerController @Inject constructor(
                 player = controller,
                 queue = playbackQueue,
                 repeatMode = repeatMode,
-                verifier = PhysicalQueueObservationCommand.verifier(controller),
+                verifier = boundedVerifier(controller),
                 onOutcome = boundedOutcomeHandler("maintain"),
             )
         ) {
@@ -4527,7 +4679,7 @@ class PlayerController @Inject constructor(
             player = controller,
             queue = playbackQueue,
             repeatMode = repeatMode,
-            verifier = PhysicalQueueObservationCommand.verifier(controller),
+            verifier = boundedVerifier(controller),
             onOutcome = boundedOutcomeHandler("recover_unprovable"),
         )
     }
@@ -4555,7 +4707,7 @@ class PlayerController @Inject constructor(
             target = logicalIndex,
             positionMs = 0L,
             repeatMode = repeatMode,
-            verifier = PhysicalQueueObservationCommand.verifier(controller),
+            verifier = boundedVerifier(controller),
             onOutcome = boundedOutcomeHandler("navigate"),
         )
         when (result) {
@@ -4603,7 +4755,7 @@ class PlayerController @Inject constructor(
             target = occurrence,
             positionMs = positionMs,
             repeatMode = repeatMode,
-            verifier = PhysicalQueueObservationCommand.verifier(controller),
+            verifier = boundedVerifier(controller),
             onOutcome = boundedOutcomeHandler("reconnect"),
         )
         if (result is BoundedNavigationResult.Reanchoring) controller.prepare()

@@ -280,12 +280,15 @@ internal class PhysicalWindowInstallPlanner(private val policy: PhysicalWindowPo
         startIndex: Int,
         positionMs: Long,
         repeatMode: RepeatMode,
+        enforceFullModeThreshold: Boolean = true,
     ): BoundedInstallPlanResult {
         if (logicalGeneration < 0L || windowGeneration < 0L) return rejected(BoundedInstallRejection.NegativeGeneration)
         if (queueSize < 1) return rejected(BoundedInstallRejection.EmptyQueue)
         if (startIndex !in 0 until queueSize) return rejected(BoundedInstallRejection.StartOutOfRange)
         if (positionMs < 0L) return rejected(BoundedInstallRejection.NegativePosition)
-        if (PhysicalQueuePolicy.modeFor(queueSize, boundedEnabled = true, fullModeMax = policy.fullModeMax) != QueueMode.Bounded) {
+        // A fresh install of a Full-sized queue is refused. A queue that SHRANK inside an established bounded session keeps its mode
+        // (an edit never switches architecture), so the owner passes enforceFullModeThreshold = false for it.
+        if (enforceFullModeThreshold && PhysicalQueuePolicy.modeFor(queueSize, boundedEnabled = true, fullModeMax = policy.fullModeMax) != QueueMode.Bounded) {
             return rejected(BoundedInstallRejection.QueueBelongsToFullMode)
         }
         val window = policy.initialWindow(queueSize, startIndex, repeatMode, logicalGeneration, windowGeneration)
@@ -350,6 +353,31 @@ internal sealed interface BoundedNavigationResult {
     data class Failed(val cause: Throwable) : BoundedNavigationResult
 }
 
+/**
+ * A logical queue mutation the owner has already applied. [queue] is the NEW complete logical queue. [oldCurrent] is the logical
+ * current in the OLD queue's coordinates as the command saw it; [occurrenceMap] maps an old logical position to its position in the
+ * new queue (null = that occurrence no longer exists) - the same exact-occurrence maps the deferred-command machinery uses.
+ * [continuation] is the new logical position to continue at when the current occurrence was removed. [player] is null while no
+ * controller exists.
+ */
+internal class QueueMutationRequest(
+    val player: Player?,
+    val queue: List<Song>,
+    val repeatMode: RepeatMode,
+    val oldCurrent: Int?,
+    val occurrenceMap: (Int) -> Int?,
+    val continuation: Int?,
+    val verifier: PhysicalInstallVerifier?,
+    val onOutcome: (BoundedInstallOutcome) -> Unit,
+)
+
+internal sealed interface MutationSubmission {
+    /** Accepted; [path] names the route taken (baseline, offline, reanchor_unverified_window, empty_queue). The terminal result goes to the outcome callback. */
+    data class Submitted(val path: String) : MutationSubmission
+    data class Rejected(val reason: String) : MutationSubmission
+    data class Failed(val cause: Throwable) : MutationSubmission
+}
+
 internal sealed interface MaintenanceResult {
     data object NoChange : MaintenanceResult
 
@@ -393,6 +421,7 @@ internal class PhysicalWindowAdapter(
     private val materialize: (List<Song>) -> List<MediaItem> = { songs -> songs.map(Song::toPlaybackMediaItem) },
 ) {
     private val planner = PhysicalWindowInstallPlanner(policy)
+    private val mutationPlanner = WindowMutationPlanner(policy)
 
     var state: WindowInstallState = WindowInstallState.Idle
         private set
@@ -410,6 +439,9 @@ internal class PhysicalWindowAdapter(
     var trackedLogical: Int = -1
         private set
 
+    /** True once a bounded install was accepted: queue edits inside the session keep the mode even if the queue shrinks below the Full limit. */
+    private var boundedSession = false
+
     /** Window generations are monotonic for the adapter's lifetime and are never reused. */
     private var nextWindowGeneration = 0L
 
@@ -422,6 +454,9 @@ internal class PhysicalWindowAdapter(
      * occurrence derived from that baseline.
      */
     private enum class Kind { Install, Baseline, Adjust }
+
+    /** A window the physical player may be holding, with the map from its logical positions to the CURRENT queue's. */
+    private class Candidate(val window: InstalledWindow, val toNew: (Int) -> Int?)
 
     private class Pending(
         val kind: Kind,
@@ -439,6 +474,14 @@ internal class PhysicalWindowAdapter(
         /** Adjust only: the PHYSICALLY observed logical current and natural-transition count at the baseline. */
         val baselineLogical: Int = -1,
         val baselineAuto: Long = 0L,
+        /** The logical generation this operation belongs to (a mutation's operations belong to the generation the edit created). */
+        val generation: Long = window.logicalGeneration,
+        /** What the physical player is probed with and must echo. Defaults to the window's own token. */
+        val token: PlanToken = window.token,
+        /** Windows the physical player may still hold (in THIS operation's queue coordinates) besides this operation's own target. */
+        val lineage: List<Candidate> = emptyList(),
+        /** Mutation baseline only. */
+        val request: QueueMutationRequest? = null,
     ) {
         var listener: Player.Listener? = null
         var handler: Handler? = null
@@ -513,7 +556,7 @@ internal class PhysicalWindowAdapter(
         onOutcome: (BoundedInstallOutcome) -> Unit = {},
     ): BoundedInstallOutcome {
         val plan = when (
-            val planned = planner.plan(queue.size, logicalGeneration, nextWindowGeneration, startIndex, positionMs, repeatMode)
+            val planned = planner.plan(queue.size, logicalGeneration, nextWindowGeneration, startIndex, positionMs, repeatMode, enforceFullModeThreshold = !boundedSession)
         ) {
             is BoundedInstallPlanResult.Rejected -> return BoundedInstallOutcome.Rejected(planned.reason)
             is BoundedInstallPlanResult.Planned -> planned.plan
@@ -521,6 +564,7 @@ internal class PhysicalWindowAdapter(
         val window = plan.window
         nextWindowGeneration = window.nextWindowGeneration()
         held = null // a newer install is the newest intent: any held in-window navigation is superseded
+        boundedSession = true
 
         // A newer accepted install owns the player from here on: end the older operation and drop the mapping the player is about to lose.
         endPending(BoundedInstallOutcome.Stale(pending?.window?.token ?: window.token, StaleReason.Superseded))
@@ -687,13 +731,14 @@ internal class PhysicalWindowAdapter(
 
     /** The physical player's baseline for an adjustment: verify the active window is really there, then plan from the physical current. */
     private fun handleBaseline(entry: Pending, o: PhysicalObservation) {
+        entry.request?.let { handleMutationBaseline(entry, it, o); return }
         val a = active
-        if (a == null || a.token != entry.window.token) { // the window this baseline belonged to is gone
+        if (a == null || a.token != entry.token) { // the window this baseline belonged to is gone
             if (pending === entry) pending = null
             detach(entry)
             return
         }
-        val token = entry.window.token
+        val token = entry.token
         val mismatch = if (o.token != token) "acknowledgement for ${o.token}, expected $token" else a.firstMismatch(o.count, o.ids)
         if (mismatch != null) {
             failPending(entry, BoundedInstallOutcome.Incomplete(token, a.installedCount, o.count, "baseline: $mismatch"), "incomplete")
@@ -769,6 +814,7 @@ internal class PhysicalWindowAdapter(
         val entry = Pending(
             Kind.Adjust, player, queue, newWindow, expectedIds, 0, newWindow.length - 1, 0L, baseline.repeatMode, baselineLogical,
             baseline.verifier, baseline.onOutcome, baselineLogical = baselineLogical, baselineAuto = baselineAuto,
+            lineage = listOf(Candidate(a, OccurrenceMap.identity())),
         )
         detach(baseline)
         pending = entry
@@ -814,6 +860,201 @@ internal class PhysicalWindowAdapter(
         }
     }
 
+    // ── queue mutations (P5-D) ──────────────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Accepts a LOGICAL queue mutation that the owner has ALREADY applied (the logical queue is the source of truth and the
+     * generation has already moved). The adapter decides the physical consequence and verifies it:
+     *  1. Pending refill/navigation work for the old queue is superseded; a held navigation target is rebased through
+     *     [QueueMutationRequest.occurrenceMap] (the exact occurrence, never a song id).
+     *  2. The physical player is probed (baseline) against the window(s) it may still hold - the verified one, an in-flight
+     *     adjustment's target, or an earlier mutation's - and its exact current occurrence is located in the NEW queue.
+     *  3. [WindowMutationPlanner] classifies: LogicalOnly (publish at once - the baseline IS the proof), BoundedEdit (bounded
+     *     `replaceMediaItems` spans, then the P5-C occurrence-exact acknowledgement), Reanchor (bounded install around the exact
+     *     intended current) or Recover (fail closed).
+     *  4. With no player, or no provable physical state, the old mapping is dropped and a bounded re-install around the rebased
+     *     current is owed (it survives disconnection: the reconnect path re-anchors around the exact current).
+     * The old mapping is never used for the new queue.
+     */
+    fun applyMutation(req: QueueMutationRequest): MutationSubmission {
+        val generation = currentLogicalGeneration()
+        val map = req.occurrenceMap
+        val inFlight = pending
+        val a = active
+
+        // Which windows could the physical player be holding right now? Each with its map into the NEW queue.
+        val candidates = ArrayList<Candidate>(2)
+        when {
+            inFlight == null -> a?.let { candidates += Candidate(it, map) }
+            inFlight.kind == Kind.Baseline && inFlight.request != null ->
+                inFlight.lineage.forEach { c -> candidates += Candidate(c.window) { x -> c.toNew(x)?.let(map) } }
+            inFlight.kind == Kind.Baseline -> a?.let { candidates += Candidate(it, map) } // a refill baseline mutated nothing
+            inFlight.kind == Kind.Adjust -> {
+                candidates += Candidate(InstalledWindow(inFlight.window, inFlight.expectedIds, 0, 0L), map)
+                inFlight.lineage.forEach { c -> candidates += Candidate(c.window) { x -> c.toNew(x)?.let(map) } }
+            }
+            else -> Unit // an install is in flight: nothing about the physical player is provable
+        }
+
+        // The authoritative logical current, rebased through the exact occurrence map. A held target outranks the physical position.
+        val basis = held?.target ?: req.oldCurrent ?: trackedLogical.takeIf { it >= 0 }
+        val rebased = basis?.let(map) ?: req.continuation
+        val oldHeld = held
+        held = null
+        endPending(BoundedInstallOutcome.Stale(inFlight?.window?.token ?: PlanToken(0L, 0L), StaleReason.Superseded))
+        state = WindowInstallState.Idle
+        trackedLogical = rebased?.takeIf { it in req.queue.indices } ?: -1
+        if (oldHeld != null) {
+            val target = map(oldHeld.target)?.takeIf { it in req.queue.indices }
+            if (target != null) {
+                held = HeldNavigation(oldHeld.player, req.queue, target, oldHeld.positionMs, req.repeatMode, oldHeld.verifier, oldHeld.onOutcome)
+            }
+        }
+
+        if (req.queue.isEmpty()) {
+            reset()
+            return MutationSubmission.Submitted("empty_queue")
+        }
+        val player = req.player
+        if (player == null) {
+            // Offline: the edit stays logical; the repair obligation is a bounded re-install around the exact current on reconnect.
+            state = if (trackedLogical >= 0) {
+                WindowInstallState.NeedsReinstall(BoundedInstallRecovery(trackedLogical, generation, 0L, req.repeatMode, "controller_unavailable"))
+            } else {
+                WindowInstallState.Idle
+            }
+            return MutationSubmission.Submitted("offline")
+        }
+        if (candidates.isEmpty()) {
+            val target = trackedLogical.takeIf { it >= 0 } ?: return MutationSubmission.Rejected("no_current_to_anchor")
+            val survives = basis?.let(map) != null
+            val position = if (survives) runCatching { player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L) else 0L
+            return when (val outcome = install(player, req.queue, generation, target, position, req.repeatMode, req.verifier, req.onOutcome)) {
+                is BoundedInstallOutcome.Submitted -> MutationSubmission.Submitted("reanchor_unverified_window")
+                is BoundedInstallOutcome.Rejected -> MutationSubmission.Rejected(outcome.reason.name)
+                is BoundedInstallOutcome.Failed -> MutationSubmission.Failed(outcome.cause)
+                else -> MutationSubmission.Rejected("unexpected_$outcome")
+            }
+        }
+        val verifier = req.verifier ?: return MutationSubmission.Rejected("no_verifier")
+        val token = PlanToken(generation, nextWindowGeneration)
+        nextWindowGeneration = token.windowGeneration + 1L
+        val entry = Pending(
+            Kind.Baseline, player, req.queue, candidates.first().window.window, LongArray(0), 0, 0, 0L, req.repeatMode,
+            trackedLogical, verifier, req.onOutcome, generation = generation, token = token, lineage = candidates, request = req,
+        )
+        pending = entry
+        state = WindowInstallState.Adjusting(token) // the old mapping is gone: it does not describe the new queue
+        try {
+            armAcknowledgement(entry)
+        } catch (t: Throwable) {
+            pending = null
+            detach(entry)
+            state = WindowInstallState.NeedsReinstall(recovery(entry, "media3_call_failed"))
+            return MutationSubmission.Failed(t)
+        }
+        return MutationSubmission.Submitted("baseline")
+    }
+
+    /** The physical player answered the mutation's baseline: locate its exact current occurrence in the NEW queue, classify, execute. */
+    private fun handleMutationBaseline(entry: Pending, req: QueueMutationRequest, o: PhysicalObservation) {
+        val token = entry.token
+        if (o.token != token) {
+            failPending(entry, BoundedInstallOutcome.Incomplete(token, 0, o.count, "mutation baseline: acknowledgement for ${o.token}, expected $token"), "incomplete")
+            return
+        }
+        val candidate = entry.lineage.firstOrNull { c ->
+            o.currentIndex in 0 until c.window.installedCount && c.window.firstMismatch(o.count, o.ids) == null
+        }
+        if (candidate == null) {
+            failPending(entry, BoundedInstallOutcome.Incomplete(token, 0, o.count, "mutation baseline: the physical player matches no window this edit could start from"), "incomplete")
+            return
+        }
+        val oldLogical = candidate.window.physicalToLogical(o.currentIndex)
+        val newCurrent = oldLogical?.let(candidate.toNew)?.takeIf { it in req.queue.indices }
+        val windowGeneration = nextWindowGeneration
+        nextWindowGeneration = windowGeneration + 1L
+        val effect = mutationPlanner.plan(
+            base = candidate.window,
+            physicalCurrent = o.currentIndex,
+            newCurrent = newCurrent,
+            continuation = req.continuation,
+            newQueue = req.queue,
+            repeatMode = req.repeatMode,
+            logicalGeneration = entry.generation,
+            windowGeneration = windowGeneration,
+        )
+        when (effect) {
+            is MutationEffect.LogicalOnly -> {
+                // No Media3 operation. The baseline is the physical proof of exactly this state, so the window is re-expressed over
+                // the new queue (new logical positions, new generation) and published now.
+                val installed = InstalledWindow(effect.window, effect.ids, o.currentIndex, 0L)
+                state = WindowInstallState.Active(installed)
+                trackedLogical = held?.target ?: installed.logicalCurrent
+                recoveryAttempts = 0
+                if (pending === entry) pending = null
+                detach(entry)
+                runHeld()
+                entry.onOutcome(BoundedInstallOutcome.Active(installed))
+            }
+            is MutationEffect.BoundedEdit -> submitMutationEdit(entry, req, effect, newCurrent!!, o.autoTransitions)
+            is MutationEffect.Reanchor -> {
+                if (pending === entry) pending = null
+                detach(entry)
+                val position = if (newCurrent != null) runCatching { entry.player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L) else 0L
+                install(entry.player, req.queue, entry.generation, effect.current, position, req.repeatMode, req.verifier, req.onOutcome)
+            }
+            is MutationEffect.Recover ->
+                failPending(entry, BoundedInstallOutcome.Incomplete(token, 0, o.count, "mutation baseline: ${effect.reason}"), "incomplete")
+        }
+    }
+
+    /** Executes the bounded script of a [MutationEffect.BoundedEdit] (removals, then insertions), then waits for the occurrence-exact acknowledgement. */
+    private fun submitMutationEdit(
+        baseline: Pending,
+        req: QueueMutationRequest,
+        edit: MutationEffect.BoundedEdit,
+        baselineLogical: Int,
+        baselineAuto: Long,
+    ) {
+        val player = baseline.player
+        // Only the songs the script inserts are materialized; each insertion is bounded by the window, never by the queue.
+        val insertItems = HashMap<WindowOp.Insert, List<MediaItem>>()
+        try {
+            for (op in edit.ops) {
+                if (op !is WindowOp.Insert) continue
+                val songs = ArrayList<Song>(op.count)
+                for (p in op.atPhysical until op.atPhysical + op.count) {
+                    songs += req.queue[edit.window.physicalToLogical(p) ?: error("window position $p unmapped")]
+                }
+                check(songs.size <= policy.config.wMax) { "unbounded insertion of ${songs.size}" }
+                insertItems[op] = materialize(songs)
+            }
+        } catch (t: Throwable) {
+            failPending(baseline, BoundedInstallOutcome.Failed(baseline.token, t), "materialize_failed")
+            return
+        }
+        val entry = Pending(
+            Kind.Adjust, player, req.queue, edit.window, edit.ids, 0, edit.window.length - 1, 0L, req.repeatMode, baselineLogical,
+            baseline.verifier, baseline.onOutcome, baselineLogical = baselineLogical, baselineAuto = baselineAuto,
+            generation = baseline.generation, lineage = baseline.lineage,
+        )
+        detach(baseline)
+        pending = entry
+        state = WindowInstallState.Adjusting(edit.window.token) // indices move: no active mapping until verified
+        try {
+            for (op in edit.ops) {
+                when (op) {
+                    is WindowOp.Remove -> player.removeMediaItems(op.fromPhysical, op.toPhysicalExclusive)
+                    is WindowOp.Insert -> player.addMediaItems(op.atPhysical, insertItems.getValue(op))
+                }
+            }
+            armAcknowledgement(entry)
+        } catch (t: Throwable) {
+            failPending(entry, BoundedInstallOutcome.Failed(edit.window.token, t), "media3_call_failed")
+        }
+    }
+
     // ── lifecycle ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /** Evaluates the pending install against the observed controller right now (also driven by player events). */
@@ -836,6 +1077,7 @@ internal class PhysicalWindowAdapter(
 
     /** Drops the active mapping and any unfinished operation (queue cleared, queue replaced by a Full install, mode change). */
     fun reset() {
+        boundedSession = false
         held = null
         endPending(BoundedInstallOutcome.Stale(pending?.window?.token ?: PlanToken(0L, 0L), StaleReason.Superseded))
         state = WindowInstallState.Idle
@@ -898,7 +1140,7 @@ internal class PhysicalWindowAdapter(
         val verifier = entry.verifier ?: return
         val handler = entry.handler ?: return
         entry.attempts++
-        val ack = verifier.observe(entry.window.token)
+        val ack = verifier.observe(entry.token)
         ack.addListener({ onAcknowledged(entry, ack) }, { task -> handler.post(task) })
     }
 
@@ -906,7 +1148,7 @@ internal class PhysicalWindowAdapter(
     private fun onAcknowledged(entry: Pending, ack: ListenableFuture<PhysicalObservation>) {
         if (pending !== entry || entry.submitting) return // superseded, reset, expired or already finished: a late ack is ignored
         if (staleByGeneration(entry)) return
-        val token = entry.window.token
+        val token = entry.token
         val observation = try {
             ack.get()
         } catch (t: Throwable) {
@@ -947,7 +1189,7 @@ internal class PhysicalWindowAdapter(
 
     /** True (and the operation is ended) when the logical queue moved since [entry] was planned. */
     private fun staleByGeneration(entry: Pending): Boolean {
-        if (currentLogicalGeneration() == entry.window.logicalGeneration) return false
+        if (currentLogicalGeneration() == entry.generation) return false
         state = WindowInstallState.Idle // a newer logical intent owns the queue; there is nothing to recover
         finish(entry, BoundedInstallOutcome.Stale(entry.window.token, StaleReason.LogicalGenerationMoved))
         return true
@@ -961,13 +1203,13 @@ internal class PhysicalWindowAdapter(
         state = WindowInstallState.NeedsReinstall(recovery(entry, reason))
         finish(entry, outcome)
         if (entry.kind != Kind.Install && recoveryAttempts < MAX_RECOVERY_ATTEMPTS &&
-            entry.window.logicalGeneration == currentLogicalGeneration() && trackedLogical in entry.queue.indices
+            entry.generation == currentLogicalGeneration() && trackedLogical in entry.queue.indices
         ) {
             // Fail closed: the physical state could not be proven, so ONE bounded re-anchor around the last authoritative occurrence
             // (a held navigation target, when there is one, IS that occurrence). Never the full queue.
             recoveryAttempts++
             install(
-                entry.player, entry.queue, entry.window.logicalGeneration, trackedLogical,
+                entry.player, entry.queue, entry.generation, trackedLogical,
                 runCatching { entry.player.currentPosition.coerceAtLeast(0L) }.getOrDefault(0L),
                 entry.repeatMode, entry.verifier, entry.onOutcome,
             )
@@ -1018,7 +1260,7 @@ internal class PhysicalWindowAdapter(
 
     private fun recovery(entry: Pending, reason: String) = BoundedInstallRecovery(
         logicalStart = trackedLogical.takeIf { it >= 0 } ?: entry.recoveryAnchor,
-        logicalGeneration = entry.window.logicalGeneration,
+        logicalGeneration = entry.generation,
         positionMs = entry.positionMs,
         repeatMode = entry.repeatMode,
         reason = reason,
