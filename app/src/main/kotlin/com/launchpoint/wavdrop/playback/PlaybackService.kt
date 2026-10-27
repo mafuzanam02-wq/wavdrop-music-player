@@ -251,6 +251,7 @@ class PlaybackService : MediaLibraryService() {
             onExternalTransport = { playerController.onExplicitExternalTransport() },
             coldPlayAuthority = playerController.coldPlayAuthority,
             onExternalPlayIntent = { play -> playerController.onExplicitExternalPlayIntent(play) },
+            selectionPlayArmed = { playerController.isSelectionPlayArmed() },
             hydrateForPlay = { songs ->
                 playerController.ensurePlayerHydratedFromSession(availableSongs = songs, operation = "explicit_play")
             },

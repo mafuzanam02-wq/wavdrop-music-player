@@ -160,6 +160,8 @@ internal data class DeferredDrain(
     val seek: PendingSeek?,
     val navigation: PendingNavigation?,
     val playWhenReady: Boolean?,
+    /** True when [playWhenReady] was captured BEFORE the newest queue jump / navigation: that selection outranks it (see [DeferredPlaybackCommands]). */
+    val playPredatesSelection: Boolean = false,
 )
 
 /**
@@ -203,6 +205,13 @@ internal class DeferredPlaybackCommands {
     var playWhenReady: Boolean? = null
         private set
 
+    /**
+     * [playWhenReady] was captured before the newest queue jump / navigation. An explicit selection of another occurrence means
+     * Play, so such an older intent (a Pause) must not override it; a NEWER [capturePlayWhenReady] clears this and wins again.
+     */
+    var playPredatesSelection: Boolean = false
+        private set
+
     val isEmpty: Boolean
         get() = start == null && queueJump == null && seek == null && navigation == null && playWhenReady == null
 
@@ -218,12 +227,14 @@ internal class DeferredPlaybackCommands {
         seek = null
         navigation = null
         playWhenReady = null
+        playPredatesSelection = false
         return command
     }
 
     fun captureQueueJump(songId: Long, playbackIndex: Int, queueGeneration: Long? = null, positionMs: Long = 0L): JumpCapture {
         seek = null
         navigation = null
+        if (playWhenReady != null) playPredatesSelection = true
         val pending = start
         return if (pending != null) {
             start = pending.retargeted(playbackIndex, songId, positionMs)
@@ -238,20 +249,29 @@ internal class DeferredPlaybackCommands {
 
     fun captureSeek(pending: PendingSeek) { seek = pending }
 
-    fun captureNavigation(pending: PendingNavigation) { navigation = pending }
+    fun captureNavigation(pending: PendingNavigation) {
+        navigation = pending
+        if (playWhenReady != null) playPredatesSelection = true
+    }
 
-    fun capturePlayWhenReady(play: Boolean) { playWhenReady = play }
+    fun capturePlayWhenReady(play: Boolean) {
+        playWhenReady = play
+        playPredatesSelection = false
+    }
 
     /**
      * The play/pause state the user currently intends, for deriving a toggle: an explicit deferred intent wins, then a deferred
      * start (which implies play), then the last known real state.
      */
-    fun intendedPlayWhenReady(currentlyPlaying: Boolean): Boolean =
-        playWhenReady ?: if (start != null) true else currentlyPlaying
+    fun intendedPlayWhenReady(currentlyPlaying: Boolean): Boolean = when {
+        playWhenReady != null && !playPredatesSelection -> playWhenReady!!
+        start != null || queueJump != null || navigation != null -> true // an explicit selection implies Play
+        else -> playWhenReady ?: currentlyPlaying
+    }
 
     /** Consume-once: returns every slot and empties them. */
     fun take(): DeferredDrain {
-        val drained = DeferredDrain(start, startQueueGeneration, queueJump, seek, navigation, playWhenReady)
+        val drained = DeferredDrain(start, startQueueGeneration, queueJump, seek, navigation, playWhenReady, playPredatesSelection)
         clear()
         return drained
     }
@@ -284,6 +304,7 @@ internal class DeferredPlaybackCommands {
         seek = null
         navigation = null
         playWhenReady = null
+        playPredatesSelection = false
     }
 }
 

@@ -442,6 +442,7 @@ internal class PhysicalWindowAdapter(
         val repeatMode: RepeatMode,
         val verifier: PhysicalInstallVerifier?,
         val onOutcome: (BoundedInstallOutcome) -> Unit,
+        val onSeekApplied: (() -> Unit)? = null,
     )
 
     private var held: HeldNavigation? = null
@@ -573,6 +574,7 @@ internal class PhysicalWindowAdapter(
         positionMs: Long,
         repeatMode: RepeatMode,
         verifier: PhysicalInstallVerifier?,
+        onSeekApplied: (() -> Unit)? = null,
         onOutcome: (BoundedInstallOutcome) -> Unit = {},
     ): BoundedNavigationResult {
         if (target !in queue.indices) return BoundedNavigationResult.Rejected("target_out_of_range")
@@ -585,7 +587,7 @@ internal class PhysicalWindowAdapter(
                     // An adjustment is being verified against the occurrence it was planned from. A seek now would move the current
                     // item underneath that proof, so the newest in-window target is HELD (latest wins) and applied once the window
                     // settles. The target is already the authoritative logical current for state and for any recovery.
-                    held = HeldNavigation(player, queue, target, positionMs, repeatMode, verifier, onOutcome)
+                    held = HeldNavigation(player, queue, target, positionMs, repeatMode, verifier, onOutcome, onSeekApplied)
                     trackedLogical = target
                     return BoundedNavigationResult.Held(target)
                 }
@@ -784,7 +786,9 @@ internal class PhysicalWindowAdapter(
     private fun runHeld() {
         val h = held ?: return
         held = null
-        navigateTo(h.player, h.queue, h.target, h.positionMs, h.repeatMode, h.verifier, h.onOutcome)
+        val result = navigateTo(h.player, h.queue, h.target, h.positionMs, h.repeatMode, h.verifier, h.onSeekApplied, h.onOutcome)
+        // A held in-window target that finally became a plain seek has no install outcome to wait for: tell its owner now.
+        if (result is BoundedNavigationResult.SeekIssued) h.onSeekApplied?.invoke()
     }
 
     /**
@@ -856,7 +860,7 @@ internal class PhysicalWindowAdapter(
         if (oldHeld != null) {
             val target = map(oldHeld.target)?.takeIf { it in req.queue.indices }
             if (target != null) {
-                held = HeldNavigation(oldHeld.player, req.queue, target, oldHeld.positionMs, req.repeatMode, oldHeld.verifier, oldHeld.onOutcome)
+                held = HeldNavigation(oldHeld.player, req.queue, target, oldHeld.positionMs, req.repeatMode, oldHeld.verifier, oldHeld.onOutcome, oldHeld.onSeekApplied)
             }
         }
 

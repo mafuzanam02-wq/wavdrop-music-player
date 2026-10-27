@@ -137,7 +137,7 @@ class PlayerControllerRealMedia3DirtyQueueTest {
         assertEquals("99", h.currentId())
         assertEquals(6, h.pc.nowPlayingState.value.currentIndex)
         assertEquals(99L, h.pc.nowPlayingState.value.song?.id)
-        assertEquals("play state preserved", playing, h.controller.playWhenReady)
+        assertTrue("an explicit Next selects AND starts the inserted song, even from paused", h.controller.playWhenReady)
         assertNoWholeQueuePush(h, baseline, "dirty Next playing=$playing")
         assertTrue("dirty seek issues exactly the target seek", h.since(baseline).count { it.startsWith("seekTo(6,") } == 1)
     }

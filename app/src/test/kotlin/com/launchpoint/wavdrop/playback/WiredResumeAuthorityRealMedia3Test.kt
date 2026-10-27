@@ -135,8 +135,9 @@ class WiredResumeAuthorityRealMedia3Test {
         rig.settle(200)
         rig.advance(2_500)
 
-        assertEquals(0, rig.count("play"))
-        assertFalse(rig.physical.playWhenReady)
+        // The explicit Next is a selection and starts the new song itself (once); the automatic resume bound to the old occurrence adds nothing.
+        assertEquals(1, rig.count("play"))
+        assertTrue(rig.physical.playWhenReady)
     }
 
     @Test fun headsetRemovalDuringTheWaitInvalidatesTheRequest() {
@@ -224,9 +225,10 @@ class WiredResumeAuthorityRealMedia3Test {
         rig.settle(200)
         rig.advance(2_500)
 
-        assertEquals("the request was bound to the old occurrence, not to 'song id 1'", 0, rig.count("play"))
+        // The explicit selection of the other copy plays it once; the automatic request bound to the old occurrence adds no second Play.
+        assertEquals("exactly the selection's own Play", 1, rig.count("play"))
         assertEquals(0, rig.physical.currentMediaItemIndex)
-        assertFalse(rig.physical.playWhenReady)
+        assertTrue(rig.physical.playWhenReady)
     }
 
     // ---------------------------------------------------------------------------------------------- controller + lifecycle

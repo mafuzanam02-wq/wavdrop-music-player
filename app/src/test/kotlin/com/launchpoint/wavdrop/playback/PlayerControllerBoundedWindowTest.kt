@@ -133,11 +133,11 @@ class PlayerControllerBoundedWindowTest {
             h.pc.skipToNext()
             h.quiesce()
             assertEquals(12_501, h.logical()); assertEquals("12502", h.currentId())
-            assertEquals("play intent preserved (playing=$playing)", playing, h.controller.playWhenReady)
+            assertTrue("an explicit Next/Previous to another occurrence starts it (playing=$playing)", h.controller.playWhenReady)
             h.pc.skipToPrevious()
             h.quiesce()
             assertEquals(12_500, h.logical()); assertEquals("12501", h.currentId())
-            assertEquals(playing, h.controller.playWhenReady)
+            assertTrue(h.controller.playWhenReady)
             assertBounded(h)
         }
     }

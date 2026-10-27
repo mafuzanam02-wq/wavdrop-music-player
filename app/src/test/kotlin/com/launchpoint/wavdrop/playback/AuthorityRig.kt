@@ -91,6 +91,7 @@ internal class AuthorityRig(sessionName: String) {
         onExplicitRepeatChange = {},
         coldPlayAuthority = pc.coldPlayAuthority,
         onExternalPlayIntent = { play -> pc.onExplicitExternalPlayIntent(play) },
+        selectionPlayArmed = { pc.isSelectionPlayArmed() },
     )
 
     /** One entry per connection attempt PlayerController started, in order. */

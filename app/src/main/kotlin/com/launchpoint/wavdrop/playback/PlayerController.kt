@@ -621,6 +621,7 @@ class PlayerController @Inject constructor(
 ) {
     private companion object {
         const val TAG = "WavStats-PC"
+        const val NO_ARMED_PLAY = -1L
         const val SEARCH_TAG = "WavdropSearchPlayback"
         const val GAPLESS_TAG = "WavdropGapless"
         const val RESUME_TAG = "WavdropResume"
@@ -1432,6 +1433,7 @@ class PlayerController @Inject constructor(
         // The exception still propagates exactly as before.
         PlaybackStartupTrace.withPendingDrain {
             var startInstalled = false
+            var jumpSelected = false
             var seek = drained.seek
             // The recorded occurrence is the authority and is installed only while no structural edit has happened since it was
             // recorded (see resolveDeferredStart); otherwise the start is rejected, never re-aimed by song id.
@@ -1462,7 +1464,9 @@ class PlayerController @Inject constructor(
                         seek = null
                     }
                 }
-                installDeferredStart(controller, start, resolvedStart.playbackIndex, play = drained.playWhenReady ?: true, positionMs = startPositionMs)
+                // A Pause older than the newest jump/navigation never overrides that selection's Play.
+                val startPlay = if (drained.playPredatesSelection) true else drained.playWhenReady ?: true
+                installDeferredStart(controller, start, resolvedStart.playbackIndex, play = startPlay, positionMs = startPositionMs)
                 startInstalled = true
             } else {
                 // A warm reconnect after a shuffle change made while disconnected must push the app-owned order to the player once,
@@ -1470,14 +1474,17 @@ class PlayerController @Inject constructor(
                 if (reconnectRequiresQueueSync(playerQueueNeedsSync, supersededByQueueRequest = false)) {
                     synchronizePlayerQueueOnReconnect(controller)
                 }
-                drained.queueJump?.let { executePendingQueueJump(controller, it) }
+                jumpSelected = drained.queueJump?.let { executePendingQueueJump(controller, it) } ?: false
             }
-            // A start's own install already applied its play/pause intent; otherwise the drain applies it last.
+            // A start's own install already applied its play/pause intent; otherwise the drain applies it last. An older Pause
+            // is dropped when the newer selection it predates actually started.
             drainPendingTransportCommands(
                 controller = controller,
                 navigation = drained.navigation,
                 seek = seek,
                 playWhenReady = if (startInstalled) null else drained.playWhenReady,
+                playPredatesSelection = drained.playPredatesSelection,
+                selectionAlreadyStarted = jumpSelected,
             )
         }
     }
@@ -1595,15 +1602,18 @@ class PlayerController @Inject constructor(
         navigation: PendingNavigation?,
         seek: PendingSeek?,
         playWhenReady: Boolean?,
+        playPredatesSelection: Boolean = false,
+        selectionAlreadyStarted: Boolean = false,
     ) {
         if (navigation == null && seek == null && playWhenReady == null) {
             syncNowPlayingState()
             return
         }
+        var selectionStarted = selectionAlreadyStarted
         if (navigation != null) {
             val intent = resolvePendingNavigation(navigation, playbackQueue, currentPlaybackIndex())
             if (intent != null) {
-                navigate(controller, intent)
+                if (navigate(controller, intent)) selectionStarted = true
             } else {
                 Log.w(
                     TAG,
@@ -1633,7 +1643,10 @@ class PlayerController @Inject constructor(
                 )
             }
         }
-        playWhenReady?.let { if (it) controller.play() else controller.pause() }
+        // An older intent never overrides the explicit selection that was captured after it and actually started.
+        if (!(playPredatesSelection && selectionStarted)) {
+            playWhenReady?.let { if (it) controller.play() else controller.pause() }
+        }
         syncNowPlayingState()
         saveSessionAsync()
     }
@@ -2254,7 +2267,7 @@ class PlayerController @Inject constructor(
         }
         deferred.clear()
         // playbackIndex is directly the ExoPlayer media item index since ExoPlayer holds playbackQueue.
-        seekToPlaybackIndex(controller, playbackIndex, positionMs = positionMs)
+        selectOccurrence(controller, playbackIndex, positionMs)
     }
 
     /**
@@ -2298,8 +2311,9 @@ class PlayerController @Inject constructor(
 
     // Main thread only. Executes a deferred queue jump after the controller reconnects, correcting
     // a stale index if the queue mutated while disconnected (never seeks a different song).
-    private fun executePendingQueueJump(controller: MediaController, request: PendingQueueJump) {
-        when (
+    // Returns true when a different occurrence was selected (so its Play intent outranks an older deferred Pause).
+    private fun executePendingQueueJump(controller: MediaController, request: PendingQueueJump): Boolean {
+        return when (
             val resolution = resolvePendingQueueJump(
                 queue = playbackQueue,
                 currentPlaybackIndex = currentPlaybackIndex(),
@@ -2307,12 +2321,27 @@ class PlayerController @Inject constructor(
                 resolvedPlaybackIndex = request.resolvedPlaybackIndex,
             )
         ) {
-            is PendingQueueJumpResolution.Seek -> seekToPlaybackIndex(controller, resolution.playbackIndex, positionMs = request.positionMs)
+            is PendingQueueJumpResolution.Seek -> selectOccurrence(controller, resolution.playbackIndex, request.positionMs)
             PendingQueueJumpResolution.Discard -> {
                 Log.w(TAG, "Discarding stale pending queue jump songId=${request.songId}")
                 syncNowPlayingState()
+                false
             }
         }
+    }
+
+    /**
+     * THE explicit-selection entry of the shared navigation path (Next, Previous-to-another, queue row, deferred drain, external
+     * index seek). Selecting an occurrence OTHER than the current one means Play, even from a paused state; the same occurrence is a
+     * restart/seek and keeps whatever play state it had. Automatic callers (recovery, window-end continuation) pass their own
+     * explicit [forcePlay] straight to [seekToPlaybackIndex] and never come through here. Returns true when a different occurrence
+     * was selected.
+     */
+    private fun selectOccurrence(controller: MediaController, target: Int, positionMs: Long = 0L): Boolean {
+        val current = currentPlaybackIndex() ?: controller.currentMediaItemIndex
+        val differs = target != current
+        seekToPlaybackIndex(controller, target, forcePlay = if (differs) true else null, positionMs = positionMs)
+        return differs
     }
 
     fun removeFromQueue(playbackIndex: Int) {
@@ -2743,6 +2772,19 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    // Bounded explicit selection from a paused state: the epoch of the selection whose Play waits for its re-anchored window to be
+    // verified (NO_ARMED_PLAY = none). Every newer selection and every explicit Play/Pause advances/clears it, so latest wins.
+    private var selectionPlayEpoch = 0L
+    private var armedPlayEpoch = NO_ARMED_PLAY
+
+    /** True while an explicit selection's Play waits for its bounded window to be verified (the session wrapper must not pre-empt it). */
+    internal fun isSelectionPlayArmed(): Boolean = armedPlayEpoch != NO_ARMED_PLAY
+
+    private fun retireArmedSelectionPlay() {
+        selectionPlayEpoch++
+        armedPlayEpoch = NO_ARMED_PLAY
+    }
+
     fun togglePlayPause() {
         // Explicit user transport intent outranks any pending automatic Bluetooth resume.
         supersedeAutomaticResumeByUser()
@@ -2761,7 +2803,10 @@ class PlayerController @Inject constructor(
             return
         }
         if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] before: controller.isPlaying=${controller.isPlaying}")
-        if (controller.isPlaying) controller.pause() else controller.play()
+        // A Play armed behind an unverified bounded window is the state the user sees as "about to play": a tap is a Pause.
+        val armed = armedPlayEpoch != NO_ARMED_PLAY
+        retireArmedSelectionPlay()
+        if (controller.isPlaying || armed) controller.pause() else controller.play()
         syncNowPlayingState()
         if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] after syncNPS: nowPlaying.isPlaying=${_nowPlayingState.value.isPlaying}")
     }
@@ -2772,6 +2817,7 @@ class PlayerController @Inject constructor(
      * pending automatic Bluetooth resume.
      */
     fun onExplicitExternalTransport() {
+        retireArmedSelectionPlay() // an external Play/Pause is newer than a Play still armed behind a window verification
         // Automatic resumes only: the session player itself decides the cold-PLAY authority per command (a PAUSE ends the
         // lineage; a PLAY begins/joins one), so a repeated PLAY must not end the lineage it is continuing.
         supersedeAutomaticResumeByUser(includingColdPlay = false)
@@ -2879,16 +2925,17 @@ class PlayerController @Inject constructor(
     // Main thread only. Executes a next/previous navigation against the CURRENT queue state.
     // Shared by the immediate path and the deferred-reconnect drain so both recompute identically
     // (never replaying a stale index).
-    private fun navigate(controller: MediaController, intent: NavigationIntent) {
+    // Returns true when a different occurrence was selected (and therefore started).
+    private fun navigate(controller: MediaController, intent: NavigationIntent): Boolean {
         val currentPlaybackIndex = currentPlaybackIndex() ?: controller.currentMediaItemIndex
-        when (intent) {
+        return when (intent) {
             NavigationIntent.NEXT -> {
                 val nextPlaybackIndex = QueueNavigator.nextIndex(
                     queueSize = playbackQueue.size,
                     currentIndex = currentPlaybackIndex,
                     repeatMode = repeatMode,
-                ) ?: return
-                seekToPlaybackIndex(controller, nextPlaybackIndex)
+                ) ?: return false
+                selectOccurrence(controller, nextPlaybackIndex)
             }
             NavigationIntent.PREVIOUS -> {
                 when (val action = QueueNavigator.previousAction(
@@ -2898,13 +2945,14 @@ class PlayerController @Inject constructor(
                     repeatMode = repeatMode,
                     restartThresholdMs = previousButtonBehavior.previousRestartThresholdMs(),
                 )) {
-                    is PreviousQueueAction.MoveTo -> seekToPlaybackIndex(controller, action.index)
+                    is PreviousQueueAction.MoveTo -> selectOccurrence(controller, action.index)
                     PreviousQueueAction.RestartCurrent -> {
                         controller.seekTo(0L)
                         syncPosition()
                         saveSessionAsync()
+                        false
                     }
-                    null -> Unit
+                    null -> false
                 }
             }
         }
@@ -4260,16 +4308,16 @@ class PlayerController @Inject constructor(
         if (playerQueueNeedsSync) {
             if (repairForTransportTarget(controller, playbackIndex)) {
                 // Completed clears the flag (offset 0); otherwise the physical index is the logical one plus the offset.
-                controller.seekTo(playbackIndex + physicalIndexOffset, 0L)
+                controller.seekTo(playbackIndex + physicalIndexOffset, positionMs.coerceAtLeast(0L))
                 kickQueueRepair()
             } else {
                 syncPlayerQueueAt(
-                    controller, playbackIndex, positionMs = 0L, playWhenReady = shouldPlay,
+                    controller, playbackIndex, positionMs = positionMs.coerceAtLeast(0L), playWhenReady = shouldPlay,
                     reason = FullQueueSyncReason.TransportTargetUnprovable,
                 )
             }
         } else {
-            controller.seekTo(playbackIndex, 0L)
+            controller.seekTo(playbackIndex, positionMs.coerceAtLeast(0L))
         }
         if (shouldPlay) {
             controller.play()
@@ -4945,6 +4993,16 @@ class PlayerController @Inject constructor(
      */
     private fun seekBoundedToLogical(controller: MediaController, logicalIndex: Int, shouldPlay: Boolean, forcePlay: Boolean?, positionMs: Long = 0L) {
         val port = requireBoundedPort()
+        // A newer selection retires any Play that an older one still has armed behind its window verification.
+        val epoch = ++selectionPlayEpoch
+        armedPlayEpoch = NO_ARMED_PLAY
+        val startIfStillCurrent = {
+            if (armedPlayEpoch == epoch && selectionPlayEpoch == epoch && mediaController === controller) {
+                armedPlayEpoch = NO_ARMED_PLAY
+                controller.play()
+                syncNowPlayingState()
+            }
+        }
         val result = physicalWindowAdapter.navigateTo(
             player = port,
             queue = playbackQueue,
@@ -4952,20 +5010,28 @@ class PlayerController @Inject constructor(
             positionMs = positionMs.coerceAtLeast(0L),
             repeatMode = repeatMode,
             verifier = boundedVerifier(port),
-            onOutcome = boundedOutcomeHandler("navigate"),
+            onSeekApplied = startIfStillCurrent,
+            onOutcome = boundedOutcomeHandler("navigate", onVerified = startIfStillCurrent),
         )
+        var armPlay = false
         when (result) {
-            is BoundedNavigationResult.SeekIssued, is BoundedNavigationResult.Held -> Unit // Held: applied when the in-flight adjustment settles
+            is BoundedNavigationResult.SeekIssued -> Unit
+            // Held: the seek is applied when the in-flight adjustment settles. Playing now would play the stale occurrence.
+            is BoundedNavigationResult.Held -> armPlay = shouldPlay && !controller.isPlaying
             is BoundedNavigationResult.Reanchoring -> {
                 playerQueueNeedsSync = true // dirty until the re-anchored window is verified
                 controller.prepare()
+                // A paused (or idle) player must not start an unverified window: Play is armed and fires once it is verified.
+                armPlay = shouldPlay && !controller.isPlaying
             }
             is BoundedNavigationResult.Rejected, is BoundedNavigationResult.Failed -> {
                 Log.w(TAG, "[bounded] navigation to $logicalIndex not performed: $result")
                 return // the current track is preserved; nothing was changed
             }
         }
-        if (shouldPlay) {
+        if (armPlay) {
+            armedPlayEpoch = epoch
+        } else if (shouldPlay) {
             controller.play()
         } else if (forcePlay == false) {
             controller.pause()

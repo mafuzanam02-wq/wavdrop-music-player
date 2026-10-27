@@ -74,7 +74,7 @@ class PhysicalSubmissionTraceTest {
             adapter.install(r.port, q, generation, start, 0L, RepeatMode.OFF, ctl, callback); idle()
             submissions.clear(); outcomes.clear() // the setup install is not under test
         }
-        fun navigate(target: Int) = adapter.navigateTo(r.port, q, target, 0L, RepeatMode.OFF, ctl, callback)
+        fun navigate(target: Int) = adapter.navigateTo(r.port, q, target, 0L, RepeatMode.OFF, ctl, onOutcome = callback)
         fun mutate(newQueue: List<Song>, oldCurrent: Int?, map: (Int) -> Int?, continuation: Int? = null): MutationSubmission {
             generation++
             q = newQueue

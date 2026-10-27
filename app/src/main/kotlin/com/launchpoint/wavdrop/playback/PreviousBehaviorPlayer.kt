@@ -51,7 +51,11 @@ internal class PreviousBehaviorPlayer(
     // Invoked for an EXTERNAL user PLAY(true)/PAUSE(false), so a play/pause intent still deferred in PlayerController (no
     // controller yet) is overwritten by this newer command instead of replaying after reconnect.
     private val onExternalPlayIntent: (Boolean) -> Unit = {},
+    // True while an explicit selection's Play is armed behind a bounded window verification (PlayerController owns it and starts it
+    // itself once the window is proven); this wrapper must not start that unverified window early.
+    private val selectionPlayArmed: () -> Boolean = { false },
 ) : ForwardingPlayer(player) {
+
 
     private fun logTransport(name: String) {
         val log = transportLog ?: return
@@ -163,30 +167,54 @@ internal class PreviousBehaviorPlayer(
         super.setRepeatMode(repeatMode)
     }
 
+    // An EXTERNAL explicit Next/Previous/seek-to-another-item is a deliberate selection: it starts the target even from a paused
+    // state. Seeking within the current item (and a Previous that restarts it) never does.
+    private fun startSelectedIfExternal(external: Boolean, moves: Boolean) {
+        if (external && moves && !playWhenReady && !selectionPlayArmed()) play()
+    }
+
     override fun seekToNext() {
-        if (isExternalUserTransportRequest()) onExplicitNavigation()
+        val external = isExternalUserTransportRequest()
+        if (external) onExplicitNavigation()
+        val moves = hasNextMediaItem()
         super.seekToNext()
+        startSelectedIfExternal(external, moves)
     }
 
     override fun seekToNextMediaItem() {
-        if (isExternalUserTransportRequest()) onExplicitNavigation()
+        val external = isExternalUserTransportRequest()
+        if (external) onExplicitNavigation()
+        val moves = hasNextMediaItem()
         super.seekToNextMediaItem()
+        startSelectedIfExternal(external, moves)
     }
 
     override fun seekToPreviousMediaItem() {
-        if (isExternalUserTransportRequest()) onExplicitNavigation()
+        val external = isExternalUserTransportRequest()
+        if (external) onExplicitNavigation()
+        val moves = hasPreviousMediaItem()
         super.seekToPreviousMediaItem()
+        startSelectedIfExternal(external, moves)
+    }
+
+    override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+        val external = isExternalUserTransportRequest()
+        val moves = mediaItemIndex != currentMediaItemIndex
+        super.seekTo(mediaItemIndex, positionMs)
+        startSelectedIfExternal(external, moves)
     }
 
     override fun seekToPrevious() {
         // One cancel at the PREVIOUS command boundary, before threshold evaluation. Delegations below use super.*
         // so neither the CF-2G2 seek hook nor the media-item hook fires a second time.
-        if (isExternalUserTransportRequest()) onExplicitNavigation()
+        val external = isExternalUserTransportRequest()
+        if (external) onExplicitNavigation()
         val thresholdMs = thresholdProvider()
         if (thresholdMs > 0L && currentPosition > thresholdMs) {
             super.seekTo(0L)
         } else if (hasPreviousMediaItem()) {
             super.seekToPreviousMediaItem()
+            startSelectedIfExternal(external, true)
         } else {
             super.seekTo(0L)
         }
