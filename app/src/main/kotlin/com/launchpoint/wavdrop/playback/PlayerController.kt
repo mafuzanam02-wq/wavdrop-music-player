@@ -3411,7 +3411,7 @@ class PlayerController @Inject constructor(
     /** Whether a restored queue of [queueSize] songs is installed as a bounded window (the service passes this to the resumption mapper). */
     internal fun boundedModeForResumption(queueSize: Int): Boolean =
         logicalPresentationAvailable &&
-            PhysicalQueuePolicy.modeFor(queueSize, boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || boundedInstallEnabledForTesting) == QueueMode.Bounded
+            PhysicalQueuePolicy.modeFor(queueSize, boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || PhysicalQueuePolicy.VALIDATION_BOUNDED || boundedInstallEnabledForTesting) == QueueMode.Bounded
 
     /** The bounded half of a resumption: see [adoptPlaybackResumption]. Nothing here touches a MediaController. */
     private fun installBoundedResumptionWindow(plan: PlaybackResumptionPlan): androidx.media3.session.MediaSession.MediaItemsWithStartPosition {
@@ -4645,7 +4645,10 @@ class PlayerController @Inject constructor(
     private val physicalWindowAdapter = PhysicalWindowAdapter(
         currentLogicalGeneration = { queueGeneration },
         materialize = { songs -> materializeMediaItems(songs).mediaItems },
-    )
+    ).also { adapter ->
+        // P5-F validation trace only: reports each physical playlist operation the adapter actually issued; changes nothing.
+        adapter.submissionObserver = { ValidationTrace.physicalSubmitted(it, playbackQueue.size) }
+    }
 
     /**
      * Test seam: how the physical player's acknowledgement is requested. Production is always the session probe
@@ -4673,7 +4676,7 @@ class PlayerController @Inject constructor(
         logicalPresentationAvailable &&
             PhysicalQueuePolicy.modeFor(
                 playbackQueue.size,
-                boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || boundedInstallEnabledForTesting,
+                boundedEnabled = PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED || PhysicalQueuePolicy.VALIDATION_BOUNDED || boundedInstallEnabledForTesting,
             ) == QueueMode.Bounded
 
     /**
@@ -4683,6 +4686,7 @@ class PlayerController @Inject constructor(
      * Not converted yet (P5-C..E): navigation, queue edits, crossfade and the session facade still assume Full.
      */
     private fun MediaController.installPlaybackQueue(operation: String, startIndex: Int, positionMs: Long) {
+        ValidationTrace.installRequested(operation, playbackQueue.size, if (isBoundedInstall()) QueueMode.Bounded else QueueMode.Full, startIndex)
         if (!isBoundedInstall()) {
             if (installedQueueMode != QueueMode.Full) notifyLogicalPresentationChanged()
             installedQueueMode = QueueMode.Full
@@ -4848,6 +4852,7 @@ class PlayerController @Inject constructor(
                 onOutcome = boundedOutcomeHandler(operation, onVerified),
             ),
         )
+        ValidationTrace.baselineObservation(operation, playbackQueue.size, result)
         when (result) {
             is MutationSubmission.Submitted -> {
                 if (controller == null) ensureControllerConnection() // the repair obligation is discharged on reconnect
@@ -4866,7 +4871,13 @@ class PlayerController @Inject constructor(
     }
 
     /** Terminal handling of ONE bounded install or adjustment; never publishes anything the adapter did not verify. */
-    private fun boundedOutcomeHandler(operation: String, onVerified: (() -> Unit)? = null): (BoundedInstallOutcome) -> Unit = { result ->
+    private fun boundedOutcomeHandler(operation: String, onVerified: (() -> Unit)? = null): (BoundedInstallOutcome) -> Unit {
+        val submittedAtNanos = ValidationTrace.nowNanos()
+        return TracedOutcome(operation) { result -> handleBoundedOutcome(operation, onVerified, submittedAtNanos, result) }
+    }
+
+    private fun handleBoundedOutcome(operation: String, onVerified: (() -> Unit)?, submittedAtNanos: Long, result: BoundedInstallOutcome) {
+        ValidationTrace.windowTerminal(operation, submittedAtNanos, result, playbackQueue.size, physicalPort?.mediaItemCount)
         notifyLogicalPresentationChanged()
         when (result) {
             is BoundedInstallOutcome.Active -> {
@@ -4887,15 +4898,15 @@ class PlayerController @Inject constructor(
     private fun maintainBoundedWindow() {
         if (mediaController == null) return
         val port = physicalPort ?: return
-        when (
-            val result = physicalWindowAdapter.maintain(
-                player = port,
-                queue = playbackQueue,
-                repeatMode = repeatMode,
-                verifier = boundedVerifier(port),
-                onOutcome = boundedOutcomeHandler("maintain"),
-            )
-        ) {
+        val result = physicalWindowAdapter.maintain(
+            player = port,
+            queue = playbackQueue,
+            repeatMode = repeatMode,
+            verifier = boundedVerifier(port),
+            onOutcome = boundedOutcomeHandler("maintain"),
+        )
+        ValidationTrace.baselineObservation("maintain", playbackQueue.size, result)
+        when (result) {
             is MaintenanceResult.Unprovable -> {
                 if (result.reason == "id_mismatch" || result.reason == "outside_window") recoverBoundedFromUnprovable(port)
             }
@@ -4906,7 +4917,7 @@ class PlayerController @Inject constructor(
 
     private fun recoverBoundedFromUnprovable(port: PhysicalWindowPort) {
         Log.w(TAG, "[bounded] current occurrence unprovable; bounded re-anchor around ${physicalWindowAdapter.trackedLogical}")
-        physicalWindowAdapter.recoverUnprovable(
+        val result = physicalWindowAdapter.recoverUnprovable(
             player = port,
             queue = playbackQueue,
             repeatMode = repeatMode,

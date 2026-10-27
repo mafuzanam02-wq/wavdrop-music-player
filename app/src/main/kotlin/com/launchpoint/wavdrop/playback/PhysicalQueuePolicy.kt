@@ -22,6 +22,15 @@ internal object PhysicalQueuePolicy {
     const val BOUNDED_WINDOW_ENABLED = false
 
     /**
+     * P5-F: compile-time DEBUG validation override (`-PwavdropValidationBounded=true`). Hard-coded false in the release
+     * BuildConfig and in every ordinary debug build; not a setting, not a second rollout gate. Fixed for the process lifetime.
+     */
+    val VALIDATION_BOUNDED: Boolean = com.launchpoint.wavdrop.BuildConfig.WAVDROP_VALIDATION_BOUNDED
+
+    /** Stable build-variant label for diagnostics. */
+    val variantLabel: String get() = if (BOUNDED_WINDOW_ENABLED || VALIDATION_BOUNDED) "bounded" else "full"
+
+    /**
      * Pure and O(1): reads only [queueSize]. With the gate off every size is [QueueMode.Full]; with it on, queues of
      * [fullModeMax] or fewer stay Full and larger ones are Bounded. An empty or negative size is Full.
      */

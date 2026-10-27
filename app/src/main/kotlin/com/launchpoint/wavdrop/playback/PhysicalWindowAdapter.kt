@@ -287,6 +287,19 @@ internal class QueueMutationRequest(
     val onOutcome: (BoundedInstallOutcome) -> Unit,
 )
 
+/**
+ * Instrumentation only (P5-F validation trace): one physical playlist operation the adapter has ACTUALLY issued to the player.
+ * [kind] is `install` (setMediaItems: initial window, re-anchor, recovery, held navigation that became a re-anchor) or `adjust`
+ * (add/remove of a bounded batch). A baseline observation request is NOT a submission. [onOutcome] is the callback of the
+ * operation this belongs to, so an observer can attribute it. It never influences planning, ordering or window authority.
+ */
+internal class PhysicalSubmission(
+    val kind: String,
+    val onOutcome: (BoundedInstallOutcome) -> Unit,
+    val removes: Int = 0,
+    val inserts: Int = 0,
+)
+
 internal sealed interface MutationSubmission {
     /** Accepted; [path] names the route taken (baseline, offline, reanchor_unverified_window, empty_queue). The terminal result goes to the outcome callback. */
     data class Submitted(val path: String) : MutationSubmission
@@ -338,6 +351,13 @@ internal class PhysicalWindowAdapter(
 ) {
     private val planner = PhysicalWindowInstallPlanner(policy)
     private val mutationPlanner = WindowMutationPlanner(policy)
+
+    /** Instrumentation only: told, once per issued physical playlist operation, after the player calls returned. Failures are swallowed. */
+    var submissionObserver: ((PhysicalSubmission) -> Unit)? = null
+
+    private fun notifySubmitted(submission: PhysicalSubmission) {
+        runCatching { submissionObserver?.invoke(submission) }
+    }
 
     var state: WindowInstallState = WindowInstallState.Idle
         private set
@@ -526,6 +546,7 @@ internal class PhysicalWindowAdapter(
             player.repeatMode = plan.physicalRepeatMode
             player.shuffleModeEnabled = false
             player.setMediaItems(items, plan.physicalStart, positionMs)
+            notifySubmitted(PhysicalSubmission("install", onOutcome))
             armAcknowledgement(entry)
         } catch (t: Throwable) {
             pending = null
@@ -746,6 +767,13 @@ internal class PhysicalWindowAdapter(
             if (adjust.trimFront > 0) player.removeMediaItems(0, adjust.trimFront)
             if (prependItems.isNotEmpty()) player.addMediaItems(0, prependItems)
             if (appendItems.isNotEmpty()) player.addMediaItems(appendItems)
+            notifySubmitted(
+                PhysicalSubmission(
+                    "adjust", baseline.onOutcome,
+                    removes = (if (adjust.trimTail > 0) 1 else 0) + (if (adjust.trimFront > 0) 1 else 0),
+                    inserts = (if (prependItems.isNotEmpty()) 1 else 0) + (if (appendItems.isNotEmpty()) 1 else 0),
+                ),
+            )
             armAcknowledgement(entry)
         } catch (t: Throwable) {
             failPending(entry, BoundedInstallOutcome.Failed(newWindow.token, t), "media3_call_failed")
@@ -970,6 +998,12 @@ internal class PhysicalWindowAdapter(
                     is WindowOp.Insert -> player.addMediaItems(op.atPhysical, insertItems.getValue(op))
                 }
             }
+            notifySubmitted(
+                PhysicalSubmission(
+                    "adjust", baseline.onOutcome,
+                    removes = edit.ops.count { it is WindowOp.Remove }, inserts = edit.ops.count { it is WindowOp.Insert },
+                ),
+            )
             armAcknowledgement(entry)
         } catch (t: Throwable) {
             failPending(entry, BoundedInstallOutcome.Failed(edit.window.token, t), "media3_call_failed")

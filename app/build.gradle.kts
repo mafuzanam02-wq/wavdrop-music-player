@@ -85,6 +85,21 @@ if (releaseStoreFile != null) {
     }
 }
 
+// ── P5-F validation variant (debug only) ─────────────────────────────────────
+// `-PwavdropValidationBounded=true` compiles the bounded physical queue ON into the DEBUG build only, so the owner can A/B the
+// same baseline on a device. It is a build-time constant (never a setting), hard-coded false in the release BuildConfig, and a
+// release task combined with the property fails the build. The committed production gate
+// (PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED) is not touched.
+val validationBounded = providers.gradleProperty("wavdropValidationBounded").orNull == "true"
+if (validationBounded) {
+    gradle.taskGraph.whenReady {
+        val release = allTasks.firstOrNull { it.project == project && it.name.contains("Release", ignoreCase = true) }
+        if (release != null) {
+            throw GradleException("wavdropValidationBounded is a debug-only validation switch; refusing to run ${release.name}.")
+        }
+    }
+}
+
 android {
     namespace = "com.launchpoint.wavdrop"
     compileSdk = 36
@@ -115,8 +130,10 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
+            buildConfigField("boolean", "WAVDROP_VALIDATION_BOUNDED", validationBounded.toString())
         }
         release {
+            buildConfigField("boolean", "WAVDROP_VALIDATION_BOUNDED", "false")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

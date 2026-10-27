@@ -132,6 +132,7 @@ class PlaybackService : MediaLibraryService() {
     @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
     override fun onCreate() {
         super.onCreate()
+        ValidationTrace.buildIdentity()
         val notificationProvider = DefaultMediaNotificationProvider(this).apply {
             setSmallIcon(R.drawable.ic_stat_wavdrop)
         }
