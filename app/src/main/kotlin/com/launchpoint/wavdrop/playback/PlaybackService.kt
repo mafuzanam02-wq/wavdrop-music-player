@@ -656,6 +656,9 @@ class PlaybackService : MediaLibraryService() {
             playerController = playerController,
             cancelCrossfade = { recoverCrossfadeFromPlaybackResumption(crossfadeCancelSink) },
             log = ::logResume,
+            // The SAME authority the session player consults, so a PAUSE that reaches the player while the saved session is being
+            // restored also decides Media3's own PLAY for this request (F5-1).
+            coldPlay = playerController.coldPlayAuthority,
         ).resume(isForPlayback) { plan ->
             mediaSession.player.repeatMode = plan.repeatMode.toPlayerRepeatMode()
             mediaSession.player.shuffleModeEnabled = false

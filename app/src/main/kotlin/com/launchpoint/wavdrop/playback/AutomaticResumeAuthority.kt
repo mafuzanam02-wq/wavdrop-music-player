@@ -280,6 +280,43 @@ internal class ColdPlayAuthority(
     @Synchronized
     fun isCurrent(ticket: ColdPlayTicket): Boolean = ticket.epoch == epoch
 
+    // ---- the PLAY Media3 owes a playback-resumption request ----------------------------------------------------------------
+    //
+    // Media3 completes a `onPlaybackResumption(isForPlayback = true)` request by applying the result and then ALWAYS issuing one PLAY
+    // on the session player (`MediaSessionImpl` calls `Util.handlePlayButtonAction` after the result AND after a failure). That PLAY
+    // knows nothing about commands that arrived while the saved session was being restored, so a PAUSE that reached the (still empty)
+    // player in between would be undone. The request therefore owns a cold-PLAY ticket from the moment it is received (a PAUSE,
+    // a selection or a newer cold PLAY supersede it exactly as they supersede a hydrating PLAY).
+    //
+    // OWNERSHIP IS EXPLICIT, never inferred from order. Media3 issues the PLAY synchronously inside the callback it attached to the
+    // request's future, so the request wraps the listener Media3 attaches ([runAsResumptionCompletion]): while that listener runs, the
+    // thread is marked as "completing request T". [admitResumptionPlay] reads the mark, so the PLAY made by Media3's callback for T is
+    // judged against T's ticket and no other, whenever, on whichever thread and in whatever order relative to other requests or
+    // commands that callback runs. A PLAY made outside any such callback (a controller's, a widget's, the app's) carries no mark and is
+    // always admitted here. Nothing is queued, so nothing can be consumed by the wrong PLAY, outlive its request or need cleanup.
+    private val resumptionPlayOwner = ThreadLocal<ColdPlayTicket?>()
+
+    /** Runs [block], Media3's completion callback for the request that owns [ticket]; every PLAY made inside it is that request's. */
+    fun <T> runAsResumptionCompletion(ticket: ColdPlayTicket, block: () -> T): T {
+        val previous = resumptionPlayOwner.get()
+        resumptionPlayOwner.set(ticket)
+        try {
+            return block()
+        } finally {
+            if (previous == null) resumptionPlayOwner.remove() else resumptionPlayOwner.set(previous)
+        }
+    }
+
+    /**
+     * Asked for every PLAY that reaches the session player. False only for a PLAY made by the completion callback of a resumption
+     * request whose ticket was superseded since it began (the newest command was not a PLAY): that PLAY must not start playback.
+     * Every other PLAY is admitted exactly as before.
+     */
+    fun admitResumptionPlay(): Boolean {
+        val owner = resumptionPlayOwner.get() ?: return true
+        return isCurrent(owner)
+    }
+
     private fun onlyHydrationsSince(generation: Long, hydrated: Long): Boolean =
         queueGeneration() - generation == hydrations() - hydrated
 

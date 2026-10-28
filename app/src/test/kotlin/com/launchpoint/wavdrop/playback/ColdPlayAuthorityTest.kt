@@ -206,6 +206,98 @@ class ColdPlayAuthorityTest {
         assertTrue(authority.desiredPlaying(physicallyPlaying = true))
     }
 
+    // ---------------------------------------------------------------- the PLAY Media3 owes a resumption request (F5-1)
+
+    @Test fun `a play made outside any resumption completion is always admitted`() {
+        assertTrue(authority.admitResumptionPlay())
+        authority.begin(); authority.supersede()
+        assertTrue("even with superseded requests around, a play no request owns is admitted", authority.admitResumptionPlay())
+    }
+
+    @Test fun `the play made inside the completion of the newest request is admitted`() {
+        val request = authority.begin()
+        assertTrue(authority.runAsResumptionCompletion(request) { authority.admitResumptionPlay() })
+        assertTrue("a later play is admitted", authority.admitResumptionPlay())
+    }
+
+    @Test fun `a pause that arrived while the request was restoring refuses the play of its completion`() {
+        val request = authority.begin() // PLAY received
+        authority.supersede() // PAUSE reaches the still empty player
+        assertFalse("Media3's unconditional PLAY must not start playback", authority.runAsResumptionCompletion(request) { authority.admitResumptionPlay() })
+        assertTrue("and only that completion is refused", authority.admitResumptionPlay())
+    }
+
+    @Test fun `a pause after the request completed but before its callback runs still refuses its play`() {
+        val request = authority.begin()
+        authority.complete(request) // the request finished; Media3's callback has not run yet
+        authority.supersede() // PAUSE lands in between
+        assertFalse(authority.runAsResumptionCompletion(request) { authority.admitResumptionPlay() })
+    }
+
+    @Test fun `each request owns its own completion whatever order the completions run in`() {
+        val first = authority.begin()
+        authority.supersede() // PAUSE
+        val second = authority.begin() // PLAY again
+        assertTrue("the newest request, run first", authority.runAsResumptionCompletion(second) { authority.admitResumptionPlay() })
+        assertFalse("the superseded request, run second", authority.runAsResumptionCompletion(first) { authority.admitResumptionPlay() })
+        assertFalse("and the other way round", authority.runAsResumptionCompletion(first) { authority.admitResumptionPlay() })
+        assertTrue(authority.runAsResumptionCompletion(second) { authority.admitResumptionPlay() })
+    }
+
+    @Test fun `an older request's completion never consumes anything a newer play is owed`() {
+        val older = authority.begin()
+        val newer = authority.begin() // supersedes older
+        assertFalse(authority.runAsResumptionCompletion(older) { authority.admitResumptionPlay() })
+        assertTrue("a legitimate play after the older completion is admitted", authority.admitResumptionPlay())
+        assertTrue(authority.runAsResumptionCompletion(newer) { authority.admitResumptionPlay() })
+    }
+
+    @Test fun `the mark is scoped to the completion and restored even when the callback throws`() {
+        val stale = authority.begin(); authority.supersede()
+        runCatching { authority.runAsResumptionCompletion(stale) { error("callback failed") } }
+        assertTrue("nothing leaks out of the completion", authority.admitResumptionPlay())
+    }
+
+    @Test fun `completions nest and restore the outer owner`() {
+        val outer = authority.begin(); authority.supersede()
+        val inner = authority.begin()
+        authority.runAsResumptionCompletion(outer) {
+            assertTrue(authority.runAsResumptionCompletion(inner) { authority.admitResumptionPlay() })
+            assertFalse("back to the outer request", authority.admitResumptionPlay())
+        }
+        assertTrue(authority.admitResumptionPlay())
+    }
+
+    @Test fun `the mark is per thread so another thread's play is never attributed to a request`() {
+        val stale = authority.begin(); authority.supersede()
+        var other: Boolean? = null
+        authority.runAsResumptionCompletion(stale) {
+            Thread { other = authority.admitResumptionPlay() }.also { it.start(); it.join() }
+        }
+        assertEquals(true, other)
+    }
+
+    @Test fun `completing a request never clears a newer pending play and does not change its ownership`() {
+        val old = authority.begin()
+        val newest = authority.begin()
+        authority.complete(old)
+        assertTrue("the newer cold play is still pending", authority.hasPendingPlay)
+        assertTrue(authority.isCurrent(newest))
+        assertFalse(authority.isCurrent(old))
+    }
+
+    @Test fun `completing the newest request ends the pending state but keeps its play admitted`() {
+        val request = authority.begin()
+        authority.complete(request)
+        assertFalse(authority.hasPendingPlay)
+        assertTrue(authority.runAsResumptionCompletion(request) { authority.admitResumptionPlay() })
+    }
+
+    @Test fun `a request beginning marks the desired state as playing so a toggle becomes a pause`() {
+        authority.begin()
+        assertTrue(authority.desiredPlaying(physicallyPlaying = false))
+    }
+
     // ---------------------------------------------------------------- media-button resolution
 
     @Test fun `play pause key during a pending cold play resolves to pause`() {

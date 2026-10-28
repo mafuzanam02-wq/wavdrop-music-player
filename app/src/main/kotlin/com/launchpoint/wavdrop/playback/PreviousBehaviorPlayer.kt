@@ -108,6 +108,15 @@ internal class PreviousBehaviorPlayer(
     }
 
     override fun play() {
+        // Media3 issues one PLAY after every playback-resumption request (also after a failed or dropped one), blind to a PAUSE,
+        // selection or newer PLAY that arrived while the saved session was being restored. The restoration itself stays; only that PLAY
+        // is refused, and only when it is made by the completion callback of a request that was superseded (see
+        // ColdPlayAuthority.admitResumptionPlay: explicit ownership). Any other PLAY is never affected.
+        if (!coldPlayAuthority.admitResumptionPlay()) {
+            logTransport("TRANSPORT_PLAY_SUPPRESSED")
+            logResume("resumption PLAY suppressed: a newer command superseded the request that restored the session")
+            return
+        }
         logTransport("TRANSPORT_PLAY")
         noteExternalTransport()
         if (isExternalUserTransportRequest()) onExternalPlayIntent(true)
@@ -141,7 +150,10 @@ internal class PreviousBehaviorPlayer(
                     logResume("explicit PLAY denied after hydration: $authorization")
                     return@launch
                 }
-                if (playerHydrationAllowsPlay(result)) {
+                // A saved queue that is already active (adopted by a playback-resumption request whose result Media3 has not applied to this
+                // player yet) is not a reason to drop the newest PLAY: authorization above proves nothing newer happened and the queue moved
+                // only through session hydrations. Without this, the newest PLAY would depend on an older request's callback running first.
+                if (playerHydrationAllowsPlay(result) || result == PlayerHydrationResult.SkippedActiveQueue) {
                     playForwarded()
                 }
             } finally {
