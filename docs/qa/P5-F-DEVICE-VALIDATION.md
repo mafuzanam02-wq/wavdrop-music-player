@@ -5,6 +5,10 @@ needs to change. **Nothing here has been run yet**: every Pass/Fail field and ev
 Production bounded mode stays OFF (`PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED = false`); this validation does not authorise
 enabling it.
 
+> **Release-readiness audit:** see [P5-F3-RELEASE-READINESS-AUDIT.md](P5-F3-RELEASE-READINESS-AUDIT.md) for the G1–G8 evidence
+> matrix, the activation classification and the prioritised remaining device tests. Informal tester reports are summarised in
+> [§7](#7-reported-tester-results-informal-not-a-test-sheet); they do not fill any sheet below.
+
 ## 0. Builds and identity
 
 | Variant | Gradle command | Behaviour |
@@ -227,6 +231,13 @@ Keep **force-stop**, **process kill** and **clear data/uninstall** separate. Do 
 | G7 | Force-stop (`adb shell am force-stop com.launchpoint.wavdrop.debug`), restart | Restores last saved session | | | |
 | G8 | Process death while in background (Developer options "Don't keep activities" is *not* this; use `adb shell am kill com.launchpoint.wavdrop.debug`) | Restores | | | |
 
+> **Note on G7/G8 above (added by the P5-F3 audit; no result field is filled):** `am force-stop` (G7) is *not* process death, and
+> `adb shell am kill` (G8) only kills a cached/background process, so it can leave a process holding the playback foreground
+> service alive. A G8 run counts as process death only if termination and restart are *proven* (different PID before/after, exit
+> record, fresh `build_identity`), with app data preserved. See the T1 protocol in
+> [P5-F3-RELEASE-READINESS-AUDIT.md](P5-F3-RELEASE-READINESS-AUDIT.md#t1-protocol--process-death-must-be-proven-not-assumed).
+> The sheet rows named G1–G8 here are restoration test rows, not the design gates G1–G8 of §12.3.
+
 ### H — Recovery and rollback
 
 | # | Action | Expected | P/F | Notes |
@@ -259,6 +270,24 @@ Anything not captured: write **not measured**.
 ## 6. Sign-off (owner)
 
 Overall A result: ______  Overall B result: ______  Blocking defects: ______  Production activation: **separate decision**.
+
+## 7. Reported tester results (informal, not a test sheet)
+
+Relayed by the owner from the affected large-library beta tester, who tested the **Bounded debug APK**. These are user-reported
+outcomes only: no logs, timings, memory figures or build identity were captured, and **none of the sheets above is considered
+executed because of them**. Device model, Android version, library size, queue size, APK file name/SHA-256, crossfade setting and
+test duration are **not recorded**.
+
+| Reported check | Reported outcome | Nearest sheet rows (not filled) |
+|---|---|---|
+| Pause → Next | Passed | B1, A5 |
+| Pause → select another song | Passed | B5, B10 |
+| Pause while a song loads | Passed | A5, B3 |
+| Rapid Play/Pause | Passed | A5 |
+| Skipping between distant songs | Passed | B5, B6 |
+| Continuous playback | Passed | C1, C2 (duration and window boundaries unknown) |
+
+The tester had also previously reported that the original large-library playback and queue problem had disappeared.
 
 ### Counting rules (physical operations vs. observations)
 * `baseline_observations` ≥ `window_submitted kind=adjust` for edits: each edit has one baseline; only edits that actually needed a Media3 add/remove (or a re-anchor) add a `window_submitted`.
