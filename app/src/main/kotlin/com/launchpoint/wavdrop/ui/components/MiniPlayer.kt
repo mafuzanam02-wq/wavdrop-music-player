@@ -121,8 +121,8 @@ fun MiniPlayer(
                 }
                 IconButton(onClick = onTogglePlayPause) {
                     Icon(
-                        imageVector        = if (nowPlaying.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (nowPlaying.isPlaying) "Pause" else "Play",
+                        imageVector        = if (nowPlaying.presentedAsPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (nowPlaying.presentedAsPlaying) "Pause" else "Play",
                         tint               = MaterialTheme.colorScheme.onSurface,
                         modifier           = Modifier.size(32.dp),
                     )

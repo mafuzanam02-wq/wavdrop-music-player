@@ -933,9 +933,14 @@ class PlayerController @Inject constructor(
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            refreshPresentation() // the intent changed: a Play shows at once, a Pause shows at once
             // ST-1: a pause (natural pause-at-end of the armed occurrence, or a user/system pause) while a terminal boundary
             // is armed. Idempotent with onIsPlayingChanged / STATE_ENDED: the first one consumes, the rest find nothing armed.
             if (!playWhenReady) handleSleepPlaybackStopped()
+        }
+
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+            refreshPresentation() // audio-focus / route suppression is NOT buffering: it must be shown as not playing
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -946,6 +951,7 @@ class PlayerController @Inject constructor(
             Log.w(TAG, "[playerError] code=${error.errorCodeName} message=${error.message}")
             PlaybackStartupTrace.onPlayerError("ctl", error)
             recoverFromCurrentPlaybackError()
+            refreshPresentation()
         }
 
         override fun onRepeatModeChanged(newRepeatMode: Int) {
@@ -1513,7 +1519,7 @@ class PlayerController @Inject constructor(
     private fun deferStart(create: (selectionId: Long) -> DeferredStart) {
         deferred.acceptStart(queueGeneration, create)
         // A start carries an implicit play intent; show it so a following toggle derives the right desired state.
-        _nowPlayingState.update { it.copy(isPlaying = true) }
+        _nowPlayingState.update { it.copy(isPlaying = true, presentedAsPlaying = true) }
         PlaybackStartupTrace.onControllerParked()
         ensureControllerConnection()
     }
@@ -2613,6 +2619,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = newSong,
                 isPlaying = wasPlaying,
+                presentedAsPlaying = wasPlaying,
                 queue = playbackQueue,
                 currentIndex = plan.currentPlaybackIndex,
                 shuffleEnabled = shuffleEnabled,
@@ -2673,6 +2680,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = newSong,
                 isPlaying = wasPlaying,
+                presentedAsPlaying = wasPlaying,
                 queue = playbackQueue,
                 currentIndex = plan.currentPlaybackIndex,
                 shuffleEnabled = shuffleEnabled,
@@ -2796,17 +2804,19 @@ class PlayerController @Inject constructor(
             // (a later PAUSE overwrites an earlier PLAY). Superseded by any queue-replacing request.
             val current = _nowPlayingState.value
             if (current.song == null) return
-            val desiredPlay = !deferred.intendedPlayWhenReady(current.isPlaying)
+            val desiredPlay = !deferred.intendedPlayWhenReady(current.presentedAsPlaying)
             deferred.capturePlayWhenReady(desiredPlay)
-            _nowPlayingState.update { it.copy(isPlaying = desiredPlay) } // optimistic; corrected on sync
+            _nowPlayingState.update { it.copy(isPlaying = desiredPlay, presentedAsPlaying = desiredPlay) } // optimistic; corrected on sync
             ensureControllerConnection()
             return
         }
         if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] before: controller.isPlaying=${controller.isPlaying}")
-        // A Play armed behind an unverified bounded window is the state the user sees as "about to play": a tap is a Pause.
-        val armed = armedPlayEpoch != NO_ARMED_PLAY
+        // The action follows what the control SHOWS (see [PlaybackPresentation]): a request that is only preparing, or a Play armed
+        // behind an unverified bounded window, is displayed as Pause, so a tap is a real Pause - never another Play. controller.isPlaying
+        // alone is false in those states. The armed Play and any older asynchronous callback are retired before the command.
+        val shownAsPlaying = presentedNow(controller)
         retireArmedSelectionPlay()
-        if (controller.isPlaying || armed) controller.pause() else controller.play()
+        if (PlaybackPresentation.toggleShouldPause(shownAsPlaying)) controller.pause() else controller.play()
         syncNowPlayingState()
         if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] after syncNPS: nowPlaying.isPlaying=${_nowPlayingState.value.isPlaying}")
     }
@@ -3050,6 +3060,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = toggleModel.currentSong,
                 isPlaying = isPlaying,
+                presentedAsPlaying = isPlaying,
                 queue = playbackQueue,
                 currentIndex = toggleModel.currentPlaybackIndex,
                 shuffleEnabled = shuffleEnabled,
@@ -3436,6 +3447,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song = startSong,
                 isPlaying = false,
+                presentedAsPlaying = false,
                 queue = playbackQueue,
                 queueSource = PlaybackQueueSource.Other,
                 currentIndex = plan.startPlaybackIndex,
@@ -4474,6 +4486,29 @@ class PlayerController @Inject constructor(
         saveSessionAsync()
     }
 
+    // True while a verified window's outcome is being delivered: the armed Play it carries is about to run in this same turn, so the
+    // state published in between must not briefly withdraw the intent (the adapter is already idle by then).
+    private var deliveringVerifiedOutcome = false
+
+    /** The Play/Pause control state for [controller]; see [PlaybackPresentation]. */
+    private fun presentedNow(controller: MediaController): Boolean = PlaybackPresentation.presentedAsPlaying(
+        isPlaying = controller.isPlaying,
+        playWhenReady = controller.playWhenReady,
+        playbackState = controller.playbackState,
+        suppressed = controller.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE,
+        hasError = controller.playerError != null,
+        // A Play armed behind an unverified bounded window is shown only while that verification is really outstanding.
+        armedIntent = armedPlayEpoch != NO_ARMED_PLAY &&
+            (deliveringVerifiedOutcome || physicalWindowAdapter.isBusy || physicalWindowAdapter.hasHeldNavigation),
+    )
+
+    /** Republishes only the control state (no stats, no queue sync): safe from any player callback. */
+    private fun refreshPresentation() {
+        val controller = mediaController ?: return
+        val presented = presentedNow(controller)
+        _nowPlayingState.update { if (it.presentedAsPlaying == presented && it.isPlaying == controller.isPlaying) it else it.copy(isPlaying = controller.isPlaying, presentedAsPlaying = presented) }
+    }
+
     private fun syncNowPlayingState(fromTransition: Boolean = false, notifyStats: Boolean = true) {
         val controller = mediaController
         val preservePlan = pendingPreserveSearchPlanForSync(controller, fromTransition)
@@ -4499,6 +4534,7 @@ class PlayerController @Inject constructor(
             it.copy(
                 song               = currentSong ?: it.song,
                 isPlaying          = controller?.isPlaying ?: it.isPlaying,
+                presentedAsPlaying = controller?.let(::presentedNow) ?: it.presentedAsPlaying,
                 queue              = playbackQueue,
                 currentIndex       = currentPlaybackIndex ?: -1,
                 shuffleEnabled     = shuffleEnabled,
@@ -4919,23 +4955,29 @@ class PlayerController @Inject constructor(
     }
 
     /** Terminal handling of ONE bounded install or adjustment; never publishes anything the adapter did not verify. */
-    private fun boundedOutcomeHandler(operation: String, onVerified: (() -> Unit)? = null): (BoundedInstallOutcome) -> Unit {
+    private fun boundedOutcomeHandler(operation: String, onVerified: (() -> Unit)? = null, onNotVerified: (() -> Unit)? = null): (BoundedInstallOutcome) -> Unit {
         val submittedAtNanos = ValidationTrace.nowNanos()
-        return TracedOutcome(operation) { result -> handleBoundedOutcome(operation, onVerified, submittedAtNanos, result) }
+        return TracedOutcome(operation) { result -> handleBoundedOutcome(operation, onVerified, onNotVerified, submittedAtNanos, result) }
     }
 
-    private fun handleBoundedOutcome(operation: String, onVerified: (() -> Unit)?, submittedAtNanos: Long, result: BoundedInstallOutcome) {
+    private fun handleBoundedOutcome(operation: String, onVerified: (() -> Unit)?, onNotVerified: (() -> Unit)?, submittedAtNanos: Long, result: BoundedInstallOutcome) {
         ValidationTrace.windowTerminal(operation, submittedAtNanos, result, playbackQueue.size, physicalPort?.mediaItemCount)
         notifyLogicalPresentationChanged()
         when (result) {
             is BoundedInstallOutcome.Active -> {
                 playerQueueNeedsSync = false
-                syncNowPlayingState(notifyStats = false)
-                onVerified?.invoke() // an operation-bound follow-up runs only now, and only if it is still the current intent
+                deliveringVerifiedOutcome = true
+                try {
+                    syncNowPlayingState(notifyStats = false)
+                    onVerified?.invoke() // an operation-bound follow-up runs only now, and only if it is still the current intent
+                } finally {
+                    deliveringVerifiedOutcome = false
+                }
                 maintainBoundedWindow() // chain: ends at NoChange, so no polling and no unbounded repeat
             }
-            is BoundedInstallOutcome.Stale -> Unit // newer intent won; it owns the queue state
+            is BoundedInstallOutcome.Stale -> onNotVerified?.invoke() // newer intent won; it owns the queue state (and any Play it armed)
             else -> {
+                onNotVerified?.invoke() // nothing was verified: a Play armed behind it is withdrawn, never left claimed
                 playerQueueNeedsSync = true // explicit recoverable state: nothing was published
                 Log.w(TAG, "bounded window operation ($operation) not verified: $result")
             }
@@ -5003,6 +5045,12 @@ class PlayerController @Inject constructor(
                 syncNowPlayingState()
             }
         }
+        val withdrawArmedPlay = {
+            if (armedPlayEpoch == epoch) {
+                armedPlayEpoch = NO_ARMED_PLAY
+                refreshPresentation()
+            }
+        }
         val result = physicalWindowAdapter.navigateTo(
             player = port,
             queue = playbackQueue,
@@ -5011,7 +5059,7 @@ class PlayerController @Inject constructor(
             repeatMode = repeatMode,
             verifier = boundedVerifier(port),
             onSeekApplied = startIfStillCurrent,
-            onOutcome = boundedOutcomeHandler("navigate", onVerified = startIfStillCurrent),
+            onOutcome = boundedOutcomeHandler("navigate", onVerified = startIfStillCurrent, onNotVerified = withdrawArmedPlay),
         )
         var armPlay = false
         when (result) {

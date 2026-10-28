@@ -979,7 +979,7 @@ private fun DashboardEmptyLibraryCard(
 
 internal fun shouldShowResumeSessionCard(nowPlaying: NowPlayingState): Boolean =
     nowPlaying.song != null &&
-        !nowPlaying.isPlaying &&
+        !nowPlaying.isPlaying && !nowPlaying.presentedAsPlaying && // a preparing request is shown as Pause, so no "resume" card (its tap is the toggle)
         (nowPlaying.positionMs > 10_000L || nowPlaying.queue.size > 1)
 
 internal fun formatResumeSessionTime(durationMs: Long): String {

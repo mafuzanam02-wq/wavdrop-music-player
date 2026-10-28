@@ -1007,7 +1007,7 @@ private fun PlaybackControlsRow(
             modifier = Modifier.size(58.dp).wavdropPressFeedback(playInteraction),
             interactionSource = playInteraction,
         ) {
-            WavdropFadeThrough(targetState = state.isPlaying) { playing ->
+            WavdropFadeThrough(targetState = state.presentedAsPlaying) { playing ->
                 Icon(
                     imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = if (playing) "Pause" else "Play",

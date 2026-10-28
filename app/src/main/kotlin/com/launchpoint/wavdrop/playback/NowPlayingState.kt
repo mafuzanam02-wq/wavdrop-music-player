@@ -14,4 +14,6 @@ data class NowPlayingState(
     val bufferedPositionMs: Long = 0L,
     val isSeekable: Boolean = false,
     val queueSource: PlaybackQueueSource = PlaybackQueueSource.Other,
+    /** What the Play/Pause control shows (see [PlaybackPresentation]); [isPlaying] stays the truthful Media3 value. */
+    val presentedAsPlaying: Boolean = false,
 )
