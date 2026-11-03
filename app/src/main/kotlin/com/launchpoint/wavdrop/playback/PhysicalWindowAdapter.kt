@@ -21,8 +21,8 @@ import com.launchpoint.wavdrop.data.model.Song
  *
  * P5-B: the controlled physical-window INSTALLATION (docs/development/P5-BOUNDED-PHYSICAL-QUEUE-DESIGN.md §13, P5-B).
  *
- * INACTIVE. Only reachable when [PhysicalQueuePolicy.modeFor] answers Bounded, which the committed gate
- * (`BOUNDED_WINDOW_ENABLED = false`) never does. Scope: ONE initial installation (plan, bounded materialization, one bounded
+ * Only reachable when [PhysicalQueuePolicy.modeFor] answers Bounded: with the committed gate on
+ * (`BOUNDED_WINDOW_ENABLED = true`, P5-F12C) that is any queue above the full-mode threshold. Scope: ONE initial installation (plan, bounded materialization, one bounded
  * `setMediaItems`, verification, publication). P5-C adds window movement and navigation. Queue edits (P5-D), the logical MediaSession facade
  * and crossfade promotion (P5-E) are NOT handled here.
  *

@@ -2,23 +2,28 @@ package com.launchpoint.wavdrop.playback
 
 import java.io.File
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** P5-A: the inactive rollout gate and the pure mode-selection rule. */
+/** P5-A/P5-F12C: the rollout gate (now enabled) and the pure mode-selection rule. */
 class PhysicalQueuePolicyTest {
 
     private val sizes = listOf(0, 1, 25, 50, 100, 299, 300, 301, 1_000, 5_000, 25_000, 50_000, Int.MAX_VALUE)
 
-    @Test fun `the committed gate is off`() {
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+    @Test fun `the committed gate is on`() {
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
     }
 
-    @Test fun `with the gate off every queue size is full`() {
+    @Test fun `with the gate explicitly off every queue size is full`() {
         for (n in sizes) {
-            assertEquals("n=$n (default)", QueueMode.Full, PhysicalQueuePolicy.modeFor(n))
             assertEquals("n=$n (explicit off)", QueueMode.Full, PhysicalQueuePolicy.modeFor(n, boundedEnabled = false))
+        }
+    }
+
+    @Test fun `the committed default applies the 300 threshold`() {
+        for (n in sizes) {
+            val expected = if (n > PhysicalWindowPolicy.FULL_MODE_MAX) QueueMode.Bounded else QueueMode.Full
+            assertEquals("n=$n (default)", expected, PhysicalQueuePolicy.modeFor(n))
         }
     }
 

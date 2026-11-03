@@ -363,14 +363,14 @@ class PlayerControllerOfflineQueueRealMedia3Test {
 
     @Test fun aNewerEditArrivingWhileRepairIsInProgressStillConverges() {
         val h = harness()
-        val big = range(1, 700)
+        val big = range(1, 12)
         val c = h.startConnected(big, 10, true)
         h.disconnect(c)
-        h.pc.playAllNext((1000L..1300L).map(::song)) // larger than one repair chunk
+        h.pc.playAllNext((1000L..1280L).map(::song)) // 281 items: larger than one repair chunk (256), and the whole queue stays at or below the Full threshold (300)
         h.settle(20)
         h.complete(settleMs = 0)
         h.pc.addToQueue(song(5000)) // newer generation while the chunked repair runs
-        h.pc.removeFromQueue(400)
+        h.pc.removeFromQueue(150)
         h.settle(2_000)
 
         assertEquals(h.logicalIds, h.serverIds)

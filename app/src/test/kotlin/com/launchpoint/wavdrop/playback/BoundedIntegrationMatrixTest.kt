@@ -337,7 +337,7 @@ class BoundedIntegrationMatrixTest {
     @Test fun fullModeKeepsMirroringTheWholeQueueAndPromotesUnchanged() {
         for (bounded in listOf(true, false)) {
             val r = rig(bounded)
-            val size = if (bounded) 200 else 1_000 // below the threshold (bounded enabled) / bounded not enabled at all
+            val size = if (bounded) 200 else PhysicalWindowPolicy.FULL_MODE_MAX // at or below the threshold: Full even with the gate on
             val q = queue(size)
             r.start(q, 50)
             val key = r.prepareNext().key

@@ -233,16 +233,16 @@ class DeferredSeekRetargetTest {
 
     @Test fun fullModeDeferredStartRetargetingKeepsThePositionToo() {
         val h = h(bounded = false)
-        h.pc.playFromQueue(queue(1_000), 100)
-        h.pc.seekToQueueItem(500, 20_000L)
+        h.pc.playFromQueue(queue(300), 100)
+        h.pc.seekToQueueItem(250, 20_000L)
         h.connect()
-        assertEquals("Full: the whole queue is installed", 1_000, h.physical.mediaItemCount)
-        assertLanded(h, 500, 20_000L, "Full retarget")
+        assertEquals("Full: the whole queue is installed", 300, h.physical.mediaItemCount)
+        assertLanded(h, 250, 20_000L, "Full retarget")
         val h2 = h(bounded = false)
-        h2.pc.playFromQueue(queue(1_000), 100)
-        h2.pc.jumpToQueueItem(600)
+        h2.pc.playFromQueue(queue(300), 100)
+        h2.pc.jumpToQueueItem(280)
         h2.connect()
-        assertEquals(600, h2.logical.currentIndex)
+        assertEquals(280, h2.logical.currentIndex)
         assertNearStart(h2, "Full ordinary jump")
         assertNull((h2.field("physicalWindowAdapter").get(h2.pc) as PhysicalWindowAdapter).active)
     }

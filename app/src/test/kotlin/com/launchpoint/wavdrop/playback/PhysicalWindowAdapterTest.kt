@@ -160,7 +160,8 @@ class PhysicalWindowAdapterTest {
     @Test fun smallQueuesStayFullAndAreRefusedByTheBoundedInstaller() {
         assertEquals(QueueMode.Full, PhysicalQueuePolicy.modeFor(300, boundedEnabled = true))
         assertEquals(QueueMode.Bounded, PhysicalQueuePolicy.modeFor(301, boundedEnabled = true))
-        assertEquals(QueueMode.Full, PhysicalQueuePolicy.modeFor(25_000)) // committed gate is off
+        assertEquals(QueueMode.Bounded, PhysicalQueuePolicy.modeFor(25_000)) // committed gate is on
+        assertEquals(QueueMode.Full, PhysicalQueuePolicy.modeFor(25_000, boundedEnabled = false))
         val queue = distinct(300)
         val r = rig(queue)
         val outcome = Harness().install(r, queue, 10)
@@ -474,8 +475,8 @@ class PhysicalWindowAdapterTest {
         assertEquals(3, Regex("""\.addMediaItems\(""").findAll(code).count())
     }
 
-    @Test fun gateIsOffAndTheControllerReachesTheAdapterOnlyThroughTheSeam() {
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+    @Test fun gateIsOnAndTheControllerReachesTheAdapterOnlyThroughTheSeam() {
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
         val source = File("src/main/kotlin/com/launchpoint/wavdrop/playback/PlayerController.kt").readText()
         assertTrue(source.contains("internal var boundedInstallEnabledForTesting: Boolean = false"))
         // the install seam and the bounded resumption window (P5-E), both through the physical port

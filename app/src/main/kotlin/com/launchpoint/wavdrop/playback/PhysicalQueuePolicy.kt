@@ -10,16 +10,14 @@ internal enum class QueueMode {
 }
 
 /**
- * P5-A: the INACTIVE rollout gate and the pure mode-selection rule (design §12.1). A sibling of [CrossfadeRolloutPolicy]:
+ * The rollout gate and the pure mode-selection rule (design §12.1). A sibling of [CrossfadeRolloutPolicy]:
  * a compile-time constant, no user setting, no BuildConfig, no persistence, no second runtime configuration system.
  *
- * **Nothing in the production playback path references this object yet.** It becomes live in P5-B, where it is evaluated once
- * per queue install. Tests exercise the enabled behaviour through the [boundedEnabled] parameter of [modeFor]; the committed
- * constant stays `false`.
+ * It is evaluated once per queue install. Tests exercise both settings through the [boundedEnabled] parameter of [modeFor].
  */
 internal object PhysicalQueuePolicy {
-    /** Build-time gate. `false`: every queue is [QueueMode.Full]. */
-    const val BOUNDED_WINDOW_ENABLED = false
+    /** Build-time gate. `true` (P5-F12C): queues larger than the full-mode threshold are [QueueMode.Bounded]. Set `false` to make every queue [QueueMode.Full] again. */
+    const val BOUNDED_WINDOW_ENABLED = true
 
     /**
      * P5-F: compile-time DEBUG validation override (`-PwavdropValidationBounded=true`). Hard-coded false in the release

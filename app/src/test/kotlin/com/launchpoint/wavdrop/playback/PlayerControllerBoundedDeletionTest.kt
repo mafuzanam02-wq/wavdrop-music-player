@@ -292,16 +292,16 @@ class PlayerControllerBoundedDeletionTest {
     }
 
     @Test fun fullModeCurrentSongDeletionIsUnchanged() {
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
-        val h = h(bounded = false); val model = queue(1_000).toMutableList()
-        h.start(model, 400)
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+        val h = h(bounded = false); val model = queue(300).toMutableList()
+        h.start(model, 150)
         val before = h.calls.size
-        h.pc.handleSongDeleted(401L); model.removeAt(400)
+        h.pc.handleSongDeleted(151L); model.removeAt(150)
         h.rig.settle(200)
-        assertEquals("the Full path pushes the surviving queue and keeps playing", listOf("setMediaItems(999)"), h.playlistOps(before))
+        assertEquals("the Full path pushes the surviving queue and keeps playing", listOf("setMediaItems(299)"), h.playlistOps(before))
         assertEquals(model.map { it.id.toString() }, h.serverIds())
-        assertEquals(400, h.logical)
-        assertEquals("402", h.currentId())
+        assertEquals(150, h.logical)
+        assertEquals("152", h.currentId())
         assertTrue(h.rig.player.playWhenReady)
         assertNull(h.continuation)
         assertEquals(WindowInstallState.Idle, h.adapter.state)

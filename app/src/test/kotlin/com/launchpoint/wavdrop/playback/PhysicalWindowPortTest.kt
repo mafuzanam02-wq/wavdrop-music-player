@@ -238,6 +238,6 @@ class PhysicalWindowPortTest {
         s.pc.skipToNext(); s.logical.settle(150)
         assertEquals(41, s.logical.player.currentMediaItemIndex)
         assertEquals(0, s.physical.recording.calls.size)
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
     }
 }

@@ -388,16 +388,16 @@ class PlayerControllerBoundedWindowTest {
         assertTrue(source.contains("if (!queueDirty || isBounded()) return"))
     }
 
-    @Test fun fullModeIsUnchangedWithTheCommittedGateAndForSmallQueues() {
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
-        // Gate-off controller: even a huge queue installs in full, exactly as before.
+    @Test fun fullModeIsUnchangedForQueuesAtOrBelowTheThreshold() {
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+        // Committed gate on: a queue AT the threshold still installs in full, exactly as before.
         val off = harness(bounded = false)
-        off.start(queue(1_000), 400)
-        assertEquals(1_000, off.rig.player.mediaItemCount)
-        assertEquals(400, off.logical())
+        off.start(queue(300), 150)
+        assertEquals(300, off.rig.player.mediaItemCount)
+        assertEquals(150, off.logical())
         off.pc.skipToNext(); off.rig.settle(100)
-        assertEquals(401, off.logical()); assertEquals("402", off.currentId())
-        assertEquals(1, off.calls.count { it.startsWith("setMediaItems(1000)") })
+        assertEquals(151, off.logical()); assertEquals("152", off.currentId())
+        assertEquals(1, off.calls.count { it.startsWith("setMediaItems(300)") })
         // Test switch on, small queue: still Full.
         val small = harness(bounded = true)
         small.start(queue(300), 10)

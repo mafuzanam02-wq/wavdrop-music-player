@@ -10,12 +10,12 @@ import org.junit.Test
 class ValidationVariantTest {
     @After fun restore() { ValidationTrace.enabled = com.launchpoint.wavdrop.BuildConfig.DEBUG; ValidationTrace.sink = { android.util.Log.d(ValidationTrace.TAG, it) } }
 
-    @Test fun committedGateStaysFalseAndOrdinaryBuildsAreFull() {
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+    @Test fun committedGateIsOnAndTheOrdinaryBuildHasNoValidationOverride() {
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
         // The unit-test run is an ordinary debug build: the validation override is off unless -PwavdropValidationBounded=true.
         if (System.getProperty("wavdrop.expectValidationBounded") == null) {
             assertFalse(PhysicalQueuePolicy.VALIDATION_BOUNDED)
-            assertEquals("full", PhysicalQueuePolicy.variantLabel)
+            assertEquals("bounded", PhysicalQueuePolicy.variantLabel) // driven by the committed gate; the override is absent
         }
     }
 
@@ -195,7 +195,7 @@ class ValidationVariantTest {
         val guard = script.substringAfter("if (validationBounded) {").substringBefore("android {")
         assertTrue(guard.contains("""name.contains("Release", ignoreCase = true)"""))
         assertTrue(guard.contains("throw GradleException"))
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
     }
 
     @Test fun traceCarriesNoSongIdentityAndIsSilentWhenDisabled() {

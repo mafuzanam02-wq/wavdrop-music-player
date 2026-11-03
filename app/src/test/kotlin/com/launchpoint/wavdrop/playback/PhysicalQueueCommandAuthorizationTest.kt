@@ -73,8 +73,8 @@ class PhysicalQueueCommandAuthorizationTest {
         }
     }
 
-    @Test fun gateStaysOffAndTheServiceHasNoPhysicalDiagnosticCommand() {
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+    @Test fun gateIsOnAndTheServiceHasNoPhysicalDiagnosticCommand() {
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
         val service = File("src/main/kotlin/com/launchpoint/wavdrop/playback/PlaybackService.kt").readText()
         assertFalse(service.contains("PhysicalQueueObservationCommand"))
         assertFalse(service.contains(legacyAction))

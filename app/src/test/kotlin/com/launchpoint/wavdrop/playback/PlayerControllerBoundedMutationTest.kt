@@ -431,18 +431,18 @@ class PlayerControllerBoundedMutationTest {
         assertFalse(source.contains("rejectBoundedQueueMutation"))
     }
 
-    @Test fun fullModeEditsAreUnchangedWithTheCommittedGate() {
-        assertFalse(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
-        val h = h(bounded = false); val model = queue(1_000).toMutableList()
-        h.start(model, 400)
+    @Test fun fullModeEditsAreUnchangedForQueuesAtOrBelowTheThreshold() {
+        assertTrue(PhysicalQueuePolicy.BOUNDED_WINDOW_ENABLED)
+        val h = h(bounded = false); val model = queue(290).toMutableList()
+        h.start(model, 150)
         assertEquals(QueueMode.Full, h.field("installedQueueMode").get(h.pc))
-        h.pc.playNext(s(93_000L)); model.add(401, s(93_000L)); h.rig.settle(150)
-        assertEquals(1_001, h.rig.player.mediaItemCount)
-        assertEquals("93000", h.rig.player.getMediaItemAt(401).mediaId)
-        h.pc.removeFromQueue(410); model.removeAt(410); h.rig.settle(150)
-        assertEquals(1_000, h.rig.player.mediaItemCount)
+        h.pc.playNext(s(93_000L)); model.add(151, s(93_000L)); h.rig.settle(150)
+        assertEquals(291, h.rig.player.mediaItemCount)
+        assertEquals("93000", h.rig.player.getMediaItemAt(151).mediaId)
+        h.pc.removeFromQueue(160); model.removeAt(160); h.rig.settle(150)
+        assertEquals(290, h.rig.player.mediaItemCount)
         assertEquals(model.map { it.id.toString() }, h.serverIds())
-        assertEquals(400, h.logical)
+        assertEquals(150, h.logical)
     }
 
     // ── evidence ────────────────────────────────────────────────────────────────────────────────────────────────────────

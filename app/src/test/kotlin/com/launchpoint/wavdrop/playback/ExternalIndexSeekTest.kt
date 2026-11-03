@@ -230,14 +230,14 @@ class ExternalIndexSeekTest {
 
     @Test fun fullModeKeepsItsSeekBehavior() {
         val r = rig(bounded = false)
-        r.start(queue(1_000), 100)
+        r.start(queue(300), 100)
         val ext = r.externalController()
-        ext.seekTo(500, 20_000L)
-        ext.awaitIndex(500)
+        ext.seekTo(250, 20_000L)
+        ext.awaitIndex(250)
         TestMediaSource.awaitCondition { r.engine.currentPlayer.currentPosition >= 20_000L }
-        assertEquals("Full: the whole queue stays physical", 1_000, r.engine.currentPlayer.mediaItemCount)
-        assertEquals(500, r.engine.currentPlayer.currentMediaItemIndex)
-        assertEquals("501", r.engine.currentPlayer.currentMediaItem?.mediaId)
+        assertEquals("Full: the whole queue stays physical", 300, r.engine.currentPlayer.mediaItemCount)
+        assertEquals(250, r.engine.currentPlayer.currentMediaItemIndex)
+        assertEquals("251", r.engine.currentPlayer.currentMediaItem?.mediaId)
         assertNull(r.adapter.active)
     }
 }
