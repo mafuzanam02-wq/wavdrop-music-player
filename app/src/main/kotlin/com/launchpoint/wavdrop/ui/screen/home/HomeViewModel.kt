@@ -418,11 +418,6 @@ class HomeViewModel @Inject constructor(
     private val libraryScan = LibraryScanCoordinator()
     val scanState: StateFlow<LibraryScanUiState> = libraryScan.state
 
-    /** Pull-to-refresh spinner: derived from [scanState], so it can never contradict it. */
-    val isRefreshing: StateFlow<Boolean> = scanState
-        .map { it == LibraryScanUiState.Scanning }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     private var hasSynced = false
 
     fun syncIfNeeded() {

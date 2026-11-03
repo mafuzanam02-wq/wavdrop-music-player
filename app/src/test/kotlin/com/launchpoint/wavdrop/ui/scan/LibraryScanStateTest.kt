@@ -129,16 +129,19 @@ class LibraryScanStateTest {
         assertEquals(1, Regex("""repository\.sync\(\)""").findAll(vm).count())
         assertTrue("libraryScan.start(viewModelScope) { repository.sync() }" in vm)
         assertFalse("fun refreshLibrary" in vm)
-        assertTrue("val isRefreshing: StateFlow<Boolean> = scanState" in vm) // derived, never contradicts scanState
+        assertFalse("no second refresh flag next to scanState", "val isRefreshing" in vm)
         val home = src("ui/screen/home/HomeScreen.kt")
-        assertTrue("onRefresh    = viewModel::rescanLibrary" in home) // routine Home rescan is pull-to-refresh, same authority as Songs
-        assertTrue("PullToRefreshBox(" in home && "isRefreshing = scanState == LibraryScanUiState.Scanning" in home) // scan state is the only refresh state
+        // routine Home rescan is pull-to-refresh via the shared container, fed by the one scan state (same as Songs)
+        assertTrue("PullToRefreshContainer(" in home && "scanState = scanState" in home && "onRefresh = viewModel::rescanLibrary" in home)
         assertTrue("onRescan               = viewModel::rescanLibrary" in home) // dashboard / empty state
         assertTrue("onRetry           = viewModel::rescanLibrary" in home)
         assertFalse("no Home top-bar overflow / Rescan menu", "HomeOverflowMenu" in home || "\"More options\"" in home || "MoreVert" in home || "DropdownMenu" in home)
         assertTrue("the contextual empty-state Rescan button stays", "\"Rescan library\"" in home)
         assertTrue("explicit scan recovery stays", "LibraryScanStatus(" in home && "onDismiss         = viewModel::dismissScanMessage" in home)
-        assertTrue("onRefresh    = viewModel::rescanLibrary" in src("ui/screen/songs/SongsScreen.kt"))
+        val songs = src("ui/screen/songs/SongsScreen.kt")
+        assertTrue("PullToRefreshContainer(" in songs && "onRefresh = viewModel::rescanLibrary" in songs)
+        assertTrue("Songs reports scan warnings/errors too", "LibraryScanStatus(" in songs)
+        assertFalse("no Material PullToRefreshBox left on Home/Songs", "PullToRefreshBox" in home || "PullToRefreshBox" in songs)
     }
 
     @Test fun `settings uses the same shared mapping and coordinator`() {

@@ -42,7 +42,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import com.launchpoint.wavdrop.ui.components.motion.PullToRefreshContainer
 import com.launchpoint.wavdrop.ui.scan.LibraryScanStatus
 import com.launchpoint.wavdrop.ui.scan.LibraryScanUiState
 import androidx.compose.material3.MaterialTheme
@@ -238,10 +238,10 @@ fun HomeScreen(
                 // Routine manual refresh is pull-to-refresh (same pattern as Songs), routed to the one scan authority.
                 // The pull indicator is the scan-in-progress indicator on Home, so the status card above never also draws
                 // its own progress bar; Try again / Library Settings / Dismiss for a warning or error stay explicit.
-                PullToRefreshBox(
-                    isRefreshing = scanState == LibraryScanUiState.Scanning,
-                    onRefresh    = viewModel::rescanLibrary,
-                    modifier     = Modifier.weight(1f).fillMaxSize(),
+                PullToRefreshContainer(
+                    scanState = scanState,
+                    onRefresh = viewModel::rescanLibrary,
+                    modifier  = Modifier.weight(1f).fillMaxSize(),
                 ) {
                 HomeDashboardContent(
                     dashboard                = dashboardState,

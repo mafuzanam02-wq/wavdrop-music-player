@@ -37,7 +37,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import com.launchpoint.wavdrop.ui.components.motion.PullToRefreshContainer
+import com.launchpoint.wavdrop.ui.scan.LibraryScanStatus
+import com.launchpoint.wavdrop.ui.scan.LibraryScanUiState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -106,7 +108,7 @@ fun SongsScreen(
     val nowPlaying        by viewModel.nowPlayingState.collectAsStateWithLifecycle()
     val favoriteSongIds   by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val songSearchResults by viewModel.songSearchResults.collectAsStateWithLifecycle()
-    val isRefreshing      by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val scanState         by viewModel.scanState.collectAsStateWithLifecycle()
     var localQuery        by remember { mutableStateOf("") }
     val songSortMode              by viewModel.songSortMode.collectAsStateWithLifecycle()
     val folderModeNeedsSelection           by viewModel.folderModeNeedsSelection.collectAsStateWithLifecycle()
@@ -185,10 +187,20 @@ fun SongsScreen(
             onPermissionGranted = viewModel::syncIfNeeded,
             modifier = Modifier.padding(innerPadding),
         ) {
-            PullToRefreshBox(
-                isRefreshing = isRefreshing,
-                onRefresh    = viewModel::rescanLibrary,
-                modifier     = Modifier.padding(innerPadding).fillMaxSize(),
+            Column(Modifier.padding(innerPadding).fillMaxSize()) {
+            // Songs previously showed no scan outcome at all; warnings/errors now surface here (same shared card as Home).
+            // Scanning is shown by the pull indicator, so the card never draws its own progress bar.
+            LibraryScanStatus(
+                state             = if (scanState == LibraryScanUiState.Scanning) LibraryScanUiState.Idle else scanState,
+                onRetry           = viewModel::rescanLibrary,
+                onLibrarySettings = onLibrarySettingsClick,
+                onDismiss         = viewModel::dismissScanMessage,
+            )
+            PullToRefreshContainer(
+                scanState = scanState,
+                onRefresh = viewModel::rescanLibrary,
+                enabled   = !isSearchActive,
+                modifier  = Modifier.weight(1f).fillMaxWidth(),
             ) {
                 when (val state = uiState) {
                     HomeUiState.Loading -> LoadingSongs()
@@ -270,6 +282,7 @@ fun SongsScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

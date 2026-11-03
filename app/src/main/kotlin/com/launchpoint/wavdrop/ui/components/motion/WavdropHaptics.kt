@@ -25,6 +25,11 @@ object WavdropHaptics {
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
     }
 
+    /** A light tick when a continuous gesture crosses its commit threshold (pull-to-refresh). Once per gesture, never repeated. */
+    fun threshold(haptics: HapticFeedback) {
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+
     /** Confirmation for a significant state change — use sparingly. */
     fun confirm(haptics: HapticFeedback) {
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
