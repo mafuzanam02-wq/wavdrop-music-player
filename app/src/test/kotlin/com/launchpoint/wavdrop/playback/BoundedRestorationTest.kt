@@ -172,6 +172,40 @@ class BoundedRestorationTest {
         assertEquals(12_345, h.pc.nowPlayingState.value.currentIndex)
     }
 
+    @Test fun p5F16BPartialBoundedResumptionKeepsSurvivorsAndProtectsTheSavedSession() {
+        val h = h(connect = false)
+        val original = snapshot(1_000, 500, 21_000L)
+        kotlinx.coroutines.runBlocking { h.sessionRepo.save(original) }
+        val library = songs(1_000).filter { it.id != 3L && it.id != 900L } // two missing; the current (id 501) survives
+        val media3 = h.resume(original, library)
+        h.quiesce()
+        assertTrue(h.pc.isSessionProtected)
+        assertEquals("the survivor 501 is at logical index 499", "501", media3.mediaItems[media3.startIndex].mediaId)
+        assertEquals(21_000L, media3.startPositionMs)
+        assertEquals(1, setMediaItemsCalls(h))
+        val ext = h.externalController()
+        assertEquals(998, ext.mediaItemCount)
+        // Ordinary events must not touch the saved session.
+        h.pc.cycleRepeatMode()
+        h.pc.toggleShuffle()
+        h.pc.seekTo(30_000L)
+        h.rig.settle(300)
+        assertEquals(original, kotlinx.coroutines.runBlocking { h.sessionRepo.load() })
+        // The 300/301 boundary follows the SURVIVOR count.
+        val atBoundary = PlaybackResumptionMapper.map(
+            snapshot(302, 0), ResumeBehaviorSettings(), songs(302).filter { it.id != 10L && it.id != 11L },
+            boundedModeFor = h.pc::boundedModeForResumption,
+        ) as PlaybackResumptionResult.Ready
+        assertEquals(300, atBoundary.plan.playbackQueue.size)
+        assertFalse(atBoundary.plan.bounded)
+        val above = PlaybackResumptionMapper.map(
+            snapshot(302, 0), ResumeBehaviorSettings(), songs(302).filter { it.id != 10L },
+            boundedModeFor = h.pc::boundedModeForResumption,
+        ) as PlaybackResumptionResult.Ready
+        assertEquals(301, above.plan.playbackQueue.size)
+        assertTrue(above.plan.bounded)
+    }
+
     @Test fun everyBoundaryOccurrenceRestoresExactly() {
         for ((current, repeat) in listOf(0 to RepeatMode.OFF, 24_999 to RepeatMode.OFF, 24_999 to RepeatMode.ALL, 0 to RepeatMode.ALL, 7 to RepeatMode.ONE)) {
             val h = h(connect = false)

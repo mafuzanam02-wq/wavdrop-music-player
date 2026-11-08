@@ -157,8 +157,14 @@ fun NowPlayingScreen(
     // Phase 8: surface one concise bad-media recovery message per episode via the existing snackbar.
     // Technical detail (exception, URI, error code) stays in logs — never shown here.
     LaunchedEffect(Unit) {
+        if (viewModel.takePartialRestoreNotice()) {
+            snackbarHostState.showSnackbar(UNAVAILABLE_SONGS_SKIPPED_TEXT)
+        }
+    }
+    LaunchedEffect(Unit) {
         viewModel.playbackMessages.collect { message ->
             val text = when (message) {
+                PlaybackUserMessage.UNAVAILABLE_SONGS_SKIPPED -> UNAVAILABLE_SONGS_SKIPPED_TEXT
                 PlaybackUserMessage.BAD_TRACK_SKIPPED ->
                     "Couldn't play that track — skipping to the next one."
                 PlaybackUserMessage.QUEUE_EXHAUSTED ->
@@ -1597,3 +1603,5 @@ private fun EmptyNowPlayingContent(modifier: Modifier = Modifier) {
  */
 internal fun nowPlayingArtworkUri(background: NowPlayingBackground, albumId: Long?): String? =
     if (background == NowPlayingBackground.ARTWORK) ArtworkResolver.albumArtworkUri(albumId) else null
+
+private const val UNAVAILABLE_SONGS_SKIPPED_TEXT = "Some unavailable songs were skipped. Your saved queue is preserved."

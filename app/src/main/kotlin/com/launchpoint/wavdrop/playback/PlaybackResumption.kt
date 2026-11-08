@@ -6,6 +6,8 @@ import androidx.media3.session.MediaSession
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRules
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionSnapshot
+import com.launchpoint.wavdrop.data.playback.SavedQueueRestorePlanner
+import com.launchpoint.wavdrop.data.playback.SavedQueueRestoreResult
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettings
 
 internal enum class PlaybackResumptionFailure {
@@ -31,6 +33,8 @@ internal data class PlaybackResumptionPlan(
      * start index ([PlayerController.adoptPlaybackResumption]). [startPlaybackIndex] is always the LOGICAL index.
      */
     val bounded: Boolean = false,
+    /** P5-F16B: some saved occurrences were unavailable; adopting this plan must protect the persisted session. */
+    val restoredPartially: Boolean = false,
 )
 
 internal sealed interface PlaybackResumptionResult {
@@ -60,25 +64,20 @@ internal object PlaybackResumptionMapper {
             ?: return PlaybackResumptionResult.Unavailable(PlaybackResumptionFailure.NO_SAVED_SESSION)
         val adjusted = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, settings)
             ?: return PlaybackResumptionResult.Unavailable(PlaybackResumptionFailure.DISABLED_BY_SETTINGS)
-        val libraryQueue = PlaybackSessionRules.mapSavedQueue(
-            queueSongIds = adjusted.queueSongIds,
-            availableSongs = availableSongs,
-        ) ?: return PlaybackResumptionResult.Unavailable(
-            PlaybackResumptionFailure.SAVED_QUEUE_UNAVAILABLE,
-        )
-        val currentLibraryIndex = PlaybackSessionRules.resolveStartLibraryIndex(
-            sessionSongId = adjusted.currentSongId,
-            sessionIndex = adjusted.currentIndex,
-            mappedQueue = libraryQueue,
-        ) ?: return PlaybackResumptionResult.Unavailable(
-            PlaybackResumptionFailure.CURRENT_OCCURRENCE_UNAVAILABLE,
-        )
-        val playbackOrder = PlaybackSessionRules.restorePlaybackOrder(
-            savedPlaybackOrder = adjusted.playbackOrder,
-            queueSize = libraryQueue.size,
-            currentQueueIndex = currentLibraryIndex,
-            shuffleEnabled = adjusted.shuffleEnabled,
-        )
+        // The same pure rule as PlayerController hydration, so both routes interpret a partly available queue identically.
+        val restore = when (val planned = SavedQueueRestorePlanner.plan(adjusted, availableSongs)) {
+            is SavedQueueRestoreResult.Restored -> planned.restore
+            is SavedQueueRestoreResult.Unresolvable -> return PlaybackResumptionResult.Unavailable(
+                if (planned.reason == SavedQueueRestoreResult.Reason.CURRENT_OCCURRENCE_UNIDENTIFIABLE) {
+                    PlaybackResumptionFailure.CURRENT_OCCURRENCE_UNAVAILABLE
+                } else {
+                    PlaybackResumptionFailure.SAVED_QUEUE_UNAVAILABLE
+                },
+            )
+        }
+        val libraryQueue = restore.songs
+        val currentLibraryIndex = restore.currentLibraryIndex
+        val playbackOrder = restore.playbackOrder
         val startPlaybackIndex = playbackOrder.indexOf(currentLibraryIndex)
         if (startPlaybackIndex < 0) {
             return PlaybackResumptionResult.Unavailable(
@@ -95,10 +94,11 @@ internal object PlaybackResumptionMapper {
                 mediaItems = if (bounded) emptyList() else playbackQueue.map(Song::toPlaybackMediaItem),
                 currentLibraryIndex = currentLibraryIndex,
                 startPlaybackIndex = startPlaybackIndex,
-                startPositionMs = adjusted.positionMs,
+                startPositionMs = restore.positionMs,
                 repeatMode = adjusted.repeatMode,
                 shuffleEnabled = adjusted.shuffleEnabled,
                 bounded = bounded,
+                restoredPartially = restore.isPartial,
             )
         )
     }

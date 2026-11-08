@@ -77,11 +77,61 @@ class PlaybackResumptionMapperTest {
     }
 
     @Test
-    fun `saved current song missing fails conservatively`() {
+    fun `P5-F16B incomplete library restores survivors and flags partial`() {
+        val plan = (PlaybackResumptionMapper.map(snapshot(), settings, listOf(song(1), song(3))) as PlaybackResumptionResult.Ready).plan
+        assertEquals(listOf(1L, 3L), plan.libraryQueue.map { it.id })
+        assertTrue(plan.restoredPartially)
+        assertEquals(12_000L, plan.startPositionMs)
+    }
+
+    @Test
+    fun `P5-F16B current song missing resumes next survivor paused at zero`() {
+        val plan = (
+            PlaybackResumptionMapper.map(
+                snapshot(currentSongId = 2, currentIndex = 1),
+                settings,
+                listOf(song(1), song(3)),
+            ) as PlaybackResumptionResult.Ready
+            ).plan
+        assertEquals(listOf(1L, 3L), plan.libraryQueue.map { it.id })
+        assertEquals(3L, plan.playbackQueue[plan.startPlaybackIndex].id)
+        assertEquals(0L, plan.startPositionMs)
+        assertTrue(plan.restoredPartially)
+    }
+
+    @Test
+    fun `P5-F16B no survivors is unavailable`() {
         assertUnavailable(
             PlaybackResumptionFailure.SAVED_QUEUE_UNAVAILABLE,
-            PlaybackResumptionMapper.map(snapshot(), settings, listOf(song(1), song(3))),
+            PlaybackResumptionMapper.map(snapshot(), settings, emptyList()),
         )
+    }
+
+    @Test
+    fun `P5-F16B complete library is not partial`() {
+        assertEquals(false, ready(snapshot()).restoredPartially)
+    }
+
+    @Test
+    fun `P5-F16B bounded mode follows the survivor count at the 300 301 boundary`() {
+        val big = (1L..302L).map { song(it) }
+        val ids = (1L..302L).toList()
+        val sizes = mutableListOf<Int>()
+        val result = PlaybackResumptionMapper.map(
+            snapshot(queueIds = ids, playbackOrder = null, currentSongId = 1, currentIndex = 0),
+            settings,
+            big.filter { it.id != 5L && it.id != 6L }, // 300 survivors of 302
+            boundedModeFor = { size -> sizes += size; size > 300 },
+        ) as PlaybackResumptionResult.Ready
+        assertEquals(listOf(300), sizes)
+        assertEquals(false, result.plan.bounded)
+        val bounded = PlaybackResumptionMapper.map(
+            snapshot(queueIds = ids, playbackOrder = null, currentSongId = 1, currentIndex = 0),
+            settings,
+            big.filter { it.id != 5L }, // 301 survivors
+            boundedModeFor = { size -> size > 300 },
+        ) as PlaybackResumptionResult.Ready
+        assertEquals(true, bounded.plan.bounded)
     }
 
     @Test

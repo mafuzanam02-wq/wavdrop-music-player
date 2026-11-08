@@ -49,6 +49,9 @@ class NowPlayingViewModel @Inject constructor(
     /** Transient bad-media recovery messages (Phase 8); surfaced once per recovery episode. */
     val playbackMessages: SharedFlow<PlaybackUserMessage> = playerController.userMessages
 
+    /** True once if a partial queue restore happened while no screen was collecting [playbackMessages]. */
+    fun takePartialRestoreNotice(): Boolean = playerController.takePartialRestoreNotice()
+
     private val _lyricsState = MutableStateFlow<LyricsResult>(LyricsResult.NotFound)
     val lyricsState: StateFlow<LyricsResult> = _lyricsState.asStateFlow()
 

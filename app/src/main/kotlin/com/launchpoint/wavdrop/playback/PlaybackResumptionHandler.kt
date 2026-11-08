@@ -70,6 +70,8 @@ internal class PlaybackResumptionHandler(
             fun setException(error: Throwable) { ticket?.let(coldPlay::complete); rawFuture.setException(error) }
         }
         scope.launch {
+            // P5-F16B: no session write may execute between reading the snapshot and adopting/protecting it (see PlayerController.activateSessionProtection).
+            playerController.withSessionPersistenceHeld {
             runCatching {
                 PlaybackResumptionMapper.map(
                     snapshot = loadSnapshot(),
@@ -101,6 +103,12 @@ internal class PlaybackResumptionHandler(
                         }
                         is PlaybackResumptionResult.Unavailable -> {
                             log("onPlaybackResumption unavailable reason=${result.reason}")
+                            // P5-F16B: a saved queue that exists but cannot be rebuilt must stay on disk (the empty-queue CLEAR rule would erase it).
+                            if (result.reason == PlaybackResumptionFailure.SAVED_QUEUE_UNAVAILABLE ||
+                                result.reason == PlaybackResumptionFailure.CURRENT_OCCURRENCE_UNAVAILABLE
+                            ) {
+                                playerController.protectUnresolvedSession()
+                            }
                             future.setException(IllegalStateException("Playback resumption unavailable: ${result.reason}"))
                         }
                     }
@@ -110,6 +118,7 @@ internal class PlaybackResumptionHandler(
                     future.setException(error)
                 },
             )
+            }
         }
         return if (ticket == null) rawFuture else OwnedCompletionFuture(rawFuture, coldPlay, ticket)
     }

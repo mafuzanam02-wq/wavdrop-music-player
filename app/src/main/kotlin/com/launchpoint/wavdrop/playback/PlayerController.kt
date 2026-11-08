@@ -20,6 +20,8 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRepository
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionRules
 import com.launchpoint.wavdrop.data.playback.PlaybackSessionSnapshot
+import com.launchpoint.wavdrop.data.playback.SavedQueueRestorePlanner
+import com.launchpoint.wavdrop.data.playback.SavedQueueRestoreResult
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
@@ -121,7 +123,7 @@ internal fun resolveSessionCurrentLibraryIndex(
 }
 
 internal class PlaybackSessionPersistenceGate {
-    private val mutex = Mutex()
+    @PublishedApi internal val mutex = Mutex()
     private val revisionLock = Any()
     private var latestRevision = 0L
 
@@ -129,13 +131,24 @@ internal class PlaybackSessionPersistenceGate {
         ++latestRevision
     }
 
-    suspend fun runIfLatest(revision: Long, operation: suspend () -> Unit): Boolean =
+    /**
+     * [skipIf] is evaluated INSIDE the mutex, immediately before the write, so a protection that became active while this operation
+     * was queued (P5-F16B) is honoured even though the operation was scheduled earlier.
+     */
+    suspend fun runIfLatest(revision: Long, skipIf: () -> Boolean = { false }, operation: suspend () -> Unit): Boolean =
         mutex.withLock {
             val isLatest = synchronized(revisionLock) { revision == latestRevision }
-            if (!isLatest) return@withLock false
+            if (!isLatest || skipIf()) return@withLock false
             operation()
             true
         }
+
+    /**
+     * Holds the persistence mutex: a repository write already executing finishes first, and no queued write starts until [block]
+     * returns. Used to read the persisted session and activate protection as one ordered step (P5-F16B). [block] must not wait on
+     * another persistence operation (the mutex is not reentrant).
+     */
+    suspend inline fun <T> runExclusive(block: () -> T): T = mutex.withLock { block() }
 }
 
 internal fun repeatModeFromPlayerMode(playerRepeatMode: Int): RepeatMode = when (playerRepeatMode) {
@@ -678,6 +691,17 @@ class PlayerController @Inject constructor(
     // freshly built list. Readers (NowPlayingState.queue, CrossfadeRuntimeSnapshot.playbackQueue) rely on this to share the reference.
     // ExoPlayer is ALWAYS loaded with playbackQueue, so currentMediaItemIndex == playback index.
     private var libraryQueue: List<Song> = emptyList()
+        set(value) {
+            field = value
+            if (value.isNotEmpty()) queueOwnedByThisProcess = true
+        }
+
+    /**
+     * P5-F16B: true once this process has held a non-empty logical queue. Only then can an empty queue mean "the user emptied it";
+     * before that (startup, before hydration) an empty queue is merely "nothing restored yet" and proves nothing about the saved
+     * session, so [saveSessionAsync] must not CLEAR it. Not set by a hydration that rolls back.
+     */
+    @Volatile private var queueOwnedByThisProcess = false
     private var playbackOrder: List<Int> = emptyList()
     private var playbackQueue: List<Song> = emptyList()
     // Physical-queue sync state. `playerQueueNeedsSync` (the long-standing flag) is true while the physical Media3 timeline
@@ -739,6 +763,60 @@ class PlayerController @Inject constructor(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val userMessages: SharedFlow<PlaybackUserMessage> = _userMessages.asSharedFlow()
+
+    /**
+     * P5-F16B session protection. True while the in-memory queue is a partial (or empty) restore of the persisted session, so the
+     * persisted snapshot is the only complete copy. While true, [saveSessionAsync] writes NOTHING (no SAVE, no CLEAR): ordinary
+     * playback events, position checkpoints, seeks, pause/resume, repeat/shuffle, sleep-timer and crossfade events cannot release it.
+     * Consequences, by design: the resume position and the current track are not persisted while protected (a process death resumes
+     * from the original snapshot), and in-queue edits (Play Next / Add to Queue / remove / reorder) stay in memory only. Listening
+     * history (StatsTracker) is unaffected. Released ONLY by an explicit whole-queue start committed in [playFromQueueInternal];
+     * a failed or rejected start returns before that point and therefore never releases it. In-memory only: a restart re-attempts
+     * the restore from the untouched snapshot.
+     */
+    @Volatile private var sessionProtected = false
+
+    /** True once for a partial restore whose message no UI was collecting yet (so it is shown once, when Now Playing opens). */
+    @Volatile private var partialRestoreNoticePending = false
+
+    internal val isSessionProtected: Boolean get() = sessionProtected
+
+    /** Protects the persisted session after a restore found nothing playable, only when no logical queue exists to own it. */
+    internal fun protectUnresolvedSession() {
+        if (!isExternalPlayback && libraryQueue.isEmpty()) activateSessionProtection()
+    }
+
+    /**
+     * Turns protection on AND invalidates every persistence operation scheduled before it: a SAVE/CLEAR queued against the older
+     * (pre-restore) state must not run later and replace the snapshot. Operations queued afterwards see [sessionProtected] inside the
+     * gate (see [saveSessionAsync]); a write already executing is ordered by the gate, which the callers hold.
+     */
+    private fun activateSessionProtection() {
+        sessionProtected = true
+        sessionPersistenceGate.nextRevision()
+    }
+
+    /**
+     * Runs [block] with the persistence gate held, so no session write executes (or starts) until it returns. The service-owned
+     * resumption wraps its load -> map -> adopt sequence in this, so the snapshot it reads cannot be replaced before protection is active.
+     */
+    internal suspend fun <T> withSessionPersistenceHeld(block: suspend () -> T): T =
+        sessionPersistenceGate.mutex.withLock { block() }
+
+    private fun announcePartialRestore() {
+        if (_userMessages.subscriptionCount.value > 0) {
+            _userMessages.tryEmit(PlaybackUserMessage.UNAVAILABLE_SONGS_SKIPPED)
+        } else {
+            partialRestoreNoticePending = true
+        }
+    }
+
+    /** One-shot read for a UI that was not collecting when the partial restore happened. */
+    fun takePartialRestoreNotice(): Boolean {
+        val pending = partialRestoreNoticePending
+        partialRestoreNoticePending = false
+        return pending
+    }
 
     // Bad-media recovery episode state (Phase 8). null == no episode in progress. Bounded: the
     // planner guarantees at most `playbackQueue.size` attempted occurrences per episode, so there
@@ -1940,6 +2018,8 @@ class PlayerController @Inject constructor(
         supersedeAutomaticResumeByUser()
 
         libraryQueue = normalizedQueue
+        sessionProtected = false // the user explicitly started a different queue: it now owns the persisted session
+        partialRestoreNoticePending = false // a held "songs were skipped" notice described the queue just replaced
         if (preservePlaybackOrder) {
             playbackOrder = normalizedQueue.indices.toList()
             playbackQueue = normalizedQueue
@@ -3361,22 +3441,33 @@ class PlayerController @Inject constructor(
             if (lockedDecision != HydrationDecision.NEEDS_HYDRATION) {
                 return@withLock PlayerHydrationResult.AlreadyHydrated
             }
+            // P5-F16B: the persistence gate is held from reading the snapshot until the in-memory queue, the protection and the
+            // revision are settled. A write already executing finishes BEFORE the load; none can start between the load and the
+            // protection decision, and every operation scheduled earlier is invalidated when the queue is replaced below.
+            return@withLock sessionPersistenceGate.runExclusive {
             val rawSnapshot = sessionRepository.load()
                 ?: return@withLock PlayerHydrationResult.NoSavedSession
             val resumeSettings = resumeBehaviorRepository.settings.first()
             val snapshot = PlaybackSessionRules.applyResumeBehavior(rawSnapshot, resumeSettings)
-                ?: return@withLock PlayerHydrationResult.FilteredBySettings
+                ?: run {
+                    // "Remember last track" is OFF: the user opted out of keeping a session, so the empty-queue CLEAR may still
+                    // delete it (intentional clearing; not permanent retention).
+                    queueOwnedByThisProcess = true
+                    return@withLock PlayerHydrationResult.FilteredBySettings
+                }
 
-            val mappedQueue = PlaybackSessionRules.mapSavedQueue(
-                queueSongIds = snapshot.queueSongIds,
-                availableSongs = availableSongs,
-            ) ?: return@withLock PlayerHydrationResult.NoResolvableSong
-            val startLibraryIndex = PlaybackSessionRules.resolveStartLibraryIndex(
-                sessionSongId = snapshot.currentSongId,
-                sessionIndex = snapshot.currentIndex,
-                mappedQueue = mappedQueue,
-            ) ?: return@withLock PlayerHydrationResult.NoResolvableSong
+            val restore = when (val planned = SavedQueueRestorePlanner.plan(snapshot, availableSongs)) {
+                is SavedQueueRestoreResult.Restored -> planned.restore
+                is SavedQueueRestoreResult.Unresolvable -> {
+                    // Nothing playable could be rebuilt: the persisted snapshot is the only copy of the user's queue. Keep it.
+                    protectUnresolvedSession()
+                    return@withLock PlayerHydrationResult.NoResolvableSong
+                }
+            }
+            val mappedQueue = restore.songs
+            val startLibraryIndex = restore.currentLibraryIndex
             val startSong = mappedQueue[startLibraryIndex]
+            val restoredPositionMs = restore.positionMs
 
             // Re-check the PHYSICAL player after all suspending work: if playback started meanwhile
             // (or external playback took over) the persisted snapshot must not overwrite it.
@@ -3403,17 +3494,22 @@ class PlayerController @Inject constructor(
             val previousPlayerQueueNeedsSync = playerQueueNeedsSync
             val previousLastKnownPositionMs = lastKnownPositionMs
             val previousState = _nowPlayingState.value
+            val previousSessionProtected = sessionProtected
+            val previousQueueOwned = queueOwnedByThisProcess
 
             // A restored session is a fresh queue identity; end any stale recovery episode.
             hydrationCount++
             bumpQueueGeneration()
+            sessionPersistenceGate.nextRevision() // older pending SAVE/CLEAR describe the queue being replaced; a failed install must not let them wipe the snapshot either
             libraryQueue = mappedQueue
             shuffleEnabled = snapshot.shuffleEnabled
             repeatMode = snapshot.repeatMode
             restorePlaybackQueue(
                 currentQueueIndex = startLibraryIndex,
-                savedPlaybackOrder = snapshot.playbackOrder,
+                savedPlaybackOrder = restore.playbackOrder,
             )
+            // A partial restore must never let an ordinary event persist the pruned queue over the original snapshot.
+            if (restore.isPartial) activateSessionProtection()
             playerQueueNeedsSync = false
             PlaybackStartupTrace.begin(operation, playbackQueue.size, controllerConnected = true, playIntended = false)
             PlaybackStartupTrace.expectStart(startSong.id)
@@ -3428,7 +3524,7 @@ class PlayerController @Inject constructor(
                     currentIndex = startPlaybackIndex,
                     shuffleEnabled = shuffleEnabled,
                     repeatMode = repeatMode,
-                    positionMs = snapshot.positionMs,
+                    positionMs = restoredPositionMs,
                     durationMs = startSong.duration.coerceAtLeast(0L),
                     bufferedPositionMs = 0L,
                     isSeekable = false,
@@ -3441,16 +3537,21 @@ class PlayerController @Inject constructor(
                 controller.installPlaybackQueue(
                     operation = operation,
                     startIndex = startPlaybackIndex,
-                    positionMs = snapshot.positionMs,
+                    positionMs = restoredPositionMs,
                 )
                 controller.prepare()
                 PlaybackStartupTrace.onPrepareIssued()
                 syncNowPlayingState()
             }.fold(
-                onSuccess = { PlayerHydrationResult.Hydrated },
+                onSuccess = {
+                    if (restore.isPartial) announcePartialRestore()
+                    PlayerHydrationResult.Hydrated
+                },
                 onFailure = { error ->
                     Log.w(TAG, "Session hydration failed during $operation", error)
+                    sessionProtected = previousSessionProtected
                     libraryQueue = previousLibraryQueue
+                    queueOwnedByThisProcess = previousQueueOwned // a rolled-back restore never owned the queue
                     playbackOrder = previousPlaybackOrder
                     playbackQueue = previousPlaybackQueue
                     shuffleEnabled = previousShuffleEnabled
@@ -3461,6 +3562,7 @@ class PlayerController @Inject constructor(
                     PlayerHydrationResult.MediaSetupFailed
                 },
             )
+            }
         }
     }
 
@@ -3474,6 +3576,7 @@ class PlayerController @Inject constructor(
     internal fun adoptPlaybackResumption(plan: PlaybackResumptionPlan): androidx.media3.session.MediaSession.MediaItemsWithStartPosition {
         hydrationCount++ // a service-owned resumption is a session load, not a queue edit
         bumpQueueGeneration()
+        sessionPersistenceGate.nextRevision() // queue replaced wholesale: older pending SAVE/CLEAR describe a state that no longer exists
         isExternalPlayback = false
         libraryQueue = plan.libraryQueue
         playbackOrder = plan.playbackOrder
@@ -3482,6 +3585,10 @@ class PlayerController @Inject constructor(
         repeatMode = plan.repeatMode
         playerQueueNeedsSync = false
         lastKnownPositionMs = -1L
+        if (plan.restoredPartially) {
+            activateSessionProtection()
+            announcePartialRestore()
+        }
         val startSong = playbackQueue[plan.startPlaybackIndex]
         _nowPlayingState.update {
             it.copy(
@@ -4038,18 +4145,23 @@ class PlayerController @Inject constructor(
      * the intended occurrence and position instead of re-reading a MediaController that may not have updated yet.
      */
     private fun saveSessionAsync(exactPlaybackIndex: Int? = null, positionOverrideMs: Long? = null) {
+        // P5-F16B: while the persisted session could not be fully restored it is the only complete copy of the user's queue.
+        // Neither SAVE (a pruned queue) nor CLEAR (an empty queue) may replace it. Only an explicit new queue releases this.
+        if (sessionProtected) return
         val action = playbackSessionPersistenceAction(
             isExternalPlayback = isExternalPlayback,
             queueIsEmpty = libraryQueue.isEmpty(),
         )
         if (action == PlaybackSessionPersistenceAction.NONE) return
+        // An empty queue this process never populated is "nothing restored yet", not a user decision to delete the saved session.
+        if (action == PlaybackSessionPersistenceAction.CLEAR && !queueOwnedByThisProcess) return
 
         val revision = sessionPersistenceGate.nextRevision()
         if (action == PlaybackSessionPersistenceAction.CLEAR) {
             lastPositionCheckpointElapsedRealtimeMs = -1L
             lastPositionCheckpointMs = -1L
             scope.launch {
-                sessionPersistenceGate.runIfLatest(revision) {
+                sessionPersistenceGate.runIfLatest(revision, skipIf = { sessionProtected }) {
                     sessionRepository.clear()
                 }
             }
@@ -4083,7 +4195,7 @@ class PlayerController @Inject constructor(
             updatedAtMs    = System.currentTimeMillis(),
         )
         scope.launch {
-            sessionPersistenceGate.runIfLatest(revision) {
+            sessionPersistenceGate.runIfLatest(revision, skipIf = { sessionProtected }) {
                 sessionRepository.save(snapshot)
             }
         }

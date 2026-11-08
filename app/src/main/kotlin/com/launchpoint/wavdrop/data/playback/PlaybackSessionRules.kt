@@ -115,6 +115,12 @@ internal object PlaybackSessionRules {
         queueSongIds = mappedQueue.map { it.id },
     )
 
+    internal fun resolveSavedCurrentIndex(
+        sessionSongId: Long?,
+        sessionIndex: Int,
+        queueSongIds: List<Long>,
+    ): Int? = resolveStartIndex(sessionSongId, sessionIndex, queueSongIds)
+
     private fun resolveStartIndex(
         sessionSongId: Long?,
         sessionIndex: Int,

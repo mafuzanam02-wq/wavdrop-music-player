@@ -13,4 +13,7 @@ enum class PlaybackUserMessage {
 
     /** Recovery walked the queue and found nothing else playable; playback stopped. */
     QUEUE_EXHAUSTED,
+
+    /** A saved queue was restored without some unavailable songs; the saved queue itself is preserved. */
+    UNAVAILABLE_SONGS_SKIPPED,
 }
