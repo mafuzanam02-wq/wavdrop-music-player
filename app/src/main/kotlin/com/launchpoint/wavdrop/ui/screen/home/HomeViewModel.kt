@@ -10,6 +10,7 @@ import com.launchpoint.wavdrop.data.local.entity.TrackListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.ListeningPeriodRange
 import com.launchpoint.wavdrop.data.model.Song
+import com.launchpoint.wavdrop.playback.QueueActionResult
 import com.launchpoint.wavdrop.data.model.HomeWrappedPreview
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
@@ -475,13 +476,9 @@ class HomeViewModel @Inject constructor(
         playerController.playFromQueue(queue = queue.ifEmpty { listOf(song) }, startSong = song)
     }
 
-    fun playNext(song: Song) {
-        playerController.playNext(song)
-    }
+    fun playNext(song: Song): QueueActionResult = playerController.playNext(song)
 
-    fun addToQueue(song: Song) {
-        playerController.addToQueue(song)
-    }
+    fun addToQueue(song: Song): QueueActionResult = playerController.addToQueue(song)
 
     fun shuffleAll() {
         val songs = (uiState.value as? HomeUiState.Songs)?.songs.orEmpty()

@@ -70,6 +70,7 @@ import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.GroupedSearchContent
 import com.launchpoint.wavdrop.ui.components.SongSearchActions
 import com.launchpoint.wavdrop.ui.components.shareSong
+import com.launchpoint.wavdrop.ui.components.announceQueueAction
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
@@ -214,8 +215,8 @@ fun SongsScreen(
                             currentSongId = nowPlaying.song?.id,
                             favoriteSongIds = favoriteSongIds,
                             onSongClick = viewModel::playSearchResult,
-                            onPlayNext = viewModel::playNext,
-                            onAddToQueue = viewModel::addToQueue,
+                            onPlayNext = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.playNext(song)) },
+                            onAddToQueue = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.addToQueue(song)) },
                             onToggleFavorite = { song, wasFavorite ->
                                 viewModel.toggleFavorite(song.id)
                                 coroutineScope.launch {
@@ -256,8 +257,8 @@ fun SongsScreen(
                                 favoriteSongIds   = favoriteSongIds,
                                 onSongClick       = viewModel::playSongFromSongsList,
                                 onShuffleAll      = viewModel::shuffleSongsList,
-                                onPlayNext        = viewModel::playNext,
-                                onAddToQueue      = viewModel::addToQueue,
+                                onPlayNext        = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.playNext(song)) },
+                                onAddToQueue      = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.addToQueue(song)) },
                                 onToggleFavorite  = { song, wasFavorite ->
                                     viewModel.toggleFavorite(song.id)
                                     coroutineScope.launch {

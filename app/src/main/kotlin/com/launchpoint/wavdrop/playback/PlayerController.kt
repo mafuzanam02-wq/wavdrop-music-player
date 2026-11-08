@@ -2017,13 +2017,20 @@ class PlayerController @Inject constructor(
         )
     }
 
-    fun playNext(song: Song) {
+    /**
+     * P5-F14: Play Next with a VERIFIED outcome. The mutation is unchanged ([commitPlayNext]); afterwards the committed logical
+     * queue is re-read and the result is [QueueActionResult.Queued] only if the song really occupies the intended position.
+     */
+    fun playNext(song: Song): QueueActionResult = verifiedQueueAction(QueueAction.PlayNext, song) { commitPlayNext(song) }
+
+    /** Returns the position the command INTENDED (the caller verifies it against the committed queue), or null for "nothing done". */
+    private fun commitPlayNext(song: Song): QueueActionResult? {
         // CF-2H3A: explicit Play Next intent cancels an owned crossfade before any queue inspection or mutation, even if
         // this then falls back (empty queue -> playSong, unresolved index -> append). Internal paths never notify.
         explicitPlayNextMutationListeners.notifyExplicitPlayNextMutation()
         if (libraryQueue.isEmpty()) {
             startQueueWithoutNotification(queue = listOf(song), startIndex = 0)
-            return
+            return QueueActionResult.StartedQueue
         }
         val currentPlaybackIndex = currentPlaybackIndex()
         if (currentPlaybackIndex == null) {
@@ -2033,8 +2040,9 @@ class PlayerController @Inject constructor(
             if (BuildConfig.DEBUG) {
                 Log.d(SEARCH_TAG, "playNext: unresolved current index, appending song=${song.id}")
             }
+            val appendPosition = playbackQueue.size
             appendAllPreservingQueue(listOf(song))
-            return
+            return QueueActionResult.Queued(QueueAction.PlayNext, QueuePlacement.Appended, appendPosition)
         }
 
         // Append the new song to the library queue and insert its index into playbackOrder
@@ -2061,6 +2069,28 @@ class PlayerController @Inject constructor(
             it.copy(queue = playbackQueue, currentIndex = currentPlaybackIndex)
         }
         saveSessionAsync()
+        return QueueActionResult.Queued(QueueAction.PlayNext, QueuePlacement.PlayNext, insertPlaybackIndex)
+    }
+
+    /**
+     * Runs [commit] (which returns the outcome it INTENDED, or null if it did nothing) and converts it into a verified result.
+     * A returned intent is trusted only after the committed logical queue is re-read: the size must have grown by exactly one
+     * (or become exactly the one new song for a fresh queue) and the song must sit at the intended position. An exception or a
+     * mismatch is [QueueActionResult.Failed]; the queue is never rolled back here (the mutation paths own their own consistency).
+     */
+    private inline fun verifiedQueueAction(action: QueueAction, song: Song, commit: () -> QueueActionResult?): QueueActionResult {
+        val sizeBefore = playbackQueue.size
+        val intent = try {
+            commit()
+        } catch (e: Exception) {
+            Log.w(TAG, "[queueAction] $action threw: ${e.message}")
+            return QueueActionResult.Failed(action, "exception")
+        } ?: return QueueActionResult.Failed(action, "nothing_to_do")
+        val result = QueueActionVerifier.verify(action, song, sizeBefore, playbackQueue, intent)
+        if (result is QueueActionResult.Failed) {
+            Log.w(TAG, "[queueAction] $action not verified: intent=$intent sizeBefore=$sizeBefore now=${playbackQueue.size}")
+        }
+        return result
     }
 
     /** Inserts [songs] immediately after the current item in their original order. */
@@ -2103,21 +2133,31 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun addToQueue(song: Song) {
+    /** P5-F14: Add to Queue with a VERIFIED outcome (see [verifiedQueueAction]); the mutation itself is [commitAddToQueue]. */
+    fun addToQueue(song: Song): QueueActionResult = verifiedQueueAction(QueueAction.AddToQueue, song) { commitAddToQueue(song) }
+
+    private fun commitAddToQueue(song: Song): QueueActionResult? {
         // CF-2H3B: notified before planning; see addAllToQueue.
         explicitAddToQueueMutationListeners.notifyExplicitAddToQueueMutation()
-        when (
+        return when (
             planQueueAdd(
                 hasExistingQueue = libraryQueue.isNotEmpty(),
                 isBatchEmpty = false,
                 currentIndexResolvable = currentPlaybackIndex() != null,
             )
         ) {
-            QueueAddPlan.NoOp -> Unit
-            QueueAddPlan.StartNewQueue -> startQueueWithoutNotification(queue = listOf(song), startIndex = 0)
+            QueueAddPlan.NoOp -> null
+            QueueAddPlan.StartNewQueue -> {
+                startQueueWithoutNotification(queue = listOf(song), startIndex = 0)
+                QueueActionResult.StartedQueue
+            }
             // Existing queue: append to tail via the proven preserving path, which keeps the queue
             // and current song intact even when the current index is temporarily unresolvable.
-            QueueAddPlan.AppendPreservingQueue -> appendAllPreservingQueue(listOf(song))
+            QueueAddPlan.AppendPreservingQueue -> {
+                val appendPosition = playbackQueue.size
+                appendAllPreservingQueue(listOf(song))
+                QueueActionResult.Queued(QueueAction.AddToQueue, QueuePlacement.Appended, appendPosition)
+            }
         }
     }
 

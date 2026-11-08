@@ -88,6 +88,7 @@ import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.SleepTimerDialog
 import com.launchpoint.wavdrop.ui.components.shareSong
+import com.launchpoint.wavdrop.ui.components.announceQueueAction
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
@@ -272,8 +273,8 @@ fun HomeScreen(
                         }
                     },
                     onTrackDetailsClick    = onTrackDetailsClick,
-                    onPlayNext             = viewModel::playNext,
-                    onAddToQueue           = viewModel::addToQueue,
+                    onPlayNext             = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.playNext(song)) },
+                    onAddToQueue           = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.addToQueue(song)) },
                     onAddToPlaylist        = { song -> addToPlaylistSong = song },
                     onShare                = { song ->
                         shareSong(context, song) {

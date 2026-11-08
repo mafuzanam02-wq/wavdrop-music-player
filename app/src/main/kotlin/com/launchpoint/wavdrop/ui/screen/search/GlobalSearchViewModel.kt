@@ -10,6 +10,7 @@ import com.launchpoint.wavdrop.data.repository.SmartCollectionRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.search.LibrarySearchIndex
+import com.launchpoint.wavdrop.playback.QueueActionResult
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.playback.NowPlayingState
@@ -127,9 +128,9 @@ class GlobalSearchViewModel @Inject constructor(
         }
     }
 
-    fun playNext(song: Song) = playerController.playNext(song)
+    fun playNext(song: Song): QueueActionResult = playerController.playNext(song)
 
-    fun addToQueue(song: Song) = playerController.addToQueue(song)
+    fun addToQueue(song: Song): QueueActionResult = playerController.addToQueue(song)
 
     fun toggleFavorite(songId: Long) {
         val song = allSongs.value.firstOrNull { it.id == songId } ?: return

@@ -23,6 +23,7 @@ import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
 import com.launchpoint.wavdrop.ui.components.GroupedSearchContent
 import com.launchpoint.wavdrop.ui.components.SearchTopAppBar
 import com.launchpoint.wavdrop.ui.components.SongSearchActions
+import com.launchpoint.wavdrop.ui.components.announceQueueAction
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.viewmodel.PlaylistActionsViewModel
 import kotlinx.coroutines.launch
@@ -71,8 +72,8 @@ fun GlobalSearchRoute(
                 currentSongId    = nowPlaying.song?.id,
                 favoriteSongIds  = favoriteSongIds,
                 onSongClick      = viewModel::playSearchResult,
-                onPlayNext       = viewModel::playNext,
-                onAddToQueue     = viewModel::addToQueue,
+                onPlayNext       = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.playNext(song)) },
+                onAddToQueue     = { song -> coroutineScope.announceQueueAction(snackbarHostState, song, viewModel.addToQueue(song)) },
                 onToggleFavorite = { song, wasFavorite ->
                     viewModel.toggleFavorite(song.id)
                     coroutineScope.launch {
