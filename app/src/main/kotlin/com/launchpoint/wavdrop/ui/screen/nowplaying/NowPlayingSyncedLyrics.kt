@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -27,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.compose.state.ProgressStateWithTickInterval
 import com.launchpoint.wavdrop.data.lyrics.SyncedLyricsLine
+import android.os.SystemClock
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlin.math.abs
 
@@ -106,8 +109,9 @@ private suspend fun LazyListState.nudgeToCenter(target: Int) {
 /**
  * Synchronized lyrics for the artwork overlay. The active line is derived from [trackProgress], the
  * one continuous Media3 progress state shared with the seek track (this composable adds no progress
- * observer, timer or poller of its own). The position is read inside `derivedStateOf`, so the list
- * only recomposes when the active line changes, and auto-scroll is keyed to that index.
+ * observer, timer or poller of its own; manual-scroll suspension uses one cancellable delay). The position is read inside `derivedStateOf`, so the list
+ * only recomposes when the active line changes, and auto-scroll is keyed to that index and to the follow state: a direct user drag/fling suspends it
+ * (see [LyricsFollowPolicy]) until [LYRICS_FOLLOW_RESUME_DELAY_MS] after the scroll settles.
  *
  * Following is immediate, never animated: the new active line must already be in its centered
  * position when it becomes highlighted, instead of being highlighted low and then gliding up.
@@ -115,6 +119,7 @@ private suspend fun LazyListState.nudgeToCenter(target: Int) {
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 internal fun SyncedLyricsOverlayList(
+    songId: Long,
     lines: List<SyncedLyricsLine>,
     compact: Boolean,
     trackProgress: ProgressStateWithTickInterval,
@@ -124,8 +129,31 @@ internal fun SyncedLyricsOverlayList(
         derivedStateOf { activeSyncedLyricsIndex(lines, trackProgress.currentPositionMs) }
     }
     val listState = rememberLazyListState()
+    // Per song (never per lyric content); a new song or reopening the overlay starts with following enabled, and
+    // an explicit in-app seek restores it.
+    val followPolicy = rememberLyricsFollowPolicy(songId, LocalLyricsSeekSignal.current?.epoch ?: 0)
+    val scrollConnection = remember(followPolicy) { LyricsUserScrollConnection(followPolicy) { SystemClock.elapsedRealtime() } }
+    val following = followPolicy.following
 
-    LaunchedEffect(lines, activeIndex) {
+    // Safety net: a user gesture that ended without a fling callback still gets its inactivity period.
+    LaunchedEffect(followPolicy, listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { moving ->
+            if (!moving) followPolicy.onScrollSettled(SystemClock.elapsedRealtime())
+        }
+    }
+
+    // One cancellable delay; a new gesture clears resumeAtMs, which cancels it. Resuming flips `following`, which
+    // re-keys the centering effect below, so the active line is recentered exactly once.
+    val resumeAt = followPolicy.resumeAtMs
+    LaunchedEffect(followPolicy, resumeAt) {
+        val due = resumeAt ?: return@LaunchedEffect
+        delay((due - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+        snapshotFlow { listState.isScrollInProgress }.first { !it }
+        followPolicy.onResumeDue(SystemClock.elapsedRealtime())
+    }
+
+    LaunchedEffect(lines, activeIndex, following) {
+        if (!following) return@LaunchedEffect
         // Item/viewport sizes are only known after the first measure.
         snapshotFlow { listState.layoutInfo.viewportSize.height }.first { it > 0 }
         val target = activeIndex ?: 0
@@ -142,6 +170,7 @@ internal fun SyncedLyricsOverlayList(
         // Half-viewport padding at both ends lets even the first and last lines reach the middle.
         val edgePadding = maxHeight / 2
         LazyColumn(
+            modifier = Modifier.nestedScroll(scrollConnection),
             state = listState,
             contentPadding = PaddingValues(top = edgePadding, bottom = edgePadding),
         ) {

@@ -60,6 +60,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -690,6 +691,9 @@ private fun FixedBottomNowPlayingLayout(
         LocalProgressPlayer.current,
         tickIntervalMs = 0L,
     )
+    // The seek control and the lyrics overlay both live in this layout, so the explicit seek signal is shared here.
+    val seekSignal = remember { LyricsSeekSignal() }
+    CompositionLocalProvider(LocalLyricsSeekSignal provides seekSignal) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -744,11 +748,15 @@ private fun FixedBottomNowPlayingLayout(
             onTogglePlayPause = onTogglePlayPause,
             onNext = onNext,
             onCycleRepeatMode = onCycleRepeatMode,
-            onSeek = onSeek,
+            onSeek = { positionMs ->
+                seekSignal.notifySeek()
+                onSeek(positionMs)
+            },
             onOpenQueue = onOpenQueue,
             sleepTimerLabel = sleepTimerLabel,
             upNextLabel = upNextLabel,
         )
+    }
     }
 }
 
@@ -1242,6 +1250,7 @@ private fun ArtworkWithLyricsOverlay(
                         .background(Color.Black.copy(alpha = scrimAlpha)),
                 ) {
                     LyricsOverlayContent(
+                        songId = song.id,
                         lyrics = lyrics,
                         onSearchOnline = { searchLyricsOnline(context, song) },
                         onPasteLyrics = onPasteLyrics,
@@ -1284,6 +1293,7 @@ private fun ArtworkWithLyricsOverlay(
 
 @Composable
 private fun LyricsOverlayContent(
+    songId: Long,
     lyrics: LyricsResult,
     onSearchOnline: (() -> Unit)?,
     onPasteLyrics: ((String) -> Unit)? = null,
@@ -1314,6 +1324,7 @@ private fun LyricsOverlayContent(
         }
         is LyricsResult.Synced -> {
             SyncedLyricsOverlayList(
+                songId = songId,
                 lines = lyrics.lines,
                 compact = compact,
                 trackProgress = trackProgress,
