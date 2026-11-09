@@ -36,6 +36,7 @@ import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.StartupDestination
 import com.launchpoint.wavdrop.playback.CrossfadeRolloutPolicy
+import com.launchpoint.wavdrop.playback.TransportFadeRules
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
 import com.launchpoint.wavdrop.ui.components.SleepTimerDialog
@@ -55,6 +56,8 @@ fun SettingsPlaybackScreen(
     val timeDisplayMode             by viewModel.nowPlayingTimeDisplayMode.collectAsStateWithLifecycle()
     val crossfadeDurationMs         by viewModel.crossfadeDurationMs.collectAsStateWithLifecycle()
     val equalizerEnabled            by viewModel.eqEnabled.collectAsStateWithLifecycle()
+    val transportFadeEnabled        by viewModel.transportFadeEnabled.collectAsStateWithLifecycle()
+    val transportFadeDurationMs     by viewModel.transportFadeDurationMs.collectAsStateWithLifecycle()
     // CF-2J1: one rollout authority; hidden while the runtime is not available, disabled (saved value kept) while EQ is on.
     val crossfadeUi = buildCrossfadeSettingUiState(CrossfadeRolloutPolicy.RUNTIME_ENABLED, equalizerEnabled, crossfadeDurationMs)
     var showStartupDialog       by remember { mutableStateOf(false) }
@@ -63,6 +66,7 @@ fun SettingsPlaybackScreen(
     var showSearchTapDialog     by remember { mutableStateOf(false) }
     var showTimeDisplayDialog   by remember { mutableStateOf(false) }
     var showCrossfadeDialog     by remember { mutableStateOf(false) }
+    var showTransportFadeDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -132,8 +136,24 @@ fun SettingsPlaybackScreen(
             }
             item { SectionDivider() }
 
+            item { SectionHeader("Transitions") }
+            item {
+                ToggleSettingsRow(
+                    title           = "Transport fade",
+                    subtitle        = "Briefly fade when you press Play, Pause, Next or Previous. Separate from Crossfade.",
+                    checked         = transportFadeEnabled,
+                    onCheckedChange = viewModel::setTransportFadeEnabled,
+                )
+            }
+            item {
+                ClickableSettingsRow(
+                    title    = "Transport fade duration",
+                    subtitle = if (transportFadeEnabled) "$transportFadeDurationMs ms" else "Turn on Transport fade to change the duration",
+                    enabled  = transportFadeEnabled,
+                    onClick  = { showTransportFadeDialog = true },
+                )
+            }
             if (crossfadeUi.visible) {
-                item { SectionHeader("Transitions") }
                 item {
                     ClickableSettingsRow(
                         title    = "Crossfade",
@@ -142,8 +162,8 @@ fun SettingsPlaybackScreen(
                         onClick  = { showCrossfadeDialog = true },
                     )
                 }
-                item { SectionDivider() }
             }
+            item { SectionDivider() }
 
             item { SectionHeader("Search") }
             item {
@@ -193,6 +213,16 @@ fun SettingsPlaybackScreen(
         }
     }
 
+    if (showTransportFadeDialog && transportFadeEnabled) {
+        TransportFadeDurationDialog(
+            selectedMs = transportFadeDurationMs,
+            onSelect   = { ms ->
+                viewModel.setTransportFadeDurationMs(ms)
+                showTransportFadeDialog = false
+            },
+            onDismiss  = { showTransportFadeDialog = false },
+        )
+    }
     if (showCrossfadeDialog && crossfadeUi.visible && crossfadeUi.enabled) {
         CrossfadeDurationDialog(
             selected  = selectedCrossfadeOption(crossfadeDurationMs),
@@ -257,6 +287,39 @@ fun SettingsPlaybackScreen(
             onDismiss = { showSleepTimerDialog = false },
         )
     }
+}
+
+@Composable
+private fun TransportFadeDurationDialog(
+    selectedMs: Long,
+    onSelect: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val options = (TransportFadeRules.MIN_DURATION_MS..TransportFadeRules.MAX_DURATION_MS step TransportFadeRules.STEP_MS).toList()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title            = { Text("Transport fade duration") },
+        text             = {
+            androidx.compose.foundation.lazy.LazyColumn {
+                items(options.size) { i ->
+                    val ms = options[i]
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(ms) }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = ms == selectedMs, onClick = { onSelect(ms) })
+                        Text(
+                            text     = "$ms ms",
+                            style    = MaterialTheme.typography.bodyLarge,
+                            color    = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

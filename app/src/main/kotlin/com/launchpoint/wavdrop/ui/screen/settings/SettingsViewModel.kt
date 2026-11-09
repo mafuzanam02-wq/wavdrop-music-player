@@ -39,6 +39,7 @@ import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.data.settings.WrappedVisualStyle
 import com.launchpoint.wavdrop.playback.CrossfadeRules
+import com.launchpoint.wavdrop.playback.TransportFadeRules
 import com.launchpoint.wavdrop.playback.PlayerController
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.playback.SleepTimerState
@@ -236,6 +237,20 @@ class SettingsViewModel @Inject constructor(
             scope        = viewModelScope,
             started      = SharingStarted.WhileSubscribed(5_000),
             initialValue = CrossfadeRules.OFF_MS,
+        )
+
+    val transportFadeEnabled: StateFlow<Boolean> =
+        appSettingsRepository.transportFadeEnabled.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = TransportFadeRules.DEFAULT_ENABLED,
+        )
+
+    val transportFadeDurationMs: StateFlow<Long> =
+        appSettingsRepository.transportFadeDurationMs.stateIn(
+            scope        = viewModelScope,
+            started      = SharingStarted.WhileSubscribed(5_000),
+            initialValue = TransportFadeRules.DEFAULT_DURATION_MS,
         )
 
     val previousButtonBehavior: StateFlow<PreviousButtonBehavior> =
@@ -509,6 +524,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationControlsSetting(setting: NotificationControlsSetting) {
         viewModelScope.launch { appSettingsRepository.setNotificationControlsSetting(setting) }
+    }
+
+    fun setTransportFadeEnabled(enabled: Boolean) {
+        viewModelScope.launch { appSettingsRepository.setTransportFadeEnabled(enabled) }
+    }
+
+    fun setTransportFadeDurationMs(durationMs: Long) {
+        viewModelScope.launch { appSettingsRepository.setTransportFadeDurationMs(durationMs) }
     }
 
     fun setCrossfadeDurationMs(durationMs: Long) {

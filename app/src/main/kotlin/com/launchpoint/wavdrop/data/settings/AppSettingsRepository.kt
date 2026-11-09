@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
 import com.launchpoint.wavdrop.playback.CrossfadeRules
+import com.launchpoint.wavdrop.playback.TransportFadeRules
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -510,6 +511,23 @@ class AppSettingsRepository @Inject constructor(
         }
     }
 
+    /** Transport Fade (explicit Play/Pause/Next/Previous): separate from Crossfade. Default off; duration normalized on read and write. */
+    val transportFadeEnabled: Flow<Boolean> = dataStore.data
+        .catch { error -> if (error is IOException) emit(emptyPreferences()) else throw error }
+        .map { it[TRANSPORT_FADE_ENABLED_KEY] ?: TransportFadeRules.DEFAULT_ENABLED }
+
+    val transportFadeDurationMs: Flow<Long> = dataStore.data
+        .catch { error -> if (error is IOException) emit(emptyPreferences()) else throw error }
+        .map { TransportFadeRules.normalizeDurationMs(it[TRANSPORT_FADE_DURATION_MS_KEY]) }
+
+    suspend fun setTransportFadeEnabled(enabled: Boolean) {
+        dataStore.edit { it[TRANSPORT_FADE_ENABLED_KEY] = enabled }
+    }
+
+    suspend fun setTransportFadeDurationMs(durationMs: Long) {
+        dataStore.edit { it[TRANSPORT_FADE_DURATION_MS_KEY] = TransportFadeRules.normalizeDurationMs(durationMs) }
+    }
+
     private fun String.toAutoBackupInterval(): AutoBackupInterval? =
         runCatching { AutoBackupInterval.valueOf(this) }.getOrNull()
 
@@ -572,5 +590,7 @@ class AppSettingsRepository @Inject constructor(
         val WRAPPED_FALLBACK_THEME_KEY               = stringPreferencesKey("wrapped_fallback_theme")
         val WRAPPED_VISUAL_STYLE_KEY                 = stringPreferencesKey("wrapped_visual_style")
         val CROSSFADE_DURATION_MS_KEY               = longPreferencesKey("crossfade_duration_ms")
+        val TRANSPORT_FADE_ENABLED_KEY              = booleanPreferencesKey("transport_fade_enabled")
+        val TRANSPORT_FADE_DURATION_MS_KEY          = longPreferencesKey("transport_fade_duration_ms")
     }
 }

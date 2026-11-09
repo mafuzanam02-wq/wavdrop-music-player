@@ -2936,7 +2936,14 @@ class PlayerController @Inject constructor(
         // alone is false in those states. The armed Play and any older asynchronous callback are retired before the command.
         val shownAsPlaying = presentedNow(controller)
         retireArmedSelectionPlay()
-        if (PlaybackPresentation.toggleShouldPause(shownAsPlaying)) controller.pause() else controller.play()
+        // The in-app Play/Pause button is an explicit transport request: it goes through the transport fade here (the session player
+        // fades only EXTERNAL controllers, so this nested call is not faded twice). Every other internal pause stays immediate.
+        val fade = transportFade
+        if (PlaybackPresentation.toggleShouldPause(shownAsPlaying)) {
+            if (fade == null) controller.pause() else fade.pause(controller.isPlaying) { controller.pause() }
+        } else {
+            if (fade == null) controller.play() else fade.play(controller.isPlaying) { controller.play() }
+        }
         syncNowPlayingState()
         if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] after syncNPS: nowPlaying.isPlaying=${_nowPlayingState.value.isPlaying}")
     }
@@ -3008,6 +3015,16 @@ class PlayerController @Inject constructor(
         }
     }
 
+    private var transportFade: TransportFadeController? = null
+
+    /** Service-owned Transport Fade for in-app Next/Previous (Play/Pause fade at the session boundary). Null = unfaded. */
+    internal fun attachTransportFade(fade: TransportFadeController?) { transportFade = fade }
+
+    private fun fadedNavigate(controller: MediaController, intent: NavigationIntent) {
+        val fade = transportFade
+        if (fade == null) navigate(controller, intent) else fade.navigate(controller.isPlaying) { navigate(controller, intent) }
+    }
+
     fun skipToNext() {
         // CF-2G3: user intent cancels an owned crossfade first, even if navigation is deferred or a no-op. The
         // deferred-drain path (navigate) never notifies, so a pending command cancels exactly once.
@@ -3025,7 +3042,7 @@ class PlayerController @Inject constructor(
             deferNavigation(NavigationIntent.NEXT)
             return
         }
-        navigate(controller, NavigationIntent.NEXT)
+        fadedNavigate(controller, NavigationIntent.NEXT)
     }
 
     fun skipToPrevious() {
@@ -3040,7 +3057,7 @@ class PlayerController @Inject constructor(
             deferNavigation(NavigationIntent.PREVIOUS)
             return
         }
-        navigate(controller, NavigationIntent.PREVIOUS)
+        fadedNavigate(controller, NavigationIntent.PREVIOUS)
     }
 
     /**

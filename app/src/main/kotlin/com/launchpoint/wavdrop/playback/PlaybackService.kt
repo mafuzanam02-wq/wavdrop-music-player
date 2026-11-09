@@ -81,6 +81,9 @@ class PlaybackService : MediaLibraryService() {
     private var nextSlotDriver: NextSlotPreparationDriver? = null
     // Promotes the Ready NEXT at the fade window, runs the equal-power overlap and recycles the retiring player.
     private var promotionRuntime: CrossfadePromotionRuntime<ExoPlayer>? = null
+    // Transport Fade (explicit Play/Pause/Next/Previous): engine topology only. The config cache follows the persisted settings.
+    private var transportFade: TransportFadeController? = null
+    private var transportFadeConfig = TransportFadeConfig(TransportFadeRules.DEFAULT_ENABLED, TransportFadeRules.DEFAULT_DURATION_MS)
 
     // The ONE explicit-cancellation lifecycle point. Every recoverCrossfadeFrom... call goes through it: before a promotion it
     // invalidates the NEXT preparation; during an overlap it settles to B (CF-2M6).
@@ -181,6 +184,21 @@ class PlaybackService : MediaLibraryService() {
                 debugLog = if (BuildConfig.DEBUG) { message -> Log.d("WavdropCrossfade", message) } else null,
             )
         }
+        val fade = assembly.engine?.let { engine ->
+            TransportFadeController(
+                sink = TransportGainSink { engine.setTransportGain(it) },
+                clock = ElapsedRealtimeCrossfadeClock,
+                scheduler = MainLooperCrossfadeTimingScheduler(),
+                config = { transportFadeConfig },
+            ).also { engine.bindTransportFade(it) }
+        }
+        transportFade = fade
+        playerController.attachTransportFade(fade)
+        serviceScope.launch {
+            combine(appSettingsRepository.transportFadeEnabled, appSettingsRepository.transportFadeDurationMs) { enabled, ms ->
+                TransportFadeConfig(enabled, ms)
+            }.distinctUntilChanged().collect { transportFadeConfig = it }
+        }
         // CF-2E2: persisted duration -> cached value + explicit driver lifecycle policy. A persisted value is NOT
         // rollout permission: with the hard gate false there is no graph, so this only updates the cache.
         serviceScope.launch {
@@ -252,6 +270,7 @@ class PlaybackService : MediaLibraryService() {
             coldPlayAuthority = playerController.coldPlayAuthority,
             onExternalPlayIntent = { play -> playerController.onExplicitExternalPlayIntent(play) },
             selectionPlayArmed = { playerController.isSelectionPlayArmed() },
+            transportFade = fade,
             hydrateForPlay = { songs ->
                 playerController.ensurePlayerHydratedFromSession(availableSongs = songs, operation = "explicit_play")
             },
@@ -500,6 +519,10 @@ class PlaybackService : MediaLibraryService() {
         logResume("SERVICE_DESTROY")
         // CF-2G2: never leave the singleton PlayerController holding a callback into this destroyed service.
         playerController.setExplicitSeekListener(null)
+        playerController.attachTransportFade(null)
+        playbackAssembly?.engine?.onPlaybackInterrupted = null
+        transportFade?.release()
+        transportFade = null
         playerController.setExplicitNavigationListener(null)
         playerController.setExplicitRepeatChangeListener(null)
         playerController.setExplicitShuffleChangeListener(null)

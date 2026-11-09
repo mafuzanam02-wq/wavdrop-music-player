@@ -54,6 +54,8 @@ internal class PreviousBehaviorPlayer(
     // True while an explicit selection's Play is armed behind a bounded window verification (PlayerController owns it and starts it
     // itself once the window is proven); this wrapper must not start that unverified window early.
     private val selectionPlayArmed: () -> Boolean = { false },
+    // Optional single-player transport fade (explicit Play/Pause/Next/Previous). Null or disabled = exactly the unfaded behaviour.
+    private val transportFade: TransportFadeController? = null,
 ) : ForwardingPlayer(player) {
 
 
@@ -98,13 +100,18 @@ internal class PreviousBehaviorPlayer(
 
     override fun pause() {
         logTransport("TRANSPORT_PAUSE")
+        val external = isExternalUserTransportRequest()
         // A PAUSE from any controller is a newer decision than every suspended cold PLAY: invalidate synchronously, before
         // anything can suspend.
         coldPlayAuthority.supersede()
         noteExternalTransport()
         if (isExternalUserTransportRequest()) onExternalPlayIntent(false)
         onExplicitPause() // cancel any owned crossfade first, then forward the pause
-        super.pause()
+        val fade = transportFade
+        // Only an EXTERNAL user's explicit Pause is faded. The app-marked controller carries PlayerController's INTERNAL commands (sleep expiry,
+        // error halt, queue clear, restoration) which are system-required stops and must never wait for the user's fade; the in-app
+        // Play/Pause button fades in PlayerController.togglePlayPause instead.
+        if (fade == null || !external) super.pause() else fade.pause(isPlaying) { super.pause() }
     }
 
     override fun play() {
@@ -118,11 +125,12 @@ internal class PreviousBehaviorPlayer(
             return
         }
         logTransport("TRANSPORT_PLAY")
+        val external = isExternalUserTransportRequest()
         noteExternalTransport()
         if (isExternalUserTransportRequest()) onExternalPlayIntent(true)
         if (currentMediaItem != null || mediaItemCount > 0) {
             coldPlayAuthority.supersede() // a direct PLAY ends any older cold PLAY still pending
-            playForwarded()
+            playForwarded(external)
             return
         }
         // Cold PLAY: capture authority NOW (synchronously, with this command); the hydration below suspends.
@@ -154,7 +162,7 @@ internal class PreviousBehaviorPlayer(
                 // player yet) is not a reason to drop the newest PLAY: authorization above proves nothing newer happened and the queue moved
                 // only through session hydrations. Without this, the newest PLAY would depend on an older request's callback running first.
                 if (playerHydrationAllowsPlay(result) || result == PlayerHydrationResult.SkippedActiveQueue) {
-                    playForwarded()
+                    playForwarded(external)
                 }
             } finally {
                 coldPlayAuthority.complete(ticket)
@@ -188,25 +196,34 @@ internal class PreviousBehaviorPlayer(
     override fun seekToNext() {
         val external = isExternalUserTransportRequest()
         if (external) onExplicitNavigation()
-        val moves = hasNextMediaItem()
-        super.seekToNext()
-        startSelectedIfExternal(external, moves)
+        fadedNavigation(external) {
+            val moves = hasNextMediaItem()
+            super.seekToNext()
+            startSelectedIfExternal(external, moves)
+            moves
+        }
     }
 
     override fun seekToNextMediaItem() {
         val external = isExternalUserTransportRequest()
         if (external) onExplicitNavigation()
-        val moves = hasNextMediaItem()
-        super.seekToNextMediaItem()
-        startSelectedIfExternal(external, moves)
+        fadedNavigation(external) {
+            val moves = hasNextMediaItem()
+            super.seekToNextMediaItem()
+            startSelectedIfExternal(external, moves)
+            moves
+        }
     }
 
     override fun seekToPreviousMediaItem() {
         val external = isExternalUserTransportRequest()
         if (external) onExplicitNavigation()
-        val moves = hasPreviousMediaItem()
-        super.seekToPreviousMediaItem()
-        startSelectedIfExternal(external, moves)
+        fadedNavigation(external) {
+            val moves = hasPreviousMediaItem()
+            super.seekToPreviousMediaItem()
+            startSelectedIfExternal(external, moves)
+            moves
+        }
     }
 
     override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
@@ -221,18 +238,28 @@ internal class PreviousBehaviorPlayer(
         // so neither the CF-2G2 seek hook nor the media-item hook fires a second time.
         val external = isExternalUserTransportRequest()
         if (external) onExplicitNavigation()
-        val thresholdMs = thresholdProvider()
-        if (thresholdMs > 0L && currentPosition > thresholdMs) {
-            super.seekTo(0L)
-        } else if (hasPreviousMediaItem()) {
-            super.seekToPreviousMediaItem()
-            startSelectedIfExternal(external, true)
-        } else {
-            super.seekTo(0L)
+        fadedNavigation(external) {
+            val thresholdMs = thresholdProvider()
+            if (thresholdMs > 0L && currentPosition > thresholdMs) {
+                super.seekTo(0L); false
+            } else if (hasPreviousMediaItem()) {
+                super.seekToPreviousMediaItem()
+                startSelectedIfExternal(external, true)
+                true
+            } else {
+                super.seekTo(0L); false
+            }
         }
     }
 
-    private fun playForwarded() {
-        super.play()
+    private fun playForwarded(external: Boolean) {
+        val fade = transportFade
+        if (fade == null || !external) super.play() else fade.play(isPlaying) { super.play() }
+    }
+
+    // An EXTERNAL explicit navigation goes through the transport fade; [body] is the unchanged navigation and returns whether it moved.
+    private fun fadedNavigation(external: Boolean, body: () -> Boolean) {
+        val fade = transportFade
+        if (fade == null || !external) body() else fade.navigate(isPlaying) { body() }
     }
 }

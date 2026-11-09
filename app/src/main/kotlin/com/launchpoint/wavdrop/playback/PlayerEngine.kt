@@ -247,12 +247,21 @@ internal class PlayerEngine<P : Player>(
                 },
             )
         }
+        val wasAudible = physicalPlayTarget()
         logicalPlayWhenReady = newPlayWhenReady
         logicalChangeReason = newReason
         logicalSuppressionReason = newSuppression
         pushPhysicalPlayState()
         facade.invalidateLogicalState()
+        // Any audible -> not-audible transition (pause, permanent or TRANSIENT focus loss, noisy) aborts a transport fade.
+        if (wasAudible && !physicalPlayTarget()) onPlaybackInterrupted?.invoke(newPlayWhenReady)
     }
+
+    /**
+     * Invoked once when playback stops being audible for any reason other than a duck. The argument is whether play-when-ready is
+     * still wanted (a suppression such as transient focus loss) so the transport fade can still honour a pending user Pause.
+     */
+    var onPlaybackInterrupted: ((stillWantsPlay: Boolean) -> Unit)? = null
 
     private fun physicalPlayTarget(): Boolean =
         logicalPlayWhenReady && logicalSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE
@@ -282,11 +291,24 @@ internal class PlayerEngine<P : Player>(
      * fade ticks only change the fade component; both recompute from the other's current value, so neither can overwrite
      * the other.
      */
+    /**
+     * Transport-fade factor (explicit Play/Pause/Next/Previous), the third and last factor of the single gain composer:
+     * physical volume = duck x transport x crossfade fade. Owned by [TransportFadeController]; it never replaces another owner.
+     */
+    var transportGain: Float = 1f
+        private set
+
+    fun setTransportGain(gain: Float) {
+        require(gain.isFinite() && gain in 0f..1f) { "transport gain must be finite within 0..1" }
+        transportGain = gain
+        applyVolumes()
+    }
+
     private fun applyVolumes() {
         if (released) return
         for (slot in listOf(currentSlot, nextSlot)) {
             val audible = slot === currentSlot || slot === retiringSlot
-            val volume = (if (audible) duckMultiplier else 1f) * fadeOf(slot)
+            val volume = (if (audible) duckMultiplier * transportGain else 1f) * fadeOf(slot)
             if (slot.player.volume != volume) slot.player.volume = volume
         }
     }

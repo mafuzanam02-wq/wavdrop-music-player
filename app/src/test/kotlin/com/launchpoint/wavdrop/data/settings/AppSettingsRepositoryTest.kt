@@ -92,6 +92,47 @@ class AppSettingsRepositoryTest {
         }
     }
 
+    @Test
+    fun `transport fade defaults to disabled at 300 ms`() = runBlocking {
+        val r = repository()
+        assertEquals(false, r.transportFadeEnabled.first())
+        assertEquals(300L, r.transportFadeDurationMs.first())
+    }
+
+    @Test
+    fun `transport fade settings round trip`() = runBlocking {
+        val r = repository()
+        r.setTransportFadeEnabled(true)
+        r.setTransportFadeDurationMs(450L)
+        assertEquals(true, r.transportFadeEnabled.first())
+        assertEquals(450L, r.transportFadeDurationMs.first())
+    }
+
+    @Test
+    fun `transport fade invalid stored values are normalized on read and write`() = runBlocking {
+        val key = longPreferencesKey("transport_fade_duration_ms")
+        for ((raw, expected) in listOf(-1L to 100L, 0L to 100L, 99L to 100L, 310L to 300L, 801L to 800L, Long.MAX_VALUE to 800L)) {
+            val ds = PreferenceDataStoreFactory.create(produceFile = { temporaryFolder.newFile("tf-${System.nanoTime()}.preferences_pb") })
+            ds.edit { it[key] = raw }
+            assertEquals("read $raw", expected, AppSettingsRepository(ds).transportFadeDurationMs.first())
+            val ds2 = PreferenceDataStoreFactory.create(produceFile = { temporaryFolder.newFile("tf2-${System.nanoTime()}.preferences_pb") })
+            AppSettingsRepository(ds2).setTransportFadeDurationMs(raw)
+            assertEquals("write $raw", expected, ds2.data.first()[key])
+        }
+    }
+
+    @Test
+    fun `transport fade settings do not touch the crossfade setting`() = runBlocking {
+        val r = repository()
+        r.setCrossfadeDurationMs(6_000L)
+        r.setTransportFadeEnabled(true)
+        r.setTransportFadeDurationMs(800L)
+        assertEquals(6_000L, r.crossfadeDurationMs.first())
+        val fresh = repository()
+        fresh.setTransportFadeEnabled(true)
+        assertEquals(0L, fresh.crossfadeDurationMs.first())
+    }
+
     private fun repository(): AppSettingsRepository {
         val dataStore = PreferenceDataStoreFactory.create(
             produceFile = {
