@@ -128,14 +128,30 @@ internal class PlayerEngine<P : Player>(
     private var writingPhysicalPlayState = false
 
     private val currentObserver = object : Player.Listener {
-        override fun onPlaybackStateChanged(playbackState: Int) = reevaluateFocus()
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            // ExoPlayer delivers STATE_ENDED BEFORE the play-when-ready change of its own pause-at-end-of-media-items stop (same
+            // event batch). The player's value is already false here, so re-evaluating focus first would push the still-true logical
+            // value back onto it, silently defeating the hold. Adopt the player's own stop as the logical value first.
+            if (playbackState == Player.STATE_ENDED && !writingPhysicalPlayState && !released) {
+                val live = currentPlayer.playWhenReady
+                if (live != physicalPlayTarget()) applyRequest(live, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            }
+            reevaluateFocus()
+        }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (writingPhysicalPlayState || released) return
             // Someone wrote the physical CURRENT directly. Route it through the logical owner instead of letting the
             // physical state silently disagree with the logical one.
-            if (playWhenReady != physicalPlayTarget()) {
-                applyRequest(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            //
+            // ExoPlayer reports play-when-ready changes AFTER the fact: echoes of this engine's own writes, and its own
+            // pause-at-end-of-media-items stop, can arrive after the engine has already moved on. Judge the player's CURRENT
+            // value, not the (possibly stale) callback argument: a stale echo then agrees with the logical owner and is ignored.
+            // Acting on the stale value let a final item that had paused at its end re-assert play, be paused again, and
+            // repeat without end (a main-thread saturating write/echo loop).
+            val live = currentPlayer.playWhenReady
+            if (live != physicalPlayTarget()) {
+                applyRequest(live, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             }
         }
     }
