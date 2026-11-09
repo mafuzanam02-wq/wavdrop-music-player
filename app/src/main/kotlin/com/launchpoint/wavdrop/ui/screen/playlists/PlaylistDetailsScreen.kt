@@ -591,17 +591,22 @@ fun PlaylistDetailsScreen(
     ) { uri ->
         if (uri != null) viewModel.exportTo(uri) else viewModel.exportDestinationCancelled()
     }
+    // Consumes each result once and shows it from the composition scope, so the resulting state change
+    // (Finished -> Idle) restarting the effect below cannot cancel the snackbar.
+    val exportNotifier = remember(coroutineScope, snackbarHostState, viewModel) {
+        ExportResultNotifier(
+            scope = coroutineScope,
+            consume = viewModel::consumeExportResult,
+            show = { message -> snackbarHostState.showSnackbar(message) },
+        )
+    }
     LaunchedEffect(exportState) {
         when (val s = exportState) {
             // One-shot: the state moves to AwaitingDestination before launching, so a recreated screen
             // (rotation) observing the state again cannot open a second picker.
             is PlaylistExportState.PickDestination ->
                 if (viewModel.exportPickerLaunched()) exportLauncher.launch(s.fileName)
-            // Consume first so a recreation mid-snackbar does not replay the message.
-            is PlaylistExportState.Finished -> {
-                viewModel.consumeExportResult()
-                snackbarHostState.showSnackbar(s.message)
-            }
+            is PlaylistExportState.Finished -> exportNotifier.onState(s)
             else -> Unit
         }
     }
