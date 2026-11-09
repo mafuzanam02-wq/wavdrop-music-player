@@ -1,6 +1,8 @@
 package com.launchpoint.wavdrop.ui.screen.playlists
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
@@ -300,6 +303,11 @@ fun PlaylistDetailsScreen(
                                     text        = { Text("Rename") },
                                     leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null) },
                                     onClick     = { menuExpanded = false; showRename = true },
+                                )
+                                DropdownMenuItem(
+                                    text        = { Text("Export as M3U8") },
+                                    leadingIcon = { Icon(Icons.Default.FileUpload, null) },
+                                    onClick     = { menuExpanded = false; viewModel.startExport() },
                                 )
                                 DropdownMenuItem(
                                     text        = { Text("Delete playlist") },
@@ -573,6 +581,40 @@ fun PlaylistDetailsScreen(
                 addToPlaylistSong = null
             },
             onDismiss           = { addToPlaylistSong = null },
+        )
+    }
+
+    // ── Export as M3U8 (device-local) ─────────────────────────────────────────
+    val exportState by viewModel.exportState.collectAsStateWithLifecycle()
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/x-mpegurl"),
+    ) { uri ->
+        if (uri != null) viewModel.exportTo(uri) else viewModel.exportDestinationCancelled()
+    }
+    LaunchedEffect(exportState) {
+        when (val s = exportState) {
+            // One-shot: the state moves to AwaitingDestination before launching, so a recreated screen
+            // (rotation) observing the state again cannot open a second picker.
+            is PlaylistExportState.PickDestination ->
+                if (viewModel.exportPickerLaunched()) exportLauncher.launch(s.fileName)
+            // Consume first so a recreation mid-snackbar does not replay the message.
+            is PlaylistExportState.Finished -> {
+                viewModel.consumeExportResult()
+                snackbarHostState.showSnackbar(s.message)
+            }
+            else -> Unit
+        }
+    }
+    (exportState as? PlaylistExportState.NeedsConfirmation)?.let { s ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissExportConfirmation,
+            title = { Text("Export incomplete playlist?") },
+            text = { Text(s.message) },
+            // Cancel is the default, non-destructive action; exporting a subset is an explicit choice.
+            confirmButton = { TextButton(onClick = viewModel::dismissExportConfirmation) { Text("Cancel") } },
+            dismissButton = {
+                TextButton(onClick = viewModel::confirmIncompleteExport) { Text("Export ${s.exportable}") }
+            },
         )
     }
 

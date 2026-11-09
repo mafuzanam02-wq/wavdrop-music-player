@@ -1,6 +1,10 @@
 package com.launchpoint.wavdrop.ui.screen.playlists
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
+import com.launchpoint.wavdrop.data.export.PlaylistExporter
+import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
@@ -95,9 +99,29 @@ class PlaylistDetailsViewModel @Inject constructor(
     private val songRepository: SongRepository,
     private val statsRepository: StatsRepository,
     private val playerController: PlayerController,
+    private val playlistExporter: PlaylistExporter,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     private val playlistId: Long = checkNotNull(savedStateHandle["playlistId"])
+
+    private val exportCoordinator = PlaylistExportCoordinator(playlistId, playlistExporter)
+    val exportState: StateFlow<PlaylistExportState> = exportCoordinator.state
+
+    fun startExport() { viewModelScope.launch { exportCoordinator.begin() } }
+    fun confirmIncompleteExport() = exportCoordinator.confirmIncomplete()
+    fun dismissExportConfirmation() = exportCoordinator.dismissConfirmation()
+    fun exportDestinationCancelled() = exportCoordinator.destinationCancelled()
+    fun exportPickerLaunched(): Boolean = exportCoordinator.pickerLaunched()
+    fun consumeExportResult() = exportCoordinator.consumeFinished()
+
+    fun exportTo(uri: Uri) {
+        viewModelScope.launch {
+            exportCoordinator.destinationChosen { mode ->
+                runCatching { appContext.contentResolver.openOutputStream(uri, mode) }.getOrNull()
+            }
+        }
+    }
     private val searchQuery = MutableStateFlow("")
 
     private val playlistSummary = playlistRepository.observePlaylists()

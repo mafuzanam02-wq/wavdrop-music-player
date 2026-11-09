@@ -19,6 +19,9 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY title COLLATE NOCASE ASC, title ASC, id ASC")
     suspend fun getAllSongsSnapshot(): List<SongEntity>
 
+    @Query("SELECT * FROM songs WHERE id IN (:ids)")
+    suspend fun getSongsByIds(ids: List<Long>): List<SongEntity>
+
     @Query("SELECT * FROM songs WHERE artist = :artist ORDER BY album, trackNumber")
     fun getSongsByArtist(artist: String): Flow<List<SongEntity>>
 
