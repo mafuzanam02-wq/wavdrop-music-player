@@ -1500,6 +1500,8 @@ class PlayerController @Inject constructor(
         }
         applyPhysicalTransportModes(controller)
         drainPendingRequests(controller)
+        // P5-F20J-R1: one bounded attempt per connection to adopt the accepted selection; it never autostarts and never loops.
+        if (unverifiedInstall != null) retryUnverifiedInstall(controller, startIndexOverride = null, play = false)
         _progressPlayer.value = controller
     }
 
@@ -1643,6 +1645,7 @@ class PlayerController @Inject constructor(
      * before. If the occurrence cannot be resolved at all the queue stays dirty (the non-destructive fallback).
      */
     private fun synchronizePlayerQueueOnReconnect(controller: MediaController) {
+        if (unverifiedInstall != null) return // P5-F20J-R1: nothing to re-anchor; the explicit retry below owns recovery
         if (isBounded()) {
             // P5-C: the old controller's acknowledgements say nothing about this player. Re-anchor a bounded window around the
             // exact logical current (never the full queue); the position is kept.
@@ -2033,7 +2036,9 @@ class PlayerController @Inject constructor(
         val playbackStartIndex = playbackOrder.indexOf(originalStartIndex).takeIf { it >= 0 } ?: 0
 
         lastKnownPositionMs = -1L
-        statsTracker.onSongSelected(startSong)
+        // P5-F20J: with a connected controller the selection is recorded only after the physical install is accepted (below); a
+        // deferred start has no physical attempt yet and keeps its accept-time record.
+        if (mediaController == null) statsTracker.onSongSelected(startSong)
         _nowPlayingState.update {
             it.copy(
                 song = startSong,
@@ -2058,28 +2063,65 @@ class PlayerController @Inject constructor(
             return
         }
         deferred.clear() // a connected accept supersedes anything stale (nothing should exist while connected)
-        installLibraryStart(controller, playbackStartIndex, play = true)
+        installLibraryStart(controller, playbackStartIndex, play = true, selectedSong = startSong)
     }
 
     /** Physical install of an accepted library-queue selection (the connected path and the deferred drain share it). */
-    private fun installLibraryStart(controller: MediaController, playbackStartIndex: Int, play: Boolean, positionMs: Long = 0L) {
+    private fun installLibraryStart(
+        controller: MediaController,
+        playbackStartIndex: Int,
+        play: Boolean,
+        positionMs: Long = 0L,
+        selectedSong: Song? = null,
+    ): Boolean {
         applyPhysicalTransportModes(controller)
         // ExoPlayer is loaded with playbackQueue so auto-transitions follow shuffle order.
-        controller.installPlaybackQueue(
+        val result = controller.installPlaybackQueue(
             operation = "play_from_queue",
             startIndex = playbackStartIndex,
             positionMs = positionMs,
         )
+        if (result == QueueInstallResult.Failed) {
+            abandonUnverifiedInstall(controller)
+            return false
+        }
         controller.prepare()
         PlaybackStartupTrace.onPrepareIssued()
-        syncNowPlayingState()
+        if (unverifiedInstall != null) {
+            // P5-F20J-R3: submitted to the bounded adapter but NOT adopted while an earlier replacement is still unverified. Nothing is
+            // claimed: the selection's Play, statistics and session are owed until the adapter's Active outcome.
+            pendingAdoption = PendingAdoption(queueGeneration, selectedSong, play)
+            if (!play) controller.pause()
+            return true
+        }
+        pendingAdoption = null
+        // P5-F20J: after a verified in-process install the controller's cached view still describes the PREVIOUS queue until its
+        // asynchronous update arrives; reading it here would publish a wrong song/index/position. The selection was published and the
+        // physical player proved it, so the controller's own events complete the state when they arrive.
+        val controllerViewCurrent = result != QueueInstallResult.Verified
+        if (controllerViewCurrent) syncNowPlayingState()
         if (play) {
             controller.play()
             PlaybackStartupTrace.mark("play_issued")
         } else {
             controller.pause()
         }
-        saveSessionAsync()
+        if (controllerViewCurrent) saveSessionAsync() else saveSessionAsync(exactPlaybackIndex = playbackStartIndex, positionOverrideMs = positionMs)
+        selectedSong?.let { statsTracker.onSongSelected(it) }
+        return true
+    }
+
+    /**
+     * P5-F20J: the physical player did not adopt the accepted selection. Nothing is claimed as playing, no statistics or session are
+     * written for it (the previously persisted session stays valid), and the queue is explicitly dirty so a later repair or
+     * explicit start converges it. The logical queue stays the user's latest accepted intent.
+     */
+    private fun abandonUnverifiedInstall(controller: MediaController) {
+        Log.w(TAG, "[install] selected queue was not adopted by the physical player; nothing published as playing, session not saved")
+        PlaybackStartupTrace.abort("install_not_verified")
+        runCatching { controller.pause() }
+        _nowPlayingState.update { it.copy(isPlaying = false, presentedAsPlaying = false) }
+        markQueueDirty(QueueDirtyReason.BatchMutationFailed)
     }
 
     fun playFromQueueShuffled(
@@ -2392,6 +2434,8 @@ class PlayerController @Inject constructor(
             return
         }
         deferred.clear()
+        // P5-F20J-R1: selecting an occurrence of an unadopted queue retries the install at that occurrence.
+        if (retryUnverifiedInstall(controller, startIndexOverride = playbackIndex, play = true)) return
         // playbackIndex is directly the ExoPlayer media item index since ExoPlayer holds playbackQueue.
         selectOccurrence(controller, playbackIndex, positionMs)
     }
@@ -2930,6 +2974,8 @@ class PlayerController @Inject constructor(
             ensureControllerConnection()
             return
         }
+        // P5-F20J-R1: an explicit Play on an unadopted selection retries that selection once (never plays the stale physical song).
+        if (retryUnverifiedInstall(controller, startIndexOverride = null, play = true)) return
         if (DEBUG_STATS) Log.d(TAG, "[togglePlayPause] before: controller.isPlaying=${controller.isPlaying}")
         // The action follows what the control SHOWS (see [PlaybackPresentation]): a request that is only preparing, or a Play armed
         // behind an unverified bounded window, is displayed as Pause, so a tap is a real Pause - never another Play. controller.isPlaying
@@ -3042,6 +3088,7 @@ class PlayerController @Inject constructor(
             deferNavigation(NavigationIntent.NEXT)
             return
         }
+        if (unverifiedInstall != null) return // P5-F20J-R1: fail closed; a wrong index model must never choose the next song
         fadedNavigate(controller, NavigationIntent.NEXT)
     }
 
@@ -3057,6 +3104,7 @@ class PlayerController @Inject constructor(
             deferNavigation(NavigationIntent.PREVIOUS)
             return
         }
+        if (unverifiedInstall != null) return // P5-F20J-R1: fail closed
         fadedNavigate(controller, NavigationIntent.PREVIOUS)
     }
 
@@ -3404,6 +3452,7 @@ class PlayerController @Inject constructor(
             ensureControllerConnection()
             return
         }
+        if (unverifiedInstall != null) return // P5-F20J-R1: a seek would move the stale physical item
         controller.seekTo(clamped)
         syncPosition(positionOverrideMs = clamped)
         saveSessionAsync()
@@ -4165,6 +4214,7 @@ class PlayerController @Inject constructor(
         // P5-F16B: while the persisted session could not be fully restored it is the only complete copy of the user's queue.
         // Neither SAVE (a pruned queue) nor CLEAR (an empty queue) may replace it. Only an explicit new queue releases this.
         if (sessionProtected) return
+        if (unverifiedInstall != null) return // P5-F20J-R1: the accepted queue is not adopted yet; the previous valid session stays
         val action = playbackSessionPersistenceAction(
             isExternalPlayback = isExternalPlayback,
             queueIsEmpty = libraryQueue.isEmpty(),
@@ -4267,6 +4317,8 @@ class PlayerController @Inject constructor(
         controllerConnectionState = ControllerConnectionState.Disconnected
         // Teardown must not resurrect a command into a later controller.
         deferred.clear()
+        unverifiedInstall = null
+        pendingAdoption = null
         mediaItemCache.clear()
     }
 
@@ -4679,6 +4731,9 @@ class PlayerController @Inject constructor(
     }
 
     private fun syncNowPlayingState(fromTransition: Boolean = false, notifyStats: Boolean = true) {
+        // P5-F20J-R1: while the accepted selection is not adopted the physical player describes ANOTHER queue; never derive state or
+        // statistics from it.
+        if (unverifiedInstall != null) return
         val controller = mediaController
         val preservePlan = pendingPreserveSearchPlanForSync(controller, fromTransition)
         val currentPlaybackIndex = preservePlan?.currentIndex?.takeIf { it in playbackQueue.indices }
@@ -4938,15 +4993,46 @@ class PlayerController @Inject constructor(
      * bounded window via [physicalWindowAdapter]; there is no full-queue fallback. [startIndex] is a LOGICAL playbackQueue index.
      * Not converted yet (P5-C..E): navigation, queue edits, crossfade and the session facade still assume Full.
      */
-    private fun MediaController.installPlaybackQueue(operation: String, startIndex: Int, positionMs: Long) {
+    private fun MediaController.installPlaybackQueue(operation: String, startIndex: Int, positionMs: Long): QueueInstallResult {
         ValidationTrace.installRequested(operation, playbackQueue.size, if (isBoundedInstall()) QueueMode.Bounded else QueueMode.Full, startIndex)
         if (!isBoundedInstall()) {
+            val modeBeforeInstall = installedQueueMode
+            // P5-F20J: while a bounded queue is presented the façade removes COMMAND_CHANGE_MEDIA_ITEMS from the controller, and the
+            // controller's view of the commands only follows the mode change asynchronously. A controller command would be refused
+            // (silently, as a Media3 warning). The physical player is owned in-process, so the replacement goes to it directly
+            // through the same port the bounded install uses, and is proven on it before anything is claimed.
+            val port = physicalPort
+            // P5-F20J-R4: an unverified earlier selection is released only by physical PROOF. A controller command being available and
+            // submitted is neither; with the protection owed the replacement therefore goes to the physical player and is read back.
+            val adoptionOwed = unverifiedInstall != null
+            if (adoptionOwed && port == null) return QueueInstallResult.Failed // nothing can prove adoption: stay closed
+            if (port != null && (isBounded() || adoptionOwed || !isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS))) {
+                if (modeBeforeInstall != QueueMode.Full) notifyLogicalPresentationChanged()
+                installedQueueMode = QueueMode.Full // the façade must forward while the physical queue is replaced
+                val result = installFullQueueOnPhysicalPlayer(port, operation, startIndex, positionMs)
+                if (result == QueueInstallResult.Verified) {
+                    if (physicalWindowAdapter.state != WindowInstallState.Idle) physicalWindowAdapter.reset()
+                    unverifiedInstall = null
+                } else {
+                    // P5-F20J-R1: FAIL CLOSED. The physical player was NOT proven Full: the previous mode is restored, and the stale
+                    // window (it describes a queue that is no longer the logical queue) is dropped, i.e. "not verified". Transport,
+                    // statistics, persistence and window maintenance stay gated on [unverifiedInstall] until an install is proven.
+                    installedQueueMode = modeBeforeInstall
+                    if (physicalWindowAdapter.state != WindowInstallState.Idle) physicalWindowAdapter.reset()
+                    unverifiedInstall = UnverifiedInstall(startIndex, positionMs, queueGeneration)
+                    notifyLogicalPresentationChanged()
+                }
+                logicalPresentationInvalidator?.invoke()
+                return result
+            }
             if (installedQueueMode != QueueMode.Full) notifyLogicalPresentationChanged()
-            installedQueueMode = QueueMode.Full
+            installedQueueMode = QueueMode.Full // protection is never owed on this controller-command route (see adoptionOwed above)
             if (physicalWindowAdapter.state != WindowInstallState.Idle) physicalWindowAdapter.reset()
             setMeasuredMediaItems(operation = operation, songs = playbackQueue, startIndex = startIndex, positionMs = positionMs)
-            return
+            return QueueInstallResult.Submitted
         }
+        // P5-F20J-R3: a SUBMITTED bounded install is not an adopted one. An existing unverified-install protection is NOT cleared here;
+        // it is released only by the adapter's Active outcome for the newest install (handleBoundedOutcome).
         val modeBeforeInstall = installedQueueMode
         installedQueueMode = QueueMode.Bounded // decided once per install; later navigation/transition code reads this
         notifyLogicalPresentationChanged()
@@ -4962,10 +5048,82 @@ class PlayerController @Inject constructor(
         )
         when (outcome) {
             is BoundedInstallOutcome.Submitted -> playerQueueNeedsSync = true // dirty until the window is verified
-            is BoundedInstallOutcome.Rejected -> { revertRefusedBoundedInstall(modeBeforeInstall); error("bounded install rejected: ${outcome.reason}") }
-            is BoundedInstallOutcome.Failed -> { revertRefusedBoundedInstall(modeBeforeInstall); throw outcome.cause }
+            is BoundedInstallOutcome.Rejected -> { failClosedBoundedInstall(startIndex, positionMs, modeBeforeInstall); error("bounded install rejected: ${outcome.reason}") }
+            is BoundedInstallOutcome.Failed -> { failClosedBoundedInstall(startIndex, positionMs, modeBeforeInstall); throw outcome.cause }
             else -> error("unexpected immediate bounded install outcome: $outcome")
         }
+        return QueueInstallResult.Submitted
+    }
+
+    /** P5-F20J-R3: an immediately refused bounded install changed nothing physical, so the stale item stays unreachable until a proven install. */
+    private fun failClosedBoundedInstall(startIndex: Int, positionMs: Long, modeBeforeInstall: QueueMode) {
+        revertRefusedBoundedInstall(modeBeforeInstall)
+        unverifiedInstall = unverifiedInstall ?: UnverifiedInstall(startIndex, positionMs, queueGeneration)
+        pendingAdoption = null
+    }
+
+    /** What the accepted selection owes once the bounded adapter proves its window: statistics, session and (if requested) Play. */
+    private class PendingAdoption(val generation: Long, val song: Song?, val play: Boolean)
+    private var pendingAdoption: PendingAdoption? = null
+
+    private fun completePendingAdoption() {
+        val pending = pendingAdoption ?: return
+        pendingAdoption = null
+        val controller = mediaController ?: return
+        if (pending.generation != queueGeneration) return // a newer selection owns the queue
+        pending.song?.let { statsTracker.onSongSelected(it) }
+        if (pending.play) controller.play()
+        saveSessionAsync()
+    }
+
+    private enum class QueueInstallResult {
+        /** Handed to Media3 (controller command or bounded adapter); adoption is observed later through the controller/adapter. */
+        Submitted,
+        /** Applied to the physical player in-process and proven there (count, current index and current id); the controller view lags. */
+        Verified,
+        /** The physical player did not adopt the queue. */
+        Failed,
+    }
+
+    /**
+     * P5-F20J: whole-queue install straight onto the physical CURRENT player, with synchronous in-process proof. A submitted command
+     * is never treated as an installed queue: the count, the current index and the current item id are read back from the player.
+     */
+    private fun installFullQueueOnPhysicalPlayer(port: PhysicalWindowPort, operation: String, startIndex: Int, positionMs: Long): QueueInstallResult {
+        val songs = playbackQueue
+        val expectedId = songs.getOrNull(startIndex)?.id?.toString() ?: return QueueInstallResult.Failed
+        val verified = try {
+            val items = materializeMediaItems(songs).mediaItems
+            port.setMediaItems(items, startIndex, positionMs)
+            port.mediaItemCount == items.size && port.currentMediaItemIndex == startIndex && port.currentMediaId == expectedId
+        } catch (e: Exception) {
+            Log.w(TAG, "[install] physical full-queue install ($operation) failed: ${e.message}")
+            false
+        }
+        return if (verified) QueueInstallResult.Verified else QueueInstallResult.Failed
+    }
+
+    /** P5-F20J-R1: an accepted selection the physical player has not adopted (fail-closed until an install is proven). */
+    private data class UnverifiedInstall(val startIndex: Int, val positionMs: Long, val generation: Long)
+    private var unverifiedInstall: UnverifiedInstall? = null
+
+    /** P5-F20J-R2: read by the session transport boundary; true while the accepted selection is not adopted by the physical player. */
+    internal val isInstallUnverified: Boolean get() = unverifiedInstall != null
+
+    /**
+     * One explicit retry of the accepted logical selection, only on a user transport action or a controller (re)connect - never
+     * timed or looped. Returns true when an unverified install existed (the caller's own command is then superseded by the retry).
+     */
+    private fun retryUnverifiedInstall(controller: MediaController, startIndexOverride: Int?, play: Boolean): Boolean {
+        val pending = unverifiedInstall ?: return false
+        val index = (startIndexOverride
+            ?: pending.startIndex.takeIf { pending.generation == queueGeneration }
+            ?: _nowPlayingState.value.currentIndex).takeIf { it in playbackQueue.indices } ?: return true // unprovable: stay closed
+        val song = playbackQueue[index]
+        val position = if (startIndexOverride == null && pending.generation == queueGeneration) pending.positionMs else 0L
+        _nowPlayingState.update { it.copy(song = song, currentIndex = index, positionMs = position, durationMs = song.duration.coerceAtLeast(0L)) }
+        installLibraryStart(controller, index, play, position, selectedSong = song)
+        return true
     }
 
 
@@ -5135,6 +5293,7 @@ class PlayerController @Inject constructor(
         when (result) {
             is BoundedInstallOutcome.Active -> {
                 playerQueueNeedsSync = false
+                unverifiedInstall = null // P5-F20J-R3: the physical player acknowledged the newest install: protection released
                 deliveringVerifiedOutcome = true
                 try {
                     syncNowPlayingState(notifyStats = false)
@@ -5142,10 +5301,12 @@ class PlayerController @Inject constructor(
                 } finally {
                     deliveringVerifiedOutcome = false
                 }
+                completePendingAdoption()
                 maintainBoundedWindow() // chain: ends at NoChange, so no polling and no unbounded repeat
             }
             is BoundedInstallOutcome.Stale -> onNotVerified?.invoke() // newer intent won; it owns the queue state (and any Play it armed)
             else -> {
+                pendingAdoption = null // P5-F20J-R3: nothing was adopted: the owed Play, statistics and session are withdrawn; protection stays
                 onNotVerified?.invoke() // nothing was verified: a Play armed behind it is withdrawn, never left claimed
                 playerQueueNeedsSync = true // explicit recoverable state: nothing was published
                 Log.w(TAG, "bounded window operation ($operation) not verified: $result")
@@ -5155,7 +5316,7 @@ class PlayerController @Inject constructor(
 
     /** One policy-driven window adjustment around the PROVEN current occurrence, if none is in flight. */
     private fun maintainBoundedWindow() {
-        if (mediaController == null) return
+        if (mediaController == null || unverifiedInstall != null) return
         val port = physicalPort ?: return
         val result = physicalWindowAdapter.maintain(
             player = port,

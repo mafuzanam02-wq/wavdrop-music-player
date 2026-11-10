@@ -56,6 +56,9 @@ internal class PreviousBehaviorPlayer(
     private val selectionPlayArmed: () -> Boolean = { false },
     // Optional single-player transport fade (explicit Play/Pause/Next/Previous). Null or disabled = exactly the unfaded behaviour.
     private val transportFade: TransportFadeController? = null,
+    // P5-F20J-R2: true while a newly accepted queue is NOT adopted by the physical player (PlayerController.isInstallUnverified). While
+    // true, every route that would start or navigate the stale physical item is refused here, the common session transport boundary.
+    private val transportBlocked: () -> Boolean = { false },
 ) : ForwardingPlayer(player) {
 
 
@@ -94,6 +97,7 @@ internal class PreviousBehaviorPlayer(
     // CF-2G2: same-track position seek (Player.seekTo(positionMs) only). Only an external user controller is an
     // explicit user seek here; the app-marked controller is never cancelled at this layer.
     override fun seekTo(positionMs: Long) {
+        if (refuseWhileUnverified("seekTo")) return
         if (isExternalUserTransportRequest()) onExplicitSeek()
         super.seekTo(positionMs)
     }
@@ -115,6 +119,7 @@ internal class PreviousBehaviorPlayer(
     }
 
     override fun play() {
+        if (refuseWhileUnverified("play")) return
         // Media3 issues one PLAY after every playback-resumption request (also after a failed or dropped one), blind to a PAUSE,
         // selection or newer PLAY that arrived while the saved session was being restored. The restoration itself stays; only that PLAY
         // is refused, and only when it is made by the completion callback of a request that was superseded (see
@@ -173,6 +178,7 @@ internal class PreviousBehaviorPlayer(
     // Media3 can deliver a play/pause as a play-when-ready change; route an EXTERNAL one through the same policy as
     // play()/pause() so it cannot bypass cold-PLAY authority. Internal/app calls forward untouched.
     override fun setPlayWhenReady(playWhenReady: Boolean) {
+        if (playWhenReady && refuseWhileUnverified("setPlayWhenReady")) return
         if (isExternalUserTransportRequest()) {
             if (playWhenReady) play() else pause()
         } else {
@@ -194,6 +200,7 @@ internal class PreviousBehaviorPlayer(
     }
 
     override fun seekToNext() {
+        if (refuseWhileUnverified("seekToNext")) return
         val external = isExternalUserTransportRequest()
         if (external) onExplicitNavigation()
         fadedNavigation(external) {
@@ -205,6 +212,7 @@ internal class PreviousBehaviorPlayer(
     }
 
     override fun seekToNextMediaItem() {
+        if (refuseWhileUnverified("seekToNextMediaItem")) return
         val external = isExternalUserTransportRequest()
         if (external) onExplicitNavigation()
         fadedNavigation(external) {
@@ -216,6 +224,7 @@ internal class PreviousBehaviorPlayer(
     }
 
     override fun seekToPreviousMediaItem() {
+        if (refuseWhileUnverified("seekToPreviousMediaItem")) return
         val external = isExternalUserTransportRequest()
         if (external) onExplicitNavigation()
         fadedNavigation(external) {
@@ -227,6 +236,7 @@ internal class PreviousBehaviorPlayer(
     }
 
     override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+        if (refuseWhileUnverified("seekToIndex")) return
         val external = isExternalUserTransportRequest()
         val moves = mediaItemIndex != currentMediaItemIndex
         super.seekTo(mediaItemIndex, positionMs)
@@ -234,6 +244,7 @@ internal class PreviousBehaviorPlayer(
     }
 
     override fun seekToPrevious() {
+        if (refuseWhileUnverified("seekToPrevious")) return
         // One cancel at the PREVIOUS command boundary, before threshold evaluation. Delegations below use super.*
         // so neither the CF-2G2 seek hook nor the media-item hook fires a second time.
         val external = isExternalUserTransportRequest()
@@ -251,6 +262,23 @@ internal class PreviousBehaviorPlayer(
             }
         }
     }
+
+    /**
+     * P5-F20J-R2: the synchronous safety guard at the common session boundary. Every session controller (notification, lock screen,
+     * media buttons, Bluetooth/AVRCP, Android Auto, the app's own controller) reaches the player through these overrides, so a
+     * command that would START or MOVE the stale physical item is refused while the accepted queue is unverified. Pause and Stop are
+     * never refused. The in-app retry installs and verifies BEFORE it plays, so it is not affected.
+     */
+    private fun refuseWhileUnverified(name: String): Boolean {
+        if (!transportBlocked()) return false
+        logTransport("TRANSPORT_REFUSED_UNVERIFIED_QUEUE $name")
+        return true
+    }
+
+    override fun seekForward() { if (!refuseWhileUnverified("seekForward")) super.seekForward() }
+    override fun seekBack() { if (!refuseWhileUnverified("seekBack")) super.seekBack() }
+    override fun seekToDefaultPosition() { if (!refuseWhileUnverified("seekToDefaultPosition")) super.seekToDefaultPosition() }
+    override fun seekToDefaultPosition(mediaItemIndex: Int) { if (!refuseWhileUnverified("seekToDefaultPosition")) super.seekToDefaultPosition(mediaItemIndex) }
 
     private fun playForwarded(external: Boolean) {
         val fade = transportFade

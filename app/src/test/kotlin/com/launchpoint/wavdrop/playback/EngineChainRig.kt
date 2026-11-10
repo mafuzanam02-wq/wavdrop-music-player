@@ -28,7 +28,7 @@ import org.robolectric.RuntimeEnvironment
  * driven by a fake scheduler/clock. Bounded is enabled for the test only; the committed gate stays false. Codec-free: no audio claim.
  */
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
-internal class EngineChainRig(bounded: Boolean = true) {
+internal class EngineChainRig(bounded: Boolean = true, private val eventWriter: PlayEventWriter? = null) {
     private class Writer : PlayEventWriter {
         override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit
         override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = Unit
@@ -67,7 +67,7 @@ internal class EngineChainRig(bounded: Boolean = true) {
         sessionRepo = PlaybackSessionRepository(store("sessionstore"))
         pc = PlayerController(
             context,
-            StatsTracker(Writer()).also { it.scope = CoroutineScope(Dispatchers.Unconfined); it.clock = { 0L } },
+            StatsTracker(eventWriter ?: Writer()).also { it.scope = CoroutineScope(Dispatchers.Unconfined); it.clock = { 0L } },
             sessionRepo, ResumeBehaviorSettingsRepository(store("resumestore")), AppSettingsRepository(store("appstore")),
         )
         driver = NextSlotPreparationDriver(

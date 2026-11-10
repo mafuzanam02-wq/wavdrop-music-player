@@ -271,6 +271,7 @@ class PlaybackService : MediaLibraryService() {
             onExternalPlayIntent = { play -> playerController.onExplicitExternalPlayIntent(play) },
             selectionPlayArmed = { playerController.isSelectionPlayArmed() },
             transportFade = fade,
+            transportBlocked = { playerController.isInstallUnverified },
             hydrateForPlay = { songs ->
                 playerController.ensurePlayerHydratedFromSession(availableSongs = songs, operation = "explicit_play")
             },
