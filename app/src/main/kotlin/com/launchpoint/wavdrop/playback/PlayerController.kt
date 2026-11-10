@@ -1889,13 +1889,34 @@ class PlayerController @Inject constructor(
     /** Physical install of an accepted preserve-search selection (the connected path and the deferred drain share it). */
     private fun installPreservedSearchStart(controller: MediaController, playbackStartIndex: Int, play: Boolean, positionMs: Long = 0L) {
         applyPhysicalTransportModes(controller)
-        controller.installPlaybackQueue(
-            operation = "preserve_search",
-            startIndex = playbackStartIndex,
-            positionMs = positionMs,
-        )
+        // P5-AUDIT-03: a refused or Failed physical install must fail closed exactly like a library start: the stale physical audio is
+        // stopped and not presented as the accepted selection, no session is written, and the selection stays the logical intent until
+        // an explicit Play or reconnect retries it. The selection statistic was already taken by playPreservedSearchPlan (it only
+        // finalizes the previous song and arms the tracker; no listen is recorded without playing time), so nothing is re-taken here.
+        val result = try {
+            controller.installPlaybackQueue(
+                operation = "preserve_search",
+                startIndex = playbackStartIndex,
+                positionMs = positionMs,
+            )
+        } catch (refused: BoundedInstallRefusedException) {
+            Log.w(TAG, "[install] preserve_search bounded install refused: ${refused.message}")
+            QueueInstallResult.Failed
+        }
+        if (result == QueueInstallResult.Failed) {
+            abandonUnverifiedInstall(controller)
+            return
+        }
         controller.prepare()
         PlaybackStartupTrace.onPrepareIssued()
+        if (unverifiedInstall != null) {
+            // Submitted to the bounded adapter while an earlier replacement is still unverified: the Play and the session are owed until
+            // the adapter proves the window (no song: the selection statistic is already taken).
+            pendingAdoption = PendingAdoption(queueGeneration, null, play)
+            if (!play) controller.pause()
+            return
+        }
+        pendingAdoption = null
         if (play) {
             controller.play()
             PlaybackStartupTrace.mark("play_issued")
@@ -4646,11 +4667,18 @@ class PlayerController @Inject constructor(
         }
         // Bounded (inactive): the queue is clean only once the installed window is VERIFIED (see installPlaybackQueue).
         if (!isBoundedInstall()) playerQueueNeedsSync = false
-        controller.installPlaybackQueue(
+        val result = controller.installPlaybackQueue(
             operation = "sync_player_queue:$reason",
             startIndex = playbackIndex,
             positionMs = positionMs,
         )
+        if (result == QueueInstallResult.Failed) {
+            // P5-AUDIT-03: the physical player did not adopt the queue. It is NOT synchronized: it stays dirty (the clear above is undone),
+            // the stale audio is stopped, and neither prepare() nor play() is issued against it. The unverified-install protection set by
+            // the failed install keeps transport closed until an explicit Play or reconnect retries the accepted queue.
+            abandonUnverifiedInstall(controller)
+            return
+        }
         controller.prepare()
         if (playWhenReady) controller.play()
     }
@@ -5048,8 +5076,8 @@ class PlayerController @Inject constructor(
         )
         when (outcome) {
             is BoundedInstallOutcome.Submitted -> playerQueueNeedsSync = true // dirty until the window is verified
-            is BoundedInstallOutcome.Rejected -> { failClosedBoundedInstall(startIndex, positionMs, modeBeforeInstall); error("bounded install rejected: ${outcome.reason}") }
-            is BoundedInstallOutcome.Failed -> { failClosedBoundedInstall(startIndex, positionMs, modeBeforeInstall); throw outcome.cause }
+            is BoundedInstallOutcome.Rejected -> { failClosedBoundedInstall(startIndex, positionMs, modeBeforeInstall); throw BoundedInstallRefusedException("bounded install rejected: ${outcome.reason}") }
+            is BoundedInstallOutcome.Failed -> { failClosedBoundedInstall(startIndex, positionMs, modeBeforeInstall); throw BoundedInstallRefusedException("bounded install failed: ${outcome.cause.message}", outcome.cause) }
             else -> error("unexpected immediate bounded install outcome: $outcome")
         }
         return QueueInstallResult.Submitted
@@ -5075,6 +5103,12 @@ class PlayerController @Inject constructor(
         if (pending.play) controller.play()
         saveSessionAsync()
     }
+
+    /**
+     * P5-AUDIT-03: the bounded adapter refused or failed the physical install IMMEDIATELY. The failure is already fail-closed
+     * ([failClosedBoundedInstall]); this type lets a user-facing caller handle exactly this refusal without catching unrelated errors.
+     */
+    private class BoundedInstallRefusedException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
 
     private enum class QueueInstallResult {
         /** Handed to Media3 (controller command or bounded adapter); adoption is observed later through the controller/adapter. */
