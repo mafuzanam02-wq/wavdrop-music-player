@@ -68,11 +68,11 @@ class TransportFadeProductionPathTest {
         assertEquals(2, r.index()); assertEquals(1f, r.volume(), 0.0001f)
     }
 
-    @Test fun navigationHappensAtTheFadeMidpointNotBefore() {
+    @Test fun navigationHappensAtTapTimeNotAtAFadeMidpoint() {
         val (r, _) = rig(); r.start(queue(5), 0)
         r.pc.skipToNext()
         time.advance(100); r.quiesce()
-        assertEquals("not yet navigated during the fade-out", 0, r.index())
+        assertEquals("navigated immediately, nothing waited for a fade-out", 1, r.index())
         r.settleAll()
         assertEquals(1, r.index())
     }
@@ -107,14 +107,14 @@ class TransportFadeProductionPathTest {
         assertEquals(12, r.index()); assertEquals(1f, r.volume(), 0.0001f)
     }
 
-    @Test fun transientFocusLossDuringTheFadeOutDropsTheDelayedNavigation() {
+    @Test fun transientFocusLossDuringTheIncomingRampKeepsTheAlreadyDoneNavigation() {
         val (r, _) = rig(); r.start(queue(5), 0)
         r.pc.skipToNext(); time.advance(60)
         val audio = RuntimeEnvironment.getApplication().getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
         shadowOf(audio).lastAudioFocusRequest!!.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)
         idleMainLooper()
         r.settleAll()
-        assertEquals("the delayed Next must not run after the interruption", 0, r.index())
+        assertEquals("the Next ran at tap time and is not undone or repeated", 1, r.index())
         assertEquals(1f, r.volume(), 0.0001f)
         assertEquals(0, time.pendingCount)
     }

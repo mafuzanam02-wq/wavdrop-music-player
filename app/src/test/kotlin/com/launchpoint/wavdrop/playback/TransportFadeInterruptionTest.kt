@@ -49,11 +49,11 @@ class TransportFadeInterruptionTest {
         assertEquals("transport gain neutral", 1f, f.p1.volume, 0.0001f)
         assertEquals(1f, fade.gain, 0f)
         time.advance(2_000)
-        assertTrue("no stale callback acted: $log", log.isEmpty())
+        assertEquals("the navigation ran once at tap time; nothing acted after the abort: $log", listOf("nav"), log)
         assertEquals(1f, f.p1.volume, 0.0001f)
     }
 
-    @Test fun transientFocusLossDuringNavigationFadeDropsTheNavigation() {
+    @Test fun transientFocusLossDuringTheIncomingRampAbortsItAndNeverMutes() {
         setUp()
         fade.navigate(isPlaying = true) { log += "nav"; true }
         time.advance(60)
@@ -61,7 +61,7 @@ class TransportFadeInterruptionTest {
         assertAborted()
     }
 
-    @Test fun permanentFocusLossDuringNavigationFadeDropsTheNavigation() {
+    @Test fun permanentFocusLossDuringTheIncomingRampAbortsItAndNeverMutes() {
         setUp()
         fade.navigate(isPlaying = true) { log += "nav"; true }
         time.advance(60)
@@ -70,7 +70,7 @@ class TransportFadeInterruptionTest {
         assertAborted()
     }
 
-    @Test fun noisyAudioDuringNavigationFadeDropsTheNavigation() {
+    @Test fun noisyAudioDuringTheIncomingRampAbortsItAndNeverMutes() {
         setUp()
         fade.navigate(isPlaying = true) { log += "nav"; true }
         time.advance(60)
@@ -100,7 +100,7 @@ class TransportFadeInterruptionTest {
         assertTrue(f.facade.playWhenReady)
         time.advance(1_000)
         assertEquals(1f, f.p1.volume, 0.0001f)
-        assertTrue(log.isEmpty())
+        assertEquals(listOf("nav"), log) // the Next already ran at tap time; no later callback repeated it
     }
 
     @Test fun duckingIsIndependentAndDoesNotAbortTheFade() {
@@ -109,7 +109,7 @@ class TransportFadeInterruptionTest {
         time.advance(60)
         focus(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)
         time.advance(100)
-        assertEquals("the fade continues through a duck", listOf("nav"), log)
+        assertEquals("the incoming ramp continues through a duck", listOf("nav"), log)
         time.advance(2_000)
         assertEquals("duck x neutral transport gain", 0.2f, f.p1.volume, 0.0001f)
         assertTrue("a duck is not a pause", f.facade.playWhenReady)

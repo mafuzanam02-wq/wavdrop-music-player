@@ -29,9 +29,4 @@ class TransportFadeRulesTest {
         assertEquals(350L, TransportFadeRules.normalizeDurationMs(325L))
     }
 
-    @Test fun `half budget is half the duration`() {
-        assertEquals(150L, TransportFadeRules.halfBudgetMs(300L))
-        assertEquals(50L, TransportFadeRules.halfBudgetMs(100L))
-        assertEquals(400L, TransportFadeRules.halfBudgetMs(800L))
-    }
 }

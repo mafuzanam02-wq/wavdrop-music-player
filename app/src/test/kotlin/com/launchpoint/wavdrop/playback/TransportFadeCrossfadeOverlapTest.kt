@@ -69,7 +69,7 @@ class TransportFadeCrossfadeOverlapTest {
         assertEquals(1f, r.p2.volume, 0.0001f)
     }
 
-    @Test fun explicitNextDuringTheOverlapSettlesUnderTheExistingPolicyBeforeNavigating() {
+    @Test fun explicitNextDuringTheOverlapSettlesUnderTheExistingPolicyThenNavigatesImmediately() {
         val r = OverlapRig().inOverlap()
         val fade = fadeFor(r)
         // The service cancels the overlap at the command boundary (explicit navigation), then the fade runs the unchanged navigation.
@@ -93,7 +93,7 @@ class TransportFadeCrossfadeOverlapTest {
         time.advance(1_000); idleMainLooper()
         assertEquals("transport gain neutral", 1f, r.engine.transportGain, 0f)
         assertFalse("overlap settled", r.engine.promotionActive)
-        assertEquals("the delayed Next never ran", 2, r.p2.currentMediaItemIndex)
+        assertEquals("Next navigated at tap time and is not undone", 3, r.p2.currentMediaItemIndex)
         assertEquals(1f, r.p2.volume, 0.0001f)
     }
 

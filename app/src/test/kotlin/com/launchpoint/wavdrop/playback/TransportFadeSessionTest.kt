@@ -113,11 +113,11 @@ class TransportFadeSessionTest {
     }
 
     // ── 3. External transport commands ────────────────────────────────────────────────────────────────────────
-    @Test fun externalNextNavigatesOnceAtTheMidpointAndEndsAtFullGain() {
+    @Test fun externalNextNavigatesOnceImmediatelyThenRampsInToFullGain() {
         val r = Rig(index = 1); r.play()
         val ext = r.connect(app = false)
         ext.seekToNext(); idleMainLooper()
-        r.settle(100); assertEquals(1, r.index)
+        assertEquals("navigated at tap time, no fade wait", 2, r.index); assertTrue(r.f.facade.playWhenReady); assertEquals("incoming starts silent", 0f, r.f.p1.volume, 0.0001f)
         r.settle(1_000)
         assertEquals(2, r.index); assertTrue(r.f.facade.playWhenReady)
         assertEquals(1f, r.f.p1.volume, 0.0001f)
@@ -207,7 +207,7 @@ class TransportFadeSessionTest {
         assertEquals(1f, rig.f.p1.volume, 0.0001f)
     }
 
-    @Test fun systemInterruptionDiscardsADelayedNavigationButAUserCommandFlushesItInOrder() {
+    @Test fun userCommandsStayOrderedAndASystemInterruptionAbortsOnlyTheIncomingRamp() {
         val rig = Rig(); rig.play()
         val order = mutableListOf<String>()
         rig.fade.navigate(true) { order += "nav"; true }
@@ -222,6 +222,6 @@ class TransportFadeSessionTest {
         time.advance(40)
         rig2.fade.interrupt() // system interruption
         time.advance(2_000)
-        assertTrue(order2.isEmpty())
+        assertEquals("the Next already ran once at tap time and is not repeated", listOf("nav"), order2); assertEquals(1f, rig2.f.p1.volume, 0.0001f)
     }
 }

@@ -94,49 +94,24 @@ class TransportFadeControllerTest {
         assertTrue(gains.isEmpty())
     }
 
-    // 6/7. Next and Previous share one budget: 150 out + navigate + 150 in = duration -------------------------------
-    @Test fun `navigation fades out for half the budget navigates then fades in for the other half`() {
-        controller.navigate(isPlaying = true) { log("nav"); true }
-        time.advance(149); assertTrue(log.isEmpty())
-        time.advance(1)
-        assertEquals(listOf("nav@150"), log)
-        assertEquals(0f, gains.last(), 0f) // navigation happens at silence
-        time.advance(149); assertTrue(gains.last() < 1f)
-        time.advance(1)
-        assertEquals(1f, gains.last(), 0f)
-        assertEquals(0, time.pendingCount)
-    }
-
-    @Test fun `duration is the total budget at 100 and 800 ms`() {
-        for (d in listOf(100L, 800L)) {
-            val t = VirtualFadeTime(); val g = mutableListOf<Float>(); val l = mutableListOf<String>()
-            val c = TransportFadeController({ g += it }, t, t) { TransportFadeConfig(true, d) }
-            c.navigate(true) { l += "nav@${t.now}"; true }
-            t.advance(d)
-            assertEquals(listOf("nav@${d / 2}"), l)
-            assertEquals(1f, g.last(), 0f)
-            assertEquals(0, t.pendingCount)
-        }
-    }
-
     // 8/15/16/18. The navigation callback owns every policy; the fade only restores gain -------------------------
     @Test fun `navigation that does not move (restart current or queue boundary) still ends at full gain`() {
         controller.navigate(isPlaying = true) { log("nav"); false }
         time.advance(300)
-        assertEquals(listOf("nav@150"), log) // the callback (policy) ran exactly once
-        assertEquals(1f, gains.last(), 0f)
+        assertEquals(listOf("nav@0"), log) // the callback (policy) ran exactly once, immediately
+        assertEquals(1f, controller.gain, 0f)
     }
 
     @Test fun `failed navigation never leaves the player muted`() {
         controller.navigate(isPlaying = true) { log("nav"); error("boom") }
         time.advance(300)
-        assertEquals(1f, gains.last(), 0f)
+        assertEquals(1f, controller.gain, 0f)
         assertEquals(0, time.pendingCount)
         // the controller is still usable afterwards
         controller.navigate(isPlaying = true) { log("nav2"); true }
         time.advance(300)
-        assertEquals(1f, gains.last(), 0f)
-        assertTrue(log.contains("nav2@450"))
+        assertEquals(1f, controller.gain, 0f)
+        assertTrue(log.contains("nav2@300"))
     }
 
     // 19. Paused navigation neither fades nor starts anything ---------------------------------------------------
@@ -180,7 +155,7 @@ class TransportFadeControllerTest {
         assertEquals(1f, gains.last(), 0f)
     }
 
-    @Test fun `pause after a pending navigation runs the navigation first`() {
+    @Test fun `pause after an immediate navigation keeps the order navigation then pause`() {
         controller.navigate(true) { log("nav"); true }
         time.advance(50)
         controller.pause(isPlaying = true) { log("pause") }
@@ -205,7 +180,7 @@ class TransportFadeControllerTest {
         controller.release()
         assertEquals(1f, gains.last(), 0f)
         time.advance(1_000)
-        assertTrue(log.isEmpty())
+        assertEquals("the navigation ran once at tap time and never again", listOf("nav@0"), log)
     }
 
     // 20. No stale callback may change the volume --------------------------------------------------------------

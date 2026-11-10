@@ -14,9 +14,6 @@ object TransportFadeRules {
         val clamped = raw.coerceIn(MIN_DURATION_MS, MAX_DURATION_MS)
         return ((clamped + STEP_MS / 2) / STEP_MS * STEP_MS).coerceIn(MIN_DURATION_MS, MAX_DURATION_MS)
     }
-
-    /** Next/Previous split the duration into a fade-out and a fade-in so the whole action costs [durationMs] in total. */
-    fun halfBudgetMs(durationMs: Long): Long = durationMs / 2
 }
 
 internal data class TransportFadeConfig(val enabled: Boolean, val durationMs: Long)
@@ -32,7 +29,9 @@ internal fun interface TransportGainSink {
  *
  * Every command bumps a generation and cancels the scheduler first, so a superseded fade can never write a gain. Rules:
  *  - disabled (or nothing audible to fade): the action runs immediately, no gain write, no delay;
- *  - a pending navigation is always executed before a newer command is handled (each press navigates exactly once, in order);
+ *  - Next/Previous navigate IMMEDIATELY through the unchanged policy (no outgoing fade, nothing waits on a timer); when a different
+ *    item was selected while audible, the incoming audio then ramps 0 -> 1 over the full configured duration, overlapping the
+ *    already-visible track change and real playback progress. A navigation that did not move (boundary, restart) never mutes;
  *  - an aborted fade ([interrupt], [release]) leaves the gain at 1 and drops pending work.
  *
  * Main thread only.
@@ -48,7 +47,6 @@ internal class TransportFadeController(
 
     private var generation = 0L
     private var pendingPause: (() -> Unit)? = null
-    private var pendingNavigation: (() -> Boolean)? = null
     private var fading = false
     private var inNavigation = false
 
@@ -69,13 +67,6 @@ internal class TransportFadeController(
         return ++generation
     }
 
-    private fun flushNavigation() {
-        val nav = pendingNavigation ?: return
-        pendingNavigation = null
-        inNavigation = true
-        try { runCatching { nav() } } finally { inNavigation = false }
-    }
-
     private fun flushPause() {
         val pause = pendingPause ?: return
         pendingPause = null
@@ -86,7 +77,6 @@ internal class TransportFadeController(
     fun play(isPlaying: Boolean, start: () -> Unit) {
         // A Play issued by a navigation itself (starting the selected item) is part of that navigation: no separate fade.
         if (inNavigation) { start(); return }
-        flushNavigation()
         val wasPausing = pendingPause != null
         pendingPause = null // a newer Play outranks a Pause that has not completed
         val gen = supersede()
@@ -104,7 +94,6 @@ internal class TransportFadeController(
     }
 
     fun pause(isPlaying: Boolean, doPause: () -> Unit) {
-        flushNavigation()
         flushPause()
         val gen = supersede()
         if (!enabled() || !isPlaying) { setGain(1f); doPause(); return }
@@ -117,26 +106,27 @@ internal class TransportFadeController(
         }
     }
 
-    /** [doNavigate] runs the unchanged navigation policy and returns whether a different item was selected. */
+    /**
+     * [doNavigate] runs the unchanged navigation policy NOW and returns whether a different item was selected. The incoming ramp
+     * starts only after it moved; a failure or a no-op leaves the gain untouched (never muted).
+     */
     fun navigate(isPlaying: Boolean, doNavigate: () -> Boolean) {
-        flushNavigation()
-        flushPause()
+        val wasPausing = pendingPause != null
+        flushPause() // an uncompleted Pause is older than this press: it lands first, then the navigation sees a paused player
         val gen = supersede()
-        if (!enabled() || !isPlaying) { setGain(1f); doNavigate(); return }
-        pendingNavigation = doNavigate
-        val half = TransportFadeRules.halfBudgetMs(duration())
-        ramp(gen, 0f, (half * gain).toLong()) {
-            flushNavigation() // restores the gain below even if the navigation fails
-            ramp(gen, 1f, half) { }
-        }
+        if (!enabled() || !isPlaying || wasPausing) { setGain(1f); doNavigate(); return }
+        inNavigation = true // a Play issued by the policy itself is part of this navigation: not a second fade
+        val moved = try { runCatching { doNavigate() }.getOrDefault(false) } finally { inNavigation = false }
+        if (!moved) { setGain(1f); return }
+        setGain(0f)
+        ramp(gen, 1f, duration()) { }
     }
 
     /** A system/other-owner interruption (focus loss, noisy, sleep boundary...): drop pending work, never stay muted. */
     fun interrupt(honorPendingPause: Boolean = false) {
-        if (!fading && pendingPause == null && pendingNavigation == null && gain >= 1f) return // idle: nothing to abort, no writes
+        if (!fading && pendingPause == null && gain >= 1f) return // idle: nothing to abort, no writes
         val pause = if (honorPendingPause) pendingPause else null
         pendingPause = null
-        pendingNavigation = null // a delayed navigation never survives an interruption
         supersede()
         setGain(1f)
         pause?.let { runCatching { it() } } // the user's Pause outlives a suppression that would otherwise resume on regain
