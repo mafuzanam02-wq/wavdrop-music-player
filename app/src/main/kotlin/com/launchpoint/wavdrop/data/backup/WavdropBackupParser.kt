@@ -584,6 +584,13 @@ private fun Map<*, *>.toBackupPreferences(): BackupPreferences = BackupPreferenc
     wrappedBackgroundIntensity  = this["wrappedBackgroundIntensity"] as? String,
     wrappedFallbackTheme        = this["wrappedFallbackTheme"] as? String,
     wrappedVisualStyle          = this["wrappedVisualStyle"] as? String,
+    homeSmartCollections        = (this["homeSmartCollections"] as? List<*>)?.filterIsInstance<String>(),
+    crossfadeDurationMs         = (this["crossfadeDurationMs"] as? Long)
+        ?.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt(),
+    transportFadeEnabled        = this["transportFadeEnabled"] as? Boolean,
+    transportFadeDurationMs     = (this["transportFadeDurationMs"] as? Long)
+        ?.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt(),
+    previousButtonBehavior      = this["previousButtonBehavior"] as? String,
 )
 
 private fun Map<*, *>.parseDesktopOverlay(): BackupDesktopOverlay {

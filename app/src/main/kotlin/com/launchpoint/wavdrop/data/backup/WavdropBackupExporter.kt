@@ -179,5 +179,10 @@ object WavdropBackupExporter {
         prefs.wrappedBackgroundIntensity?.let    { put("wrappedBackgroundIntensity",    it) }
         prefs.wrappedFallbackTheme?.let          { put("wrappedFallbackTheme",          it) }
         prefs.wrappedVisualStyle?.let            { put("wrappedVisualStyle",            it) }
+        prefs.homeSmartCollections?.let { ids -> put("homeSmartCollections", JSONArray().apply { ids.forEach { put(it) } }) }
+        prefs.crossfadeDurationMs?.let { put("crossfadeDurationMs", it) }
+        prefs.transportFadeEnabled?.let { put("transportFadeEnabled", it) }
+        prefs.transportFadeDurationMs?.let { put("transportFadeDurationMs", it) }
+        prefs.previousButtonBehavior?.let { put("previousButtonBehavior", it) }
     }
 }

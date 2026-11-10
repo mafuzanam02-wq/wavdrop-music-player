@@ -82,11 +82,21 @@ class RecoveryRestoreRulesTest {
 
     @Test fun `unspecified preferences resolve to defaults so Recovery is authoritative over a changed device`() {
         val resolved = RecoveryPreferenceDefaults.resolve(RecoveryTestFixtures.emptyPrefs())
-        val exempt = setOf("scanMode", "selectedFolderUris")
+        // P5-AUDIT-08: these are always written by a current export, so null means "backup predates the field" and must NOT become a
+        // default (that would overwrite a newer device value). They are exempt here and pinned by the test below.
+        val exempt = setOf("scanMode", "selectedFolderUris") + PORTABLE_SETTINGS_FIELDS
         for (f in BackupPreferences::class.java.declaredFields) {
             if (f.name in exempt || f.isSynthetic) continue
             f.isAccessible = true
             assertNotNull("${f.name} must resolve to a default", f.get(resolved))
+        }
+    }
+
+    @Test fun `legacy-absent portable settings stay unresolved so Recovery leaves newer device values alone`() {
+        val resolved = RecoveryPreferenceDefaults.resolve(RecoveryTestFixtures.emptyPrefs())
+        for (name in PORTABLE_SETTINGS_FIELDS) {
+            val f = BackupPreferences::class.java.getDeclaredField(name).also { it.isAccessible = true }
+            assertNull("$name must stay null when the backup predates it", f.get(resolved))
         }
     }
 
@@ -221,5 +231,11 @@ class RecoveryRestoreRulesTest {
         assertEquals(2, WavdropBackupParser.SUPPORTED_VERSION)
         val gradle = File("build.gradle.kts").readText()
         assertTrue("versionCode = 10" in gradle && "versionName = \"0.1.0-beta10\"" in gradle)
+    }
+
+    private companion object {
+        val PORTABLE_SETTINGS_FIELDS = setOf(
+            "homeSmartCollections", "crossfadeDurationMs", "transportFadeEnabled", "transportFadeDurationMs", "previousButtonBehavior",
+        )
     }
 }

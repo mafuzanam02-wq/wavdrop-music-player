@@ -200,7 +200,8 @@ class WavdropBackupRepository @Inject constructor(
 
         val scanSettings   = libraryScanSettingsRepository.settings.first()
         val resumeSettings = resumeBehaviorSettingsRepository.settings.first()
-        val homeSections   = homeLayoutSettingsRepository.settings.first().visibleSections
+        val homeSettings   = homeLayoutSettingsRepository.settings.first()
+        val homeSections   = homeSettings.visibleSections
 
         // Export rule: only settings that differ from their default are written.
         // A null field means "was default at export time"; restore leaves the
@@ -270,6 +271,13 @@ class WavdropBackupRepository @Inject constructor(
                 .takeIf { it != WrappedFallbackTheme.AUTO }?.name,
             wrappedVisualStyle = appSettingsRepository.wrappedVisualStyle.first()
                 .takeIf { it != WrappedVisualStyle.DEFAULT }?.name,
+            // P5-AUDIT-08: always written (defaults included). Null therefore means "predates the field", never "was default",
+            // so Recovery can leave a legacy backup's absent fields alone while still resetting current ones exactly.
+            homeSmartCollections = homeSettings.homeSmartCollections.map { it.name },
+            crossfadeDurationMs = appSettingsRepository.crossfadeDurationMs.first().toInt(),
+            transportFadeEnabled = appSettingsRepository.transportFadeEnabled.first(),
+            transportFadeDurationMs = appSettingsRepository.transportFadeDurationMs.first().toInt(),
+            previousButtonBehavior = appSettingsRepository.previousButtonBehavior.first().name,
         )
 
         val exportedAtMs = System.currentTimeMillis()

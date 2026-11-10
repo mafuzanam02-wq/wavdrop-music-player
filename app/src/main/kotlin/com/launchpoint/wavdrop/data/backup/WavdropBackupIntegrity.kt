@@ -105,6 +105,12 @@ object WavdropBackupIntegrity {
                 optionalRecord("prefWrappedBackgroundIntensity", prefs.wrappedBackgroundIntensity)
                 optionalRecord("prefWrappedFallbackTheme", prefs.wrappedFallbackTheme)
                 optionalRecord("prefWrappedVisualStyle", prefs.wrappedVisualStyle)
+                // P5-AUDIT-08 portable settings: appended optional records, so every backup without them keeps its original fingerprint.
+                optionalRecord("prefHomeSmartCollections", prefs.homeSmartCollections?.joinToString(","))
+                optionalRecord("prefCrossfadeDurationMs", prefs.crossfadeDurationMs)
+                optionalRecord("prefTransportFadeEnabled", prefs.transportFadeEnabled)
+                optionalRecord("prefTransportFadeDurationMs", prefs.transportFadeDurationMs)
+                optionalRecord("prefPreviousButtonBehavior", prefs.previousButtonBehavior)
             } ?: record("prefs-none")
         }
         return sha256Hex(canonical)

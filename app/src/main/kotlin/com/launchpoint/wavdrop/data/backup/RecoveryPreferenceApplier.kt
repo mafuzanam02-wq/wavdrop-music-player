@@ -30,6 +30,10 @@ import kotlinx.coroutines.CancellationException
  * have since changed, leaving it alone would keep the device's non-default value, so Recovery resolves every null to its default
  * first. The defaults are the exact complements of the exporter's `takeIf` rules (see WavdropBackupRepository.buildBackupJson).
  *
+ * Also NOT resolved: the P5-AUDIT-08 settings (Home Smart Collections, Crossfade, Transport Fade, Previous behavior). A current export
+ * writes those unconditionally, so null there means the backup predates the field; resolving it would silently overwrite a newer
+ * device value with a default.
+ *
  * Deliberately NOT resolved (device-specific, never restored by Recovery): [BackupPreferences.scanMode] and
  * [BackupPreferences.selectedFolderUris] (SAF grants are per-device permission state).
  */

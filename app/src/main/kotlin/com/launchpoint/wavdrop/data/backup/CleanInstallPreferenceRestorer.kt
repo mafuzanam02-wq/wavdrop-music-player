@@ -12,11 +12,13 @@ import com.launchpoint.wavdrop.data.settings.BackupFileMode
 import com.launchpoint.wavdrop.data.settings.HeadphoneResumeMode
 import com.launchpoint.wavdrop.data.settings.HomeLayoutSettingsRepository
 import com.launchpoint.wavdrop.data.settings.HomeSectionId
+import com.launchpoint.wavdrop.data.settings.HomeSmartCollectionSelection
 import com.launchpoint.wavdrop.data.settings.LibraryScanMode
 import com.launchpoint.wavdrop.data.settings.LibraryScanSettingsRepository
 import com.launchpoint.wavdrop.data.settings.NotificationControlsSetting
 import com.launchpoint.wavdrop.data.settings.NowPlayingBackground
 import com.launchpoint.wavdrop.data.settings.NowPlayingTimeDisplayMode
+import com.launchpoint.wavdrop.data.settings.PreviousButtonBehavior
 import com.launchpoint.wavdrop.data.settings.ResumeBehaviorSettingsRepository
 import com.launchpoint.wavdrop.data.settings.SearchTapBehavior
 import com.launchpoint.wavdrop.data.settings.SongSortMode
@@ -76,6 +78,16 @@ class CleanInstallPreferenceRestorer @Inject constructor(
             ?.mapNotNull { it.enumValue<HomeSectionId>() }
             ?.toSet()
             ?.let { homeSettings.setVisibleSections(it) }
+
+        // P5-AUDIT-08. Null means the backup predates the field: leave the device value alone. Everything present is normalized by the
+        // same rules the settings screens use, and an unrecognized value is ignored rather than replaced by a default.
+        preferences.homeSmartCollections
+            ?.let { homeSettings.setHomeSmartCollections(HomeSmartCollectionSelection.sanitizeIds(it)) }
+        preferences.crossfadeDurationMs?.let { appSettings.setCrossfadeDurationMs(it.toLong()) }
+        preferences.transportFadeEnabled?.let { appSettings.setTransportFadeEnabled(it) }
+        preferences.transportFadeDurationMs?.let { appSettings.setTransportFadeDurationMs(it.toLong()) }
+        PreviousButtonBehavior.fromStoredName(preferences.previousButtonBehavior)
+            ?.let { appSettings.setPreviousButtonBehavior(it) }
 
         preferences.minimumTrackDurationSeconds?.let { scanSettings.setMinimumTrackDurationSeconds(it) }
         preferences.includeWhatsAppVoiceNotes?.let { scanSettings.setIncludeWhatsAppVoiceNotes(it) }

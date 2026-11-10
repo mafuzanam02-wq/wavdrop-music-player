@@ -108,6 +108,12 @@ internal object ReferenceFingerprintV2 {
                 optionalRecord("prefWrappedBackgroundIntensity", prefs.wrappedBackgroundIntensity)
                 optionalRecord("prefWrappedFallbackTheme", prefs.wrappedFallbackTheme)
                 optionalRecord("prefWrappedVisualStyle", prefs.wrappedVisualStyle)
+                // P5-AUDIT-08 portable settings (appended; absent records leave every older fingerprint unchanged).
+                optionalRecord("prefHomeSmartCollections", prefs.homeSmartCollections?.joinToString(","))
+                optionalRecord("prefCrossfadeDurationMs", prefs.crossfadeDurationMs)
+                optionalRecord("prefTransportFadeEnabled", prefs.transportFadeEnabled)
+                optionalRecord("prefTransportFadeDurationMs", prefs.transportFadeDurationMs)
+                optionalRecord("prefPreviousButtonBehavior", prefs.previousButtonBehavior)
             } ?: record("prefs-none")
         }
         return sha256Hex(canonical)

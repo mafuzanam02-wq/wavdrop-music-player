@@ -90,6 +90,16 @@ data class BackupPreferences(
     val wrappedBackgroundIntensity: String? = null,
     val wrappedFallbackTheme: String? = null,
     val wrappedVisualStyle: String? = null,
+    // P5-AUDIT-08 portable settings. Unlike the fields above, these are NEVER omitted for being default: a current export always writes
+    // all of them, so null unambiguously means "this backup predates the field" and Recovery leaves the local value alone.
+    /** Ordered Home Smart Collection ids (the sanitized exact-three selection, in display order). */
+    val homeSmartCollections: List<String>? = null,
+    /** The single canonical Automatic Crossfade duration in ms; 0 ([com.launchpoint.wavdrop.playback.CrossfadeRules.OFF_MS]) is OFF. */
+    val crossfadeDurationMs: Int? = null,
+    val transportFadeEnabled: Boolean? = null,
+    /** Independent of [transportFadeEnabled]: a disabled fade keeps its customized duration. */
+    val transportFadeDurationMs: Int? = null,
+    val previousButtonBehavior: String? = null,
 )
 
 data class BackupPlaylistSong(
@@ -234,6 +244,11 @@ data class BackupManifest(
             prefs.wrappedBackgroundIntensity,
             prefs.wrappedFallbackTheme,
             prefs.wrappedVisualStyle,
+            prefs.homeSmartCollections,
+            prefs.crossfadeDurationMs,
+            prefs.transportFadeEnabled,
+            prefs.transportFadeDurationMs,
+            prefs.previousButtonBehavior,
         ).size
     }
 }
