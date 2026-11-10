@@ -33,6 +33,15 @@ sealed interface QueueSaveResult {
     data object UnsavableQueue : QueueSaveResult
 }
 
+/** Result of a snapshot-guarded playlist edit (P5-AUDIT-05). Only [Applied] changed anything. */
+enum class PlaylistEditResult {
+    Applied,
+    /** The playlist no longer matches the snapshot the command was derived from; nothing was changed. */
+    Stale,
+    /** The snapshot is current but the target position does not exist (or a move is a no-op); nothing was changed. */
+    InvalidTarget,
+}
+
 data class AddToPlaylistResult(val added: Int, val skipped: Int) {
 
     fun singleSongMessage(): String = when {
@@ -188,6 +197,51 @@ class PlaylistRepository @Inject constructor(
             )
         }
     }
+
+    /**
+     * P5-AUDIT-05: snapshot-guarded removal. [expected] is the COMPLETE ordered row list (position + songId, orphan rows included)
+     * the caller's UI acted on. Inside ONE transaction the current rows are read and compared with it: the edit is applied only when
+     * they are identical, so it can never remove a different occurrence than the one the user saw. Comparing the whole sequence (not
+     * just the song id at [position]) is what keeps repeated identical songs safe: after one removal the list has changed, so a second
+     * command from the old snapshot is [PlaylistEditResult.Stale] even if the new first entry has the same song id. A rejected command
+     * writes nothing (no rows, no timestamp).
+     */
+    suspend fun removePlaylistEntry(
+        playlistId: Long,
+        position: Int,
+        expected: List<PlaylistPositionEntry>,
+    ): PlaylistEditResult = db.withTransaction {
+        val current = playlistEntries(playlistId)
+        if (!snapshotMatches(current, expected)) return@withTransaction PlaylistEditResult.Stale
+        if (current.none { it.position == position }) return@withTransaction PlaylistEditResult.InvalidTarget
+        replacePlaylistSongs(
+            playlistId = playlistId,
+            entries    = PlaylistPositionRules.removeAtPosition(current = current, position = position),
+        )
+        PlaylistEditResult.Applied
+    }
+
+    /** P5-AUDIT-05: snapshot-guarded move; same contract as the guarded [removePlaylistEntry]. A no-op move writes nothing. */
+    suspend fun movePlaylistSong(
+        playlistId: Long,
+        fromPosition: Int,
+        toPosition: Int,
+        expected: List<PlaylistPositionEntry>,
+    ): PlaylistEditResult = db.withTransaction {
+        val current = playlistEntries(playlistId)
+        if (!snapshotMatches(current, expected)) return@withTransaction PlaylistEditResult.Stale
+        if (fromPosition == toPosition || current.none { it.position == fromPosition } || current.none { it.position == toPosition }) {
+            return@withTransaction PlaylistEditResult.InvalidTarget
+        }
+        replacePlaylistSongs(
+            playlistId = playlistId,
+            entries    = PlaylistPositionRules.move(current = current, fromPosition = fromPosition, toPosition = toPosition),
+        )
+        PlaylistEditResult.Applied
+    }
+
+    private fun snapshotMatches(current: List<PlaylistPositionEntry>, expected: List<PlaylistPositionEntry>): Boolean =
+        current == expected.sortedBy { it.position }
 
     suspend fun clearPlaylist(playlistId: Long) {
         db.withTransaction {

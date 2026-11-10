@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.model.PlaylistSummary
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.playlists.PlaylistArtworkBuilder
+import com.launchpoint.wavdrop.data.playlists.PlaylistPositionEntry
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.data.repository.PlaylistRepository
 import com.launchpoint.wavdrop.data.repository.SongRepository
@@ -48,6 +49,8 @@ data class PlaylistDetailsUiState(
     val totalDurationMs: Long,
     val totalPlayCount: Int,
     val mostPlayedSongTitle: String?,
+    /** P5-AUDIT-05: the COMPLETE ordered playlist rows (orphan rows included) this state was derived from; the guard for edit commands. */
+    val rowSnapshot: List<PlaylistPositionEntry> = emptyList(),
 ) {
     val songs: List<Song> get() = entries.map { it.song }
     val isSearchActive: Boolean get() = searchQuery.isNotBlank()
@@ -134,7 +137,7 @@ class PlaylistDetailsViewModel @Inject constructor(
     ) { playlistSongs, allSongs, allStats ->
         val songMap = allSongs.associateBy { it.id }
         val playCountBySongId = allStats.associate { it.songId to it.playCount }
-        playlistSongs.mapNotNull { ps ->
+        val items = playlistSongs.mapNotNull { ps ->
             songMap[ps.songId]?.let { song ->
                 PlaylistSongItem(
                     playlistId = ps.playlistId,
@@ -145,6 +148,7 @@ class PlaylistDetailsViewModel @Inject constructor(
                 )
             }
         }
+        items to playlistSongs.map { PlaylistPositionEntry(songId = it.songId, position = it.position) }
     }
 
     val uiState: StateFlow<PlaylistDetailsUiState> = combine(
@@ -153,7 +157,8 @@ class PlaylistDetailsViewModel @Inject constructor(
         searchQuery,
         statsRepository.favoriteSongIds(),
         playerController.nowPlayingState,
-    ) { summary, entries, query, favorites, nowPlaying ->
+    ) { summary, ordered, query, favorites, nowPlaying ->
+        val (entries, rowSnapshot) = ordered
         val visibleSongs = LibrarySearch.filterSongs(entries.map { it.song }, query)
         val visibleSongIds = visibleSongs.mapTo(mutableSetOf()) { it.id }
         val visibleEntries = if (query.isBlank()) {
@@ -185,6 +190,7 @@ class PlaylistDetailsViewModel @Inject constructor(
             totalDurationMs = entries.sumOf { it.song.duration },
             totalPlayCount = totalPlayCount,
             mostPlayedSongTitle = mostPlayedSongTitle,
+            rowSnapshot = rowSnapshot,
         )
     }.stateIn(
         scope        = viewModelScope,
@@ -264,9 +270,12 @@ class PlaylistDetailsViewModel @Inject constructor(
         viewModelScope.launch { statsRepository.toggleFavorite(songId, song.uri) }
     }
 
+    // P5-AUDIT-05: every edit carries the row snapshot of the state the user acted on, captured synchronously with the tap. A command
+    // derived from an older state is rejected by the repository (Stale) and changes nothing; the next emitted state is the truth.
     fun removeEntry(position: Int) {
+        val snapshot = uiState.value.rowSnapshot
         viewModelScope.launch {
-            playlistRepository.removePlaylistEntry(playlistId = playlistId, position = position)
+            playlistRepository.removePlaylistEntry(playlistId = playlistId, position = position, expected = snapshot)
         }
     }
 
@@ -275,11 +284,13 @@ class PlaylistDetailsViewModel @Inject constructor(
         val index = entries.indexOfFirst { it.position == position }
         if (index <= 0) return
         val targetPosition = entries[index - 1].position
+        val snapshot = uiState.value.rowSnapshot
         viewModelScope.launch {
             playlistRepository.movePlaylistSong(
                 playlistId   = playlistId,
                 fromPosition = position,
                 toPosition   = targetPosition,
+                expected     = snapshot,
             )
         }
     }
@@ -289,22 +300,26 @@ class PlaylistDetailsViewModel @Inject constructor(
         val index = entries.indexOfFirst { it.position == position }
         if (index < 0 || index >= entries.lastIndex) return
         val targetPosition = entries[index + 1].position
+        val snapshot = uiState.value.rowSnapshot
         viewModelScope.launch {
             playlistRepository.movePlaylistSong(
                 playlistId   = playlistId,
                 fromPosition = position,
                 toPosition   = targetPosition,
+                expected     = snapshot,
             )
         }
     }
 
     fun moveToPosition(fromPosition: Int, toPosition: Int) {
         if (fromPosition == toPosition) return
+        val snapshot = uiState.value.rowSnapshot
         viewModelScope.launch {
             playlistRepository.movePlaylistSong(
                 playlistId   = playlistId,
                 fromPosition = fromPosition,
                 toPosition   = toPosition,
+                expected     = snapshot,
             )
         }
     }
