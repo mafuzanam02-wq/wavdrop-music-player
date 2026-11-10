@@ -85,15 +85,20 @@ class PlaylistRepository @Inject constructor(
     fun observeAllPlaylistSongs(): Flow<List<PlaylistSong>> =
         dao.getAllPlaylistSongs().map { it.map(PlaylistSongEntity::toDomain) }
 
+    // P5-AUDIT-06: the name check and the write are ONE Room transaction (as in [createPlaylistFromQueue]). Room serializes write
+    // transactions on a database instance, so of any competing create/rename/queue-save for the same name exactly one wins and the
+    // others see it and return DuplicateName. This holds per database instance (the app has one); it is not a SQLite constraint.
     suspend fun createPlaylist(name: String): PlaylistOperationResult {
         val trimmed = PlaylistNameRules.normalize(name)
         if (trimmed.isBlank()) return PlaylistOperationResult.BlankName
-        if (dao.countByName(trimmed) > 0) return PlaylistOperationResult.DuplicateName
-        val now = System.currentTimeMillis()
-        val id = dao.insertPlaylist(
-            PlaylistEntity(name = trimmed, createdAt = now, updatedAt = now)
-        )
-        return PlaylistOperationResult.Success(id)
+        return db.withTransaction {
+            if (dao.countByName(trimmed) > 0) return@withTransaction PlaylistOperationResult.DuplicateName
+            val now = System.currentTimeMillis()
+            val id = dao.insertPlaylist(
+                PlaylistEntity(name = trimmed, createdAt = now, updatedAt = now)
+            )
+            PlaylistOperationResult.Success(id)
+        }
     }
 
     /**
@@ -131,11 +136,13 @@ class PlaylistRepository @Inject constructor(
     suspend fun renamePlaylist(id: Long, name: String): PlaylistOperationResult {
         val trimmed = PlaylistNameRules.normalize(name)
         if (trimmed.isBlank()) return PlaylistOperationResult.BlankName
-        if (dao.countByNameExcluding(trimmed, excludeId = id) > 0) {
-            return PlaylistOperationResult.DuplicateName
+        return db.withTransaction {
+            if (dao.countByNameExcluding(trimmed, excludeId = id) > 0) {
+                return@withTransaction PlaylistOperationResult.DuplicateName
+            }
+            dao.renamePlaylist(id = id, name = trimmed, updatedAt = System.currentTimeMillis())
+            PlaylistOperationResult.Success(id)
         }
-        dao.renamePlaylist(id = id, name = trimmed, updatedAt = System.currentTimeMillis())
-        return PlaylistOperationResult.Success(id)
     }
 
     suspend fun deletePlaylist(id: Long) {
