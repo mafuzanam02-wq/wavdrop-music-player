@@ -44,11 +44,18 @@ import org.robolectric.RuntimeEnvironment
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 internal class ResumptionOrderRig(bounded: Boolean = true, private val resumptionRoute: Boolean = true) {
 
-    private class Writer : PlayEventWriter {
-        override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit
-        override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = Unit
-        override suspend fun recordListenStart(songId: Long, contentUri: String) = Unit
+    /** Statistics writes, in order ("play:<id>:<listenedMs>", "skip:<id>", "listen:<id>"); P5-AUDIT-16 observes attribution through it. */
+    val statsEvents = CopyOnWriteArrayList<String>()
+    /** The simulated elapsed-realtime clock of the REAL [StatsTracker]; advance it by hand: no sleeps. */
+    @Volatile var statsNowMs = 0L
+
+    private inner class Writer : PlayEventWriter {
+        override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) { statsEvents += "play:$songId:$listenedMs" }
+        override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) { statsEvents += "skip:$songId" }
+        override suspend fun recordListenStart(songId: Long, contentUri: String) { statsEvents += "listen:$songId" }
     }
+
+    val tracker = StatsTracker(Writer()).also { it.scope = CoroutineScope(Dispatchers.Unconfined); it.clock = { statsNowMs } }
 
     private fun store(name: String) = PreferenceDataStoreFactory.create(
         scope = CoroutineScope(Dispatchers.IO + Job()),
@@ -66,7 +73,7 @@ internal class ResumptionOrderRig(bounded: Boolean = true, private val resumptio
     val sessionRepo = PlaybackSessionRepository(store("sessionstore"))
     val pc = PlayerController(
         context,
-        StatsTracker(Writer()).also { it.scope = CoroutineScope(Dispatchers.Unconfined); it.clock = { 0L } },
+        tracker,
         sessionRepo, ResumeBehaviorSettingsRepository(store("resumestore")), AppSettingsRepository(store("appstore")),
     )
 
