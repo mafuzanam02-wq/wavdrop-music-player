@@ -114,9 +114,29 @@ object QuarantinePlanner {
         val playlistEntries: List<PlaylistEntryCandidate>,
     )
 
+    /**
+     * P5-STATS-18C: the events of a track that is ALREADY quarantined (its origin key exists). Only the events are processed: the
+     * track's statistics, lyrics, baselines, playlist entries and metadata are never touched. Each pair is (event, base fingerprint).
+     */
+    data class ExistingTrackEvents(
+        val originKey: String,
+        val events: List<Pair<BackupListenEvent, String>>,
+    )
+
+    /** The collision-group items of [events] for [PendingEventWriter]. */
+    internal fun eventItems(events: List<Pair<BackupListenEvent, String>>): List<PendingEventOccurrences.Item> =
+        events.map { (e, base) ->
+            PendingEventOccurrences.Item(
+                base,
+                PendingEventOccurrences.Member(e.eventType, e.occurredAt, e.listenedMs, e.durationMs, e.eventId, e.source),
+            )
+        }
+
     data class Plan(
         val newCandidates: List<TrackCandidate>,
         val alreadyPresentCount: Int,
+        /** Events of tracks that already exist: still reconciled, so a collapsed occurrence can be recovered from its original backup. */
+        val existingTrackEvents: List<ExistingTrackEvents> = emptyList(),
     ) {
         val hasNewData: Boolean get() = newCandidates.isNotEmpty()
         val newTracksCount: Int get() = newCandidates.size
@@ -197,17 +217,21 @@ object QuarantinePlanner {
         val newCandidates = mutableListOf<TrackCandidate>()
         var alreadyPresentCount = 0
 
+        val existingTrackEvents = mutableListOf<ExistingTrackEvents>()
+
         for (songId in unmatchedSongIds + orphanSongIds) {
             val key = originKey(fp, songId)
+            val events = (eventsBySongId[songId] ?: emptyList())
+                .map { e -> e to eventFingerprint(fp, songId, e) }
             if (key in existingOriginKeys) {
                 alreadyPresentCount++
+                if (events.isNotEmpty()) {
+                    existingTrackEvents += ExistingTrackEvents(key, events)
+                }
                 continue
             }
 
             val song = backupSongById[songId]
-
-            val events = (eventsBySongId[songId] ?: emptyList())
-                .map { e -> e to eventFingerprint(fp, songId, e) }
 
             val lyrics = lyricsBySongId[songId]
                 ?.let { o -> o to lyricsFingerprint(fp, songId) }
@@ -240,7 +264,11 @@ object QuarantinePlanner {
             )
         }
 
-        return Plan(newCandidates = newCandidates, alreadyPresentCount = alreadyPresentCount)
+        return Plan(
+            newCandidates = newCandidates,
+            alreadyPresentCount = alreadyPresentCount,
+            existingTrackEvents = existingTrackEvents,
+        )
     }
 
     private data class OrphanHint(val title: String?, val artist: String?, val album: String?, val uri: String?)

@@ -133,6 +133,19 @@ interface PendingTrackDao {
     @Query("SELECT * FROM pending_listen_events WHERE originFingerprint = :fingerprint")
     suspend fun getEventByFingerprint(fingerprint: String): PendingListenEventEntity?
 
+    // ── P5-STATS-18C: collision-safe quarantined events (indexed range reads over the unique originFingerprint index) ─────────
+
+    /** The stored rows of one collision group: its base fingerprint plus its `base|n=<slot>` fingerprints ([lo] inclusive, [hi] exclusive). */
+    @Query("SELECT * FROM pending_listen_events WHERE originFingerprint = :base OR (originFingerprint >= :lo AND originFingerprint < :hi)")
+    suspend fun getEventsForGroup(base: String, lo: String, hi: String): List<PendingListenEventEntity>
+
+    /**
+     * Stored events of ONE track (P5-STATS-18C1): every event fingerprint starts with `<originKey>|`, so the track's rows are exactly
+     * `["$originKey|", "$originKey}")` on the unique originFingerprint index. `fp|1|` never reaches `fp|10|` (`'|'` sorts after `'0'`).
+     */
+    @Query("SELECT * FROM pending_listen_events WHERE originFingerprint >= :lo AND originFingerprint < :hi")
+    suspend fun getEventsInFingerprintRange(lo: String, hi: String): List<PendingListenEventEntity>
+
     @Query("SELECT * FROM pending_import_baselines WHERE originFingerprint = :fingerprint")
     suspend fun getBaselineByFingerprint(fingerprint: String): PendingImportBaselineEntity?
 

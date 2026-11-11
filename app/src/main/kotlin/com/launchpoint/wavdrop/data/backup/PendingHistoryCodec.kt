@@ -261,6 +261,16 @@ internal object PendingHistoryCodec {
         uniqueFingerprints(core.playlistEntries.map { it.originFingerprint })
         refsExist(history.events.map { it.trackOriginKey }, keys)
         uniqueFingerprints(history.events.map { it.originFingerprint })
+        // P5-STATS-18C1: an event fingerprint is `<trackOriginKey>|<occurredAt>|<type>|<listenedMs>` plus an optional canonical
+        // `|n=<k>` (k >= 1, no leading zero). Anything else is rejected, never normalised.
+        for (e in history.events) {
+            val base = "${e.trackOriginKey}|${e.occurredAt}|${e.eventType}|${e.listenedMs}"
+            val f = e.originFingerprint
+            val ok = f == base || (f.startsWith("$base|n=") && f.substring(base.length + 3).let { k ->
+                k.isNotEmpty() && k.length <= 9 && k[0] != '0' && k.all { it in '0'..'9' }
+            })
+            if (!ok) throw BackupParseException(DAMAGED)
+        }
     }
 
     private fun uniqueRefs(refs: List<String>, keys: Set<String>) {

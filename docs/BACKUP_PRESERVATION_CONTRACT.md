@@ -157,6 +157,25 @@ deleted by any restore mode.
 
 Pending events do not store the original `eventId`, so it is not retained for any quarantined event.
 
+**Quarantined event occurrences (P5-STATS-18C).** Events that share `songId|occurredAt|type|listenedMs` inside one
+snapshot are a *group*. Before 18C only one row per group was stored. Now:
+- *Preserved source occurrences:* members with different `eventId`s, different `durationMs`, or repeated null-id
+  records each keep their own row (multiplicity is kept). Rows are labelled by position in the group (the legacy
+  fingerprint for the first, `<fingerprint>|n=<k>` for the others); nothing is invented.
+- *Deduplicated by a reliable id:* members with the same non-null `eventId` and the same payload are one event. The
+  same id with a different `durationMs` is contradictory: both payloads are kept, none is overwritten.
+- *Indistinguishable legacy records:* byte-identical null-id records cannot be told apart from a repeated record, so
+  they are counted as the source file lists them; which source record a stored row stands for is not claimed.
+- *Recoverable:* a track quarantined by an older build kept only one row of such a group. Importing the ORIGINAL
+  backup again adds the missing occurrences (the stored row is accounted for, never replaced); the preview reports
+  that as mergeable, comparing only that track's own stored rows by payload (never by a snapshot-wide count). A stored
+  row that no occurrence of the backup explains fails the restore, rolled back in full. Events transported in a
+  pending-history section keep their established fingerprints verbatim (P5-STATS-18C1); two devices that labelled the
+  same legacy group differently therefore conflict and fail safe instead of one relabelling the other.
+- *Permanently missing:* a later backup that carries only the surviving row cannot reconstruct the lost ones, and the
+  survivor's original `eventId` is not stored. Live restore (`ListenEventRestorePlanner`) is unchanged and still
+  collapses such events.
+
 ### 6.2 After 12 months unmatched - *Deferred*
 PENDING / GHOST -> ARCHIVED with Storage Management and Lifetime History surfaces. Not implemented.
 

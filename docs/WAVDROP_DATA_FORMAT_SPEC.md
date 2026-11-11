@@ -260,6 +260,14 @@ quarantined history:
 - Records keep their ORIGINAL `originKey` / `originFingerprint` and are linked by `originKey` (never a local
   `pendingId`), so restoring them again, or from an overlapping backup, is idempotent. Nothing is invented: a
   pending event carries no `eventId` or `source`; null `lastListenedAt` and null playlist provenance stay null.
+- Event `originFingerprint` is an opaque string. Since P5-STATS-18C the second and later events of a collision group
+  (same song, time, type and `listenedMs`) end in `|n=<k>` (k >= 1); the first keeps the unsuffixed legacy form. The
+  section format and version are unchanged. A section event already HAS its identity, so a reader restores it
+  verbatim (P5-STATS-18C1): the fingerprint must be `<trackOriginKey>|<occurredAt>|<type>|<listenedMs>` plus an optional
+  canonical `|n=<k>` (k >= 1, no leading zero), otherwise the whole backup is rejected as damaged. An absent fingerprint
+  is inserted with its own payload; an identical stored row is a no-op; a different payload under the same fingerprint
+  fails the restore (rolled back in full). Established fingerprints are never relabelled, even when their order is not
+  canonical, and older sections (one row per group) restore as before.
 - The section describes the device's CURRENT pending set; it does not accumulate earlier generations. An older
   app that reads and re-exports such a backup does not know the section, so it drops it.
 - Not covered (P5-STATS-17C): history for songs that were missing from the backup's own `songs` list.

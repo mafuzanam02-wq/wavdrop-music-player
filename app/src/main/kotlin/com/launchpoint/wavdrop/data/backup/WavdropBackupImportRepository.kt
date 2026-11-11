@@ -101,6 +101,8 @@ class WavdropBackupImportRepository @Inject constructor(
 
             val existingQuarantineOriginKeys: Set<String> =
                 pendingTrackDao.getAllOriginKeys().toHashSet()
+            val quarantineFp = QuarantinePlanner.backupFingerprint(backup)
+            val storedQuarantineEvents = storedQuarantineEventsFor(backup, quarantineFp, existingQuarantineOriginKeys)
 
             val existingLyricsMap = lyricsOverrideDao.getAllSnapshot()
                 .associate { WavdropMergePreviewAnalyzer.ExistingLyricsKey(it.songId, it.contentUri) to it.updatedAt }
@@ -189,6 +191,8 @@ class WavdropBackupImportRepository @Inject constructor(
                 backup                       = backup,
                 currentSongs                 = currentSongs,
                 existingQuarantineOriginKeys = existingQuarantineOriginKeys,
+                backupFingerprint            = quarantineFp,
+                storedQuarantineEvents       = storedQuarantineEvents,
                 existingStats                = currentStatsById,
                 existingEventFingerprints    = existingEventFingerprints,
                 existingEventIds             = existingEventIds,
@@ -480,7 +484,7 @@ class WavdropBackupImportRepository @Inject constructor(
             if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "baselines restored=${baselinePlan.restored} " +
                 "t=${System.currentTimeMillis() - t0}ms")
             // ── Quarantine: preserve unmatched backup history ─────────────────────────
-            val fp = QuarantinePlanner.backupFingerprint(backup)
+            val fp = quarantineFp
             val quarantinePlan = QuarantinePlanner.plan(
                 backup                = backup,
                 backupFingerprint     = fp,
@@ -488,6 +492,7 @@ class WavdropBackupImportRepository @Inject constructor(
                 existingOriginKeys    = existingQuarantineOriginKeys,
             )
             val now = System.currentTimeMillis()
+            val pendingEventWriter = PendingEventWriter(pendingTrackDao)
             var pendingTracksInserted = 0
             var pendingEventsInserted = 0
             var pendingPlaylistEntriesInserted = 0
@@ -528,19 +533,8 @@ class WavdropBackupImportRepository @Inject constructor(
                     )
                 }
 
-                for ((event, fingerprint) in candidate.events) {
-                    pendingTrackDao.insertEvent(
-                        PendingListenEventEntity(
-                            pendingId         = pendingId,
-                            eventType         = event.eventType,
-                            occurredAt        = event.occurredAt,
-                            listenedMs        = event.listenedMs,
-                            durationMs        = event.durationMs,
-                            originFingerprint = fingerprint,
-                        )
-                    )
-                    pendingEventsInserted++
-                }
+                // P5-STATS-18C: occurrence-preserving write; counts what was actually stored, not insert attempts.
+                pendingEventsInserted += pendingEventWriter.write(pendingId, QuarantinePlanner.eventItems(candidate.events)).inserted
 
                 candidate.lyrics?.let { (override, fingerprint) ->
                     pendingTrackDao.insertLyrics(
@@ -579,6 +573,13 @@ class WavdropBackupImportRepository @Inject constructor(
                     )
                     pendingPlaylistEntriesInserted++
                 }
+            }
+
+            // P5-STATS-18C: tracks that were quarantined by an earlier import still get their missing event occurrences (events only:
+            // their stats, lyrics, baselines, playlist entries and metadata are never touched). A conflict rolls the transaction back.
+            for (existing in quarantinePlan.existingTrackEvents) {
+                val pendingId = pendingTrackDao.getPendingId(existing.originKey) ?: continue
+                pendingEventsInserted += pendingEventWriter.write(pendingId, QuarantinePlanner.eventItems(existing.events)).inserted
             }
 
             // Carried-forward quarantine (P5-STATS-17B): additive, original keys, conflict => whole transaction rolls back.
@@ -700,6 +701,23 @@ class WavdropBackupImportRepository @Inject constructor(
     }
 
     /**
+     * P5-STATS-18C1: the stored event rows of exactly those already-quarantined tracks this backup has events for (track-scoped indexed
+     * range reads; unrelated tracks of the same snapshot are never read or compared).
+     */
+    private suspend fun storedQuarantineEventsFor(
+        backup: WavdropBackup,
+        fingerprint: String,
+        existingOriginKeys: Set<String>,
+    ): Map<String, List<PendingListenEventEntity>> {
+        val out = HashMap<String, List<PendingListenEventEntity>>()
+        for (songId in backup.listenEvents.mapTo(HashSet()) { it.songId }) {
+            val key = QuarantinePlanner.originKey(fingerprint, songId)
+            if (key in existingOriginKeys) out[key] = pendingTrackDao.getEventsInFingerprintRange("$key|", "$key}")
+        }
+        return out
+    }
+
+    /**
      * Read-only preview: queries DB snapshots and delegates to [WavdropMergePreviewAnalyzer]
      * to determine whether the backup contains any data that would actually be written.
      * No data is modified. Called during the preview phase to drive the Apply button and
@@ -770,6 +788,8 @@ class WavdropBackupImportRepository @Inject constructor(
 
         val existingQuarantineOriginKeys: Set<String> =
             pendingTrackDao.getAllOriginKeys().toHashSet()
+        val quarantineFp = QuarantinePlanner.backupFingerprint(backup)
+        val storedQuarantineEvents = storedQuarantineEventsFor(backup, quarantineFp, existingQuarantineOriginKeys)
 
         if (backup.desktopOverlay != null) {
             onStage?.invoke("Checking Desktop activity…")
@@ -780,6 +800,8 @@ class WavdropBackupImportRepository @Inject constructor(
             backup                       = backup,
             currentSongs                 = currentSongs,
             existingQuarantineOriginKeys = existingQuarantineOriginKeys,
+            backupFingerprint            = quarantineFp,
+            storedQuarantineEvents       = storedQuarantineEvents,
             existingStats                = existingStats,
             existingEventFingerprints    = existingEventFingerprints,
             existingEventIds             = existingEventIds,

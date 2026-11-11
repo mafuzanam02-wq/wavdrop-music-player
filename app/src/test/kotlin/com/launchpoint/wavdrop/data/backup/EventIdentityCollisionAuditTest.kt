@@ -30,11 +30,11 @@ import java.io.File
 import java.util.UUID
 
 /**
- * P5-STATS-18A - DIAGNOSTIC audit of listening-event identity (no production change).
+ * P5-STATS-18A - audit of listening-event identity; updated by P5-STATS-18C.
  *
- * Every test here PASSES while asserting the CURRENT behaviour, including the defective parts. Tests named "CURRENT DEFECT: ..." pin
- * a demonstrated data-loss mechanism: when a correction slice lands they are EXPECTED TO FAIL and must be inverted (the second
- * assertion of each pair states the corrected outcome in its message). They are not disabled so that the mechanism stays proven.
+ * 18C fixed the QUARANTINE path: cases A, B (quarantine part), D, F and G now assert the corrected behaviour. The LIVE restore path
+ * (ListenEventRestorePlanner) is deliberately unchanged, so the live part of case B still pins the remaining defect and is EXPECTED
+ * to fail when a later slice fixes it.
  *
  * Mechanism under test: `QuarantinePlanner.eventFingerprint` = snapshotFp|songId|occurredAt|eventType|listenedMs and
  * `pending_listen_events.originFingerprint` is UNIQUE with INSERT OR IGNORE, while `durationMs`, `eventId` and any occurrence index are
@@ -113,29 +113,28 @@ class EventIdentityCollisionAuditTest {
 
     // ── Case A: different durations ───────────────────────────────────────────
 
-    @Test fun `CURRENT DEFECT A - events differing only in durationMs collapse to one quarantined row, and the count over-reports`() = runBlocking {
+    @Test fun `A (fixed in 18C) - events differing only in durationMs are all quarantined and the count equals the stored rows`() = runBlocking {
         for (f in Fmt.values()) for (mode in Mode.values()) {
             val b = parse(f, serialize(f, backup(both { id -> listOf(ev(id, null, durationMs = 100_000L), ev(id, null, durationMs = 200_000L)) })))
             assertEquals("the backup really holds 4 distinct records", 4, b.listenEvents.size)
             val n = Node()
             val r = n.restore(b, mode)
-            // descriptor-bearing (1) AND descriptor-less (90) behave identically: 2 of the 4 distinct events are gone.
-            assertEquals("$f $mode: stored rows", 2, n.pendingEvents())
-            assertEquals("$f $mode: the restore REPORTS all four as preserved (over-reporting)", 4, r.pendingEventsPreserved)
-            val kept = n.pending.loadAll()!!.events.map { it.durationMs }
-            assertEquals("the survivor is the first in canonical order (smallest durationMs)", listOf(100_000L, 100_000L), kept)
-            // Corrected outcome (to be asserted by the fix slice): 4 stored rows, durations {100000, 200000} for each song.
+            // descriptor-bearing (1) AND descriptor-less (90) behave identically: all 4 distinct events are preserved.
+            assertEquals("$f $mode: stored rows", 4, n.pendingEvents())
+            assertEquals("$f $mode: the count reports persisted rows", 4, r.pendingEventsPreserved)
+            val kept = n.pending.loadAll()!!.events.map { it.durationMs }.sorted()
+            assertEquals(listOf(100_000L, 100_000L, 200_000L, 200_000L), kept)
         }
     }
 
     // ── Case B: different event ids ───────────────────────────────────────────
 
-    @Test fun `CURRENT DEFECT B - distinct non-null event ids with equal remaining fields collapse, in quarantine and in live restore`() = runBlocking {
+    @Test fun `B - distinct non-null event ids are both quarantined (fixed in 18C) but still collapse in live restore (CURRENT DEFECT)`() = runBlocking {
         val events = listOf(ev(1, "id-one"), ev(1, "id-two"))
         for (mode in Mode.values()) {
             val n = Node()
             n.restore(parse(Fmt.JSON, serialize(Fmt.JSON, backup(events))), mode)
-            assertEquals("$mode: quarantine keeps one of two distinct event ids", 1, n.pendingEvents())
+            assertEquals("$mode: quarantine keeps both distinct event ids", 2, n.pendingEvents())
         }
         // LIVE restore (song 5 is in the library): the live planner uses the same four-field fingerprint, so it collapses too.
         val live = backup(listOf(ev(5, "id-one"), ev(5, "id-two"))).copy(songs = listOf(backupSong(5)), trackStats = listOf(backupStats(5, 2, 0, false)))
@@ -153,15 +152,15 @@ class EventIdentityCollisionAuditTest {
         val n = Node()
         val r = n.restore(parse(Fmt.JSON, serialize(Fmt.JSON, backup(listOf(ev(1, "same"), ev(1, "same"))))), Mode.MERGE)
         assertEquals(1, n.pendingEvents())
-        assertEquals("the count still says 2: it counts attempted inserts, not stored rows", 2, r.pendingEventsPreserved)
+        assertEquals("the count now reports persisted rows, not attempted inserts", 1, r.pendingEventsPreserved)
     }
 
     // ── Case D: legacy events ─────────────────────────────────────────────────
 
-    @Test fun `CURRENT DEFECT D - identical legacy events (null id) from independent occurrences cannot be told apart and collapse`() = runBlocking {
+    @Test fun `D (fixed in 18C) - identical legacy events (null id) keep their multiplicity`() = runBlocking {
         val n = Node()
         n.restore(parse(Fmt.JSON, serialize(Fmt.JSON, backup(listOf(ev(1, null), ev(1, null))))), Mode.MERGE)
-        assertEquals("two byte-identical legacy records: one stored (undecidable: duplicate record or two plays?)", 1, n.pendingEvents())
+        assertEquals("two byte-identical legacy records are two occurrences in the source: both are stored", 2, n.pendingEvents())
         // No event id is ever written to the pending table (there is no column), so nothing is fabricated.
         assertTrue(n.pending.loadAll()!!.events.all { it.originFingerprint.isNotBlank() })
     }
@@ -178,18 +177,16 @@ class EventIdentityCollisionAuditTest {
 
     // ── Case F: repeated restore ──────────────────────────────────────────────
 
-    @Test fun `F - repeating a restore never inflates, and CURRENT DEFECT - it also cannot repair an already-collapsed track`() = runBlocking {
+    @Test fun `F - repeating a restore never inflates and the preview agrees there is nothing to do`() = runBlocking {
         val b = parse(Fmt.JSON, serialize(Fmt.JSON, backup(listOf(ev(1, null, durationMs = 100_000L), ev(1, null, durationMs = 200_000L)))))
         val n = Node()
         n.restore(b, Mode.MERGE)
-        assertEquals(1, n.pendingEvents())
+        assertEquals(2, n.pendingEvents())
         val again = n.restore(b, Mode.MERGE)
         assertTrue("second Merge is a no-op", again.isNoOp)
-        assertEquals("idempotent: no inflation", 1, n.pendingEvents())
-        // The planner skips a track whose origin key already exists, so re-importing the ORIGINAL backup can never add the lost
-        // event back, and the preview agrees there is nothing to do. A fix that only changes the fingerprint will NOT heal old rows.
+        assertEquals("idempotent: no inflation", 2, n.pendingEvents())
         assertTrue(!n.merge.previewMerge(b).hasMergeableData)
-        assertEquals(1, n.pendingEvents())
+        assertEquals(2, n.pendingEvents())
     }
 
     // ── Case G: multi-generation ──────────────────────────────────────────────
@@ -198,21 +195,20 @@ class EventIdentityCollisionAuditTest {
         val a = parse(f, serialize(f, backup(listOf(ev(1, null, durationMs = 100_000L), ev(1, null, durationMs = 200_000L)))))
         assertEquals("backup A holds both events (this file is the only place the second one still exists)", 2, a.listenEvents.size)
         val bNode = Node(); bNode.restore(a, mode)
-        assertEquals(1, bNode.pendingEvents())
+        assertEquals(2, bNode.pendingEvents())
         val bBackup = parse(f, bNode.export(f))
-        assertEquals("B transports only the survivor", 1, bBackup.pendingHistory!!.events.size)
+        assertEquals("B transports both events", 2, bBackup.pendingHistory!!.events.size)
         val cNode = Node(); cNode.restore(bBackup, mode)
-        assertEquals(1, cNode.pendingEvents())
+        assertEquals(2, cNode.pendingEvents())
         val cBackup = parse(f, cNode.export(f))
-        assertEquals("the loss propagates unchanged through every later generation", 1, cBackup.pendingHistory!!.events.size)
-        assertEquals(100_000L, cBackup.pendingHistory!!.events.single().durationMs)
-        // Corrected outcome: B and C would carry both events.
+        assertEquals("both events survive every later generation", 2, cBackup.pendingHistory!!.events.size)
+        assertEquals(listOf(100_000L, 200_000L), cBackup.pendingHistory!!.events.map { it.durationMs }.sorted())
     }
 
-    @Test fun `CURRENT DEFECT G - the loss propagates A to B to C - JSON Merge`() = chain(Fmt.JSON, Mode.MERGE)
-    @Test fun `CURRENT DEFECT G - the loss propagates A to B to C - JSON Recovery`() = chain(Fmt.JSON, Mode.RECOVERY)
-    @Test fun `CURRENT DEFECT G - the loss propagates A to B to C - WDBK Merge`() = chain(Fmt.WDBK, Mode.MERGE)
-    @Test fun `CURRENT DEFECT G - the loss propagates A to B to C - WDBK Recovery`() = chain(Fmt.WDBK, Mode.RECOVERY)
+    @Test fun `G (fixed in 18C) - no loss from A to B to C - JSON Merge`() = chain(Fmt.JSON, Mode.MERGE)
+    @Test fun `G (fixed in 18C) - no loss from A to B to C - JSON Recovery`() = chain(Fmt.JSON, Mode.RECOVERY)
+    @Test fun `G (fixed in 18C) - no loss from A to B to C - WDBK Merge`() = chain(Fmt.WDBK, Mode.MERGE)
+    @Test fun `G (fixed in 18C) - no loss from A to B to C - WDBK Recovery`() = chain(Fmt.WDBK, Mode.RECOVERY)
 
     // ── Case H: live versus quarantine ────────────────────────────────────────
 

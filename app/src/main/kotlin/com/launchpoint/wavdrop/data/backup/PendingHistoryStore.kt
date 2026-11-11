@@ -2,9 +2,9 @@ package com.launchpoint.wavdrop.data.backup
 
 import com.launchpoint.wavdrop.data.local.dao.PendingTrackDao
 import com.launchpoint.wavdrop.data.local.entity.PendingImportBaselineEntity
-import com.launchpoint.wavdrop.data.local.entity.PendingListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingLyricsOverrideEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingPlaylistEntryEntity
+import com.launchpoint.wavdrop.data.local.entity.PendingListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingTrackEntity
 import com.launchpoint.wavdrop.data.local.entity.PendingTrackStatsEntity
 
@@ -155,11 +155,20 @@ class PendingHistoryStore(private val dao: PendingTrackDao) {
             else if (dao.getPlaylistEntryByFingerprint(p.originFingerprint)?.equivalentTo(incoming) == true) present++
             else conflict("playlist entry", p.originFingerprint)
         }
+        // P5-STATS-18C1: a carried event ALREADY has an established identity (its originFingerprint, which need not be canonical after a
+        // legacy-survivor repair). It is transported verbatim: never regrouped, relabelled or re-slotted. An absent fingerprint is
+        // inserted with its own payload, an identical stored row is a no-op, and a different payload under the same fingerprint (or a
+        // fingerprint owned by another track) is a conflict that rolls the whole restore back.
         for (e in history.events) {
-            val incoming = e.toEntity(parent(e.trackOriginKey))
-            if (dao.insertEventOrIgnore(incoming) != -1L) events++
-            else if (dao.getEventByFingerprint(e.originFingerprint)?.equivalentTo(incoming) == true) present++
-            else conflict("listen event", e.originFingerprint)
+            val incoming = PendingListenEventEntity(
+                pendingId = parent(e.trackOriginKey), eventType = e.eventType, occurredAt = e.occurredAt, listenedMs = e.listenedMs,
+                durationMs = e.durationMs, originFingerprint = e.originFingerprint,
+            )
+            if (dao.insertEventOrIgnore(incoming) != -1L) { events++; continue }
+            val stored = dao.getEventByFingerprint(e.originFingerprint) ?: conflict("listen event", e.originFingerprint)
+            if (stored.pendingId == incoming.pendingId && stored.eventType == incoming.eventType && stored.occurredAt == incoming.occurredAt &&
+                stored.listenedMs == incoming.listenedMs && stored.durationMs == incoming.durationMs
+            ) present++ else conflict("listen event", e.originFingerprint)
         }
         return PendingHistoryRestoreResult(tracks, stats, events, lyrics, baselines, entries, present)
     }
@@ -176,10 +185,6 @@ class PendingHistoryStore(private val dao: PendingTrackDao) {
         originKey == o.originKey && backupFingerprint == o.backupFingerprint && backupSongId == o.backupSongId &&
             title == o.title && artist == o.artist && album == o.album && duration == o.duration && trackNumber == o.trackNumber &&
             year == o.year && sourceUri == o.sourceUri && sourceFolderPath == o.sourceFolderPath && status == o.status
-
-    private fun PendingListenEventEntity.equivalentTo(o: PendingListenEventEntity) =
-        pendingId == o.pendingId && eventType == o.eventType && occurredAt == o.occurredAt && listenedMs == o.listenedMs &&
-            durationMs == o.durationMs && originFingerprint == o.originFingerprint
 
     private fun PendingImportBaselineEntity.equivalentTo(o: PendingImportBaselineEntity) =
         pendingId == o.pendingId && sourceType == o.sourceType && sourceKey == o.sourceKey && playCount == o.playCount &&
@@ -216,11 +221,6 @@ class PendingHistoryStore(private val dao: PendingTrackDao) {
 
     private fun PendingHistoryStats.toEntity(pendingId: Long) = PendingTrackStatsEntity(
         pendingId, playCount, skipCount, lastPlayedAt, totalListeningTimeMs, isFavorite, lastListenedAt,
-    )
-
-    private fun PendingHistoryEvent.toEntity(pendingId: Long) = PendingListenEventEntity(
-        pendingId = pendingId, eventType = eventType, occurredAt = occurredAt, listenedMs = listenedMs, durationMs = durationMs,
-        originFingerprint = originFingerprint,
     )
 
     private fun PendingHistoryLyrics.toEntity(pendingId: Long) = PendingLyricsOverrideEntity(pendingId, lyrics, updatedAt, originFingerprint)

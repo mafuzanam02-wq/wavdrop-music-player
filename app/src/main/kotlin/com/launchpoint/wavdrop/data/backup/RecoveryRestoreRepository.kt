@@ -242,6 +242,12 @@ class RecoveryRestoreRepository @Inject constructor(
         var tracks = 0
         var events = 0
         var playlistEntries = 0
+        val eventWriter = PendingEventWriter(pendingTrackDao)
+        // P5-STATS-18C: tracks quarantined by an earlier import still get their missing event occurrences (events only).
+        for (existing in plan.existingTrackEvents) {
+            val pendingId = pendingTrackDao.getPendingId(existing.originKey) ?: continue
+            events += eventWriter.write(pendingId, QuarantinePlanner.eventItems(existing.events)).inserted
+        }
         for (candidate in plan.newCandidates) {
             val rowId = pendingTrackDao.insertTrack(
                 PendingTrackEntity(
@@ -274,19 +280,8 @@ class RecoveryRestoreRepository @Inject constructor(
                     ),
                 )
             }
-            for ((event, fingerprint) in candidate.events) {
-                pendingTrackDao.insertEvent(
-                    PendingListenEventEntity(
-                        pendingId         = pendingId,
-                        eventType         = event.eventType,
-                        occurredAt        = event.occurredAt,
-                        listenedMs        = event.listenedMs,
-                        durationMs        = event.durationMs,
-                        originFingerprint = fingerprint,
-                    ),
-                )
-                events++
-            }
+            // P5-STATS-18C: occurrence-preserving write; counts what was actually stored, not insert attempts.
+            events += eventWriter.write(pendingId, QuarantinePlanner.eventItems(candidate.events)).inserted
             candidate.lyrics?.let { (override, fingerprint) ->
                 pendingTrackDao.insertLyrics(
                     PendingLyricsOverrideEntity(

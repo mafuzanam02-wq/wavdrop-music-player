@@ -124,6 +124,9 @@ class MergeImportAtomicityRoomTest {
         override suspend fun insertTrack(entity: PendingTrackEntity): Long = db.pendingTrackDao().insertTrack(entity).also { hit("pending.insertTrack") }
         override suspend fun insertStats(entity: PendingTrackStatsEntity) { db.pendingTrackDao().insertStats(entity); hit("pending.insertStats") }
         override suspend fun insertEvent(entity: PendingListenEventEntity) { db.pendingTrackDao().insertEvent(entity); hit("pending.insertEvent") }
+        // P5-STATS-18C: quarantined events are now written through PendingEventWriter, which uses insertEventOrIgnore.
+        override suspend fun insertEventOrIgnore(entity: PendingListenEventEntity): Long =
+            db.pendingTrackDao().insertEventOrIgnore(entity).also { hit("pending.insertEvent") }
         override suspend fun insertLyrics(entity: PendingLyricsOverrideEntity) { db.pendingTrackDao().insertLyrics(entity); hit("pending.insertLyrics") }
         override suspend fun insertBaseline(entity: PendingImportBaselineEntity) { db.pendingTrackDao().insertBaseline(entity); hit("pending.insertBaseline") }
         override suspend fun insertPlaylistEntry(entity: PendingPlaylistEntryEntity) { db.pendingTrackDao().insertPlaylistEntry(entity); hit("pending.insertPlaylistEntry") }

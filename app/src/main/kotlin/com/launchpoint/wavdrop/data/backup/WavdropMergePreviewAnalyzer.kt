@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.data.backup
 
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity
+import com.launchpoint.wavdrop.data.local.entity.PendingListenEventEntity
 import com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity
 import com.launchpoint.wavdrop.data.model.Song
 
@@ -41,6 +42,13 @@ object WavdropMergePreviewAnalyzer {
         backup: WavdropBackup,
         currentSongs: List<Song>,
         existingQuarantineOriginKeys: Set<String>,
+        /** The snapshot fingerprint (computed once by the caller; recomputed here when absent). */
+        backupFingerprint: String? = null,
+        /**
+         * P5-STATS-18C1: the stored quarantined event rows of each already-quarantined track the backup has events for, keyed by origin
+         * key (track-scoped, so unrelated tracks never mask a missing occurrence). `null` ("unknown") disables the check.
+         */
+        storedQuarantineEvents: Map<String, List<PendingListenEventEntity>>? = null,
         /**
          * Current [TrackStatsEntity] rows keyed by local song id.
          * Must be supplied explicitly by every caller — there is no safe default.
@@ -223,7 +231,7 @@ object WavdropMergePreviewAnalyzer {
         }
 
         // ── Quarantine: unmatched backup tracks with history to preserve ──────
-        val fp = QuarantinePlanner.backupFingerprint(backup)
+        val fp = backupFingerprint ?: QuarantinePlanner.backupFingerprint(backup)
         val quarantinePlan = QuarantinePlanner.plan(
             backup                = backup,
             backupFingerprint     = fp,
@@ -238,6 +246,13 @@ object WavdropMergePreviewAnalyzer {
                 alreadyPendingTrackCount = quarantinePlan.alreadyPresentCount,
             )
         }
+
+        // P5-STATS-18C: an already-quarantined track whose event occurrences are not all stored (an earlier import collapsed them) can be
+        // repaired by importing the original backup again, so that is a write too.
+        if (storedQuarantineEvents != null && quarantinePlan.existingTrackEvents.any {
+                PendingEventOccurrences.needsWrite(QuarantinePlanner.eventItems(it.events), storedQuarantineEvents[it.originKey].orEmpty())
+            }
+        ) return mergeable()
 
         // Carried-forward quarantine that is not yet stored here is a write too.
         if (pendingHistoryHasNewData) return mergeable()
