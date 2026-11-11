@@ -11,6 +11,7 @@ import android.net.Uri
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
+import androidx.core.content.ContextCompat
 import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.MainActivity
 import com.launchpoint.wavdrop.R
@@ -31,6 +32,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 internal interface WavdropWidgetEntryPoint {
     fun widgetStateStore(): WidgetStateStore
+    fun widgetAppearanceStore(): WidgetAppearanceStore
 }
 
 /**
@@ -61,32 +63,81 @@ class WavdropWidgetUpdater @Inject constructor(
         // do not cancel the scope. Lives for the process lifetime.
         private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+        @Volatile private var appContext: Context? = null
+
+        // Every request funnels through ONE coordinator: passes never overlap, bursts coalesce, and each pass reads the latest
+        // playback snapshot and appearances when it runs — so an appearance save and a playback update can never leave a
+        // widget showing stale state.
+        private val coordinator = WidgetUpdateCoordinator(
+            scope = updateScope,
+            onError = { Log.e(TAG, "[updater] performUpdate FAILED: ${it::class.simpleName} ${it.message}", it) },
+            run = { target -> appContext?.let { performUpdate(it, target) } },
+        )
+
         /**
          * Triggers a full RemoteViews rebuild for all active widget instances.
          * Safe to call from any thread or coroutine; returns immediately.
          */
         fun requestUpdate(context: Context) {
-            val appContext = context.applicationContext
-            if (BuildConfig.DEBUG) Log.d(TAG, "[updater] requestUpdate called thread=${Thread.currentThread().name}")
+            appContext = context.applicationContext
+            if (BuildConfig.DEBUG) Log.d(TAG, "[updater] requestUpdate(all) thread=${Thread.currentThread().name}")
+            coordinator.request(null)
+        }
+
+        /** Refreshes only the given widget instances (e.g. after one widget's appearance was saved). */
+        fun requestUpdate(context: Context, appWidgetIds: Collection<Int>) {
+            appContext = context.applicationContext
+            if (BuildConfig.DEBUG) Log.d(TAG, "[updater] requestUpdate(ids=$appWidgetIds)")
+            coordinator.request(appWidgetIds)
+        }
+
+        /**
+         * Requests a render of ONE widget and suspends until a pass that started after this call has finished.
+         * Returns true only if that widget was rendered by `updateAppWidget`; false if rendering failed or the id is not (or no
+         * longer) one of Wavdrop's widgets. Used by the configuration screen so the first render exists before RESULT_OK.
+         * Playback (all-widget) passes are unaffected: a failure there is only logged.
+         */
+        suspend fun requestUpdateAndAwait(context: Context, appWidgetId: Int): Boolean {
+            appContext = context.applicationContext
+            return coordinator.requestAndAwait(listOf(appWidgetId))
+        }
+
+        /** Runs [block] against the appearance store off the main thread; [onDone] always runs (used to finish goAsync()). */
+        internal fun withAppearanceStore(context: Context, onDone: () -> Unit = {}, block: suspend (WidgetAppearanceStore) -> Unit) {
+            val appCtx = context.applicationContext
             updateScope.launch {
                 try {
-                    performUpdate(appContext)
+                    resolveAppearanceStore(appCtx)?.let { block(it) }
                 } catch (e: Throwable) {
-                    Log.e(TAG, "[updater] performUpdate FAILED: ${e::class.simpleName} ${e.message}", e)
+                    Log.e(TAG, "[updater] appearance store work FAILED: ${e::class.simpleName} ${e.message}", e)
+                } finally {
+                    onDone()
                 }
             }
         }
 
-        private suspend fun performUpdate(context: Context) {
+        private suspend fun performUpdate(context: Context, target: Set<Int>?) {
             val manager = AppWidgetManager.getInstance(context)
-            val ids = manager.getAppWidgetIds(
+            val allIds = manager.getAppWidgetIds(
                 ComponentName(context, WavdropWidgetProvider::class.java)
             )
-            if (BuildConfig.DEBUG) Log.d(TAG, "[updater] active widget IDs: ${ids.size} → ${ids.toList()}")
-            if (ids.isEmpty()) return
+            // A targeted request drops ids that are not (or no longer) Wavdrop widgets; for an AWAITED request that is a failure,
+            // reported below, so a removed/foreign id can never be reported as rendered.
+            val ids = if (target == null) allIds else allIds.filter { it in target }.toIntArray()
+            val missing = target?.filter { it !in allIds }.orEmpty()
+            if (BuildConfig.DEBUG) Log.d(TAG, "[updater] widget IDs to update: ${ids.size} → ${ids.toList()} missing=$missing")
+            if (ids.isEmpty()) {
+                if (missing.isNotEmpty()) throw WidgetRenderException("widget ids not present: $missing")
+                return
+            }
 
             val store = resolveStore(context)
             val snapshot = store?.load()
+            // Playback-driven passes fall back to the default look if the appearance read fails; a TARGETED pass (an awaited
+            // first render after configuration) must not pretend success with the wrong look, so it fails instead.
+            val appearances = resolveAppearanceStore(context)?.runCatching { load(ids.toList()) }?.getOrNull()
+                ?: if (target != null) throw WidgetRenderException("appearance store unavailable") else emptyMap()
+            val failed = mutableListOf<Int>()
             if (BuildConfig.DEBUG) Log.d(TAG, "[updater] snapshot: title=${snapshot?.title} isPlaying=${snapshot?.isPlaying} hasActive=${snapshot?.hasActiveMedia}")
 
             val hasActive = snapshot?.hasActiveMedia == true
@@ -109,14 +160,29 @@ class WavdropWidgetUpdater @Inject constructor(
                         artworkBySize.getOrPut(target) { loadArtwork(context, snapshot?.albumId, target) }
                     } else null
 
-                    val views = buildViews(context, layout, snapshot, artwork)
+                    val views = buildViews(context, layout, snapshot, artwork, appearances[id] ?: WidgetAppearance.DEFAULT)
                     manager.updateAppWidget(id, views)
                     if (BuildConfig.DEBUG) Log.d(TAG, "[updater] id=$id updateAppWidget OK")
                 } catch (e: Throwable) {
+                    failed += id
                     Log.e(TAG, "[updater] id=$id update FAILED: ${e::class.simpleName} ${e.message}", e)
                 }
             }
+            // Tell the coordinator (and any awaiting configuration screen) that this pass did not fully succeed.
+            if (target != null && (failed.isNotEmpty() || missing.isNotEmpty())) {
+                throw WidgetRenderException("render failed for $failed, missing $missing")
+            }
         }
+
+        private fun resolveAppearanceStore(context: Context): WidgetAppearanceStore? =
+            runCatching {
+                EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    WavdropWidgetEntryPoint::class.java,
+                ).widgetAppearanceStore()
+            }.onFailure {
+                Log.e(TAG, "[updater] failed to resolve WidgetAppearanceStore: ${it.message}", it)
+            }.getOrNull()
 
         private fun resolveStore(context: Context): WidgetStateStore? =
             runCatching {
@@ -167,6 +233,8 @@ class WavdropWidgetUpdater @Inject constructor(
             layout: Int,
             snapshot: WidgetPlaybackSnapshot?,
             artwork: Bitmap?,
+            appearance: WidgetAppearance = WidgetAppearance.DEFAULT,
+            resolveColor: (Context, Int) -> Int = ContextCompat::getColor,
         ): RemoteViews {
             val views = RemoteViews(context.packageName, layout)
 
@@ -183,20 +251,28 @@ class WavdropWidgetUpdater @Inject constructor(
             if (layout == R.layout.wavdrop_widget_idle) return views
 
             // Active state: populate track metadata.
-            val state = WidgetRenderState.of(snapshot, hasArtwork = artwork != null)
+            val state = WidgetRenderState.of(snapshot, hasArtwork = artwork != null, appearance = appearance)
             views.setTextViewText(R.id.widget_title, state.title)
             views.setTextViewText(R.id.widget_artist, state.artist)
 
-            // Artwork: background + thumbnail share the same bitmap.
-            if (artwork != null) {
+            // Card background: only the Artwork style paints the artwork behind the card, under a preset-strength scrim.
+            // Solid (and any missing artwork) leaves the opaque dark card; the artwork bitmap is then not even attached here.
+            if (state.showsArtworkBackground && artwork != null) {
                 views.setViewVisibility(R.id.widget_background, View.VISIBLE)
                 views.setImageViewBitmap(R.id.widget_background, artwork)
                 views.setViewVisibility(R.id.widget_scrim, View.VISIBLE)
-                views.setImageViewBitmap(R.id.widget_artwork, artwork)
+                // View.setBackgroundColor(@ColorInt) is a @RemotableViewMethod (API 1); setBackgroundResource expects a drawable
+                // id, so the color resource is resolved to an ARGB int first (see setScrimColor).
+                views.setScrimColor(R.id.widget_scrim, resolveColor(context, state.scrimColorRes))
             } else {
                 views.setViewVisibility(R.id.widget_background, View.GONE)
                 views.setViewVisibility(R.id.widget_scrim, View.GONE)
-                // Same placeholder tile in every layout when there is no artwork.
+            }
+
+            // Thumbnail: always the artwork when there is one (every style), else the same placeholder tile in every layout.
+            if (artwork != null) {
+                views.setImageViewBitmap(R.id.widget_artwork, artwork)
+            } else {
                 views.setImageViewResource(R.id.widget_artwork, state.placeholderRes)
             }
 
@@ -247,17 +323,26 @@ internal data class WidgetRenderState(
     val title: String,
     val artist: String,
     val showsArtwork: Boolean,
+    val showsArtworkBackground: Boolean,
+    val scrimColorRes: Int,
     val placeholderRes: Int,
     val playPauseIconRes: Int,
     val playPauseBackgroundRes: Int,
 ) {
     companion object {
-        fun of(snapshot: WidgetPlaybackSnapshot?, hasArtwork: Boolean): WidgetRenderState {
+        fun of(
+            snapshot: WidgetPlaybackSnapshot?,
+            hasArtwork: Boolean,
+            appearance: WidgetAppearance = WidgetAppearance.DEFAULT,
+        ): WidgetRenderState {
             val playing = snapshot?.isPlaying == true
+            val look = appearance.effective()
             return WidgetRenderState(
                 title = snapshot?.title ?: "",
                 artist = snapshot?.artist ?: "",
                 showsArtwork = hasArtwork,
+                showsArtworkBackground = hasArtwork && look.style == WidgetBackgroundStyle.ARTWORK,
+                scrimColorRes = look.intensity.scrimColorRes,
                 placeholderRes = R.drawable.widget_artwork_placeholder,
                 playPauseIconRes = if (playing) R.drawable.widget_ic_pause else R.drawable.widget_ic_play,
                 playPauseBackgroundRes = if (playing) R.drawable.widget_btn_accent_bg else R.drawable.widget_btn_idle_bg,
@@ -317,3 +402,17 @@ internal object WidgetLayoutSelector {
         return sample
     }
 }
+
+/**
+ * Paints the artwork overlay. `View.setBackgroundColor(@ColorInt int)` is annotated `@RemotableViewMethod` (since API 1, so it is
+ * available at the project's minSdk 26), which is what lets RemoteViews invoke it by name through [RemoteViews.setInt].
+ * `setBackgroundResource` is NOT used for colors: it takes a drawable id, and a `R.color` id is not a documented drawable input.
+ */
+internal fun RemoteViews.setScrimColor(viewId: Int, @androidx.annotation.ColorInt argb: Int) {
+    setInt(viewId, SET_BACKGROUND_COLOR_METHOD, argb)
+}
+
+internal const val SET_BACKGROUND_COLOR_METHOD = "setBackgroundColor"
+
+/** A targeted widget render did not complete (render error, or the id is not a Wavdrop widget any more). */
+internal class WidgetRenderException(message: String) : RuntimeException(message)

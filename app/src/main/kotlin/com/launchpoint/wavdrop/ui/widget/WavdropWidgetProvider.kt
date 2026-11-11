@@ -48,6 +48,27 @@ class WavdropWidgetProvider : AppWidgetProvider() {
         WavdropWidgetUpdater.requestUpdate(context)
     }
 
+    /** Widget instances removed by the user: forget their appearance settings. */
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        val pending = goAsync()
+        WavdropWidgetUpdater.withAppearanceStore(context, onDone = { pending.finish() }) { it.remove(appWidgetIds.toList()) }
+    }
+
+    /** The last Wavdrop widget was removed: nothing left to remember. */
+    override fun onDisabled(context: Context) {
+        val pending = goAsync()
+        WavdropWidgetUpdater.withAppearanceStore(context, onDone = { pending.finish() }) { it.clearAll() }
+    }
+
+    /**
+     * The launcher restored widgets from a backup and reassigned their ids: carry each old id's appearance to its new id.
+     * (A restore that never calls this leaves the widgets on the default look, which is the safe fallback.)
+     */
+    override fun onRestored(context: Context, oldWidgetIds: IntArray, newWidgetIds: IntArray) {
+        val pending = goAsync()
+        WavdropWidgetUpdater.withAppearanceStore(context, onDone = { pending.finish() }) { it.migrate(oldWidgetIds, newWidgetIds) }
+    }
+
     companion object {
         private const val TAG = "WavdropWidget"
     }

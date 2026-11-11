@@ -265,6 +265,21 @@
                 android:resource="@xml/wavdrop_widget_info" />
         </receiver>
 
+        <!--
+            Widget configuration screen (per-widget appearance). The launcher starts it with APPWIDGET_CONFIGURE when a
+            widget is added and, where supported, when the user reconfigures it. It only accepts an appWidgetId that
+            belongs to Wavdrop's own widget provider; anything else finishes with RESULT_CANCELED.
+        -->
+        <activity
+            android:name=".ui.widget.WidgetConfigActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|density|fontScale|locale|layoutDirection"
+            android:theme="@style/Theme.Wavdrop">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

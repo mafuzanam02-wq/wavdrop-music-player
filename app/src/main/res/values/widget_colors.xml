@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark scrim laid over the widget's artwork background (base colour #16131F). Balanced is the original look. -->
+    <color name="widget_scrim_light">#8C16131F</color>
+    <color name="widget_scrim_balanced">#D916131F</color>
+    <color name="widget_scrim_dark">#F216131F</color>
+</resources>

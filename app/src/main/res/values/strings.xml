@@ -8,4 +8,21 @@
     <string name="widget_prev_desc">Previous</string>
     <string name="widget_play_pause_desc">Play or pause</string>
     <string name="widget_next_desc">Next</string>
+    <string name="widget_config_title">Widget appearance</string>
+    <string name="widget_config_background">Background</string>
+    <string name="widget_config_style_artwork">Artwork</string>
+    <string name="widget_config_style_artwork_hint">Album art fills the card behind a dark overlay</string>
+    <string name="widget_config_style_solid">Solid</string>
+    <string name="widget_config_style_solid_hint">A plain dark card; the album art stays as the thumbnail</string>
+    <string name="widget_config_intensity">Artwork overlay</string>
+    <string name="widget_config_intensity_light">Light</string>
+    <string name="widget_config_intensity_light_hint">More of the artwork shows through</string>
+    <string name="widget_config_intensity_balanced">Balanced</string>
+    <string name="widget_config_intensity_balanced_hint">The default look</string>
+    <string name="widget_config_intensity_dark">Dark</string>
+    <string name="widget_config_intensity_dark_hint">Strongest overlay for easy reading</string>
+    <string name="widget_config_save">Save</string>
+    <string name="widget_config_cancel">Cancel</string>
+    <string name="widget_config_saving">Saving…</string>
+    <string name="widget_config_save_failed">Couldn\'t update the widget. Try again, or cancel.</string>
 </resources>

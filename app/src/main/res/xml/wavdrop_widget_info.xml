@@ -10,4 +10,6 @@
     android:widgetCategory="home_screen"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/wavdrop_widget_idle"
+    android:configure="com.launchpoint.wavdrop.ui.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable"
     android:description="@string/widget_description" />
