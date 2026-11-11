@@ -8,21 +8,21 @@ import com.launchpoint.wavdrop.data.text.MusicTextNormalizer
  * events) to current library songs.
  *
  * Resolution order, strongest first:
- *  1. Backup songId through [resolvedBySongId] — the 6-tier matcher mapping
- *     computed once per restore, which survives reinstall ID changes.
- *  2. Exact content URI (same device, no rescan).
- *  3. Title+artist+album tags — but ONLY when exactly one current song carries
- *     those tags. Duplicate-tag songs are never guessed at: attaching lyrics or
- *     playlist entries to the wrong duplicate is worse than skipping the row.
+ *  1. Backup songId through [resolvedBySongId] — the matcher mapping computed once
+ *     per restore, which survives reinstall ID changes and already applies the
+ *     URI-corroboration rule (P5-AUDIT-11).
+ *  2. Title+artist+album tags — but ONLY when exactly one current song carries
+ *     those tags, and never a song the matcher REJECTED for this backup song
+ *     ([rejectedLocalIdsByBackupSongId], a contradicted URI collision).
  *
- * Unresolved rows return null; callers count them as unmatched.
+ * A bare content URI is deliberately NOT a resolution step: a MediaStore URI is not durable identity and
+ * this resolver has no duration, so it cannot corroborate one. Unresolved rows return null; callers count them as unmatched.
  */
 class BackupSongLinkResolver(
     currentSongs: List<Song>,
     private val resolvedBySongId: Map<Long, Song>,
+    private val rejectedLocalIdsByBackupSongId: Map<Long, Set<Long>> = emptyMap(),
 ) {
-    private val byUri = currentSongs.associateBy { it.uri }
-
     // groupBy + size==1 filter instead of associateBy: associateBy silently collapses
     // duplicate-tag songs to the last one, which mis-attaches data.
     private val uniqueByTags: Map<Triple<String, String, String>, Song> =
@@ -37,6 +37,7 @@ class BackupSongLinkResolver(
             .filterValues { it.size == 1 }
             .mapValues { (_, songs) -> songs.single() }
 
+    @Suppress("UNUSED_PARAMETER") // contentUri is kept for call-site compatibility; a URI alone never resolves a row.
     fun resolve(
         backupSongId: Long,
         contentUri: String?,
@@ -45,15 +46,16 @@ class BackupSongLinkResolver(
         album: String?,
     ): Song? {
         resolvedBySongId[backupSongId]?.let { return it }
-        contentUri?.let { uri -> byUri[uri]?.let { return it } }
         if (title != null && artist != null && album != null) {
-            return uniqueByTags[
+            val candidate = uniqueByTags[
                 Triple(
                     MusicTextNormalizer.normalizeStrict(title),
                     MusicTextNormalizer.normalizeStrict(artist),
                     MusicTextNormalizer.normalizeStrict(album),
                 )
-            ]
+            ] ?: return null
+            if (candidate.id in rejectedLocalIdsByBackupSongId[backupSongId].orEmpty()) return null
+            return candidate
         }
         return null
     }

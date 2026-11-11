@@ -50,8 +50,9 @@ object RecoveryRestorePlanner {
 
     fun plan(backup: WavdropBackup, currentSongs: List<Song>): Plan {
         val match = WavdropBackupStatsMatcher.match(backup, currentSongs)
-        val resolvedBySongId = WavdropBackupStatsMatcher.resolveBackupSongIds(backup, currentSongs)
-        val linkResolver = BackupSongLinkResolver(currentSongs, resolvedBySongId)
+        val songResolution = WavdropBackupStatsMatcher.resolveBackupSongs(backup, currentSongs)
+        val resolvedBySongId = songResolution.resolved
+        val linkResolver = BackupSongLinkResolver(currentSongs, resolvedBySongId, songResolution.rejectedLocalIds)
         val backupSongById = backup.songs.associateBy { it.id }
 
         // Stats: one authoritative row per matched current song (the matcher already drops collisions; the map is belt and braces).

@@ -85,8 +85,9 @@ object WavdropMergePreviewAnalyzer {
         }
 
         // For all remaining checks, build the shared song resolver once.
-        val resolvedBySongId = WavdropBackupStatsMatcher.resolveBackupSongIds(backup, currentSongs)
-        val linkResolver     = BackupSongLinkResolver(currentSongs, resolvedBySongId)
+        val songResolution   = WavdropBackupStatsMatcher.resolveBackupSongs(backup, currentSongs)
+        val resolvedBySongId = songResolution.resolved
+        val linkResolver     = BackupSongLinkResolver(currentSongs, resolvedBySongId, songResolution.rejectedLocalIds)
 
         // ── Stats: any matched track where backup value is strictly greater,
         //          or backup marks a track as favourite that local does not ───

@@ -125,7 +125,7 @@ class MergeNoOpProtectionTest {
         val songId = 1L
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
-            songs           = listOf(BackupSong(songId, "content://media/$songId", "T", "A", "B", 0L, 180_000L, 0L, 0, 0)),
+            songs           = listOf(BackupSong(songId, "content://media/$songId", "Track $songId", "Artist", "Album", 0L, 180_000L, 0L, 0, 0)),
             trackStats      = listOf(backupStats(songId, playCount = 10, listeningMs = 5_000L)),
             importBaselines = emptyList(),
         )
@@ -142,7 +142,7 @@ class MergeNoOpProtectionTest {
         val songId = 1L
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
-            songs           = listOf(BackupSong(songId, "content://media/$songId", "T", "A", "B", 0L, 180_000L, 0L, 0, 0)),
+            songs           = listOf(BackupSong(songId, "content://media/$songId", "Track $songId", "Artist", "Album", 0L, 180_000L, 0L, 0, 0)),
             trackStats      = listOf(backupStats(songId, playCount = 5, listeningMs = 1_000L)),
             importBaselines = emptyList(),
         )
@@ -160,7 +160,7 @@ class MergeNoOpProtectionTest {
         val songId = 1L
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
-            songs           = listOf(BackupSong(songId, "content://media/$songId", "T", "A", "B", 0L, 180_000L, 0L, 0, 0)),
+            songs           = listOf(BackupSong(songId, "content://media/$songId", "Track $songId", "Artist", "Album", 0L, 180_000L, 0L, 0, 0)),
             trackStats      = listOf(backupStats(songId, playCount = 30)),
             importBaselines = emptyList(),
         )
@@ -184,7 +184,7 @@ class MergeNoOpProtectionTest {
         val songId = 1L
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
-            songs           = listOf(BackupSong(songId, "content://media/$songId", "T", "A", "B", 0L, 180_000L, 0L, 0, 0)),
+            songs           = listOf(BackupSong(songId, "content://media/$songId", "Track $songId", "Artist", "Album", 0L, 180_000L, 0L, 0, 0)),
             trackStats      = listOf(backupStats(songId, playCount = 30, lastPlayedAt = 2_000_000L)),
             importBaselines = emptyList(),
         )
@@ -247,7 +247,7 @@ class MergeNoOpProtectionTest {
         val event  = backupEvent(songId, occurredAt = 1_000_000L)
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
-            songs           = listOf(BackupSong(songId, "content://media/$songId", "T", "A", "B", 0L, 180_000L, 0L, 0, 0)),
+            songs           = listOf(BackupSong(songId, "content://media/$songId", "Track $songId", "Artist", "Album", 0L, 180_000L, 0L, 0, 0)),
             trackStats      = emptyList(),
             importBaselines = emptyList(),
             listenEvents    = listOf(event),
@@ -273,7 +273,7 @@ class MergeNoOpProtectionTest {
         val event  = backupEvent(songId, occurredAt = 2_000_000L)
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
-            songs           = listOf(BackupSong(songId, "content://media/$songId", "T", "A", "B", 0L, 180_000L, 0L, 0, 0)),
+            songs           = listOf(BackupSong(songId, "content://media/$songId", "Track $songId", "Artist", "Album", 0L, 180_000L, 0L, 0, 0)),
             trackStats      = emptyList(),
             importBaselines = emptyList(),
             listenEvents    = listOf(event),

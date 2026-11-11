@@ -47,7 +47,7 @@ object WavdropBackupStatsMatcher {
     }
 
     private class Resolver(currentSongs: List<Song>) {
-        val byUri = currentSongs.associateBy { it.uri }
+        private val byUri = currentSongs.groupBy { it.uri }
         private val byPathTitle = currentSongs
             .filter { !it.folderPath.isNullOrBlank() }
             .groupBy { it.folderPath!!.normPath() to it.title.strictKey() }
@@ -66,10 +66,25 @@ object WavdropBackupStatsMatcher {
         }
         private val byTitle = currentSongs.groupBy { it.title.strictKey() }
 
-        fun resolve(bSong: BackupSong?, uriHint: String): Resolution {
-            byUri[uriHint]?.let { return Resolution.Matched(it, MatchTier.URI) }
+        /**
+         * A URI is supporting evidence only (P5-AUDIT-11). It is accepted when the backup song's duration (within
+         * [DURATION_TOLERANCE_MS], both known) AND meaningful normalized title agree with the current song. A URI hit that is contradicted
+         * is REJECTED: its local id is added to [rejectedOut] and excluded from every later tier, so the weak TAGS_ONLY fallback cannot
+         * re-accept the colliding file. Without a backup song descriptor nothing can corroborate, so a bare URI never attributes anything.
+         */
+        fun resolve(bSong: BackupSong?, uriHint: String, rejectedOut: MutableSet<Long>? = null): Resolution {
             if (bSong == null) return Resolution.None
-            byUri[bSong.uri]?.let { return Resolution.Matched(it, MatchTier.URI) }
+
+            val uriCandidates = listOf(uriHint, bSong.uri).filter { it.isNotBlank() }.distinct()
+                .flatMap { byUri[it].orEmpty() }.distinctBy { it.id }
+            val corroborated = uriCandidates.filter { uriCorroborated(bSong, it) }
+            val excluded = (uriCandidates - corroborated.toSet()).map { it.id }.toSet()
+            rejectedOut?.addAll(excluded)
+            when (corroborated.size) {
+                1 -> return Resolution.Matched(corroborated.single(), MatchTier.URI)
+                0 -> Unit
+                else -> return Resolution.Ambiguous
+            }
 
             fun durationOk(song: Song): Boolean =
                 abs(song.duration - bSong.duration) <= DURATION_TOLERANCE_MS
@@ -109,7 +124,8 @@ object WavdropBackupStatsMatcher {
                 MatchTier.TAGS_ONLY to byTags[tagsKey].orEmpty(),
             )
 
-            val firstHit = tiers.firstOrNull { it.second.isNotEmpty() } ?: return Resolution.None
+            val firstHit = tiers.map { (tier, songs) -> tier to songs.filter { it.id !in excluded } }
+                .firstOrNull { it.second.isNotEmpty() } ?: return Resolution.None
             return if (firstHit.second.distinctBy { it.id }.size == 1) {
                 Resolution.Matched(firstHit.second.first(), firstHit.first)
             } else {
@@ -192,14 +208,34 @@ object WavdropBackupStatsMatcher {
      * songId-keyed backup rows) to their new local song ids after a reinstall.
      * Ambiguous or unmatched backup songs are simply absent from the map.
      */
-    fun resolveBackupSongIds(backup: WavdropBackup, currentSongs: List<Song>): Map<Long, Song> {
+    fun resolveBackupSongIds(backup: WavdropBackup, currentSongs: List<Song>): Map<Long, Song> =
+        resolveBackupSongs(backup, currentSongs).resolved
+
+    /** [resolved]: backup song id -> current song. [rejectedLocalIds]: backup song id -> URI-colliding local ids that must never be re-attached. */
+    data class BackupSongResolution(val resolved: Map<Long, Song>, val rejectedLocalIds: Map<Long, Set<Long>>)
+
+    fun resolveBackupSongs(backup: WavdropBackup, currentSongs: List<Song>): BackupSongResolution {
         val resolver = Resolver(currentSongs)
         val resolved = mutableMapOf<Long, Song>()
+        val rejected = mutableMapOf<Long, Set<Long>>()
         for (bSong in backup.songs) {
-            val res = resolver.resolve(bSong, bSong.uri)
+            val out = mutableSetOf<Long>()
+            val res = resolver.resolve(bSong, bSong.uri, out)
             if (res is Resolution.Matched) resolved[bSong.id] = res.song
+            if (out.isNotEmpty()) rejected[bSong.id] = out
         }
-        return resolved
+        return BackupSongResolution(resolved, rejected)
+    }
+
+    private val PLACEHOLDER_TITLES = setOf("", "unknown", "unknown title", "untitled", "unknown track", "<unknown>")
+
+    private fun uriCorroborated(b: BackupSong, local: Song): Boolean {
+        if (b.duration <= 0L || local.duration <= 0L) return false
+        if (abs(local.duration - b.duration) > DURATION_TOLERANCE_MS) return false
+        val strict = b.title.strictKey()
+        val bt = b.title.tolerantKey()
+        if (bt.isBlank() || strict in PLACEHOLDER_TITLES || bt in PLACEHOLDER_TITLES) return false
+        return bt == local.title.tolerantKey()
     }
 
     private fun String.strictKey() = MusicTextNormalizer.normalizeStrict(this)

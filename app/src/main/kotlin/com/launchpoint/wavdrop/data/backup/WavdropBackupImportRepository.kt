@@ -84,7 +84,8 @@ class WavdropBackupImportRepository @Inject constructor(
             // Backup song id → current library song, shared by event and baseline
             // restore so every songId-keyed row follows its track after a reinstall.
             val match            = WavdropBackupStatsMatcher.match(backup, currentSongs)
-            val resolvedBySongId = WavdropBackupStatsMatcher.resolveBackupSongIds(backup, currentSongs)
+            val songResolution = WavdropBackupStatsMatcher.resolveBackupSongs(backup, currentSongs)
+            val resolvedBySongId = songResolution.resolved
 
             // Pre-load current stats for all matched songs to compute reporting deltas
             // without N individual queries inside the loop; also needed for the
@@ -123,7 +124,7 @@ class WavdropBackupImportRepository @Inject constructor(
             }
 
             val backupSongById = backup.songs.associateBy { it.id }
-            val linkResolver = BackupSongLinkResolver(currentSongs, resolvedBySongId)
+            val linkResolver = BackupSongLinkResolver(currentSongs, resolvedBySongId, songResolution.rejectedLocalIds)
 
             var eventPlan = ListenEventRestorePlanner.Plan(
                 toInsert = emptyList(), eventsInBackup = 0, restored = 0,

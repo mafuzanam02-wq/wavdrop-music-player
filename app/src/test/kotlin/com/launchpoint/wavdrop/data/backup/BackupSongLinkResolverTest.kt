@@ -39,11 +39,28 @@ class BackupSongLinkResolverTest {
     // ── URI fallback ──────────────────────────────────────────────────────────
 
     @Test
-    fun `falls back to exact URI when songId is not resolved`() {
+    fun `a bare URI never resolves a row when songId is not resolved (P5-AUDIT-11)`() {
+        // Previously pinned the opposite: a MediaStore URI alone attached rows to whatever file held it. The link resolver has no duration
+        // and cannot corroborate, so the URI step was removed; validated songId mapping and unique tags remain.
         val current = song(7L, uri = "content://media/7")
         val resolver = BackupSongLinkResolver(listOf(current), emptyMap())
-        val resolved = resolver.resolve(99L, "content://media/7", null, null, null)
-        assertEquals(7L, resolved?.id)
+        assertNull(resolver.resolve(99L, "content://media/7", null, null, null))
+    }
+
+    @Test
+    fun `tags fallback cannot reintroduce a URI-colliding candidate the matcher rejected`() {
+        val colliding = song(7L, uri = "content://media/7", title = "Song", artist = "Band", album = "LP")
+        val resolver = BackupSongLinkResolver(listOf(colliding), emptyMap(), mapOf(99L to setOf(7L)))
+        assertNull(resolver.resolve(99L, "content://media/7", "Song", "Band", "LP"))
+        // A different backup song with the same tags is unaffected by 99's rejection.
+        assertEquals(7L, resolver.resolve(100L, null, "Song", "Band", "LP")?.id)
+    }
+
+    @Test
+    fun `validated songId mapping still wins over rejection and URI`() {
+        val current = song(7L)
+        val resolver = BackupSongLinkResolver(listOf(current), mapOf(99L to current), mapOf(99L to setOf(7L)))
+        assertEquals(7L, resolver.resolve(99L, null, null, null, null)?.id)
     }
 
     // ── Tags fallback: unique only ────────────────────────────────────────────

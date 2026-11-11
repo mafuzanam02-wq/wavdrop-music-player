@@ -134,7 +134,7 @@ class MergeRestoreTest {
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
             songs           = listOf(
-                BackupSong(1L, "content://media/1", "T", "A", "B", 0L, 180_000L, 0L, 0, 0),
+                BackupSong(1L, "content://media/1", "Track", "A", "B", 0L, 180_000L, 0L, 0, 0),
             ),
             trackStats      = listOf(backupStats(songId = 1L, isFavorite = false)),
             importBaselines = emptyList(),
@@ -163,7 +163,7 @@ class MergeRestoreTest {
         val backup = WavdropBackup(
             exportedAt      = "2026-06-23T00:00:00Z",
             songs           = listOf(
-                BackupSong(1L, "content://media/1", "T", "A", "B", 0L, 180_000L, 0L, 0, 0),
+                BackupSong(1L, "content://media/1", "Track", "A", "B", 0L, 180_000L, 0L, 0, 0),
             ),
             trackStats      = listOf(backupStats(songId = 1L, isFavorite = true)),
             importBaselines = emptyList(),
