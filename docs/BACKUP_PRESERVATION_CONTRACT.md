@@ -135,6 +135,14 @@ Pending rows are **snapshot-scoped**: the origin key includes the backup fingerp
 same library create separate pending rows. This is intentional (no cross-snapshot identity claims) and
 tracked as a guardrail (TD-013).
 
+**Carried forward (P5-STATS-17B).** Pending rows ARE exported, as an optional versioned extension (format in
+`WAVDROP_DATA_FORMAT_SPEC.md` section 9), so a later backup does not lose quarantined history. This transports the
+quarantine; it does not change what it means: rows keep their original snapshot-scoped keys, are never merged
+across snapshots, never rematched, never made visible as live-song history, and no identity or event is
+invented. On restore, a stored row that is equivalent to an incoming one is a no-op; one that contradicts it
+fails the restore (rolled back in full) instead of being silently dropped. Existing pending rows are never
+deleted by any restore mode.
+
 ### 6.2 After 12 months unmatched - *Deferred*
 PENDING / GHOST -> ARCHIVED with Storage Management and Lifetime History surfaces. Not implemented.
 
@@ -205,7 +213,7 @@ event recorded between the snapshot and the transaction is not in the snapshot.
 | Events | Exported-source events (`wavdrop_playback`, `manual_restore`, `wavdrop_desktop_playback`) are replaced by the backup's set (matched ones restored, deduped inside the backup; none fabricated from counters). Events from non-exported sources are never deleted |
 | Playlists | WavDrop playlists replaced by the backup's (names, backup order, created/updated times, duplicate entries of the same backup song kept); local-only playlists removed; device/MediaStore playlists untouched |
 | Lyrics / baselines | Replaced by the backup's matched rows |
-| Unmatched data | Preserved in the pending/quarantine tables with the same origin-key idempotence as Merge. Existing pending rows are NOT deleted (they are not exported, so the snapshot could not restore them) |
+| Unmatched data | Preserved in the pending/quarantine tables with the same origin-key idempotence as Merge. Existing pending rows are NOT deleted. Since P5-STATS-17B the pending set is also exported (see below), so the safety snapshot carries it, and a backup's own pending-history section is added with the same equivalence-or-fail rule as Merge |
 | desktopOverlay | Stored verbatim from the backup; removed if the backup carries none. Overlay stats/events are not re-applied (the root is already authoritative) |
 | Preferences | The supported preference set, with unspecified (default) values resolved to defaults so Recovery is authoritative over a changed device. Scan mode and SAF folder grants are device state and are not restored. If auto-backup is restored without a local folder, the existing "Choose backup folder" prompt appears |
 

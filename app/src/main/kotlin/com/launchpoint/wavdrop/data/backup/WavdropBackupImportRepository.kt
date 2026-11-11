@@ -199,13 +199,28 @@ class WavdropBackupImportRepository @Inject constructor(
             )
             if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "mergeCheck done " +
                 "hasMergeable=${mergeCheck.hasMergeableData} t=${System.currentTimeMillis() - t0}ms")
+            // P5-STATS-17B: quarantined history carried by the backup. It never touches live data, but it IS persistent state, so a
+            // backup whose only news is pending history must not be treated as a no-op (that is exactly the "Backup B" case).
+            val pendingHistory = backup.pendingHistory?.takeIf { !it.isEmpty }
+            val pendingStore = PendingHistoryStore(pendingTrackDao)
             if (!mergeCheck.hasMergeableData) {
-                // No persistent state change is possible. Return without any writes.
+                val onlyPending = pendingHistory?.let { pendingStore.restore(it) }
+                if (onlyPending == null || onlyPending.rowsInserted == 0) {
+                    // No persistent state change was possible (or the pending history was already fully present). Nothing was written.
+                    return@withTransaction WavdropBackupImportApplyResult(
+                        matchedTracks   = match.matchedRows.size,
+                        unmatchedTracks = match.unmatchedCount,
+                        statsUpdated    = 0,
+                        isNoOp          = true,
+                    )
+                }
                 return@withTransaction WavdropBackupImportApplyResult(
                     matchedTracks   = match.matchedRows.size,
                     unmatchedTracks = match.unmatchedCount,
                     statsUpdated    = 0,
-                    isNoOp          = true,
+                    pendingTracksPreserved = onlyPending.tracksInserted,
+                    pendingEventsPreserved = onlyPending.eventsInserted,
+                    pendingPlaylistEntriesPreserved = onlyPending.playlistEntriesInserted,
                 )
             }
 
@@ -566,6 +581,9 @@ class WavdropBackupImportRepository @Inject constructor(
                 }
             }
 
+            // Carried-forward quarantine (P5-STATS-17B): additive, original keys, conflict => whole transaction rolls back.
+            val pendingRestored = pendingHistory?.let { pendingStore.restore(it) } ?: PendingHistoryRestoreResult()
+
             val favoritesInBackup = backup.trackStats.count { it.isFavorite }
             val matchedFavorites  = match.matchedRows.count { (_, stat) -> stat.isFavorite }
 
@@ -597,9 +615,9 @@ class WavdropBackupImportRepository @Inject constructor(
                     eventPlan.skippedUnmatched + desktopOverlayEventsSkippedUnmatched,
                 currentMonthEventsRestored    =
                     eventPlan.currentMonthRestored + desktopOverlayCurrentMonthEventsRestored,
-                pendingTracksPreserved        = pendingTracksInserted,
-                pendingEventsPreserved        = pendingEventsInserted,
-                pendingPlaylistEntriesPreserved = pendingPlaylistEntriesInserted,
+                pendingTracksPreserved        = pendingTracksInserted + pendingRestored.tracksInserted,
+                pendingEventsPreserved        = pendingEventsInserted + pendingRestored.eventsInserted,
+                pendingPlaylistEntriesPreserved = pendingPlaylistEntriesInserted + pendingRestored.playlistEntriesInserted,
             )
         }
 
@@ -768,6 +786,7 @@ class WavdropBackupImportRepository @Inject constructor(
             existingBaselines            = existingBaselines,
             existingLyrics               = existingLyrics,
             existingPlaylists            = existingPlaylists,
+            pendingHistoryHasNewData     = backup.pendingHistory?.let { PendingHistoryStore(pendingTrackDao).hasNewData(it) } == true,
         )
         if (BuildConfig.DEBUG) Log.d(TAG, "previewMerge: done hasMergeable=${result.hasMergeableData} " +
             "t=${System.currentTimeMillis() - t0}ms")

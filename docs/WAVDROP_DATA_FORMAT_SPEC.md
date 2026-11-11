@@ -239,7 +239,27 @@ General unknown-field preservation is *Deferred*.
 
 **Pending (quarantine) data - *Current.*** For Android-origin backups, backup history that matches no
 local song is retained in snapshot-scoped pending tables rather than discarded (semantics in the
-preservation contract). Pending rows are not exported as a separate section and are not rematched.
+preservation contract). Pending rows are never rematched. *(P5-STATS-17B)* They ARE carried forward by every
+later Android backup as an optional, additive extension, so a backup made after a restore still holds the
+quarantined history:
+
+- `.wdbk`: optional entries `extensions/pending-history.json` (header + tracks, stats, lyrics, baselines,
+  playlist entries) and `extensions/pending-history-events-NNNNNN.json` (events, chunked like live history).
+  Every entry is `required: false`, `sectionVersion: 1`, covered by the manifest's per-entry SHA-256. No
+  capability is declared. An older reader hashes and ignores them with its standard "optional data ... was
+  ignored" warning.
+- Legacy JSON: additive root key `pendingHistory` (`schemaVersion: 1`, records, inline `events`, and
+  `integrity: {v: 1, sha256}`). Older parsers ignore unknown roots. The digest detects damage; it is not
+  authentication.
+- Neither form is covered by the primary v2 semantic fingerprint. A section whose version this app does not
+  know is skipped with a warning (rejected only if declared required); a supported section that is malformed,
+  contradicts itself or fails its digest rejects the whole backup before anything is written.
+- Records keep their ORIGINAL `originKey` / `originFingerprint` and are linked by `originKey` (never a local
+  `pendingId`), so restoring them again, or from an overlapping backup, is idempotent. Nothing is invented: a
+  pending event carries no `eventId` or `source`; null `lastListenedAt` and null playlist provenance stay null.
+- The section describes the device's CURRENT pending set; it does not accumulate earlier generations. An older
+  app that reads and re-exports such a backup does not know the section, so it drops it.
+- Not covered (P5-STATS-17C): history for songs that were missing from the backup's own `songs` list.
 
 ## 10. Compatibility
 

@@ -252,7 +252,7 @@ class RecoveryRestoreRoomTest {
     @Test fun `a failure at any stage rolls every destructive change back`() = runBlocking {
         val stages = listOf(
             "planned", "statsCleared", "eventsCleared", "lyricsAndBaselinesCleared", "playlistsCleared",
-            "statsWritten", "eventsWritten", "lyricsAndBaselinesWritten", "playlistsWritten", "quarantineWritten",
+            "statsWritten", "eventsWritten", "lyricsAndBaselinesWritten", "playlistsWritten", "quarantineWritten", "pendingHistoryWritten",
         )
         val before = dump()
         for (stage in stages) {

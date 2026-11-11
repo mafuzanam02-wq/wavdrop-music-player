@@ -10,6 +10,7 @@ import com.launchpoint.wavdrop.BuildConfig
 import com.launchpoint.wavdrop.data.local.dao.ImportBaselineDao
 import com.launchpoint.wavdrop.data.local.dao.LyricsOverrideDao
 import com.launchpoint.wavdrop.data.local.dao.PendingBackupExtensionDao
+import com.launchpoint.wavdrop.data.local.dao.PendingTrackDao
 import com.launchpoint.wavdrop.data.local.dao.PlaylistDao
 import com.launchpoint.wavdrop.data.local.dao.SongDao
 import com.launchpoint.wavdrop.data.local.dao.TrackListenEventDao
@@ -68,6 +69,7 @@ class WavdropBackupRepository @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val trackListenEventDao: TrackListenEventDao,
     private val pendingBackupExtensionDao: PendingBackupExtensionDao,
+    private val pendingTrackDao: PendingTrackDao,
     private val appSettingsRepository: AppSettingsRepository,
     private val homeLayoutSettingsRepository: HomeLayoutSettingsRepository,
     private val libraryScanSettingsRepository: LibraryScanSettingsRepository,
@@ -119,6 +121,8 @@ class WavdropBackupRepository @Inject constructor(
             emptyList()
         }
         val boundary = trackListenEventDao.getMaxId()
+        // Pending/quarantine history: the small records now, events streamed later up to a boundary captured here (P5-STATS-17B).
+        val pendingHistory = PendingHistoryStore(pendingTrackDao).openExport()
         WdbkExportSnapshot(
             backupId = small.backupId!!,
             sourceInstallationId = small.sourceInstallationId!!,
@@ -144,6 +148,7 @@ class WavdropBackupRepository @Inject constructor(
                     map = { event -> event.toBackupListenEvent(songMap[event.songId]) },
                 )
             },
+            pendingHistory = pendingHistory,
         )
     }
 
@@ -157,7 +162,7 @@ class WavdropBackupRepository @Inject constructor(
                 trackListenEventDao.getAllSnapshot()
                     .filter { BackupEventExportRules.shouldExport(it.source) }
                     .map { event -> event.toBackupListenEvent(songById[event.songId]) }
-            }
+            }.copy(pendingHistory = PendingHistoryStore(pendingTrackDao).loadAll())
         )
     }
 

@@ -52,8 +52,9 @@ data class RecoveryImpact(
  * What is cleared is limited to what a Wavdrop backup exports (and so what the safety snapshot contains): track stats,
  * exported-source listen events, lyrics overrides, import baselines, WavDrop playlists and the desktopOverlay extension.
  * NEVER touched: the songs table / MediaStore / audio files, device-local TrackIdentity, listen events from non-exported
- * sources, and the pending/quarantine tables (their contents are not exported, so deleting them could not be undone from the
- * snapshot). Unmatched backup history is added to the quarantine with the same origin-key dedup Merge uses.
+ * sources, and the pending/quarantine tables (deleting them is not part of Recovery; the safety snapshot now carries them too,
+ * P5-STATS-17B). Unmatched backup history, and any pending history the backup itself carries, is added to the quarantine with the same
+ * origin-key dedup Merge uses.
  */
 @Singleton
 class RecoveryRestoreRepository @Inject constructor(
@@ -131,8 +132,19 @@ class RecoveryRestoreRepository @Inject constructor(
                 )
             }
 
-            val quarantined = writeQuarantine(quarantinePlan, fp, now)
+            val newlyQuarantined = writeQuarantine(quarantinePlan, fp, now)
             stage("quarantineWritten")
+
+            // P5-STATS-17B: quarantined history the backup carries forward. Additive and conflict-checked (original keys); existing
+            // pending rows are never deleted. A conflict throws, and the single transaction rolls back every write above.
+            val carried = backup.pendingHistory?.takeIf { !it.isEmpty }?.let { PendingHistoryStore(pendingTrackDao).restore(it) }
+                ?: PendingHistoryRestoreResult()
+            val quarantined = QuarantineCounts(
+                tracks = newlyQuarantined.tracks + carried.tracksInserted,
+                events = newlyQuarantined.events + carried.eventsInserted,
+                playlistEntries = newlyQuarantined.playlistEntries + carried.playlistEntriesInserted,
+            )
+            stage("pendingHistoryWritten")
 
             WavdropBackupImportApplyResult(
                 matchedTracks            = plan.matchedRows.size,

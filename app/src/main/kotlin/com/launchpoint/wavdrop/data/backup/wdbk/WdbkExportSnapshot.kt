@@ -7,6 +7,8 @@ import com.launchpoint.wavdrop.data.backup.BackupPlaylist
 import com.launchpoint.wavdrop.data.backup.BackupPreferences
 import com.launchpoint.wavdrop.data.backup.BackupSong
 import com.launchpoint.wavdrop.data.backup.BackupTrackStats
+import com.launchpoint.wavdrop.data.backup.PendingHistoryEventSource
+import com.launchpoint.wavdrop.data.backup.PendingHistoryExport
 import com.launchpoint.wavdrop.data.backup.WavdropBackup
 import com.launchpoint.wavdrop.data.backup.WavdropBackupIntegrityV2
 
@@ -43,6 +45,8 @@ class WdbkExportSnapshot(
     val playlists: List<BackupPlaylist>,
     val desktopOverlayRawJson: String?,
     val openEvents: () -> WdbkEventSource,
+    /** P5-STATS-17B: the current pending/quarantine history, or null when nothing is pending (no extension entries are then written). */
+    val pendingHistory: PendingHistoryExport? = null,
 ) {
     companion object {
         /**
@@ -69,6 +73,16 @@ class WdbkExportSnapshot(
                     WdbkEventSource { max ->
                         val to = minOf(next + max, sorted.size)
                         sorted.subList(next, to).toList().also { next = to }
+                    }
+                },
+                pendingHistory = backup.pendingHistory?.takeIf { !it.isEmpty }?.let { h ->
+                    val ordered = h.events.sortedBy { it.originFingerprint }
+                    PendingHistoryExport(h.core) {
+                        var next = 0
+                        PendingHistoryEventSource { max ->
+                            val to = minOf(next + max, ordered.size)
+                            ordered.subList(next, to).toList().also { next = to }
+                        }
                     }
                 },
             )

@@ -60,6 +60,8 @@ object WavdropBackupExporterV2 {
             backup.desktopOverlay?.rawJson?.let { raw ->
                 put("desktopOverlay", JSONObject(raw))
             }
+            // Additive optional root: older readers ignore unknown roots. Omitted entirely when nothing is pending.
+            backup.pendingHistory?.takeIf { !it.isEmpty }?.let { put("pendingHistory", PendingHistoryCodec.legacyObject(it)) }
         }.toString(2)
     }
 

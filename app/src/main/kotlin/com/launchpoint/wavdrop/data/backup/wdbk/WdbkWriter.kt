@@ -2,6 +2,7 @@ package com.launchpoint.wavdrop.data.backup.wdbk
 
 import com.launchpoint.wavdrop.data.backup.BackupFormatVersion
 import com.launchpoint.wavdrop.data.backup.BackupManifest
+import com.launchpoint.wavdrop.data.backup.PendingHistoryCodec
 import com.launchpoint.wavdrop.data.backup.WavdropBackup
 import com.launchpoint.wavdrop.data.backup.WavdropBackupExporterV2
 import com.launchpoint.wavdrop.data.backup.WavdropBackupIntegrityV2
@@ -144,6 +145,36 @@ class WdbkWriter(
                 WdbkLayout.DESKTOP_OVERLAY,
                 WdbkLayout.Section.DESKTOP_OVERLAY,
                 utf8(JSONObject(raw).toString()),
+                required = false,
+            )
+        }
+
+        // Pending/quarantine history (P5-STATS-17B): optional extension entries, NEVER required, so an older reader hashes and
+        // skips them. Events stream in bounded chunks exactly like live history; the main entry is written AFTER them because it
+        // declares the measured counts. Absent entirely when nothing is pending, so such a backup is byte-for-byte unchanged.
+        snapshot.pendingHistory?.takeIf { it.hasContent }?.let { pending ->
+            val events = pending.openEvents()
+            var pendingChunks = 0
+            var pendingEvents = 0L
+            while (true) {
+                val chunk = events.nextChunk(eventsPerChunk)
+                if (chunk.isEmpty()) break
+                check(chunk.size <= eventsPerChunk) { "Pending event source returned more than the requested chunk size" }
+                entry(
+                    path = WdbkLayout.pendingEventsPath(pendingChunks),
+                    section = WdbkLayout.Section.PENDING_HISTORY_EVENTS,
+                    bytes = utf8(PendingHistoryCodec.eventsArray(chunk).toString()),
+                    required = false,
+                    chunkIndex = pendingChunks,
+                    eventCount = chunk.size,
+                )
+                pendingEvents += chunk.size
+                pendingChunks++
+            }
+            entry(
+                WdbkLayout.PENDING_HISTORY,
+                WdbkLayout.Section.PENDING_HISTORY,
+                utf8(PendingHistoryCodec.coreObject(pending.core, pendingEvents, pendingChunks).toString()),
                 required = false,
             )
         }

@@ -88,6 +88,8 @@ object WdbkLayout {
     const val PREFERENCES = "sections/preferences.json"
     const val PLAYLISTS = "sections/playlists.json"
     const val DESKTOP_OVERLAY = "extensions/desktop-overlay.json"
+    /** P5-STATS-17B optional extension: the pending/quarantine history (main entry) plus its event chunk entries. */
+    const val PENDING_HISTORY = "extensions/pending-history.json"
     const val HISTORY_DIR = "history/"
 
     /** Logical section ids recorded in manifest entry descriptors. */
@@ -100,6 +102,8 @@ object WdbkLayout {
         const val PLAYLISTS = "playlists"
         const val LISTEN_EVENTS = "listenEvents"
         const val DESKTOP_OVERLAY = "desktopOverlay"
+        const val PENDING_HISTORY = "pendingHistory"
+        const val PENDING_HISTORY_EVENTS = "pendingHistoryEvents"
     }
 
     /** Sections that are always present, even when empty (`[]`). */
@@ -115,6 +119,7 @@ object WdbkLayout {
     val OPTIONAL_PRESENCE: Map<String, String> = linkedMapOf(
         Section.PREFERENCES to PREFERENCES,
         Section.DESKTOP_OVERLAY to DESKTOP_OVERLAY,
+        Section.PENDING_HISTORY to PENDING_HISTORY,
     )
 
     /** path → section for every entry name this reader understands (history chunks are matched separately). */
@@ -131,7 +136,16 @@ object WdbkLayout {
     fun historyChunkIndex(path: String): Int? =
         HISTORY_NAME.matchEntire(path)?.groupValues?.get(1)?.toIntOrNull()
 
-    private val SAFE_SEGMENT = Regex("""[A-Za-z0-9._-]+""")
+    private val PENDING_EVENTS_NAME = Regex("""extensions/pending-history-events-(\d{6})\.json""")
+
+    fun pendingEventsPath(chunkIndex: Int): String =
+        String.format(Locale.ROOT, "extensions/pending-history-events-%06d.json", chunkIndex)
+
+    /** The chunk index encoded in a canonical pending-history event entry name, or null when [path] is not one. */
+    fun pendingEventsChunkIndex(path: String): Int? =
+        PENDING_EVENTS_NAME.matchEntire(path)?.groupValues?.get(1)?.toIntOrNull()
+
+    private val SAFE_SEGMENT =Regex("""[A-Za-z0-9._-]+""")
 
     /**
      * Strict entry-name allow-list. Rejects empty names, absolute paths, backslashes, drive/URL colons,

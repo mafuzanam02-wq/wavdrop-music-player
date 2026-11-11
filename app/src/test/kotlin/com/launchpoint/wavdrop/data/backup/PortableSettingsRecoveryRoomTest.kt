@@ -74,7 +74,7 @@ class PortableSettingsRecoveryRoomTest {
 
     private fun exporter(d: Device) = WavdropBackupRepository(
         RuntimeEnvironment.getApplication(), d.store, db.songDao(), db.trackStatsDao(), db.importBaselineDao(), db.lyricsOverrideDao(),
-        db.playlistDao(), db.trackListenEventDao(), db.pendingBackupExtensionDao(), d.app, d.home, d.scan, d.resume,
+        db.playlistDao(), db.trackListenEventDao(), db.pendingBackupExtensionDao(), db.pendingTrackDao(), d.app, d.home, d.scan, d.resume,
     )
 
     private suspend fun setNonDefault(d: Device) {

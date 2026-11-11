@@ -17,6 +17,10 @@ import com.launchpoint.wavdrop.data.backup.WavdropBackupIntegrityV2
 import com.launchpoint.wavdrop.data.backup.WavdropBackupParser
 import com.launchpoint.wavdrop.data.backup.WavdropBackupSectionParser
 import com.launchpoint.wavdrop.data.backup.BackupParseException
+import com.launchpoint.wavdrop.data.backup.PendingHistoryBackup
+import com.launchpoint.wavdrop.data.backup.PendingHistoryCodec
+import com.launchpoint.wavdrop.data.backup.PendingHistoryEvent
+import com.launchpoint.wavdrop.data.backup.PendingHistoryLimits
 import java.io.BufferedInputStream
 import java.io.EOFException
 import java.io.FilterInputStream
@@ -83,6 +87,13 @@ class WdbkReader(private val limits: WdbkLimits = WdbkLimits.DEFAULT) {
         var preferences: BackupPreferences? = null
         var overlay: BackupDesktopOverlay? = null
         val chunks = HashMap<Int, List<BackupListenEvent>>()
+        /**
+         * Raw bytes of the pending-history extension entries (P5-STATS-17B). Deliberately NOT parsed while streaming: whether the
+         * section is a version this reader supports is only known from the manifest descriptor, and a newer-version entry must be
+         * skipped with a warning rather than rejected for failing to parse as version 1.
+         */
+        var pendingMainBytes: ByteArray? = null
+        val pendingChunkBytes = HashMap<Int, ByteArray>()
         /** First parse failure, deferred so an integrity mismatch is reported in preference to a parse error. */
         var deferredParseError: BackupParseException? = null
     }
@@ -141,6 +152,8 @@ class WdbkReader(private val limits: WdbkLimits = WdbkLimits.DEFAULT) {
     /** Routes a canonical entry to its section parser; failures are deferred (see [Collected.deferredParseError]). */
     private fun collect(name: String, bytes: ByteArray, into: Collected) {
         val section = WdbkLayout.KNOWN_FIXED_PATHS[name]
+        if (section == WdbkLayout.Section.PENDING_HISTORY) { into.pendingMainBytes = bytes; return }
+        WdbkLayout.pendingEventsChunkIndex(name)?.let { into.pendingChunkBytes[it] = bytes; return }
         val chunkIndex = if (section == null) WdbkLayout.historyChunkIndex(name) else null
         if (section == null && chunkIndex == null) return // unknown name: only hashed; must be declared optional later
         if (into.deferredParseError != null) return
@@ -228,10 +241,21 @@ class WdbkReader(private val limits: WdbkLimits = WdbkLimits.DEFAULT) {
         }
         var overlayUsable = false
         val chunkDescriptors = mutableListOf<WdbkEntryDescriptor>()
+        var pendingMain: WdbkEntryDescriptor? = null
+        val pendingChunkDescriptors = mutableListOf<WdbkEntryDescriptor>()
         for (d in declared.values) {
             val fixedSection = WdbkLayout.KNOWN_FIXED_PATHS[d.path]
             val historyIndex = if (fixedSection == null) WdbkLayout.historyChunkIndex(d.path) else null
+            val pendingEventsIndex = if (fixedSection == null && historyIndex == null) WdbkLayout.pendingEventsChunkIndex(d.path) else null
             when {
+                fixedSection == WdbkLayout.Section.PENDING_HISTORY -> {
+                    if (d.section != fixedSection) throw WdbkFormatException(DAMAGED)
+                    pendingMain = d
+                }
+                pendingEventsIndex != null -> {
+                    if (d.section != WdbkLayout.Section.PENDING_HISTORY_EVENTS || d.chunkIndex != pendingEventsIndex) throw WdbkFormatException(DAMAGED)
+                    pendingChunkDescriptors += d
+                }
                 fixedSection != null && fixedSection in WdbkLayout.ALWAYS_PRESENT -> Unit // checked above
                 fixedSection == WdbkLayout.Section.PREFERENCES -> checkKnownDescriptor(d, fixedSection, mustBeRequired = true)
                 fixedSection == WdbkLayout.Section.DESKTOP_OVERLAY -> {
@@ -267,6 +291,8 @@ class WdbkReader(private val limits: WdbkLimits = WdbkLimits.DEFAULT) {
 
         // Only now that integrity holds is a deferred parse error the right thing to report.
         collected.deferredParseError?.let { throw it }
+
+        val pendingHistory = readPendingHistory(pendingMain, pendingChunkDescriptors, collected, warnings)
 
         val events = ArrayList<BackupListenEvent>(sorted.sumOf { it.eventCount ?: 0 })
         for (d in sorted) {
@@ -307,13 +333,69 @@ class WdbkReader(private val limits: WdbkLimits = WdbkLimits.DEFAULT) {
             throw WdbkFormatException(WavdropBackupParser.IMPLAUSIBLE_STATS_ERROR)
         }
 
-        val backup = sealed.copy(desktopOverlay = if (overlayUsable) collected.overlay else null)
+        val backup = sealed.copy(desktopOverlay = if (overlayUsable) collected.overlay else null, pendingHistory = pendingHistory)
         return WavdropBackupImportResult(
             backup = backup,
             error = null,
             integrityStatus = BackupIntegrityStatus.VERIFIED,
             warnings = warnings,
         )
+    }
+
+    /**
+     * Pending-history extension (P5-STATS-17B). Physical integrity (length + SHA-256 of every entry) has ALREADY been verified by the
+     * caller. Here: version gate, then strict parse + cross-validation, all before anything can reach the database.
+     *  - not present                                   -> null (an older backup, or nothing was pending);
+     *  - present, newer / unknown version              -> skipped with ONE warning, unless declared required (then rejected);
+     *  - present, supported version                    -> must parse, be contiguous, match its declared counts and validate.
+     */
+    private fun readPendingHistory(
+        main: WdbkEntryDescriptor?,
+        chunkDescriptors: List<WdbkEntryDescriptor>,
+        collected: Collected,
+        warnings: MutableList<String>,
+    ): PendingHistoryBackup? {
+        if (main == null) {
+            if (chunkDescriptors.isNotEmpty()) throw WdbkFormatException(DAMAGED)   // event chunks without their header
+            return null
+        }
+        if (main.sectionVersion != WdbkContainerVersion.SECTION_VERSION ||
+            chunkDescriptors.any { it.sectionVersion != WdbkContainerVersion.SECTION_VERSION }
+        ) {
+            if (main.required || chunkDescriptors.any { it.required }) {
+                throw WdbkFormatException(WdbkManifest.NEWER_VERSION, WdbkFormatException.Kind.NEWER_VERSION)
+            }
+            warnings += "This backup contains quarantined history in a newer format that this version of Wavdrop cannot read; it was skipped."
+            return null
+        }
+
+        val rawMain = collected.pendingMainBytes ?: throw WdbkFormatException(DAMAGED)
+        val section = WavdropBackupSectionParser.parseJson(String(rawMain, Charsets.UTF_8)) as? Map<*, *>
+            ?: throw BackupParseException(PendingHistoryCodec.DAMAGED)
+        if (PendingHistoryCodec.schemaVersion(section) != PendingHistoryLimits.SCHEMA_VERSION.toLong()) {
+            throw BackupParseException(PendingHistoryCodec.DAMAGED)   // descriptor and body disagree
+        }
+        val parsed = PendingHistoryCodec.parseCore(section)
+
+        val ordered = chunkDescriptors.sortedBy { it.chunkIndex }
+        if (ordered.size != parsed.eventChunkCount) throw BackupParseException(PendingHistoryCodec.DAMAGED)
+        val events = ArrayList<PendingHistoryEvent>(minOf(parsed.eventCount, 1_000_000L).toInt())
+        ordered.forEachIndexed { expected, d ->
+            if (d.chunkIndex != expected) throw WdbkFormatException(DAMAGED)
+            val declaredCount = d.eventCount ?: throw WdbkFormatException(DAMAGED)
+            if (declaredCount < 1 || declaredCount > limits.maxEventsPerChunk) throw WdbkFormatException(DAMAGED)
+            val bytes = collected.pendingChunkBytes[expected] ?: throw WdbkFormatException(DAMAGED)
+            val list = WavdropBackupSectionParser.parseJson(String(bytes, Charsets.UTF_8)) as? List<*>
+                ?: throw BackupParseException(PendingHistoryCodec.DAMAGED)
+            val chunk = PendingHistoryCodec.parseEvents(list, limits.maxEventsPerChunk)
+            if (chunk.size != declaredCount) throw WdbkFormatException(WavdropBackupParser.INTEGRITY_ERROR, WdbkFormatException.Kind.INTEGRITY)
+            events.addAll(chunk)
+        }
+        if (events.size.toLong() != parsed.eventCount) throw WdbkFormatException(WavdropBackupParser.INTEGRITY_ERROR, WdbkFormatException.Kind.INTEGRITY)
+
+        val history = PendingHistoryBackup(parsed.core, events)
+        PendingHistoryCodec.validate(history)
+        return history
     }
 
     private fun checkKnownDescriptor(d: WdbkEntryDescriptor, expectedSection: String, mustBeRequired: Boolean) {

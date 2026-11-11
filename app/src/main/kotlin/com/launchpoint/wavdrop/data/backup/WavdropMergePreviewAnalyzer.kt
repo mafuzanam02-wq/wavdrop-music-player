@@ -57,7 +57,13 @@ object WavdropMergePreviewAnalyzer {
         existingLyrics: Map<ExistingLyricsKey, Long>,
         existingPlaylists: Map<String, Set<Long>>,
         precomputedDesktopOverlayPlan: DesktopOverlayRestorePlan? = null,
+        /**
+         * P5-STATS-17B: true when the backup's pending-history section would insert at least one quarantine row on this device
+         * (computed by the caller with the existing pending keys). It is never "live" data, only preserved history.
+         */
+        pendingHistoryHasNewData: Boolean = false,
     ): Result {
+        val hasPendingHistory = backup.pendingHistory?.isEmpty == false
         // Empty backup: nothing at all (no data, no preferences).
         val hasAnyContent = backup.trackStats.isNotEmpty() ||
             backup.listenEvents.isNotEmpty() ||
@@ -65,7 +71,8 @@ object WavdropMergePreviewAnalyzer {
             backup.lyricsOverrides.isNotEmpty() ||
             backup.playlists.isNotEmpty() ||
             backup.preferences != null ||
-            backup.desktopOverlay != null
+            backup.desktopOverlay != null ||
+            hasPendingHistory
         if (!hasAnyContent) {
             return noOp("This backup contains no data to import.")
         }
@@ -76,7 +83,8 @@ object WavdropMergePreviewAnalyzer {
             backup.importBaselines.isNotEmpty() ||
             backup.lyricsOverrides.isNotEmpty() ||
             backup.playlists.isNotEmpty() ||
-            backup.desktopOverlay != null
+            backup.desktopOverlay != null ||
+            hasPendingHistory
         if (!hasLibraryData) {
             return noOp(
                 "This backup contains settings, but settings are not changed during a merge. " +
@@ -230,6 +238,9 @@ object WavdropMergePreviewAnalyzer {
                 alreadyPendingTrackCount = quarantinePlan.alreadyPresentCount,
             )
         }
+
+        // Carried-forward quarantine that is not yet stored here is a write too.
+        if (pendingHistoryHasNewData) return mergeable()
 
         // Nothing produced a write.
         return noOp(

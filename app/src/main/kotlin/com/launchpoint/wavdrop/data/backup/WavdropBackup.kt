@@ -284,4 +284,10 @@ data class WavdropBackup(
      * so Android can validate sealed roots first, then import/preserve portable Desktop activity.
      */
     val desktopOverlay: BackupDesktopOverlay? = null,
+    /**
+     * Optional V2 extension (P5-STATS-17B): the pending/quarantine history carried forward from earlier restores. Like
+     * [desktopOverlay] it is outside the Android V2 fingerprint; its own integrity is the `.wdbk` per-entry SHA-256 or, in
+     * legacy JSON, a digest inside the section. Null / empty = nothing pending (the section is then not written at all).
+     */
+    val pendingHistory: PendingHistoryBackup? = null,
 )

@@ -342,17 +342,27 @@ object WavdropBackupParser {
                 return failure(IMPLAUSIBLE_STATS_ERROR)
             }
 
+            // ── 9. Pending-history extension (P5-STATS-17B) ───────────────────
+            // Outside the sealed fingerprint, so it carries its own digest. A malformed or damaged supported section
+            // rejects the backup (nothing partial); a well-formed section of a newer version is skipped with a warning.
+            val warnings = mutableListOf<String>()
+            var pendingHistory: PendingHistoryBackup? = null
+            if (root.containsKey("pendingHistory")) {
+                when (val parsed = PendingHistoryCodec.parseLegacy(root["pendingHistory"])) {
+                    is PendingHistoryCodec.LegacyParse.Supported -> pendingHistory = parsed.history
+                    is PendingHistoryCodec.LegacyParse.UnsupportedVersion ->
+                        warnings += "This backup contains quarantined history in a newer format that this version of Wavdrop cannot read; it was skipped."
+                }
+            }
+
             val backup = sealedBackup.copy(
                 desktopOverlay = desktopOverlayRoot?.parseDesktopOverlay(),
+                pendingHistory = pendingHistory,
             )
 
-            val warnings = if (unknownOptional.isNotEmpty()) {
-                listOf(
-                    "This backup includes optional features not supported by this version of " +
-                        "Wavdrop. Some data may not be fully restored: ${unknownOptional.joinToString()}."
-                )
-            } else {
-                emptyList()
+            if (unknownOptional.isNotEmpty()) {
+                warnings += "This backup includes optional features not supported by this version of " +
+                    "Wavdrop. Some data may not be fully restored: ${unknownOptional.joinToString()}."
             }
 
             success(backup, BackupIntegrityStatus.VERIFIED, warnings)
