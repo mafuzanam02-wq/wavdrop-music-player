@@ -168,6 +168,8 @@ object QuarantinePlanner {
             }
         }
 
+        val backupSongById = backup.songs.associateBy { it.id }
+
         // Collect backup songs that have any data and were NOT resolved.
         val unmatchedSongIds = backup.songs
             .map { it.id }
@@ -176,12 +178,26 @@ object QuarantinePlanner {
                     hasAnyData(id, statsBySongId, eventsBySongId, lyricsBySongId, baselinesBySongId, playlistEntriesBySongId)
             }
 
-        val backupSongById = backup.songs.associateBy { it.id }
+        // P5-STATS-17C: DESCRIPTOR-LESS ORPHANS. A record may reference a backup song id that has no entry in the backup's own `songs`
+        // list (a v1/legacy export that dropped the song, or history whose song row was already gone when the backup was written).
+        // Such an id can never be resolved to a live song (resolution starts from a descriptor, and an id alone is not identity), so it
+        // can never be restored live; before this it was simply dropped. It is real history, so it is quarantined under the same
+        // snapshot-scoped origin key, with metadata left unknown. Sorted so the plan is deterministic.
+        val orphanSongIds = (statsBySongId.keys + eventsBySongId.keys + lyricsBySongId.keys + baselinesBySongId.keys +
+            playlistEntriesBySongId.keys)
+            .filter { id ->
+                id !in backupSongById &&
+                    hasAnyData(id, statsBySongId, eventsBySongId, lyricsBySongId, baselinesBySongId, playlistEntriesBySongId)
+            }
+            .distinct()
+            .sorted()
+
+        val orphanHints = orphanHints(backup, orphanSongIds.toHashSet())
 
         val newCandidates = mutableListOf<TrackCandidate>()
         var alreadyPresentCount = 0
 
-        for (songId in unmatchedSongIds) {
+        for (songId in unmatchedSongIds + orphanSongIds) {
             val key = originKey(fp, songId)
             if (key in existingOriginKeys) {
                 alreadyPresentCount++
@@ -201,16 +217,20 @@ object QuarantinePlanner {
 
             val plEntries = playlistEntriesBySongId[songId] ?: emptyList()
 
+            // Descriptor-less orphan: "" / 0 / null mean UNKNOWN, never an actual title, duration or path. The only values filled in
+            // are ones the backup itself states on the orphan's own records, and only when every such record agrees.
+            val hint = if (song == null) orphanHints[songId] else null
+
             newCandidates += TrackCandidate(
                 originKey        = key,
                 backupSongId     = songId,
-                title            = song?.title ?: "",
-                artist           = song?.artist ?: "",
-                album            = song?.album ?: "",
+                title            = song?.title ?: hint?.title ?: "",
+                artist           = song?.artist ?: hint?.artist ?: "",
+                album            = song?.album ?: hint?.album ?: "",
                 duration         = song?.duration ?: 0L,
                 trackNumber      = song?.trackNumber ?: 0,
                 year             = song?.year ?: 0,
-                sourceUri        = song?.uri,
+                sourceUri        = song?.uri ?: hint?.uri,
                 sourceFolderPath = song?.folderPath,
                 stats            = statsBySongId[songId],
                 events           = events,
@@ -221,6 +241,51 @@ object QuarantinePlanner {
         }
 
         return Plan(newCandidates = newCandidates, alreadyPresentCount = alreadyPresentCount)
+    }
+
+    private data class OrphanHint(val title: String?, val artist: String?, val album: String?, val uri: String?)
+
+    /** Distinct values seen for one orphan; only whether there is exactly one matters, so it stops growing at two. */
+    private class Seen<T> {
+        var first: T? = null
+        var conflicted = false
+        fun add(v: T) {
+            val f = first
+            if (f == null) first = v else if (f != v) conflicted = true
+        }
+        fun unanimous(): T? = if (conflicted) null else first
+    }
+
+    /**
+     * Descriptive fields stated by each orphan's own records (events and playlist entries carry title/artist/album; stats, lyrics,
+     * events and playlist entries carry a content URI). Each field is used only if at least one record states it and ALL records that
+     * state it agree; otherwise it stays unknown. Nothing is guessed, and the result depends only on the backup, so repeats are
+     * idempotent.
+     *
+     * One pass over each record list, touching only records of an orphan id: work is linear in the number of records, not
+     * orphans x records. Title, artist and album are only meaningful together, so the whole triple must be unanimous
+     * (all-blank triples state nothing and are ignored; blank URIs likewise).
+     */
+    private fun orphanHints(backup: WavdropBackup, orphanIds: Set<Long>): Map<Long, OrphanHint> {
+        if (orphanIds.isEmpty()) return emptyMap()
+        val tags = HashMap<Long, Seen<Triple<String, String, String>>>()
+        val uris = HashMap<Long, Seen<String>>()
+        fun tag(id: Long, t: String, a: String, al: String) {
+            if (id !in orphanIds) return
+            if (t.isNotBlank() || a.isNotBlank() || al.isNotBlank()) tags.getOrPut(id) { Seen() }.add(Triple(t, a, al))
+        }
+        fun uri(id: Long, u: String) {
+            if (id !in orphanIds) return
+            if (u.isNotBlank()) uris.getOrPut(id) { Seen() }.add(u)
+        }
+        for (s in backup.trackStats) uri(s.songId, s.contentUri)
+        for (l in backup.lyricsOverrides) uri(l.songId, l.contentUri)
+        for (e in backup.listenEvents) { tag(e.songId, e.title, e.artist, e.album); uri(e.songId, e.contentUri) }
+        for (p in backup.playlists) for (s in p.songs) { tag(s.songId, s.title, s.artist, s.album); uri(s.songId, s.contentUri) }
+        return orphanIds.associateWith { id ->
+            val triple = tags[id]?.unanimous()
+            OrphanHint(triple?.first, triple?.second, triple?.third, uris[id]?.unanimous())
+        }
     }
 
     private fun hasAnyData(

@@ -239,7 +239,10 @@ General unknown-field preservation is *Deferred*.
 
 **Pending (quarantine) data - *Current.*** For Android-origin backups, backup history that matches no
 local song is retained in snapshot-scoped pending tables rather than discarded (semantics in the
-preservation contract). Pending rows are never rematched. *(P5-STATS-17B)* They ARE carried forward by every
+preservation contract). Pending rows are never rematched. *(P5-STATS-17C)* This includes records whose
+`songId` has no entry in the backup's own `songs` list (descriptor-less orphans): they get a pending track with
+the usual `<fingerprint>|<songId>` origin key and unknown metadata (`""`/0/null = unknown, not a real value).
+No new section or format field is involved. *(P5-STATS-17B)* They ARE carried forward by every
 later Android backup as an optional, additive extension, so a backup made after a restore still holds the
 quarantined history:
 

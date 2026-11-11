@@ -143,6 +143,20 @@ invented. On restore, a stored row that is equivalent to an incoming one is a no
 fails the restore (rolled back in full) instead of being silently dropped. Existing pending rows are never
 deleted by any restore mode.
 
+**Three different "unmatched" cases (P5-STATS-17C).** They must not be conflated:
+1. *A song absent from the destination library*: the backup describes the song (it is in `songs`) but no live song
+   safely matches it. Quarantined with its descriptor.
+2. *A song absent from the backup's own `songs` list*: statistics, events, lyrics, baselines or playlist entries refer
+   to a backup song id that has no descriptor. Quarantined under the same snapshot-scoped origin key
+   (`<fingerprint>|<songId>`). Unknown metadata is stored as empty / 0 / null, which means UNKNOWN and is never a
+   real title or duration. Title, artist, album and URI are filled only when the orphan's own records state them and
+   all agree; nothing is guessed. No stats row or event is ever fabricated, and a numeric id alone never touches a
+   live song.
+3. *A historical record with no reliable song identity*: what case 2 produces. It is preserved as archive data only.
+   It cannot be automatically matched to a song later (an id is not identity; the no-rematching rule stands).
+
+Pending events do not store the original `eventId`, so it is not retained for any quarantined event.
+
 ### 6.2 After 12 months unmatched - *Deferred*
 PENDING / GHOST -> ARCHIVED with Storage Management and Lifetime History surfaces. Not implemented.
 
