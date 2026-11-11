@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Full Player layout (wavdrop_widget_tall.xml): 4×2 default placement, minH 115–299dp.
-     Vertically centred content block. 48dp minimum touch targets on all controls. -->
+<!-- Tall (wavdrop_widget_tall): 200dp <= height < 330dp (e.g. 4x3, 4x4). Larger artwork beside the title (up to two lines) and artist,
+     with a control row underneath. FIXED height 12+104+10+56+12 = 194dp: the info row is a fixed 104dp so a large font scale clips
+     the text (centred), never the controls. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_body"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/wavdrop_widget_loading_background"
+    android:clipToOutline="true"
     android:clickable="true"
     android:focusable="true">
 
-    <!-- Artwork atmosphere background -->
     <ImageView
         android:id="@+id/widget_background"
         android:layout_width="match_parent"
@@ -18,15 +19,13 @@
         android:visibility="gone"
         android:contentDescription="@null" />
 
-    <!-- Dark scrim over artwork -->
     <TextView
         android:id="@+id/widget_scrim"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#CC16131F"
+        android:background="#D916131F"
         android:visibility="gone" />
 
-    <!-- Content block — vertically centred -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -34,37 +33,38 @@
         android:gravity="center_vertical"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
-        android:paddingTop="14dp"
-        android:paddingBottom="14dp">
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp">
 
-        <!-- Track info row: artwork beside title/artist -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="104dp"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
             <ImageView
                 android:id="@+id/widget_artwork"
-                android:layout_width="76dp"
-                android:layout_height="76dp"
+                android:layout_width="104dp"
+                android:layout_height="104dp"
                 android:scaleType="centerCrop"
-                android:background="#FF2A2536"
+                android:background="@drawable/widget_artwork_bg"
+                android:clipToOutline="true"
                 android:contentDescription="@string/widget_artwork_desc" />
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:orientation="vertical"
+                android:gravity="center_vertical"
                 android:layout_marginStart="14dp">
 
                 <TextView
                     android:id="@+id/widget_title"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textColor="#EDEAF4"
-                    android:textSize="16sp"
+                    android:textColor="#F2EFF8"
+                    android:textSize="17sp"
                     android:textStyle="bold"
                     android:maxLines="2"
                     android:ellipsize="end" />
@@ -74,8 +74,8 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="3dp"
-                    android:textColor="#A9A3B8"
-                    android:textSize="13sp"
+                    android:textColor="#B5AFC6"
+                    android:textSize="14sp"
                     android:maxLines="1"
                     android:ellipsize="end" />
 
@@ -83,46 +83,57 @@
 
         </LinearLayout>
 
-        <!-- Controls row — 48dp minimum touch target on all buttons.
-             Padding keeps the icon glyph visually restrained. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginTop="8dp">
+            android:gravity="center_vertical"
+            android:layout_marginTop="10dp">
 
-            <!-- Previous: 48×48dp container, ~24dp effective glyph area -->
-            <ImageButton
-                android:id="@+id/widget_previous"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@drawable/widget_ic_skip_previous"
-                android:background="@android:color/transparent"
-                android:padding="12dp"
-                android:contentDescription="@string/widget_prev_desc" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+                <ImageButton
+                    android:id="@+id/widget_previous"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_ic_skip_previous"
+                    android:background="@android:color/transparent"
+                    android:padding="12dp"
+                    android:contentDescription="@string/widget_prev_desc" />
+            </FrameLayout>
 
-            <!-- Play/Pause: 56×56dp container, ~28dp effective glyph area -->
-            <ImageButton
-                android:id="@+id/widget_play_pause"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="16dp"
-                android:src="@drawable/widget_ic_play"
-                android:background="@drawable/widget_btn_idle_bg"
-                android:padding="14dp"
-                android:contentDescription="@string/widget_play_pause_desc" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+                <ImageButton
+                    android:id="@+id/widget_play_pause"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_ic_play"
+                    android:background="@drawable/widget_btn_idle_bg"
+                    android:padding="14dp"
+                    android:contentDescription="@string/widget_play_pause_desc" />
+            </FrameLayout>
 
-            <!-- Next: 48×48dp container, ~24dp effective glyph area -->
-            <ImageButton
-                android:id="@+id/widget_next"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="16dp"
-                android:src="@drawable/widget_ic_skip_next"
-                android:background="@android:color/transparent"
-                android:padding="12dp"
-                android:contentDescription="@string/widget_next_desc" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+                <ImageButton
+                    android:id="@+id/widget_next"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_ic_skip_next"
+                    android:background="@android:color/transparent"
+                    android:padding="12dp"
+                    android:contentDescription="@string/widget_next_desc" />
+            </FrameLayout>
 
         </LinearLayout>
 

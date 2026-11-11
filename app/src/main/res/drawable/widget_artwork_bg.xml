@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rounded surface behind the widget artwork. With android:clipToOutline on the ImageView it also rounds the image itself. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FF2A2536" />
+    <corners android:radius="14dp" />
+</shape>

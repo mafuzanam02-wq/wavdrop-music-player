@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Missing-artwork placeholder: dark tile with a music note. Square, so it scales cleanly into every artwork slot. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <path
+        android:fillColor="#FF2A2536"
+        android:pathData="M0,0h96v96h-96z" />
+    <path
+        android:fillColor="#FF7C6FA8"
+        android:pathData="M54,26v27.3c-1.8,-1.1 -4,-1.7 -6.5,-1.7c-6.1,0 -11,3.9 -11,8.7s4.9,8.7 11,8.7s11,-3.9 11,-8.7V38h12V26H54z" />
+</vector>
