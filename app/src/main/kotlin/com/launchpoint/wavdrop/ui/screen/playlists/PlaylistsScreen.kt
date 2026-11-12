@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
+import com.launchpoint.wavdrop.ui.components.DestructiveConfirmDialog
+import com.launchpoint.wavdrop.ui.components.DestructiveDialogCopy
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
@@ -242,19 +244,15 @@ fun PlaylistsScreen(
 
     // ── Delete confirmation ───────────────────────────────────────────────────
     deleteTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title   = { Text("Delete playlist") },
-            text    = { Text("Delete \"${target.playlist.name}\"? This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deletePlaylist(target.playlist.id)
-                    deleteTarget = null
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+        DestructiveConfirmDialog(
+            title        = DestructiveDialogCopy.DELETE_PLAYLIST_TITLE,
+            message      = DestructiveDialogCopy.deletePlaylistBody(target.playlist.name),
+            confirmLabel = DestructiveDialogCopy.DELETE_PLAYLIST_CONFIRM,
+            onConfirm    = {
+                viewModel.deletePlaylist(target.playlist.id)
+                deleteTarget = null
             },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
-            },
+            onDismiss    = { deleteTarget = null },
         )
     }
 }

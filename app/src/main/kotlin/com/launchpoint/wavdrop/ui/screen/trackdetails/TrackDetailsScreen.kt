@@ -71,6 +71,8 @@ import com.launchpoint.wavdrop.data.model.TrackStats
 import com.launchpoint.wavdrop.data.stats.ListeningTimeRules
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.DestructiveConfirmDialog
+import com.launchpoint.wavdrop.ui.components.DestructiveDialogCopy
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
 import com.launchpoint.wavdrop.ui.components.metadataNavigationKey
 import com.launchpoint.wavdrop.ui.components.shareSong
@@ -94,6 +96,7 @@ fun TrackDetailsScreen(
     var showAddToPlaylist    by remember { mutableStateOf(false) }
     var showLyricsEditor     by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showClearLyricsConfirmation by remember { mutableStateOf(false) }
     val snackbarHostState    = remember { SnackbarHostState() }
     val coroutineScope       = rememberCoroutineScope()
     val context              = LocalContext.current
@@ -175,7 +178,7 @@ fun TrackDetailsScreen(
                     { showDeleteConfirmation = true }
                 } else null,
                 onEditLyrics      = { showLyricsEditor = true },
-                onClearLyrics     = { lyricsViewModel.clearCustomLyrics() },
+                onClearLyrics     = { showClearLyricsConfirmation = true },
                 modifier          = Modifier.padding(innerPadding),
             )
         }
@@ -216,12 +219,22 @@ fun TrackDetailsScreen(
                     showLyricsEditor = false
                 }
             },
-            onClear = {
-                lyricsViewModel.clearCustomLyrics {
-                    showLyricsEditor = false
-                }
-            },
+            onClear = { showClearLyricsConfirmation = true },
             onDismiss = { showLyricsEditor = false },
+        )
+    }
+
+    // Both Clear entry points (header and editor) ask first; Cancel/Back leave the saved lyrics and any editor draft untouched.
+    if (showClearLyricsConfirmation) {
+        DestructiveConfirmDialog(
+            title        = DestructiveDialogCopy.REMOVE_LYRICS_TITLE,
+            message      = DestructiveDialogCopy.REMOVE_LYRICS_BODY,
+            confirmLabel = DestructiveDialogCopy.REMOVE_LYRICS_CONFIRM,
+            onConfirm    = {
+                showClearLyricsConfirmation = false
+                lyricsViewModel.clearCustomLyrics { showLyricsEditor = false }
+            },
+            onDismiss    = { showClearLyricsConfirmation = false },
         )
     }
 
@@ -516,20 +529,12 @@ private fun DeleteConfirmationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title            = { Text("Delete from device") },
-        text             = {
-            Text("Delete \"$songTitle\"? This removes the audio file from your device. This cannot be undone.")
-        },
-        confirmButton    = {
-            TextButton(onClick = onConfirm) {
-                Text("Delete from device", color = MaterialTheme.colorScheme.error)
-            }
-        },
-        dismissButton    = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
+    DestructiveConfirmDialog(
+        title        = DestructiveDialogCopy.DELETE_TRACK_TITLE,
+        message      = DestructiveDialogCopy.deleteTrackBody(songTitle),
+        confirmLabel = DestructiveDialogCopy.DELETE_TRACK_CONFIRM,
+        onConfirm    = onConfirm,
+        onDismiss    = onDismiss,
     )
 }
 

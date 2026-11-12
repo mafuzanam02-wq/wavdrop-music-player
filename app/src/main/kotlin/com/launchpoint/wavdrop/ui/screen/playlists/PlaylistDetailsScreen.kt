@@ -86,6 +86,8 @@ import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.DestructiveConfirmDialog
+import com.launchpoint.wavdrop.ui.components.DestructiveDialogCopy
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
@@ -675,18 +677,12 @@ fun PlaylistDetailsScreen(
 
     // ── Delete confirmation ───────────────────────────────────────────────────
     if (showDelete) {
-        AlertDialog(
-            onDismissRequest = { showDelete = false },
-            title   = { Text("Delete playlist") },
-            text    = { Text("Delete \"$playlistName\"? This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deletePlaylist { onNavigateBack() }
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDelete = false }) { Text("Cancel") }
-            },
+        DestructiveConfirmDialog(
+            title        = DestructiveDialogCopy.DELETE_PLAYLIST_TITLE,
+            message      = DestructiveDialogCopy.deletePlaylistBody(playlistName),
+            confirmLabel = DestructiveDialogCopy.DELETE_PLAYLIST_CONFIRM,
+            onConfirm    = { viewModel.deletePlaylist { onNavigateBack() } },
+            onDismiss    = { showDelete = false },
         )
     }
 }
