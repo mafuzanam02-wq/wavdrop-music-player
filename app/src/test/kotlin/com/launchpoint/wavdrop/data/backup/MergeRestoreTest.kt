@@ -185,12 +185,15 @@ class MergeRestoreTest {
             eventType = "PLAY", occurredAt = 1_000_000L,
             listenedMs = 30_000L, durationMs = 180_000L, source = "wavdrop_playback",
         )
-        val existing = setOf("1|1000000|PLAY|30000")
+        // One legacy (null-id) row already stored with the same identity: the single incoming record is accounted for.
+        val existing = ListenEventRestorePlanner.ExistingListenEvents(
+            legacyCounts = mapOf(ListenEventRestorePlanner.legacyKey(1L, 1_000_000L, "PLAY", 30_000L, 180_000L) to 1),
+        )
 
         val plan = ListenEventRestorePlanner.plan(
             events               = listOf(event),
             resolveSong          = { song(it.songId, it.contentUri) },
-            existingFingerprints = existing,
+            existing             = existing,
         )
 
         assertEquals(0, plan.restored)
@@ -210,7 +213,6 @@ class MergeRestoreTest {
         val plan = ListenEventRestorePlanner.plan(
             events               = listOf(event),
             resolveSong          = { song(it.songId, it.contentUri) },
-            existingFingerprints = emptySet(),
         )
 
         assertEquals(1, plan.restored)

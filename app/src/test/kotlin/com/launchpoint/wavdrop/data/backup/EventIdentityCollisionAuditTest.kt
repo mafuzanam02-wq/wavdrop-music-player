@@ -32,9 +32,9 @@ import java.util.UUID
 /**
  * P5-STATS-18A - audit of listening-event identity; updated by P5-STATS-18C.
  *
- * 18C fixed the QUARANTINE path: cases A, B (quarantine part), D, F and G now assert the corrected behaviour. The LIVE restore path
- * (ListenEventRestorePlanner) is deliberately unchanged, so the live part of case B still pins the remaining defect and is EXPECTED
- * to fail when a later slice fixes it.
+ * 18C fixed the QUARANTINE path: cases A, B (quarantine part), D, F and G assert the corrected behaviour. 18D fixed the LIVE restore
+ * path (ListenEventRestorePlanner), so the live part of case B now asserts both ids are restored; the dedicated live-identity
+ * scenarios are in LiveEventIdentityRoomTest.
  *
  * Mechanism under test: `QuarantinePlanner.eventFingerprint` = snapshotFp|songId|occurredAt|eventType|listenedMs and
  * `pending_listen_events.originFingerprint` is UNIQUE with INSERT OR IGNORE, while `durationMs`, `eventId` and any occurrence index are
@@ -129,20 +129,20 @@ class EventIdentityCollisionAuditTest {
 
     // ── Case B: different event ids ───────────────────────────────────────────
 
-    @Test fun `B - distinct non-null event ids are both quarantined (fixed in 18C) but still collapse in live restore (CURRENT DEFECT)`() = runBlocking {
+    @Test fun `B - distinct non-null event ids are both quarantined (18C) and both restored live (18D)`() = runBlocking {
         val events = listOf(ev(1, "id-one"), ev(1, "id-two"))
         for (mode in Mode.values()) {
             val n = Node()
             n.restore(parse(Fmt.JSON, serialize(Fmt.JSON, backup(events))), mode)
             assertEquals("$mode: quarantine keeps both distinct event ids", 2, n.pendingEvents())
         }
-        // LIVE restore (song 5 is in the library): the live planner uses the same four-field fingerprint, so it collapses too.
+        // LIVE restore (song 5 is in the library): P5-STATS-18D - the stable id is the identity, so both distinct ids are restored.
         val live = backup(listOf(ev(5, "id-one"), ev(5, "id-two"))).copy(songs = listOf(backupSong(5)), trackStats = listOf(backupStats(5, 2, 0, false)))
         for (mode in Mode.values()) {
             val n = Node()
             val r = n.restore(parse(Fmt.JSON, serialize(Fmt.JSON, live)), mode)
-            assertEquals("$mode live: one of two distinct event ids is skipped as a duplicate", 1, n.db.trackListenEventDao().getAllSnapshot().size)
-            assertEquals(1, r.eventsSkippedDuplicate)
+            assertEquals("$mode live: both distinct event ids are restored", 2, n.db.trackListenEventDao().getAllSnapshot().size)
+            assertEquals(0, r.eventsSkippedDuplicate)
         }
     }
 

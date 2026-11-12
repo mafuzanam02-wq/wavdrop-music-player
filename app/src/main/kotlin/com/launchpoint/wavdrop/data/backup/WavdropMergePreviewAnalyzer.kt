@@ -61,6 +61,11 @@ object WavdropMergePreviewAnalyzer {
         existingEventFingerprints: Set<String>,
         /** Existing local non-null eventIds — keeps preview event-dedup aligned with apply (P2-B1). */
         existingEventIds: Set<String> = emptySet(),
+        /**
+         * Identity-aware existing events for the ROOT event plan (P5-STATS-18D): the same structure apply uses, so preview and apply
+         * decide identically. [existingEventFingerprints]/[existingEventIds] remain for the Desktop overlay planner only.
+         */
+        existingListenEvents: ListenEventRestorePlanner.ExistingListenEvents = ListenEventRestorePlanner.ExistingListenEvents.EMPTY,
         existingBaselines: List<ImportBaselineEntity>,
         existingLyrics: Map<ExistingLyricsKey, Long>,
         existingPlaylists: Map<String, Set<Long>>,
@@ -146,8 +151,7 @@ object WavdropMergePreviewAnalyzer {
                         album        = event.album,
                     )
                 },
-                existingFingerprints = existingEventFingerprints,
-                existingEventIds     = existingEventIds,
+                existing             = existingListenEvents,
             )
             if (plan.restored > 0) return mergeable()
         }

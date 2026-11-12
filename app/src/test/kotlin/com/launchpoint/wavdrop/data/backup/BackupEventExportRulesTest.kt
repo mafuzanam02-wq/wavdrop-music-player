@@ -73,7 +73,6 @@ class BackupEventExportRulesTest {
         val restoreB = ListenEventRestorePlanner.plan(
             events = gen1Events,
             resolveSong = { deviceBSong },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -102,7 +101,6 @@ class BackupEventExportRulesTest {
         val restoreC = ListenEventRestorePlanner.plan(
             events = gen2Events,
             resolveSong = { deviceCSong },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -117,18 +115,15 @@ class BackupEventExportRulesTest {
         val first = ListenEventRestorePlanner.plan(
             events = listOf(backupEvent(songId = 1L)),
             resolveSong = { local },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
-        val existing = first.toInsert
-            .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
-            .toSet()
+        val existing = ListenEventRestorePlanner.ExistingListenEvents.from(first.toInsert)
 
         val second = ListenEventRestorePlanner.plan(
             events = listOf(backupEvent(songId = 1L)),
             resolveSong = { local },
-            existingFingerprints = existing,
+            existing = existing,
             nowMs = nowMs,
             zone = utc,
         )

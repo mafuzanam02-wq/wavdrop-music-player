@@ -194,15 +194,24 @@ Exportable listen-event sources are `wavdrop_playback`, `manual_restore`, and `w
 
 Restored/imported listen-event idempotency (eventId-aware):
 
-- If the incoming event has a non-null `eventId`, it is deduplicated against existing local non-null
-  `eventId`s and against earlier events in the same batch. `eventId` is carried through to the stored row.
-- If the incoming event has no `eventId` (legacy), the legacy identity concept applies:
+- If the incoming event has a non-null `eventId`, the id is its identity (P5-STATS-18D): the same id with the same
+  payload is a duplicate; the same id with a different payload (song, timestamp, type, listened time or duration) is a
+  reported conflict that is skipped and never overwrites; different ids are different events even with identical
+  metadata. `eventId` is carried through to the stored row. The Android live restore applies this rule; Desktop
+  overlay events keep their own planner.
+- If the incoming event has no `eventId` (legacy), source multiplicity applies. Records are grouped by:
 
 ```text
-local Android songId + occurredAt + eventType + listenedMs
+local Android songId + occurredAt + eventType + listenedMs + durationMs
 ```
 
+  Merge inserts `max(0, incoming count - stored null-id count)` per group (idempotent); Recovery keeps every source
+  record. A null-id record is never suppressed by an ID-bearing row, nor the reverse.
 - Legacy events are never assigned a fabricated `eventId` on import.
+- Recovery deletes only the exported event sources; rows of other sources survive. An incoming ID-bearing event whose
+  id matches a surviving row is not inserted: identical payload = duplicate, different payload = reported conflict
+  (`eventsSkippedConflict`). Surviving rows are never deleted or overwritten, and Recovery never leaves two rows with
+  the same id (P5-STATS-18D2).
 
 Do not dedupe only by song ID; multiple plays of the same song are valid. Repeat import of the same Desktop backup must not duplicate events, inflate `playCount`, inflate raw `totalListeningTimeMs`, duplicate playlist songs, or destabilize `importBaselines` and `lyricsOverrides`.
 

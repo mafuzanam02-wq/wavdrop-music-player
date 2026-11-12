@@ -85,6 +85,7 @@ class MergePreviewAnalyzerTest {
         existingStats: Map<Long, com.launchpoint.wavdrop.data.local.entity.TrackStatsEntity> = emptyMap(),
         existingEventFingerprints: Set<String> = emptySet(),
         existingEventIds: Set<String> = emptySet(),
+        existingListenEvents: ListenEventRestorePlanner.ExistingListenEvents = ListenEventRestorePlanner.ExistingListenEvents.EMPTY,
         existingBaselines: List<ImportBaselineEntity> = emptyList(),
         existingLyrics: Map<WavdropMergePreviewAnalyzer.ExistingLyricsKey, Long> = emptyMap(),
         existingPlaylists: Map<String, Set<Long>> = emptyMap(),
@@ -96,6 +97,7 @@ class MergePreviewAnalyzerTest {
         existingStats                = existingStats,
         existingEventFingerprints    = existingEventFingerprints,
         existingEventIds             = existingEventIds,
+        existingListenEvents         = existingListenEvents,
         existingBaselines            = existingBaselines,
         existingLyrics               = existingLyrics,
         existingPlaylists            = existingPlaylists,
@@ -148,13 +150,15 @@ class MergePreviewAnalyzerTest {
             importBaselines = emptyList(),
             listenEvents    = listOf(event),
         )
-        // Fingerprint matches the event exactly.
-        val existingFingerprints = setOf("${songId}|1000000|PLAY|30000")
+        // One stored legacy row with exactly the event's identity accounts for it.
+        val existingEvents = ListenEventRestorePlanner.ExistingListenEvents(
+            legacyCounts = mapOf(ListenEventRestorePlanner.legacyKey(songId, 1_000_000L, event.eventType, event.listenedMs, event.durationMs) to 1),
+        )
 
         val result = analyze(
             backup                    = backup,
             currentSongs              = listOf(song(songId)),
-            existingEventFingerprints = existingFingerprints,
+            existingListenEvents      = existingEvents,
         )
         assertFalse(result.hasMergeableData)
         assertNotNull(result.noOpReason)

@@ -48,7 +48,17 @@ object RecoveryRestorePlanner {
         val favoritesRestored: Int get() = stats.count { it.isFavorite }
     }
 
-    fun plan(backup: WavdropBackup, currentSongs: List<Song>): Plan {
+    /**
+     * @param survivingEventIds P5-STATS-18D2: stable-id payloads of the stored rows that SURVIVE this Recovery (sources Recovery never
+     * deletes). An incoming event with the same id is a duplicate (same payload) or a reported conflict (different payload) and is not
+     * inserted, so the final table can never carry a second row with a surviving id. Rows Recovery deletes are NOT included, and
+     * legacy null-id rows keep full source multiplicity (they are never compared). The caller reads it before any destructive write.
+     */
+    fun plan(
+        backup: WavdropBackup,
+        currentSongs: List<Song>,
+        survivingEventIds: Map<String, ListenEventRestorePlanner.EventPayload> = emptyMap(),
+    ): Plan {
         val match = WavdropBackupStatsMatcher.match(backup, currentSongs)
         val songResolution = WavdropBackupStatsMatcher.resolveBackupSongs(backup, currentSongs)
         val resolvedBySongId = songResolution.resolved
@@ -80,8 +90,10 @@ object RecoveryRestorePlanner {
             resolveSong = { e ->
                 linkResolver.resolve(e.songId, e.contentUri, e.title, e.artist, e.album)
             },
-            existingFingerprints = emptySet(),
-            existingEventIds = emptySet(),
+            // P5-STATS-18D/18D2: the exported-source rows are removed in the same transaction, so they are not compared. Only ids of
+            // rows that SURVIVE (never-exported sources) are. Inside the backup, ID-bearing events dedupe by id (conflicting payloads
+            // are reported, not inserted) and legacy null-id records keep their source multiplicity (existing legacy counts stay empty).
+            existing = ListenEventRestorePlanner.ExistingListenEvents(byId = survivingEventIds),
         )
 
         // Lyrics: matched overrides only; unmatched ones are preserved by the quarantine step. Newest wins if two collapse.

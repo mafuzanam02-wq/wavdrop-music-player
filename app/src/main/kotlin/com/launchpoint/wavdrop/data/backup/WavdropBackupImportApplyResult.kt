@@ -68,4 +68,6 @@ data class WavdropBackupImportApplyResult(
     val restoreMode: BackupRestoreMode = BackupRestoreMode.MERGE,
     /** Non-null only for [BackupRestoreMode.RECOVERY]. */
     val recovery: RecoveryRestoreSummary? = null,
+    /** Live events skipped because their stable eventId matched an existing/earlier event with a DIFFERENT payload (P5-STATS-18D). */
+    val eventsSkippedConflict: Int = 0,
 )

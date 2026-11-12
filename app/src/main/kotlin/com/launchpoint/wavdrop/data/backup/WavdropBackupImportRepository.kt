@@ -96,6 +96,7 @@ class WavdropBackupImportRepository @Inject constructor(
             val dedupSnapshot = loadEventDedupSnapshot(backup)
             val existingEventFingerprints = dedupSnapshot.fingerprints
             val existingEventIds = dedupSnapshot.eventIds
+            val existingListenEvents = dedupSnapshot.existing
 
             val existingBaselines = importBaselineDao.getAllImportBaselinesSnapshot()
 
@@ -147,8 +148,7 @@ class WavdropBackupImportRepository @Inject constructor(
                             album = event.album,
                         )
                     },
-                    existingFingerprints = existingEventFingerprints,
-                    existingEventIds = existingEventIds,
+                    existing = existingListenEvents,
                 )
                 if (BuildConfig.DEBUG) Log.d(APPLY_TAG, "root event plan done " +
                     "toInsert=${eventPlan.toInsert.size} skipped=${eventPlan.skippedTotal} " +
@@ -196,6 +196,7 @@ class WavdropBackupImportRepository @Inject constructor(
                 existingStats                = currentStatsById,
                 existingEventFingerprints    = existingEventFingerprints,
                 existingEventIds             = existingEventIds,
+                existingListenEvents         = existingListenEvents,
                 existingBaselines            = existingBaselines,
                 existingLyrics               = existingLyricsMap,
                 existingPlaylists            = existingPlaylistsMap,
@@ -614,6 +615,7 @@ class WavdropBackupImportRepository @Inject constructor(
                     eventPlan.skippedDuplicate + desktopOverlayEventsSkippedDuplicate,
                 eventsSkippedUnmatched        =
                     eventPlan.skippedUnmatched + desktopOverlayEventsSkippedUnmatched,
+                eventsSkippedConflict         = eventPlan.skippedConflict,
                 currentMonthEventsRestored    =
                     eventPlan.currentMonthRestored + desktopOverlayCurrentMonthEventsRestored,
                 pendingTracksPreserved        = pendingTracksInserted + pendingRestored.tracksInserted,
@@ -678,6 +680,19 @@ class WavdropBackupImportRepository @Inject constructor(
     }
 
     /**
+     * The stored payload of every ID-bearing event whose id is in [incomingIds], wherever its timestamp lies (P5-STATS-18D1).
+     *
+     * `track_listen_events.eventId` has no index (and adding one needs a Room migration, which this fix deliberately avoids), so an
+     * `IN (...)` lookup would re-scan the table once per chunk and is capped by SQLite's bound-parameter limit. Instead the ID-bearing
+     * rows are streamed ONCE in rowid order, [EVENT_SNAPSHOT_PAGE] at a time (indexed rowid range, no sort), and only matches are kept.
+     * Cost: one sequential pass, O(rows in the table); memory: O(|incomingIds|) - never the table. Skipped entirely when the backup
+     * carries no ids. If the table holds the same id twice, the lowest rowid wins (the planner then reports any disagreement).
+     */
+    private suspend fun loadStoredPayloadsForIds(incomingIds: Set<String>): Map<String, ListenEventRestorePlanner.EventPayload> {
+        return trackListenEventDao.scanPayloadsForIds(incomingIds)
+    }
+
+    /**
      * Loads existing event fingerprints and eventIds for the time range spanned by all
      * events in [backup] — both root listenEvents and desktopOverlay listenEvents.
      *
@@ -691,13 +706,36 @@ class WavdropBackupImportRepository @Inject constructor(
         val overlayTimes = backup.desktopOverlay?.listenEvents
             ?.mapNotNull { it.occurredAt.takeIf { t -> t > 0L } }.orEmpty()
         val allTimes = rootTimes + overlayTimes
-        if (allTimes.isEmpty()) return EventDedupSnapshot(emptySet(), emptySet())
+        if (allTimes.isEmpty()) return EventDedupSnapshot(emptySet(), emptySet(), ListenEventRestorePlanner.ExistingListenEvents.EMPTY)
         val minMs = allTimes.min()
         val maxMs = allTimes.max()
-        val fingerprints = trackListenEventDao.getInRangeSnapshot(minMs, maxMs)
-            .mapTo(HashSet()) { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
-        val eventIds = trackListenEventDao.getEventIdsInRangeSnapshot(minMs, maxMs).toHashSet()
-        return EventDedupSnapshot(fingerprints, eventIds)
+        // P5-STATS-18D1: stable ids are matched GLOBALLY (a stored id outside the backup's time window must still be seen), only for
+        // the ids this backup actually carries, with a bounded-memory streaming pass.
+        val byId = loadStoredPayloadsForIds(backup.listenEvents.mapNotNullTo(HashSet()) { it.eventId })
+        // P5-STATS-18D: ONE keyset-paged pass over the indexed occurredAt range (never a whole-table or whole-range entity list).
+        // Legacy (null-id) rows are counted per 5-field key and stay time-range scoped; the 4-field fingerprints / ids are kept
+        // for the Desktop overlay planner (unchanged).
+        val fingerprints = HashSet<String>()
+        val eventIds = HashSet<String>()
+        val legacy = HashMap<String, Int>()
+        var afterAt = minMs
+        var afterId = Long.MIN_VALUE
+        while (true) {
+            val page = trackListenEventDao.getRangePage(minMs, maxMs, afterAt, afterId, EVENT_SNAPSHOT_PAGE)
+            if (page.isEmpty()) break
+            for (r in page) {
+                fingerprints += "${r.songId}|${r.occurredAt}|${r.eventType}|${r.listenedMs}"
+                val rowEventId = r.eventId
+                if (rowEventId != null) eventIds += rowEventId
+                else legacy.merge(
+                    ListenEventRestorePlanner.legacyKey(r.songId, r.occurredAt, r.eventType, r.listenedMs, r.durationMs), 1, Int::plus,
+                )
+            }
+            if (page.size < EVENT_SNAPSHOT_PAGE) break
+            afterAt = page.last().occurredAt
+            afterId = page.last().id
+        }
+        return EventDedupSnapshot(fingerprints, eventIds, ListenEventRestorePlanner.ExistingListenEvents(byId, legacy))
     }
 
     /**
@@ -758,6 +796,7 @@ class WavdropBackupImportRepository @Inject constructor(
         val dedupSnapshot = loadEventDedupSnapshot(backup)
         val existingEventFingerprints = dedupSnapshot.fingerprints
         val existingEventIds = dedupSnapshot.eventIds
+        val existingListenEvents = dedupSnapshot.existing
         if (BuildConfig.DEBUG) Log.d(TAG, "previewMerge: fingerprints loaded count=${existingEventFingerprints.size} " +
             "eventIds=${existingEventIds.size} t=${System.currentTimeMillis() - t0}ms")
         onStage?.invoke("Checking listening history…")
@@ -805,6 +844,7 @@ class WavdropBackupImportRepository @Inject constructor(
             existingStats                = existingStats,
             existingEventFingerprints    = existingEventFingerprints,
             existingEventIds             = existingEventIds,
+            existingListenEvents         = existingListenEvents,
             existingBaselines            = existingBaselines,
             existingLyrics               = existingLyrics,
             existingPlaylists            = existingPlaylists,
@@ -860,9 +900,14 @@ class WavdropBackupImportRepository @Inject constructor(
 }
 
 private data class EventDedupSnapshot(
+    /** 4-field fingerprints and ids: consumed ONLY by the Desktop overlay planner (its rules are unchanged). */
     val fingerprints: Set<String>,
     val eventIds: Set<String>,
+    /** Identity-aware view for the live Android event planner (P5-STATS-18D). */
+    val existing: ListenEventRestorePlanner.ExistingListenEvents,
 )
+
+private const val EVENT_SNAPSHOT_PAGE = 5_000
 
 private const val TAG = "WavdropRestore"
 private const val APPLY_TAG = "WavdropImportApply"

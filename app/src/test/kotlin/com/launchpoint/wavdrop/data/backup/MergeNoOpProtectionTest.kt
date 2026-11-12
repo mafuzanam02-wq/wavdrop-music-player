@@ -103,6 +103,7 @@ class MergeNoOpProtectionTest {
         currentSongs: List<Song> = emptyList(),
         existingStats: Map<Long, TrackStatsEntity> = emptyMap(),
         existingEventFingerprints: Set<String> = emptySet(),
+        existingListenEvents: ListenEventRestorePlanner.ExistingListenEvents = ListenEventRestorePlanner.ExistingListenEvents.EMPTY,
         existingBaselines: List<com.launchpoint.wavdrop.data.local.entity.ImportBaselineEntity> = emptyList(),
         existingLyrics: Map<WavdropMergePreviewAnalyzer.ExistingLyricsKey, Long> = emptyMap(),
         existingPlaylists: Map<String, Set<Long>> = emptyMap(),
@@ -113,6 +114,7 @@ class MergeNoOpProtectionTest {
         existingQuarantineOriginKeys = existingQuarantineOriginKeys,
         existingStats                = existingStats,
         existingEventFingerprints    = existingEventFingerprints,
+        existingListenEvents         = existingListenEvents,
         existingBaselines            = existingBaselines,
         existingLyrics               = existingLyrics,
         existingPlaylists            = existingPlaylists,
@@ -253,13 +255,15 @@ class MergeNoOpProtectionTest {
             listenEvents    = listOf(event),
             playlists       = listOf(backupPlaylist("Mix", listOf(songId))),
         )
-        val existingFingerprints = setOf("${songId}|1000000|PLAY|30000")
+        val existingEvents = ListenEventRestorePlanner.ExistingListenEvents(
+            legacyCounts = mapOf(ListenEventRestorePlanner.legacyKey(songId, 1_000_000L, event.eventType, event.listenedMs, event.durationMs) to 1),
+        )
         val existingPlaylists    = mapOf("Mix" to setOf(songId))
 
         val result = analyze(
             backup                    = backup,
             currentSongs              = listOf(song(songId)),
-            existingEventFingerprints = existingFingerprints,
+            existingListenEvents      = existingEvents,
             existingPlaylists         = existingPlaylists,
         )
         assertFalse("All data already present → no-op", result.hasMergeableData)

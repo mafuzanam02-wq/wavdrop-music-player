@@ -76,7 +76,8 @@ class RecoveryRestoreRepository @Inject constructor(
         db.withTransaction {
             // ── 1. Read + decide. No writes yet. ──────────────────────────────────────────────────────────────────
             val currentSongs = loadCurrentSongs()
-            val plan = RecoveryRestorePlanner.plan(backup, currentSongs)
+            // Read BEFORE the destructive step: the rows that will survive it (P5-STATS-18D2). The transaction keeps them stable.
+            val plan = RecoveryRestorePlanner.plan(backup, currentSongs, loadSurvivingEventIds(backup))
             val fp = QuarantinePlanner.backupFingerprint(backup)
             val quarantinePlan = QuarantinePlanner.plan(
                 backup                = backup,
@@ -166,6 +167,7 @@ class RecoveryRestoreRepository @Inject constructor(
                 eventsSkipped            = plan.eventPlan.skippedTotal,
                 eventsSkippedDuplicate   = plan.eventPlan.skippedDuplicate,
                 eventsSkippedUnmatched   = plan.eventPlan.skippedUnmatched,
+                eventsSkippedConflict    = plan.eventPlan.skippedConflict,
                 currentMonthEventsRestored = plan.eventPlan.currentMonthRestored,
                 baselinesRestored        = plan.baselinePlan.restored,
                 pendingTracksPreserved   = quarantined.tracks,
@@ -192,9 +194,17 @@ class RecoveryRestoreRepository @Inject constructor(
             )
         }
 
+    /**
+     * Stored payloads, by stable id, of the rows Recovery will NOT delete (any source outside [EXPORTED_EVENT_SOURCES]) for the ids this
+     * backup carries. The same bounded, unindexed-safe scan Merge uses, restricted to surviving sources, so a row Recovery is about to
+     * remove is never treated as a collision.
+     */
+    private suspend fun loadSurvivingEventIds(backup: WavdropBackup): Map<String, ListenEventRestorePlanner.EventPayload> =
+        trackListenEventDao.scanPayloadsForIds(backup.listenEvents.mapNotNullTo(HashSet()) { it.eventId }) { it.source !in EXPORTED_EVENT_SOURCES }
+
     /** Read-only impact summary for the preview. Uses the same planner as [applyRecovery]; writes nothing. */
     suspend fun previewImpact(backup: WavdropBackup): RecoveryImpact {
-        val plan = RecoveryRestorePlanner.plan(backup, loadCurrentSongs())
+        val plan = RecoveryRestorePlanner.plan(backup, loadCurrentSongs(), loadSurvivingEventIds(backup))
         val restoredFavoriteIds = plan.stats.filter { it.isFavorite }.mapTo(HashSet()) { it.songId }
         val localStats = trackStatsDao.getAllStatsSnapshot()
         val plannedFingerprints = plan.eventPlan.toInsert

@@ -8,6 +8,19 @@ import com.launchpoint.wavdrop.data.model.HomeWrappedSongActivity
 import com.launchpoint.wavdrop.data.model.SongCompletionSummary
 import kotlinx.coroutines.flow.Flow
 
+/** The identity-relevant columns of one stored ID-bearing event (P5-STATS-18D1). No `source`, no `id` beyond the paging cursor. */
+data class StoredEventIdentityRow(
+    val id: Long,
+    val eventId: String,
+    val songId: Long,
+    val occurredAt: Long,
+    val eventType: String,
+    val listenedMs: Long,
+    val durationMs: Long,
+    /** Lets Recovery tell the rows it deletes (exported sources) from the rows that survive it. Never part of identity. */
+    val source: String,
+)
+
 @Dao
 interface TrackListenEventDao {
 
@@ -82,6 +95,36 @@ interface TrackListenEventDao {
         WHERE occurredAt >= :fromMs AND occurredAt <= :toMs
     """)
     suspend fun getInRangeSnapshot(fromMs: Long, toMs: Long): List<TrackListenEventEntity>
+
+    /**
+     * Keyset page of the rows in an inclusive occurredAt range (P5-STATS-18D), in index order `(occurredAt, id)`, strictly after the
+     * cursor. Restore dedup walks a multi-year history with it instead of materialising the whole range as one list.
+     * Start with (afterAt = fromMs, afterId = Long.MIN_VALUE).
+     */
+    @Query("""
+        SELECT * FROM track_listen_events
+        WHERE occurredAt >= :afterAt AND occurredAt <= :toMs
+          AND occurredAt >= :fromMs
+          AND (occurredAt, id) > (:afterAt, :afterId)
+        ORDER BY occurredAt ASC, id ASC
+        LIMIT :limit
+    """)
+    suspend fun getRangePage(fromMs: Long, toMs: Long, afterAt: Long, afterId: Long, limit: Int): List<TrackListenEventEntity>
+
+    /**
+     * Keyset page of ID-bearing rows over the WHOLE table, in rowid order (P5-STATS-18D1). `eventId` has no index, so a lookup by id
+     * (or an `IN (...)` list) would re-scan the table per query; this reads it once, sequentially, `limit` rows at a time with no sort
+     * (plan: SEARCH track_listen_events USING INTEGER PRIMARY KEY (rowid>?), pinned by a test) and the caller keeps only the ids it
+     * needs. Start with afterId = Long.MIN_VALUE; continue with the last returned id.
+     */
+    @Query("""
+        SELECT id, eventId, songId, occurredAt, eventType, listenedMs, durationMs, source
+        FROM track_listen_events
+        WHERE id > :afterId AND eventId IS NOT NULL
+        ORDER BY id ASC
+        LIMIT :limit
+    """)
+    suspend fun getEventIdentityPage(afterId: Long, limit: Int): List<StoredEventIdentityRow>
 
     /**
      * Non-null eventIds in an inclusive occurredAt range. Used by restore dedup to skip an

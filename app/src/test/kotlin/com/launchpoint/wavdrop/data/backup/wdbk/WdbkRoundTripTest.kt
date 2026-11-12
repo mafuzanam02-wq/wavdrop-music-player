@@ -263,7 +263,6 @@ class WdbkRoundTripTest {
         fun events(b: WavdropBackup) = ListenEventRestorePlanner.plan(
             events = b.listenEvents,
             resolveSong = { songs[it.songId] },
-            existingFingerprints = emptySet(),
             nowMs = WdbkTestSupport.NOW,
             zone = java.time.ZoneOffset.UTC,
         )

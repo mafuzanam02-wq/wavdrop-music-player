@@ -174,9 +174,12 @@ Android event shape (v2): `songId` (string), `contentUri`, `title`, `artist`, `a
 - **`eventId`** is generated when an event is created (never during export). New events carry one; legacy
   events have none and are **never backfilled**. It is serialized when present and covered by the
   integrity fingerprint.
-- **Idempotency / dedup:** when an incoming event has an `eventId`, it is deduplicated by that id against
-  existing events and earlier events in the same batch; events without an `eventId` use the legacy
-  identity `local songId + occurredAt + eventType + listenedMs`. Never dedupe by song id alone.
+- **Idempotency / dedup (P5-STATS-18D):** an event with an `eventId` is identified by that id: the same id with the
+  same payload is one event; the same id with a different payload is a reported conflict (skipped, nothing
+  overwritten); different ids are different events even when every other field matches. Events without an
+  `eventId` have no identity: records sharing `local songId + occurredAt + eventType + listenedMs + durationMs` keep
+  their source multiplicity (Merge inserts only `max(0, incoming - stored)`; Recovery keeps all). The two kinds never
+  suppress each other. Never dedupe by song id alone.
 - **Invalid events** (`occurredAt <= 0`, `listenedMs <= 0`, `durationMs < 0`) are skipped without failing
   the restore; no synthetic replacement events are created.
 - **Exportable sources:** `wavdrop_playback`, `manual_restore`, `wavdrop_desktop_playback`. Synthetic or

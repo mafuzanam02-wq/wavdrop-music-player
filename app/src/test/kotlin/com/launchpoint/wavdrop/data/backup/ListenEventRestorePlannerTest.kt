@@ -47,7 +47,6 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(event(songId = 1L, occurredAt = epochMs(2026, 6, 5))),
             resolveSong = { local },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -64,7 +63,6 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(event(songId = 1L, occurredAt = epochMs(2026, 6, 5))),
             resolveSong = { local },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -82,11 +80,9 @@ class ListenEventRestorePlannerTest {
         val events = listOf(event(songId = 1L, occurredAt = epochMs(2026, 6, 5)))
 
         val first = ListenEventRestorePlanner.plan(
-            events, { local }, emptySet(), nowMs, utc,
+            events, { local }, ListenEventRestorePlanner.ExistingListenEvents.EMPTY, nowMs, utc,
         )
-        val existing = first.toInsert
-            .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
-            .toSet()
+        val existing = ListenEventRestorePlanner.ExistingListenEvents.from(first.toInsert)
         val second = ListenEventRestorePlanner.plan(
             events, { local }, existing, nowMs, utc,
         )
@@ -105,7 +101,6 @@ class ListenEventRestorePlannerTest {
                 event(songId = 1L, occurredAt = epochMs(2026, 6, 6)),
             ),
             resolveSong = { local },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -119,7 +114,6 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(event(songId = 1L, occurredAt = epochMs(2026, 3, 10))),
             resolveSong = { local },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -132,7 +126,6 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(event(songId = 1L, occurredAt = epochMs(2026, 6, 5))),
             resolveSong = { null },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -175,7 +168,6 @@ class ListenEventRestorePlannerTest {
                 ),
             ),
             resolveSong = { song(7L) },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -196,17 +188,14 @@ class ListenEventRestorePlannerTest {
         val first = ListenEventRestorePlanner.plan(
             events = listOf(skip),
             resolveSong = { song(7L) },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
-        val existing = first.toInsert
-            .map { "${it.songId}|${it.occurredAt}|${it.eventType}|${it.listenedMs}" }
-            .toSet()
+        val existing = ListenEventRestorePlanner.ExistingListenEvents.from(first.toInsert)
         val second = ListenEventRestorePlanner.plan(
             events = listOf(skip),
             resolveSong = { song(7L) },
-            existingFingerprints = existing,
+            existing = existing,
             nowMs = nowMs,
             zone = utc,
         )
@@ -265,7 +254,6 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(event(songId = 1L, occurredAt = epochMs(2026, 6, 5), uri = "content://media/OLD/1")),
             resolveSong = { resolved[it.songId] },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -283,47 +271,50 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(eventWithId(1L, epochMs(2026, 6, 5), eventId = "evt-1")),
             resolveSong = { song(7L) },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
-            existingEventIds = setOf("evt-1"),
+            existing = existingWithId("evt-1", at = epochMs(2026, 6, 5)),
         )
         assertEquals(0, plan.restored)
         assertEquals(1, plan.skippedDuplicate)
     }
 
+    /** A stored ID-bearing row whose payload equals [event]'s mapped to local song 7. */
+    private fun existingWithId(id: String, at: Long, songId: Long = 7L, listenedMs: Long = 30_000L, durationMs: Long = 180_000L) =
+        ListenEventRestorePlanner.ExistingListenEvents(
+            byId = mapOf(id to ListenEventRestorePlanner.EventPayload(songId, at, TrackListenEventEntity.TYPE_PLAY, listenedMs, durationMs)),
+        )
+
     @Test
-    fun `phase7 - duplicate non-null eventId within same batch skips the second`() {
+    fun `phase7 - same non-null eventId in one batch with a different payload is a reported conflict, not a duplicate`() {
         val plan = ListenEventRestorePlanner.plan(
-            // Different occurredAt → distinct fingerprints; only eventId collides.
             events = listOf(
                 eventWithId(1L, epochMs(2026, 6, 5), eventId = "evt-1"),
                 eventWithId(1L, epochMs(2026, 6, 6), eventId = "evt-1"),
             ),
             resolveSong = { song(7L) },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
         assertEquals(1, plan.restored)
-        assertEquals(1, plan.skippedDuplicate)
+        assertEquals(0, plan.skippedDuplicate)
+        assertEquals(1, plan.skippedConflict)
+        assertEquals("the first one wins and nothing is overwritten", epochMs(2026, 6, 5), plan.toInsert.single().occurredAt)
     }
 
     @Test
-    fun `phase7 - null eventId still uses fingerprint fallback`() {
+    fun `phase7 - null eventId uses its own multiplicity rule and ignores an ID-bearing row`() {
         val nullEvent = eventWithId(1L, epochMs(2026, 6, 5), eventId = null)
-        val fingerprint = "7|${nullEvent.occurredAt}|${nullEvent.eventType}|${nullEvent.listenedMs}"
-        val plan = ListenEventRestorePlanner.plan(
-            events = listOf(nullEvent),
-            resolveSong = { song(7L) },
-            existingFingerprints = setOf(fingerprint),
-            nowMs = nowMs,
-            zone = utc,
-            // A populated eventId set must not affect a null-eventId event.
-            existingEventIds = setOf("evt-1"),
+        val storedLegacy = ListenEventRestorePlanner.ExistingListenEvents(
+            legacyCounts = mapOf(ListenEventRestorePlanner.legacyKey(7L, nullEvent.occurredAt, nullEvent.eventType, nullEvent.listenedMs, nullEvent.durationMs) to 1),
         )
-        assertEquals(0, plan.restored)
-        assertEquals(1, plan.skippedDuplicate)
+        val dup = ListenEventRestorePlanner.plan(listOf(nullEvent), { song(7L) }, storedLegacy, nowMs, utc)
+        assertEquals(0, dup.restored)
+        assertEquals(1, dup.skippedDuplicate)
+        // A stored ID-bearing row with identical metadata must NOT suppress the legacy record.
+        val idOnly = existingWithId("evt-1", at = nullEvent.occurredAt)
+        val kept = ListenEventRestorePlanner.plan(listOf(nullEvent), { song(7L) }, idOnly, nowMs, utc)
+        assertEquals(1, kept.restored)
     }
 
     @Test
@@ -331,10 +322,9 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(eventWithId(1L, epochMs(2026, 6, 5), eventId = "evt-new")),
             resolveSong = { song(7L) },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
-            existingEventIds = setOf("evt-other"),
+            existing = existingWithId("evt-other", at = epochMs(2026, 6, 5)),
         )
         assertEquals(1, plan.restored)
         assertEquals("evt-new", plan.toInsert.single().eventId)
@@ -345,7 +335,6 @@ class ListenEventRestorePlannerTest {
         val plan = ListenEventRestorePlanner.plan(
             events = listOf(eventWithId(1L, epochMs(2026, 6, 5), eventId = null)),
             resolveSong = { song(7L) },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )
@@ -357,7 +346,6 @@ class ListenEventRestorePlannerTest {
         ListenEventRestorePlanner.plan(
             events = listOf(event),
             resolveSong = { song(7L) },
-            existingFingerprints = emptySet(),
             nowMs = nowMs,
             zone = utc,
         )

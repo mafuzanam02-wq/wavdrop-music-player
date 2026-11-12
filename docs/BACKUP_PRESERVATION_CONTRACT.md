@@ -173,8 +173,41 @@ snapshot are a *group*. Before 18C only one row per group was stored. Now:
   pending-history section keep their established fingerprints verbatim (P5-STATS-18C1); two devices that labelled the
   same legacy group differently therefore conflict and fail safe instead of one relabelling the other.
 - *Permanently missing:* a later backup that carries only the surviving row cannot reconstruct the lost ones, and the
-  survivor's original `eventId` is not stored. Live restore (`ListenEventRestorePlanner`) is unchanged and still
-  collapses such events.
+  survivor's original `eventId` is not stored.
+
+**Live event identity (P5-STATS-18D).** `ListenEventRestorePlanner` decides which events of a backup are added to the
+live `track_listen_events` table. Two populations never suppress each other:
+- *Stable-ID events (non-null `eventId`):* the id is the identity (treated as globally unique; the app generates UUIDs
+  at creation and the backup carries no per-event installation scope). Same id and same payload (mapped local song,
+  `occurredAt`, type, `listenedMs`, `durationMs`; the stored `source` is not part of identity) is one event. Different
+  ids with identical metadata are different events. The same id with a DIFFERENT payload, whether against a stored
+  row or earlier in the same backup, is an identity conflict: it is reported (`eventsSkippedConflict`), not inserted,
+  and never overwrites. A conflict alone is not an actionable write. Stored ids are matched GLOBALLY for the ids the
+  backup carries, whatever their stored timestamp (P5-STATS-18D1: one sequential rowid pass, memory bounded by the
+  backup's own ids; `eventId` stays unindexed, so no schema migration). Only the legacy null-id count is scoped to the
+  backup's `occurredAt` window.
+- *Legacy events (null `eventId`):* there is no identity, so source multiplicity applies. Records with the same
+  `(local songId, occurredAt, eventType, listenedMs, durationMs)` form a group; of I incoming records and L stored
+  legacy rows, `max(0, I - L)` are inserted. Repeating a Merge is therefore idempotent; a destination that has one of
+  two keeps its row and gains only the missing one. Two identical legacy records are two SOURCE records; they are
+  not claimed to be two distinct listening sessions. Ids are never invented for them.
+- *Merge vs Recovery:* Merge compares with the existing local rows (above). Recovery is authoritative over the exported
+  sources: those local rows are removed in the same transaction, so every source-backed occurrence is kept (no
+  collapse of identical-metadata events) while ID-bearing duplicates and conflicts inside the backup follow the same
+  rules.
+- *Recovery and preserved sources (P5-STATS-18D2):* Recovery deletes only the exported sources; rows of other sources
+  (for example `blackplayer_import`) SURVIVE and are never deleted or overwritten. Before any destructive write the
+  stored payloads of surviving ID-bearing rows are read (same bounded rowid pass as Merge, restricted to the surviving
+  sources and to the ids the backup carries). An incoming event whose id matches a surviving row is a duplicate (same
+  payload, not inserted again) or a reported conflict (different payload, `eventsSkippedConflict`, not inserted). Rows
+  Recovery is about to delete are never compared, so a legitimate replacement of an exported-source row still works.
+  Legacy null-id rows keep full source multiplicity and are never compared. Policy: skip-and-report rather than fail
+  the transaction, because the rest of an authoritative restore is valid, the surviving local row is the one that must
+  not be disturbed, and it matches Merge's conflict handling. The whole restore still runs in one transaction, so any
+  failure rolls everything back; a Recovery can never leave a second row carrying a surviving id, and repeating it is
+  idempotent.
+- *Not repairable:* a backup or device that already lost occurrences before this change cannot regain them; only the
+  original backup that still lists them can.
 
 ### 6.2 After 12 months unmatched - *Deferred*
 PENDING / GHOST -> ARCHIVED with Storage Management and Lifetime History surfaces. Not implemented.
