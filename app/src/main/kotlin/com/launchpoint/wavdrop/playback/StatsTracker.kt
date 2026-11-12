@@ -4,10 +4,12 @@ import android.os.SystemClock
 import android.util.Log
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlayEventWriter
+import com.launchpoint.wavdrop.data.repository.PlayOccurrence
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -58,6 +60,15 @@ class StatsTracker @Inject constructor(
 
     // Overridable in tests (internal visibility keeps it out of production call sites).
     internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
+
+    // P5-STATS-19B: wall-clock epoch ms used to stamp an occurrence AT DETECTION (clock above is monotonic elapsed time, for durations).
+    internal var wallClock: () -> Long = { System.currentTimeMillis() }
+
+    // P5-STATS-19B: a new id per detected PLAY/SKIP occurrence. Generated here, before persistence, so every later attempt to persist
+    // the same occurrence can pass the same id (retry scheduling itself is out of scope for this slice).
+    internal var newEventId: () -> String = { UUID.randomUUID().toString() }
+
+    private fun newOccurrence() = PlayOccurrence(newEventId(), wallClock())
 
     // ── Public API (called from PlayerController on the main thread) ──────────
 
@@ -159,9 +170,10 @@ class StatsTracker @Inject constructor(
             val listenedMs = accumulatedMs
             val durationMs = song.duration
             if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] → calling recordPlay songId=${song.id} listenedMs=$listenedMs durationMs=$durationMs")
+            val occurrence = newOccurrence()   // identity + time fixed NOW, not inside the (possibly delayed) write
             scope.launch {
                 runCatching {
-                    playEventWriter.recordPlay(song.id, song.uri, listenedMs, durationMs)
+                    playEventWriter.recordPlayOccurrence(occurrence, song.id, song.uri, listenedMs, durationMs)
                 }.onFailure { e ->
                     Log.w(TAG, "Failed to record play event for songId=${song.id}", e)
                 }
@@ -180,9 +192,10 @@ class StatsTracker @Inject constructor(
         if (accumulatedMs < LISTEN_THRESHOLD_MS) return
         listenStartWrittenForCurrent = true
         if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordListenStart] songId=${song.id} accumulatedMs=$accumulatedMs → writing lastListenedAt")
+        val listenedAt = wallClock()
         scope.launch {
             runCatching {
-                playEventWriter.recordListenStart(song.id, song.uri)
+                playEventWriter.recordListenStartAt(listenedAt, song.id, song.uri)
             }.onFailure { e ->
                 Log.w(TAG, "Failed to record listen start for songId=${song.id}", e)
             }
@@ -202,9 +215,10 @@ class StatsTracker @Inject constructor(
             val song = currentSong ?: return
             // Only count as a skip if there was any engagement at all.
             if (accumulatedMs > 0L) {
+                val occurrence = newOccurrence()
                 scope.launch {
                     runCatching {
-                        playEventWriter.recordSkip(song.id, song.uri, song.duration)
+                        playEventWriter.recordSkipOccurrence(occurrence, song.id, song.uri, song.duration)
                     }.onFailure { e ->
                         Log.w(TAG, "Failed to record skip event for songId=${song.id}", e)
                     }

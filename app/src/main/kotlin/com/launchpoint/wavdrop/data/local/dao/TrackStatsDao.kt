@@ -66,13 +66,14 @@ interface TrackStatsDao {
     @Query("""
         UPDATE track_stats
         SET playCount           = playCount + 1,
-            lastPlayedAt        = :nowMs,
+            lastPlayedAt        = MAX(lastPlayedAt, :nowMs),
             totalListeningTimeMs = totalListeningTimeMs + :listenedMs
         WHERE songId = :songId
     """)
     suspend fun incrementPlayCount(songId: Long, nowMs: Long, listenedMs: Long)
 
-    @Query("UPDATE track_stats SET lastListenedAt = :nowMs WHERE songId = :songId")
+    // MAX(): a delayed, older write must never move the timestamp backwards (P5-STATS-19B).
+    @Query("UPDATE track_stats SET lastListenedAt = MAX(lastListenedAt, :nowMs) WHERE songId = :songId")
     suspend fun updateLastListenedAt(songId: Long, nowMs: Long)
 
     @Query("UPDATE track_stats SET skipCount = skipCount + 1 WHERE songId = :songId")

@@ -27,6 +27,13 @@ interface TrackListenEventDao {
     @Insert
     suspend fun insert(event: TrackListenEventEntity)
 
+    /**
+     * Every stored event carrying [eventId] (P5-STATS-19B idempotency lookup). `eventId` has no index on schema 13, so this is a full
+     * scan of the table; it returns only the matching rows. Rows with a null eventId never match.
+     */
+    @Query("SELECT * FROM track_listen_events WHERE eventId = :eventId")
+    suspend fun getByEventId(eventId: String): List<TrackListenEventEntity>
+
     @Insert
     suspend fun insertAll(events: List<TrackListenEventEntity>)
 

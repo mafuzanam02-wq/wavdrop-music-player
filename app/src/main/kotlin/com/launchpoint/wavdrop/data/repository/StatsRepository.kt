@@ -51,57 +51,96 @@ class StatsRepository @Inject constructor(
      * which calls [TrackStatsDao.mergeImportedStats] directly. No events are written for imports.
      */
     override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
-        val nowMs = System.currentTimeMillis()
-        db.withTransaction {
-            dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
-            dao.incrementPlayCount(songId, nowMs = nowMs, listenedMs = listenedMs)
-            listenEventDao.insert(
-                TrackListenEventEntity(
-                    songId = songId,
-                    eventType = TrackListenEventEntity.TYPE_PLAY,
-                    occurredAt = nowMs,
-                    listenedMs = listenedMs,
-                    durationMs = durationMs,
-                    source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
-                    // Stable per-event id generated at creation time (contract §9.2).
-                    eventId = UUID.randomUUID().toString(),
-                )
-            )
-        }
+        // Original entry point: one fresh occurrence per call (so, as before, repeating THIS call counts twice).
+        recordPlayOccurrence(newOccurrence(), songId, contentUri, listenedMs, durationMs)
     }
 
     /**
-     * Records a skip: updates the aggregate row and appends a SKIP event.
+     * P5-STATS-19B - idempotent PLAY. In ONE Room transaction: look the event id up; an equivalent stored event means the occurrence is
+     * already applied (nothing changes); the same id with a different payload is rejected with [StatsEventConflictException] (nothing is
+     * modified); an absent id inserts the event and updates the aggregate exactly once. Room serialises write transactions, so competing
+     * writers of one id cannot both pass the lookup.
      *
-     * [durationMs] is the track's total duration — 0 if unknown. Used only for the event record.
+     * The lookup is by `eventId`, which has no index on schema 13 (a full scan of `track_listen_events`); see [findStoredByEventId].
      */
+    override suspend fun recordPlayOccurrence(
+        occurrence: PlayOccurrence,
+        songId: Long,
+        contentUri: String,
+        listenedMs: Long,
+        durationMs: Long,
+    ): StatsWriteResult = db.withTransaction {
+        val incoming = occurrenceEvent(occurrence, songId, TrackListenEventEntity.TYPE_PLAY, listenedMs, durationMs)
+        if (isAlreadyApplied(incoming)) return@withTransaction StatsWriteResult.ALREADY_APPLIED
+        dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
+        dao.incrementPlayCount(songId, nowMs = occurrence.occurredAtMs, listenedMs = listenedMs)
+        listenEventDao.insert(incoming)
+        StatsWriteResult.APPLIED
+    }
+
     override suspend fun recordListenStart(songId: Long, contentUri: String) {
-        val nowMs = System.currentTimeMillis()
+        recordListenStartAt(System.currentTimeMillis(), songId, contentUri)
+    }
+
+    /** `lastListenedAt` is set with MAX(), so a delayed older write can never move it backwards and repeating it is harmless. */
+    override suspend fun recordListenStartAt(occurredAtMs: Long, songId: Long, contentUri: String) {
         db.withTransaction {
             dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
-            dao.updateLastListenedAt(songId, nowMs)
+            dao.updateLastListenedAt(songId, occurredAtMs)
         }
     }
 
     override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
-        db.withTransaction {
-            val nowMs = System.currentTimeMillis()
-            dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
-            dao.incrementSkipCount(songId)
-            listenEventDao.insert(
-                TrackListenEventEntity(
-                    songId = songId,
-                    eventType = TrackListenEventEntity.TYPE_SKIP,
-                    occurredAt = nowMs,
-                    listenedMs = 0L,
-                    durationMs = durationMs,
-                    source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
-                    // Stable per-event id generated at creation time (contract §9.2).
-                    eventId = UUID.randomUUID().toString(),
-                )
-            )
-        }
+        recordSkipOccurrence(newOccurrence(), songId, contentUri, durationMs)
     }
+
+    /** P5-STATS-19B - idempotent SKIP, same contract as [recordPlayOccurrence]. */
+    override suspend fun recordSkipOccurrence(
+        occurrence: PlayOccurrence,
+        songId: Long,
+        contentUri: String,
+        durationMs: Long,
+    ): StatsWriteResult = db.withTransaction {
+        val incoming = occurrenceEvent(occurrence, songId, TrackListenEventEntity.TYPE_SKIP, 0L, durationMs)
+        if (isAlreadyApplied(incoming)) return@withTransaction StatsWriteResult.ALREADY_APPLIED
+        dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
+        dao.incrementSkipCount(songId)
+        listenEventDao.insert(incoming)
+        StatsWriteResult.APPLIED
+    }
+
+    private fun newOccurrence() = PlayOccurrence(UUID.randomUUID().toString(), System.currentTimeMillis())
+
+    private fun occurrenceEvent(occurrence: PlayOccurrence, songId: Long, type: String, listenedMs: Long, durationMs: Long) =
+        TrackListenEventEntity(
+            songId = songId,
+            eventType = type,
+            occurredAt = occurrence.occurredAtMs,
+            listenedMs = listenedMs,
+            durationMs = durationMs,
+            source = TrackListenEventEntity.SOURCE_WAVDROP_PLAYBACK,
+            // Stable per-occurrence id, created by the caller at detection time (contract §9.2).
+            eventId = occurrence.eventId,
+        )
+
+    /**
+     * Event equivalence = same song, type, occurrence time, listened and duration. `source` is deliberately NOT compared: an event that
+     * was restored on another device keeps its id but gets a different source. Rows with a null `eventId` can never match.
+     */
+    private fun TrackListenEventEntity.sameOccurrenceAs(o: TrackListenEventEntity) =
+        songId == o.songId && eventType == o.eventType && occurredAt == o.occurredAt && listenedMs == o.listenedMs && durationMs == o.durationMs
+
+    /** True when an equivalent event is stored; throws [StatsEventConflictException] if ANY stored row of that id differs. */
+    private suspend fun isAlreadyApplied(incoming: TrackListenEventEntity): Boolean {
+        val stored = findStoredByEventId(incoming.eventId!!)
+        if (stored.isEmpty()) return false
+        if (stored.any { !it.sameOccurrenceAs(incoming) }) {
+            throw StatsEventConflictException("Listen event id ${incoming.eventId} is already stored with a different payload; nothing was written.")
+        }
+        return true
+    }
+
+    private suspend fun findStoredByEventId(eventId: String): List<TrackListenEventEntity> = listenEventDao.getByEventId(eventId)
 
     suspend fun toggleFavorite(songId: Long, contentUri: String) {
         db.withTransaction {
