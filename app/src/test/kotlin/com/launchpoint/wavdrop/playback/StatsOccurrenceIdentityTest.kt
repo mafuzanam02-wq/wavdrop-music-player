@@ -28,9 +28,6 @@ class StatsOccurrenceIdentityTest {
         val plays = mutableListOf<Play>()
         val skips = mutableListOf<Skip>()
         val listenAt = mutableListOf<Long>()
-        override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = error("legacy path must not be used")
-        override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = error("legacy path must not be used")
-        override suspend fun recordListenStart(songId: Long, contentUri: String) = error("legacy path must not be used")
         override suspend fun recordPlayOccurrence(occurrence: PlayOccurrence, songId: Long, contentUri: String, listenedMs: Long, durationMs: Long): StatsWriteResult {
             plays += Play(occurrence, songId, listenedMs); return StatsWriteResult.APPLIED
         }
@@ -72,14 +69,13 @@ class StatsOccurrenceIdentityTest {
         val gate = CompletableDeferred<Unit>()
         val seen = mutableListOf<PlayOccurrence>()
         val w = object : PlayEventWriter {
-            override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit
-            override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = Unit
-            override suspend fun recordListenStart(songId: Long, contentUri: String) = Unit
             override suspend fun recordPlayOccurrence(occurrence: PlayOccurrence, songId: Long, contentUri: String, listenedMs: Long, durationMs: Long): StatsWriteResult {
                 gate.await()                       // the write is delayed (e.g. waiting on SQLite)
                 seen += occurrence
                 return StatsWriteResult.APPLIED
             }
+            override suspend fun recordSkipOccurrence(occurrence: PlayOccurrence, songId: Long, contentUri: String, durationMs: Long) = StatsWriteResult.APPLIED
+            override suspend fun recordListenStartAt(occurredAtMs: Long, songId: Long, contentUri: String) = Unit
         }
         val t = tracker(w)
         t.onSongSelected(song(1)); t.playFor(30_000L)

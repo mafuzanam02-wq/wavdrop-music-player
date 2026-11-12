@@ -47,7 +47,7 @@ import org.robolectric.shadows.ShadowSystemClock
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class PlayerControllerSleepBoundaryRealMedia3Test {
 
-    private class Writer : PlayEventWriter {
+    private class Writer : HookedPlayEventWriter() {
         val plays = mutableListOf<Long>()
         val skips = mutableListOf<Long>()
         val listenStarts = mutableListOf<Long>()

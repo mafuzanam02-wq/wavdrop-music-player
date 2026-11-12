@@ -8,7 +8,6 @@ import com.launchpoint.wavdrop.data.repository.PlayOccurrence
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -69,6 +68,27 @@ class StatsTracker @Inject constructor(
     internal var newEventId: () -> String = { UUID.randomUUID().toString() }
 
     private fun newOccurrence() = PlayOccurrence(newEventId(), wallClock())
+
+    // P5-STATS-19C: every write goes through ONE bounded, serialized, retrying queue. Callbacks only offer to it (never blocks); the
+    // single consumer runs on [scope]. Created lazily so tests can set [scope] / [deliveryPolicy] / [deliveryListener] first.
+    internal var deliveryPolicy: StatsDeliveryPolicy = StatsDeliveryPolicy()
+    internal var retryDelayer: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) }
+    internal var deliveryListener: (StatsDeliveryOutcome) -> Unit = ::logDelivery
+    private val delivery by lazy {
+        StatsDeliveryQueue({ scope }, playEventWriter, deliveryPolicy, { retryDelayer(it) }) { deliveryListener(it) }
+    }
+
+    /** Diagnostic counters (successful / already-applied / retrying / unresolved / abandoned / failed / rejected). */
+    internal fun deliveryCount(state: StatsDeliveryState): Int = delivery.count(state)
+    internal val deliveryParkedCount: Int get() = delivery.parkedCount
+
+    private fun logDelivery(o: StatsDeliveryOutcome) {
+        when (o.state) {
+            StatsDeliveryState.APPLIED, StatsDeliveryState.ALREADY_APPLIED -> if (DEBUG_STATS) Log.d(TAG, "delivery $o")
+            StatsDeliveryState.RETRYING, StatsDeliveryState.UNRESOLVED -> Log.w(TAG, "delivery $o")
+            StatsDeliveryState.ABANDONED, StatsDeliveryState.FAILED, StatsDeliveryState.REJECTED -> Log.e(TAG, "STATS DATA LOST: $o")
+        }
+    }
 
     // ── Public API (called from PlayerController on the main thread) ──────────
 
@@ -171,13 +191,7 @@ class StatsTracker @Inject constructor(
             val durationMs = song.duration
             if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordPlay] → calling recordPlay songId=${song.id} listenedMs=$listenedMs durationMs=$durationMs")
             val occurrence = newOccurrence()   // identity + time fixed NOW, not inside the (possibly delayed) write
-            scope.launch {
-                runCatching {
-                    playEventWriter.recordPlayOccurrence(occurrence, song.id, song.uri, listenedMs, durationMs)
-                }.onFailure { e ->
-                    Log.w(TAG, "Failed to record play event for songId=${song.id}", e)
-                }
-            }
+            delivery.submit(StatsTask.Play(occurrence, song.id, song.uri, listenedMs, durationMs))
         }
     }
 
@@ -193,13 +207,7 @@ class StatsTracker @Inject constructor(
         listenStartWrittenForCurrent = true
         if (DEBUG_STATS) Log.d(TAG, "[checkAndRecordListenStart] songId=${song.id} accumulatedMs=$accumulatedMs → writing lastListenedAt")
         val listenedAt = wallClock()
-        scope.launch {
-            runCatching {
-                playEventWriter.recordListenStartAt(listenedAt, song.id, song.uri)
-            }.onFailure { e ->
-                Log.w(TAG, "Failed to record listen start for songId=${song.id}", e)
-            }
-        }
+        delivery.submit(StatsTask.ListenStart(listenedAt, song.id, song.uri))
     }
 
     /**
@@ -216,13 +224,7 @@ class StatsTracker @Inject constructor(
             // Only count as a skip if there was any engagement at all.
             if (accumulatedMs > 0L) {
                 val occurrence = newOccurrence()
-                scope.launch {
-                    runCatching {
-                        playEventWriter.recordSkipOccurrence(occurrence, song.id, song.uri, song.duration)
-                    }.onFailure { e ->
-                        Log.w(TAG, "Failed to record skip event for songId=${song.id}", e)
-                    }
-                }
+                delivery.submit(StatsTask.Skip(occurrence, song.id, song.uri, song.duration))
             }
         }
     }

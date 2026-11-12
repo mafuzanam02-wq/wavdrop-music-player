@@ -10,7 +10,9 @@ import com.launchpoint.wavdrop.data.repository.PlayEventWriter
 import com.launchpoint.wavdrop.data.repository.PlayOccurrence
 import com.launchpoint.wavdrop.data.repository.StatsRepository
 import com.launchpoint.wavdrop.data.repository.StatsWriteResult
+import com.launchpoint.wavdrop.playback.StatsDeliveryState
 import com.launchpoint.wavdrop.playback.StatsTracker
+import java.util.concurrent.atomic.AtomicInteger
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +56,13 @@ class StatsWriteFailureRoomTest {
     private fun repo(events: TrackListenEventDao = realEvents) =
         StatsRepository(db, db.trackStatsDao(), db.importBaselineDao(), events)
 
+    // P5-STATS-19C: the legacy non-idempotent entry points no longer exist; each call here is a fresh, distinct occurrence.
+    private var seq = 0
+    private suspend fun StatsRepository.play() =
+        recordPlayOccurrence(PlayOccurrence("o${++seq}", 1_000L * seq), 1L, "content://media/1", 30_000L, 120_000L)
+    private suspend fun StatsRepository.skip() =
+        recordSkipOccurrence(PlayOccurrence("o${++seq}", 1_000L * seq), 1L, "content://media/1", 120_000L)
+
     private fun count(table: String): Int =
         db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM $table").use { it.moveToFirst(); it.getInt(0) }
 
@@ -77,22 +86,22 @@ class StatsWriteFailureRoomTest {
 
     @Test fun `CORRECT - recordPlay failing after the aggregate update rolls the aggregate back`() = runBlocking {
         val failing = eventsWithInsert { throw IOException("disk full") }
-        try { repo(failing).recordPlay(1L, "content://media/1", 30_000L, 120_000L); fail("expected IOException") }
+        try { repo(failing).play(); fail("expected IOException") }
         catch (_: IOException) { }
         assertNothingPersisted()           // insertIfAbsent AND incrementPlayCount were both undone
     }
 
     @Test fun `CORRECT - recordSkip failing after the aggregate update rolls the aggregate back`() = runBlocking {
         val failing = eventsWithInsert { throw IOException("disk full") }
-        try { repo(failing).recordSkip(1L, "content://media/1", 120_000L); fail("expected IOException") }
+        try { repo(failing).skip(); fail("expected IOException") }
         catch (_: IOException) { }
         assertNothingPersisted()
     }
 
     @Test fun `CORRECT - a failure leaves earlier committed statistics untouched`() = runBlocking {
-        repo().recordPlay(1L, "content://media/1", 30_000L, 120_000L)
+        repo().play()
         val failing = eventsWithInsert { throw IOException("disk full") }
-        try { repo(failing).recordPlay(1L, "content://media/1", 30_000L, 120_000L); fail("expected IOException") }
+        try { repo(failing).play(); fail("expected IOException") }
         catch (_: IOException) { }
         assertEquals(1, db.trackStatsDao().getStatsBySongId(1L)!!.playCount)
         assertEquals(1, count("track_listen_events"))
@@ -104,7 +113,7 @@ class StatsWriteFailureRoomTest {
         val reached = CompletableDeferred<Unit>()
         val never = CompletableDeferred<Unit>()
         val blocking = eventsWithInsert { reached.complete(Unit); never.await() }   // suspends AFTER the aggregate update
-        val job = async(Dispatchers.IO) { repo(blocking).recordPlay(1L, "content://media/1", 30_000L, 120_000L) }
+        val job = async(Dispatchers.IO) { repo(blocking).play() }
         withTimeout(10_000) { reached.await() }
         withTimeout(10_000) { job.cancelAndJoin() }
         assertNothingPersisted()
@@ -112,37 +121,72 @@ class StatsWriteFailureRoomTest {
 
     // ── 8: the writer commits but the caller never learns it ──────────────────
 
-    // P5-STATS-19B: corrected. The tracker still cannot tell committed from failed (retry scheduling is out of scope), but a repeat of the
-    // SAME occurrence id is now recognised and applied once.
-    @Test fun `CORRECT - a committed-but-unacknowledged play is applied once when the same occurrence is repeated`() = runBlocking {
+    /** Completes [done] once [n] deliveries have reached a terminal success state. */
+    private fun settledAfter(n: Int, done: CompletableDeferred<Unit>): (com.launchpoint.wavdrop.playback.StatsDeliveryOutcome) -> Unit {
+        val seen = AtomicInteger()
+        return { o -> if ((o.state == StatsDeliveryState.APPLIED || o.state == StatsDeliveryState.ALREADY_APPLIED) && seen.incrementAndGet() == n) done.complete(Unit) }
+    }
+
+    // P5-STATS-19B/19C: the real repository recognises a repeat of the SAME occurrence id, and (19C) the tracker's delivery queue now
+    // performs that repeat itself after an uncertain outcome, so the play is counted exactly once end to end.
+    @Test fun `CORRECT - a committed-but-unacknowledged play is retried by the tracker and counted exactly once`() = runBlocking {
+        val bothDone = CompletableDeferred<Unit>()
         val real = repo()
+        var calls = 0
         val ackLost = object : PlayEventWriter {
-            override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit
             override suspend fun recordPlayOccurrence(
                 occurrence: PlayOccurrence, songId: Long, contentUri: String, listenedMs: Long, durationMs: Long,
             ): StatsWriteResult {
-                real.recordPlayOccurrence(occurrence, songId, contentUri, listenedMs, durationMs)   // COMMITS
-                throw IOException("acknowledgement lost")                                           // caller sees a failure
+                val result = real.recordPlayOccurrence(occurrence, songId, contentUri, listenedMs, durationMs)   // COMMITS
+                if (++calls == 1) throw IOException("acknowledgement lost")                                       // first caller sees a failure
+                return result
             }
-            override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = real.recordSkip(songId, contentUri, durationMs)
-            override suspend fun recordListenStart(songId: Long, contentUri: String) = real.recordListenStart(songId, contentUri)
+            override suspend fun recordSkipOccurrence(occurrence: PlayOccurrence, songId: Long, contentUri: String, durationMs: Long) = real.recordSkipOccurrence(occurrence, songId, contentUri, durationMs)
+            override suspend fun recordListenStartAt(occurredAtMs: Long, songId: Long, contentUri: String) = real.recordListenStartAt(occurredAtMs, songId, contentUri)
         }
         var clock = 0L
         val tracker = StatsTracker(ackLost).also {
             it.scope = CoroutineScope(Dispatchers.Unconfined); it.clock = { clock }
             it.wallClock = { 5_000L }; it.newEventId = { "occ-1" }
+            it.deliveryListener = settledAfter(2, bothDone)
+            it.retryDelayer = {}                                  // retry immediately; the delay itself is covered in StatsWriteFailureTest
         }
         val song = Song(id = 1L, title = "t", artist = "a", album = "b", albumId = 0L, duration = 120_000L, uri = "content://media/1",
             dateAdded = 0L, trackNumber = 0, year = 2020)
         tracker.onSongSelected(song); tracker.onPlaybackStarted(); clock += 30_000L; tracker.onPlaybackPaused()
+        withTimeout(10_000) { bothDone.await() }   // real Room hops threads: wait for the delivery signal (PLAY + listen start), no sleeping
 
-        assertEquals("the row IS committed although the tracker saw a failure", 1, db.trackStatsDao().getStatsBySongId(1L)!!.playCount)
-
-        // A repeat of the SAME occurrence (same id and captured time) is recognised:
-        val repeat = real.recordPlayOccurrence(PlayOccurrence("occ-1", 5_000L), 1L, "content://media/1", 30_000L, 120_000L)
-        assertEquals(StatsWriteResult.ALREADY_APPLIED, repeat)
+        assertEquals("the tracker retried the exact same occurrence", 2, calls)
+        assertEquals(1, tracker.deliveryCount(StatsDeliveryState.RETRYING))
+        assertEquals("the retry was recognised as already applied", 1, tracker.deliveryCount(StatsDeliveryState.ALREADY_APPLIED))
         assertEquals("counted once", 1, db.trackStatsDao().getStatsBySongId(1L)!!.playCount)
         assertEquals(listOf(Triple("PLAY", "occ-1", 30_000L)), eventRows())
+
+        // And a further manual repeat of the SAME occurrence is still recognised:
+        val repeat = real.recordPlayOccurrence(PlayOccurrence("occ-1", 5_000L), 1L, "content://media/1", 30_000L, 120_000L)
+        assertEquals(StatsWriteResult.ALREADY_APPLIED, repeat)
+        assertEquals("still counted once", 1, db.trackStatsDao().getStatsBySongId(1L)!!.playCount)
+    }
+
+    @Test fun `CORRECT - a transient failure inside the real transaction rolls back and the tracker's retry applies the play exactly once`() = runBlocking {
+        val bothDone = CompletableDeferred<Unit>()
+        var failuresLeft = 1
+        val flaky = eventsWithInsert { e -> if (failuresLeft-- > 0) throw IOException("disk full") else realEvents.insert(e) }
+        var clock = 0L
+        val tracker = StatsTracker(repo(flaky)).also {
+            it.scope = CoroutineScope(Dispatchers.Unconfined); it.clock = { clock }
+            it.wallClock = { 7_000L }; it.newEventId = { "occ-9" }; it.retryDelayer = {}
+            it.deliveryListener = settledAfter(2, bothDone)
+        }
+        val song = Song(id = 1L, title = "t", artist = "a", album = "b", albumId = 0L, duration = 120_000L, uri = "content://media/1",
+            dateAdded = 0L, trackNumber = 0, year = 2020)
+        tracker.onSongSelected(song); tracker.onPlaybackStarted(); clock += 30_000L; tracker.onPlaybackPaused()
+        withTimeout(10_000) { bothDone.await() }   // real Room hops threads: wait for the delivery signal (PLAY + listen start), no sleeping
+
+        assertEquals(1, tracker.deliveryCount(StatsDeliveryState.RETRYING))
+        assertEquals("the failed first attempt was rolled back; the retry applied it once", 1, db.trackStatsDao().getStatsBySongId(1L)!!.playCount)
+        assertEquals(listOf(Triple("PLAY", "occ-9", 30_000L)), eventRows())
+        assertEquals(7_000L, db.trackStatsDao().getStatsBySongId(1L)!!.lastPlayedAt)
     }
 
     // ── Idempotency support in the schema ─────────────────────────────────────

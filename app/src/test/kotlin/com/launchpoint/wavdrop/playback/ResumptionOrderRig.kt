@@ -49,7 +49,7 @@ internal class ResumptionOrderRig(bounded: Boolean = true, private val resumptio
     /** The simulated elapsed-realtime clock of the REAL [StatsTracker]; advance it by hand: no sleeps. */
     @Volatile var statsNowMs = 0L
 
-    private inner class Writer : PlayEventWriter {
+    private inner class Writer : HookedPlayEventWriter() {
         override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) { statsEvents += "play:$songId:$listenedMs" }
         override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) { statsEvents += "skip:$songId" }
         override suspend fun recordListenStart(songId: Long, contentUri: String) { statsEvents += "listen:$songId" }

@@ -39,7 +39,7 @@ import org.robolectric.annotation.Config
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class PlayerControllerRealMedia3DirtyQueueTest {
 
-    private class Writer : PlayEventWriter {
+    private class Writer : HookedPlayEventWriter() {
         val plays = mutableListOf<Long>()
         val skips = mutableListOf<Long>()
         val listenStarts = mutableListOf<Long>()

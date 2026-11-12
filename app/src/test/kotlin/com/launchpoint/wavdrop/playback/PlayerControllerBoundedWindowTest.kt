@@ -37,7 +37,7 @@ import org.robolectric.annotation.Config
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class PlayerControllerBoundedWindowTest {
 
-    private class Writer : PlayEventWriter {
+    private class Writer : HookedPlayEventWriter() {
         val listenStarts = mutableListOf<Long>()
         override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit
         override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = Unit

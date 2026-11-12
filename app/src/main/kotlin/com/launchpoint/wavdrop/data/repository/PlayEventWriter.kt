@@ -27,25 +27,19 @@ enum class StatsWriteResult {
 class StatsEventConflictException(message: String) : IllegalStateException(message)
 
 /**
- * Minimal write interface used by the playback layer to record play and skip events.
+ * Minimal write interface used by the playback layer to record play, skip and listen-start statistics.
  * Implemented by [StatsRepository]; the separation allows the playback package to depend
  * on this interface rather than the full repository, and makes StatsTracker unit-testable.
  *
- * The `*Occurrence` / `*At` methods are the idempotent write path used by the tracker (P5-STATS-19B). Their defaults delegate to the
- * original methods so that existing fakes keep compiling; [StatsRepository] overrides them with the transactional implementation.
+ * P5-STATS-19C - CONTRACT. Every method is idempotent per occurrence, because the caller may repeat the exact same call after an
+ * uncertain outcome (e.g. a commit whose acknowledgement was lost). There are deliberately NO default implementations and no
+ * non-idempotent entry points: an implementation cannot silently inherit a write that would count a repeated call twice.
+ *
+ *  - An equivalent event already stored under the same id => return [StatsWriteResult.ALREADY_APPLIED], change nothing.
+ *  - The same id stored with a different payload => throw [StatsEventConflictException], change nothing.
+ *  - Otherwise apply the event and its aggregate update atomically and return [StatsWriteResult.APPLIED].
  */
 interface PlayEventWriter {
-    suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long = 0L)
-    suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long = 0L)
-
-    /**
-     * Records that the user listened to [songId] for at least 5 accumulated seconds.
-     * Updates [TrackStatsEntity.lastListenedAt] only — does not increment playCount,
-     * does not write a PLAY or SKIP event, and does not affect analytics.
-     * Used exclusively by the Recently Played surface (Home + Smart Collection).
-     */
-    suspend fun recordListenStart(songId: Long, contentUri: String)
-
     /** Idempotent PLAY keyed by [occurrence]: applied at most once however often it is repeated. */
     suspend fun recordPlayOccurrence(
         occurrence: PlayOccurrence,
@@ -53,10 +47,7 @@ interface PlayEventWriter {
         contentUri: String,
         listenedMs: Long,
         durationMs: Long,
-    ): StatsWriteResult {
-        recordPlay(songId, contentUri, listenedMs, durationMs)
-        return StatsWriteResult.APPLIED
-    }
+    ): StatsWriteResult
 
     /** Idempotent SKIP keyed by [occurrence]: applied at most once however often it is repeated. */
     suspend fun recordSkipOccurrence(
@@ -64,13 +55,12 @@ interface PlayEventWriter {
         songId: Long,
         contentUri: String,
         durationMs: Long,
-    ): StatsWriteResult {
-        recordSkip(songId, contentUri, durationMs)
-        return StatsWriteResult.APPLIED
-    }
+    ): StatsWriteResult
 
-    /** Listen start with the time captured at detection. Naturally idempotent: `lastListenedAt` only ever moves forward. */
-    suspend fun recordListenStartAt(occurredAtMs: Long, songId: Long, contentUri: String) {
-        recordListenStart(songId, contentUri)
-    }
+    /**
+     * Records that the user listened to [songId] for at least 5 accumulated seconds, at the time [occurredAtMs] captured at detection.
+     * Updates `lastListenedAt` only (it never moves backwards) - does not increment playCount, does not write a PLAY or SKIP event, and
+     * does not affect analytics. Naturally idempotent. Used exclusively by the Recently Played surface (Home + Smart Collection).
+     */
+    suspend fun recordListenStartAt(occurredAtMs: Long, songId: Long, contentUri: String)
 }

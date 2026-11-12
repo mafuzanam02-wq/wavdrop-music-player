@@ -26,7 +26,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class FullPathProtectionReleaseTest {
-    private class NullWriter : PlayEventWriter {
+    private class NullWriter : HookedPlayEventWriter() {
         override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit
         override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = Unit
         override suspend fun recordListenStart(songId: Long, contentUri: String) = Unit

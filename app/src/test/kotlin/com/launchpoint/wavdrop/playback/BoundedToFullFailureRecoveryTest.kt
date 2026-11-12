@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class BoundedToFullFailureRecoveryTest {
-    private class RecordingWriter : PlayEventWriter {
+    private class RecordingWriter : HookedPlayEventWriter() {
         val skips = mutableListOf<Long>()
         val listenStarts = mutableListOf<Long>()
         override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit

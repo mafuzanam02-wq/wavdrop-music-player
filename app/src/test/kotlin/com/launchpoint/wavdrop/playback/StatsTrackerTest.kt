@@ -298,6 +298,7 @@ class StatsTrackerTest {
     fun `play writer failure does not throw and does not affect subsequent plays`() {
         val throwingWriter = ThrowingPlayEventWriter(throwOnPlay = true)
         val resilientTracker = StatsTracker(throwingWriter).also {
+            it.retryDelayer = {}   // P5-STATS-19C: retries run immediately in this synchronous test
             it.scope = CoroutineScope(Dispatchers.Unconfined)
             it.clock = { fakeClockMs }
         }
@@ -315,13 +316,14 @@ class StatsTrackerTest {
         resilientTracker.onPlaybackPaused()
 
         // Writer recorded both attempts (even though they threw).
-        assertEquals(2, throwingWriter.playAttempts)
+        assertEquals("19C: each failing play is attempted twice (unknown failure: one retry)", 4, throwingWriter.playAttempts)
     }
 
     @Test
     fun `skip writer failure does not throw and does not affect subsequent skips`() {
         val throwingWriter = ThrowingPlayEventWriter(throwOnSkip = true)
         val resilientTracker = StatsTracker(throwingWriter).also {
+            it.retryDelayer = {}   // P5-STATS-19C: retries run immediately in this synchronous test
             it.scope = CoroutineScope(Dispatchers.Unconfined)
             it.clock = { fakeClockMs }
         }
@@ -339,12 +341,12 @@ class StatsTrackerTest {
         resilientTracker.onPlaybackPaused()
         resilientTracker.onSongSelected(song(3))  // finalises song 2 as skip
 
-        assertEquals(2, throwingWriter.skipAttempts)
+        assertEquals("19C: each failing skip is attempted twice (unknown failure: one retry)", 4, throwingWriter.skipAttempts)
     }
 
     @Test
     fun `play writer failure does not prevent a normal play from being counted on next song`() {
-        val throwOnFirstWriter = object : PlayEventWriter {
+        val throwOnFirstWriter = object : HookedPlayEventWriter() {
             var attempt = 0
             val recorded = mutableListOf<Long>()
             override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
@@ -356,6 +358,7 @@ class StatsTrackerTest {
             override suspend fun recordListenStart(songId: Long, contentUri: String) {}
         }
         val resilientTracker = StatsTracker(throwOnFirstWriter).also {
+            it.retryDelayer = {}   // P5-STATS-19C: retries run immediately in this synchronous test
             it.scope = CoroutineScope(Dispatchers.Unconfined)
             it.clock = { fakeClockMs }
         }
@@ -370,7 +373,7 @@ class StatsTrackerTest {
         fakeClockMs += 30_000L
         resilientTracker.onPlaybackPaused()   // attempt 2 — succeeds
 
-        assertEquals(listOf(2L), throwOnFirstWriter.recorded)
+        assertEquals("19C: the failed first play is retried and then recorded, in order", listOf(1L, 2L), throwOnFirstWriter.recorded)
     }
 
     // ── skip logic ────────────────────────────────────────────────────────────
@@ -536,7 +539,7 @@ class StatsTrackerTest {
     private data class SkipCall(val songId: Long)
     private data class ListenStartCall(val songId: Long)
 
-    private class FakePlayEventWriter : PlayEventWriter {
+    private class FakePlayEventWriter : HookedPlayEventWriter() {
         val plays = mutableListOf<PlayCall>()
         val skips = mutableListOf<SkipCall>()
         val listenStarts = mutableListOf<ListenStartCall>()
@@ -563,7 +566,7 @@ class StatsTrackerTest {
     private class ThrowingPlayEventWriter(
         private val throwOnPlay: Boolean = false,
         private val throwOnSkip: Boolean = false,
-    ) : PlayEventWriter {
+    ) : HookedPlayEventWriter() {
         var playAttempts = 0
         var skipAttempts = 0
 

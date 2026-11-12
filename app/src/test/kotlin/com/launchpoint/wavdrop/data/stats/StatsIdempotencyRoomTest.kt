@@ -212,14 +212,6 @@ class StatsIdempotencyRoomTest {
         assertEquals("only the n1 write counted", 1, stats().playCount)
     }
 
-    @Test fun `the original entry points still exist and each call is its own occurrence`() = runBlocking {
-        repo.recordPlay(1L, uri, 30_000L, 120_000L); repo.recordPlay(1L, uri, 30_000L, 120_000L)
-        repo.recordSkip(1L, uri, 120_000L)
-        assertEquals(2, stats().playCount); assertEquals(1, stats().skipCount)
-        val ids = events().map { it.split("|")[6] }
-        assertEquals(3, ids.toSet().size)
-        assertTrue(ids.none { it == "null" || it.isBlank() })
-    }
 
     // ── Schema-13 lookup cost ─────────────────────────────────────────────────
 

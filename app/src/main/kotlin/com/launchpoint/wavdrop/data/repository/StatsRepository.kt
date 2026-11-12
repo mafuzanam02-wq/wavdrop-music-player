@@ -28,7 +28,6 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,19 +40,9 @@ class StatsRepository @Inject constructor(
 ) : PlayEventWriter {
     // ── Regular write ops ─────────────────────────────────────────────────────
 
-    /**
-     * Records a meaningful play: updates the aggregate row and appends a PLAY event.
-     *
-     * [durationMs] is the track's total duration — 0 if unknown. Used only for the event
-     * record; the aggregate is unaffected.
-     *
-     * NOTE: BlackPlayer imports do NOT call this method — they go through [applyBpstatImport]
-     * which calls [TrackStatsDao.mergeImportedStats] directly. No events are written for imports.
-     */
-    override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) {
-        // Original entry point: one fresh occurrence per call (so, as before, repeating THIS call counts twice).
-        recordPlayOccurrence(newOccurrence(), songId, contentUri, listenedMs, durationMs)
-    }
+    // P5-STATS-19C: the former non-idempotent recordPlay / recordSkip / recordListenStart entry points were removed. Each call minted a
+    // fresh id, so repeating one counted twice, and nothing in production used them. BlackPlayer imports do NOT write events - they go
+    // through [applyBpstatImport] / TrackStatsDao.mergeImportedStats.
 
     /**
      * P5-STATS-19B - idempotent PLAY. In ONE Room transaction: look the event id up; an equivalent stored event means the occurrence is
@@ -78,20 +67,12 @@ class StatsRepository @Inject constructor(
         StatsWriteResult.APPLIED
     }
 
-    override suspend fun recordListenStart(songId: Long, contentUri: String) {
-        recordListenStartAt(System.currentTimeMillis(), songId, contentUri)
-    }
-
     /** `lastListenedAt` is set with MAX(), so a delayed older write can never move it backwards and repeating it is harmless. */
     override suspend fun recordListenStartAt(occurredAtMs: Long, songId: Long, contentUri: String) {
         db.withTransaction {
             dao.insertIfAbsent(TrackStatsEntity(songId = songId, contentUri = contentUri))
             dao.updateLastListenedAt(songId, occurredAtMs)
         }
-    }
-
-    override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) {
-        recordSkipOccurrence(newOccurrence(), songId, contentUri, durationMs)
     }
 
     /** P5-STATS-19B - idempotent SKIP, same contract as [recordPlayOccurrence]. */
@@ -108,8 +89,6 @@ class StatsRepository @Inject constructor(
         listenEventDao.insert(incoming)
         StatsWriteResult.APPLIED
     }
-
-    private fun newOccurrence() = PlayOccurrence(UUID.randomUUID().toString(), System.currentTimeMillis())
 
     private fun occurrenceEvent(occurrence: PlayOccurrence, songId: Long, type: String, listenedMs: Long, durationMs: Long) =
         TrackListenEventEntity(

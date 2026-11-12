@@ -37,7 +37,7 @@ import org.robolectric.annotation.Config
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 class LogicalQueueSessionTest {
 
-    private class Writer : PlayEventWriter {
+    private class Writer : HookedPlayEventWriter() {
         override suspend fun recordPlay(songId: Long, contentUri: String, listenedMs: Long, durationMs: Long) = Unit
         override suspend fun recordSkip(songId: Long, contentUri: String, durationMs: Long) = Unit
         override suspend fun recordListenStart(songId: Long, contentUri: String) = Unit
