@@ -192,7 +192,7 @@ background behaviour can only be validated on hardware.
 
 | Check | Expected result | Pass / Fail / Notes |
 |---|---|---|
-| Play a song past the meaningful-play threshold. | Statistics eventually reflect one play. | |
+| Play a song past the meaningful-play threshold, then pause it or move to another song. | Statistics reflect exactly one play once the pause or song change has happened (thresholds are evaluated then, not mid-song). See "Statistics delivery" below. | |
 | Skip a song. | Skip count updates where shown. | |
 | Open Statistics Dashboard. | Overview and lists show data or polished empty state. | |
 | Open Listening Reports. | All-time report uses aggregate stats correctly. | |
@@ -747,3 +747,31 @@ Nothing below has been run on a device. Do not tick items until the user has ver
 - [ ] M. With an empty queue the Queue Sheet shows no save action.
 - [ ] N. Success shows "Queue saved as playlist" while the Queue Sheet stays open.
 - [ ] O. Open an audio file from another app (ACTION_VIEW) so it plays through WavDrop: the Queue Sheet shows no "Save queue as playlist" action, and no playlist is created.
+
+## Statistics delivery (P5-STATS-19; post-Beta 10; OWNER-CONFIRMED 9 of 9 controlled manual checks PASSED)
+
+The owner confirmed that all nine controlled manual device checks below passed. Device model, Android version, date, timings, logs and screenshots were not recorded here, and individual items are intentionally not ticked because per-item evidence was not recorded. Retained for regression passes.
+
+Testing sequence: Wavdrop evaluates the meaningful-play (`min(30 s, 50 % of duration)`) and five-second listen thresholds only when playback is **paused** or at a **song-selection / loop boundary** (next, previous, a different song, natural advance, or a repeat-one loop). Counts and Recently Played do not change while one song plays uninterrupted; pause or move on, then check. Note each song's counts before the test.
+
+- [ ] A. Play: play a song past the threshold, then pause. Its play count rises by exactly 1.
+- [ ] B. Skip: play a song for a few seconds below the threshold, then press Next. Its skip count rises by 1 and its play count does not change.
+- [ ] C. Recently Played: play a song for at least 5 s (below the play threshold), then pause. It appears in Recently Played with no play count change.
+- [ ] D. Pause/resume: play, pause, resume and finish past the threshold. Exactly one play, with no double counting.
+- [ ] E. Repeat-one: let a short song loop. Each completed loop past the threshold adds one play and no skip is recorded at the loop boundary.
+- [ ] F. Navigation: Next / Previous between songs credits a play for the song left past the threshold and a skip for one left below it.
+- [ ] G. Locked-screen playback: lock the screen during playback, then pause or change song. The listened time is credited once.
+- [ ] H. Background playback: leave the app while a song plays, return and pause or change song. The play is counted once.
+- [ ] I. Restart persistence: after the plays above, close and reopen the app. Counts and Recently Played are unchanged.
+
+Expected, not a failure: if the app process is killed (force-stop or system kill) before a pause or boundary, the song's current unflushed listening time is lost; this is the accepted in-process limit (TD-019).
+
+### Not yet validated on a device (future stress and fault-injection tests)
+
+Nothing below has been run. Do not tick until verified on hardware, and do not edit database contents by hand.
+
+- [ ] Recovery after a temporary database-write failure. No safe failure-injection method exists; none may be added to production code without a separate approved decision.
+- [ ] Process-death behaviour with queued or parked statistics tasks (expected: queued work lost, TD-019).
+- [ ] Large-history performance: statistics writes and playback smoothness with a very large `track_listen_events` table (the `eventId` lookup is unindexed on schema 13; device cost unmeasured).
+- [ ] Sustained heavy skipping (many rapid Next presses) against the 256-task queue limit.
+- [ ] Doze / battery-optimization and other Android lifecycle scenarios beyond checks G to I.

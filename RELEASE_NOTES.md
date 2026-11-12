@@ -6,6 +6,18 @@ is `WHATS_NEW.md`.
 
 ---
 
+## Post-Beta 10 engineering note: statistics reliability (not part of any published release)
+
+Internal engineering work on `master` after the Beta 10.0 checkpoint (P5-STATS-19A to 19D). It has not shipped in a published release, and the app version is unchanged (`0.1.0-beta10`, `versionCode` 10). This is a record of engineering state, not a user-facing release claim.
+
+- Each counted play or skip now carries a stable occurrence id, applied at most once in a single database transaction; repeated attempts cannot double-count, and last-played / last-listened times never move backwards.
+- Statistics writes are delivered through a bounded, serialized, in-process retry queue that retries temporary database failures and no longer blocks playback callbacks.
+- The unsafe legacy non-idempotent write paths were removed.
+- Verified by automated JVM tests, a debug build and source review, plus the owner's confirmation that 9 of 9 controlled manual device checks passed (see `QA_CHECKLIST.md`).
+- Known limits: delivery is in-process only, so queued work and unflushed listening time are lost if the process is killed. Database-outage recovery, process-death durability, large-history device performance and every Android lifecycle scenario have not been physically validated (see TD-019).
+
+---
+
 ## 0.1.0-beta10
 
 Wavdrop Beta 10.0 (`versionName` `0.1.0-beta10`, `versionCode` 10). New listening features, faster libraries, and major playback

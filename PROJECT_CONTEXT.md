@@ -40,7 +40,7 @@ Wavdrop Desktop import. Naming history: `Lyra` -> `EchoVault` -> **Wavdrop** (fi
   browse/resume, Bluetooth/LE Audio/wired reconnect authority, paused-session retention after task
   removal, bad-media recovery with a user message, Previous-button behaviour setting, widget, Equalizer,
   synchronized LRC lyrics.
-- Statistics, Monthly Reports, Wrapped (monthly/yearly/all-time), Insights.
+- Statistics, Monthly Reports, Wrapped (monthly/yearly/all-time), Insights; idempotent, retry-delivered playback statistics writes (see "Statistics reliability - current state" below).
 - Backup v2 (verified export, integrity, pending/quarantine preservation, eventId-aware dedup,
   extension-root preservation), automatic backup via WorkManager, Desktop and BlackPlayer import.
 - Device-local TrackIdentity foundation (not exported, no rematching).
@@ -217,6 +217,28 @@ implementation slice is left partially applied on `master`.
 - Crossfade slice ordering: runtime integration must be built as small review-gated slices on top of
   the existing coordinator/secondary-player contracts rather than a rewrite.
 - The crossfade-owned portion of the natural-transition (AUTO) callback ownership debt (TD-018) became a demonstrated blocker and is owned by CF-2L1 and CF-2L2; the broader callback-ownership cleanup stays its own slice.
+
+## Statistics reliability - current state
+
+Post-Beta 10 engineering (P5-STATS-19A to 19D; not part of any published release). Technical detail:
+"Statistics write path" in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); decision D-37 in
+[ENGINEERING_BACKLOG_AND_DECISIONS.md](ENGINEERING_BACKLOG_AND_DECISIONS.md); accepted limits TD-019 in
+[TECHNICAL_DEBT_REGISTER.md](TECHNICAL_DEBT_REGISTER.md).
+
+- Each detected PLAY or SKIP gets a stable occurrence id and timestamp at detection. The repository applies a
+  given id at most once inside one transaction (a repeat is a no-op; a contradictory repeat is rejected), and
+  `lastPlayedAt` / `lastListenedAt` never move backwards.
+- Writes go through one bounded, serialized, in-process retry queue (256 queued, 32 parked, three rounds).
+  Temporary database failures retry the same occurrence. Playback callbacks never block or touch Room.
+- Thresholds (30 s or 50 %, 5 s listen) are evaluated at pause and at song or loop boundaries, not while a
+  song plays uninterrupted.
+- Accepted limits: nothing survives process death (queued work and the current song's unflushed time are
+  lost); a full queue rejects the newest task and an over-full parked list evicts the oldest; losses are
+  logged and counted only; the id lookup is unindexed (schema 13, no outbox, no migration).
+- Evidence: automated JVM tests and source review (19D), plus the owner's confirmation that 9 of 9 controlled
+  manual device checks passed (see [QA_CHECKLIST.md](QA_CHECKLIST.md)). NOT physically validated: database
+  outage / write-failure recovery, process-death durability, large-history device performance, and every
+  Android lifecycle scenario.
 
 ## Where things are documented
 

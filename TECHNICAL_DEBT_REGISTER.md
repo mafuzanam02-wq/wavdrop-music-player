@@ -1,7 +1,7 @@
 # TECHNICAL DEBT REGISTER
 
 > **Wavdrop Music Player** · package `com.launchpoint.wavdrop`
-> Record of intentional engineering compromises. Last reviewed after CF-2C3 (post-beta9).
+> Record of intentional engineering compromises. Last reviewed after CF-2C3 (post-beta9); TD-019 added after P5-STATS-19D.
 
 ---
 
@@ -69,6 +69,7 @@ architecture, not technical debt**; its remaining items are tracked in the backl
 | TD-016 | Legacy merge reconciliation | ACTIVE | Medium |
 | TD-017 | Permission-revoked recovery UX | MONITOR | Low |
 | TD-018 | Natural AUTO-transition callback ownership | ACTIVE | Medium |
+| TD-019 | Statistics delivery is in-process only | ACTIVE | Medium |
 
 ---
 
@@ -521,6 +522,37 @@ AUTO, and let the discontinuity callback only refresh state.
 **ST-1 update:** sleep-timer end-of-song handling no longer observes natural completion in four callbacks. It is one pure policy (`SleepTimerPolicy`) bound to an exact occurrence and enforced physically (Media3 pause-at-end-of-media-items), so the player never advances or loops past the armed occurrence and no stats or session notification is added for a track that must not start. The Media3 callbacks only feed the policy (a defensive fallback pauses if the physical hold were ever missing). The broader two-callback ownership of ordinary AUTO transitions described above is unchanged and remains open.
 
 **CF-2L3 update:** the natural handoff now has a testable settlement invariant (a finished or cancelled transition leaves no bookkeeping, gain owner or secondary ownership) and DEBUG transport/reconciliation diagnostics; it changes no callback ownership and the broader cleanup remains open.
+
+---
+
+### TD-019
+
+**ID:** TD-019
+**Category:** Statistics delivery is in-process only
+**Current Status:** ACTIVE
+**Priority:** Medium
+**Origin:** P5-STATS-19C to 19D (bounded statistics write recovery); limits accepted by the owner.
+**Current Implementation:** PLAY, SKIP and listen-start writes are delivered by an in-memory, bounded,
+serialized retry queue (see `docs/ARCHITECTURE.md`, "Statistics write path"). Limits: 256 queued tasks, 32
+parked tasks, three recovery rounds; a full queue rejects the newest task and an over-full parked list evicts
+the oldest. Nothing survives process death: queued and parked tasks, and the current song's time accumulated
+since the last pause or song boundary, are lost. Unsuccessful delivery is logged (`STATS DATA LOST`) and
+counted, with no user-facing indicator. An in-flight task is reported abandoned on scope cancellation even if
+its transaction may already have committed. The idempotency lookup by `eventId` is unindexed on schema 13.
+**Reason This Exists:** A durable outbox needs a Room migration and its own design; the owner approved bounded
+in-process recovery first (D-37).
+**Risk:** Plays or skips can be missing after a process kill during a retry window, or after a sustained
+database outage longer than the retry and parking limits. The `eventId` scan cost on a very large history is
+unmeasured on a device.
+**Why We Accepted It:** No loss has been observed; the owner's 9 of 9 controlled manual device checks passed.
+Database-outage recovery, process-death durability and large-history device performance have NOT been
+physically validated, and an outbox or index would add migration risk without evidence of need.
+**When To Revisit:** Only on evidence: observed missing plays or skips after process death or a crash, or a
+measured device latency attributable to the `eventId` scan on a realistic history. Options are recorded, not
+scheduled, in `ENGINEERING_BACKLOG_AND_DECISIONS.md` section 6.
+**Dependencies:** Observed-loss or timing evidence; a Room migration review for either option.
+**Possible Future Solution:** A non-unique `eventId` index (Room 13 -> 14) and/or a durable outbox.
+**Notes:** Do not "fix" the bounded limits or the reject-newest / evict-oldest rules without a new decision.
 
 ---
 

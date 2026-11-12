@@ -58,7 +58,8 @@ Boundaries:
 - **Pure objects** (planners, rules, builders, reducers) hold decision logic so it is unit-testable
   without Android. Prefer adding logic there over inside services or composables.
 - `PlayEventWriter` is the narrow interface the playback layer uses to record plays/skips
-  (implemented by `StatsRepository`).
+  (implemented by `StatsRepository`); delivery goes through the serialized `StatsDeliveryQueue`
+  (see "Statistics write path" in section 3).
 
 ---
 
@@ -117,11 +118,89 @@ Migration tests and exported schemas must be updated with every schema bump.
   stale rows are pruned in chunks.
 - `StatsTracker` records a play after a meaningful-play threshold of `min(30 s, 50 % of duration)`;
   switching away earlier records a skip. A lower 5 s listen threshold only updates `lastListenedAt`
-  (Recently Played) and writes no event.
+  (Recently Played) and writes no event. Thresholds are evaluated only at the boundaries described
+  in "Statistics write path" below, not continuously.
 - Smart collections: 11 read-only computed types (`SmartCollectionType`), ranked over the full eligible
   set before capping so eligible counts are exact.
 - Search: `LibrarySearchIndex` caches normalized fields; Home and global search filter off the main
   thread (`Dispatchers.Default`) with a 200 ms debounce.
+
+### Statistics write path (P5-STATS-19)
+
+How a listened play, skip or 5 s listen reaches Room. Room stays at schema 13: there is no outbox table
+and no `eventId` index.
+
+**Detection (`StatsTracker`, playback layer).**
+
+- A `@Singleton` that holds only in-memory state. `PlayerController` calls `onSongSelected`,
+  `onPlaybackStarted` and `onPlaybackPaused` on the main thread; the tracker accumulates listened time with
+  a monotonic clock.
+- Thresholds are evaluated **only** when playback is paused or at a song-selection boundary: a different
+  song, or the same song re-selected (a repeat-one loop boundary or a replay). Counts therefore do not
+  change while a song plays uninterrupted; the play, skip and Recently Played updates appear at the next
+  pause or boundary.
+- At a boundary the tracker flushes the running session, then checks: PLAY when accumulated time reaches
+  `min(30 s, 50 % of duration)`; listen-start (`lastListenedAt`) at 5 s; SKIP when a *different* song is
+  left before its PLAY was counted and some listening time exists. A same-song re-selection never records
+  a skip. Per-selection guard flags are set at detection, so one selection yields at most one PLAY and one
+  listen-start.
+- A PLAY or SKIP is stamped at detection with a `PlayOccurrence` (random UUID event id plus wall-clock
+  time). Every later attempt to persist that occurrence reuses the same id and time.
+
+**Writer boundary.**
+
+- `PlayEventWriter` (three methods: `recordPlayOccurrence`, `recordSkipOccurrence`, `recordListenStartAt`)
+  is the only way the playback layer writes statistics. `StatsRepository` is its only implementation,
+  bound as a singleton in `PlaybackModule`. The earlier non-idempotent `recordPlay` / `recordSkip` /
+  `recordListenStart` no longer exist, so a legacy write path cannot be re-selected without a compile error.
+
+**Repository transaction rules (`StatsRepository`).**
+
+- PLAY and SKIP each run in one Room write transaction: look up the event id; if a stored event is
+  equivalent (same song, type, time, listened and duration; `source` is ignored) the result is
+  `ALREADY_APPLIED` and nothing changes; the same id with a different payload throws
+  `StatsEventConflictException` and nothing is modified; otherwise the event row and the aggregate counters
+  are written together. A failure rolls both back, so a retry of the same occurrence is safe.
+- `lastPlayedAt` and `lastListenedAt` only move forward (SQL `MAX`), so a delayed older occurrence cannot
+  rewind them.
+- Legacy events with a null `eventId` are never matched or altered. The id lookup has no index on schema 13
+  and scans `track_listen_events`; its cost on a device has not been measured.
+
+**Delivery (`StatsDeliveryQueue`, internal to the playback package).**
+
+- The tracker offers each task with a non-blocking `trySend` into a bounded `Channel` (256). One consumer
+  coroutine drains it in order on the tracker scope (`SupervisorJob` + `Dispatchers.IO`); it is started
+  lazily and restarted by the next submit if it stopped while the scope is still active. Playback callbacks
+  never touch Room or suspend.
+- Failures are classified (busy, transient I/O, permanent, conflict, unknown). Busy and transient I/O
+  failures are the retryable (transient) classes: the same task is retried after 250 ms, 1 s and 3 s (four
+  attempts). Permanent and conflict failures end immediately as failed, with no retry and no parking. An
+  unknown failure gets one retry after 250 ms and, if that also fails, is abandoned; it is never parked.
+- Only a retryable (busy or transient I/O) failure that has exhausted its in-call retries is parked (at most
+  32; three rounds in total, the in-call sequence being round one). Parked tasks get another attempt, oldest
+  first, after the next successful write; there is no timer. During redelivery a parked task that now fails
+  permanently or with a conflict is failed, and one that exhausts its rounds is abandoned. Parking beyond 32
+  evicts the oldest parked task; a submit into a full queue rejects the newest task.
+
+**Terminal diagnostics and cancellation.**
+
+- Each accepted task reports **at most one** terminal outcome (applied, already applied, failed or
+  abandoned). Retrying and unresolved are non-terminal and are never reported after a terminal outcome for
+  the same task. Rejected tasks are never accepted; they are reported at submit time.
+- A parked task can sit in the unresolved state, with no terminal outcome yet, until one of these happens:
+  an eligible redelivery succeeds or fails permanently, it is evicted, its rounds are exhausted, or the scope is
+  cancelled.
+- When the tracker scope ends, the in-flight, buffered and parked tasks are reported as abandoned from
+  memory only (no database access). An in-flight task is reported abandoned even if its transaction may
+  already have committed.
+- Abandoned, failed and rejected outcomes are logged as `STATS DATA LOST` and counted for diagnostics.
+  There is no user-facing indicator. The counters and log lines are in memory and logcat only: if the
+  process is killed, tasks that had not yet reached a terminal outcome never will, and diagnostics are not
+  guaranteed to be retained.
+
+**Known limits.** Delivery is in-process only. Queued and parked tasks, and the time accumulated for the
+current song before the next pause or boundary, are lost if the process is killed. The 256 / 32 / three-round
+limits are the approved delivery policy (see D-37 in `ENGINEERING_BACKLOG_AND_DECISIONS.md`).
 
 ### Analytics authority
 
@@ -429,6 +508,8 @@ transaction; MAX-merges the main play count only (field 2 is a period play count
   **main-thread confined** (the service scope is `Dispatchers.Main`). The crossfade runtime and
   secondary player are main-thread confined as well.
 - Room access and file/SAF work run on `Dispatchers.IO` (e.g. `AutoBackupRepository.runIfDue`).
+  Statistics writes are made only by the `StatsDeliveryQueue` consumer on `Dispatchers.IO`; the
+  `StatsTracker` callbacks invoked from the main thread only update memory and offer to the queue.
 - CPU-heavy derivations (library search index, Home filtering, analytics builders, Insights grouping)
   run with `flowOn(Dispatchers.Default)`.
 - ViewModel flows use `WhileSubscribed` so background derivation stops with the UI.
