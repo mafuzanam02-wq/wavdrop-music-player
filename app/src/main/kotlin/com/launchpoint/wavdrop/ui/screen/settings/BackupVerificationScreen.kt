@@ -242,7 +242,7 @@ private fun VerificationStatusCard(result: BackupVerificationResult) {
             if (result.fileName != null || result.backupTimestampMillis != null) {
                 Spacer(Modifier.height(10.dp))
                 result.backupTimestampMillis?.let {
-                    StatusDetailLine("Last backup", formatVerificationTime(it))
+                    StatusDetailLine(if (result.timestampIsFileTime) "Last backup (file date)" else "Last backup", formatVerificationTime(it))
                 }
                 result.fileName?.let { StatusDetailLine("Backup file", it) }
                 result.fileSizeBytes?.let { StatusDetailLine("Size", formatFileSize(it)) }

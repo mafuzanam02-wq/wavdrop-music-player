@@ -16,6 +16,8 @@ data class BackupVerificationResult(
     val fileName: String? = null,
     val fileSizeBytes: Long? = null,
     val backupTimestampMillis: Long? = null,
+    /** True when [backupTimestampMillis] is the file's modified time because the backup has no readable embedded export time. */
+    val timestampIsFileTime: Boolean = false,
     val schemaVersion: Int? = null,
     val trackCount: Int = 0,
     val playlistCount: Int = 0,

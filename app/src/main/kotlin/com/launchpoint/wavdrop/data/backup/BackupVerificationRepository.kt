@@ -6,7 +6,6 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.launchpoint.wavdrop.data.settings.AppSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -107,7 +106,9 @@ class BackupVerificationRepository @Inject constructor(
     ): BackupVerificationResult {
         val warnings = mutableListOf<String>()
 
-        val timestamp = parseExportedAt(backup.exportedAt) ?: fileModifiedMillis
+        // Embedded export time wins; the file's modified time is only an explicitly flagged fallback (never the export date).
+        val embedded = BackupPresentation.exportTimestampMillis(backup)
+        val timestamp = embedded ?: fileModifiedMillis
         if (timestamp == null) {
             warnings += "The backup has no readable date, so its age cannot be checked."
         }
@@ -124,11 +125,8 @@ class BackupVerificationRepository @Inject constructor(
         if (backup.preferences == null) {
             warnings += "App settings are not included in this backup."
         }
-        if (backup.payloadSha256 == null) {
-            // Legacy backups predate the integrity signature. Still fully restorable;
-            // a fresh backup upgrades them. Warning only — never a failure.
-            warnings += "Older backup format. It can still be restored — create a new backup to add integrity protection."
-        }
+        // Only genuine v1 backups are "older"; v2 JSON and WDBK are integrity-verified by their own mechanisms.
+        BackupPresentation.legacyFormatWarning(backup)?.let { warnings += it }
 
         val coreSectionsPresent =
             backup.songs.isNotEmpty() &&
@@ -141,7 +139,8 @@ class BackupVerificationRepository @Inject constructor(
             fileName              = fileName,
             fileSizeBytes         = fileSizeBytes,
             backupTimestampMillis = timestamp,
-            schemaVersion         = WavdropBackupParser.SUPPORTED_VERSION,
+            timestampIsFileTime   = embedded == null && timestamp != null,
+            schemaVersion        = WavdropBackupParser.SUPPORTED_VERSION,
             trackCount            = backup.songs.size,
             playlistCount         = backup.playlists.size,
             favoriteCount         = backup.trackStats.count { it.isFavorite },
@@ -165,11 +164,6 @@ class BackupVerificationRepository @Inject constructor(
         backupTimestampMillis = fileTimeMillis,
         errors                = listOf(message),
     )
-
-    private fun parseExportedAt(exportedAt: String): Long? =
-        exportedAt.takeIf { it.isNotBlank() }?.let { value ->
-            runCatching { Instant.parse(value).toEpochMilli() }.getOrNull()
-        }
 
     internal companion object {
         private const val TAG = "WavdropBackup"

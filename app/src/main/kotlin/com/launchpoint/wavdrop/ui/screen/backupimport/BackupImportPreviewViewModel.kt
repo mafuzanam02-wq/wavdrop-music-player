@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.launchpoint.wavdrop.data.backup.BackupContainerKind
 import com.launchpoint.wavdrop.data.backup.BackupDocumentReadResult
 import com.launchpoint.wavdrop.data.backup.BackupInputReader
+import com.launchpoint.wavdrop.data.backup.BackupPresentation
 import com.launchpoint.wavdrop.data.backup.BackupRejectReason
 import com.launchpoint.wavdrop.data.backup.WavdropBackupDocumentReader
 import com.launchpoint.wavdrop.data.backup.WavdropBackupImportResult
@@ -279,7 +280,7 @@ class BackupImportPreviewViewModel @Inject constructor(
             return BackupImportUiState.Preview(
                 format               = DesktopWavdropBackupParser.APP_NAME,
                 version              = backup.schemaVersion,
-                exportedAt           = backup.exportedAt.ifBlank { "Unknown" },
+                exportedAt           = BackupPresentation.formatDesktopExportDate(backup.exportedAt),
                 songCount            = backup.songs.size,
                 statsCount           = backup.songs.size,
                 baselineCount        = 0,
@@ -353,7 +354,7 @@ class BackupImportPreviewViewModel @Inject constructor(
         return BackupImportUiState.Preview(
             format               = WavdropBackupParser.SUPPORTED_FORMAT,
             version              = WavdropBackupParser.SUPPORTED_VERSION,
-            exportedAt           = backup.exportedAt.ifBlank { "Unknown" },
+            exportedAt           = BackupPresentation.formatExportDate(backup),
             songCount            = backup.songs.size,
             statsCount           = backup.trackStats.size,
             baselineCount        = backup.importBaselines.size,
