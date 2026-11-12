@@ -50,7 +50,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -108,6 +108,8 @@ import com.launchpoint.wavdrop.playback.PlaybackUserMessage
 import com.launchpoint.wavdrop.playback.RepeatMode
 import com.launchpoint.wavdrop.playback.SleepTimerOption
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
+import com.launchpoint.wavdrop.ui.components.DestructiveConfirmDialog
+import com.launchpoint.wavdrop.ui.components.DestructiveDialogCopy
 import com.launchpoint.wavdrop.ui.components.SleepTimerDialog
 import com.launchpoint.wavdrop.ui.components.shareSong
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
@@ -1085,16 +1087,13 @@ private fun LyricsEditorDialog(
     val canSave = text.isNotBlank()
 
     if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            title = { Text("Remove lyrics?") },
-            text = { Text("Your custom lyrics for this track will be removed.") },
-            confirmButton = {
-                Button(onClick = onClear) { Text("Remove") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirm = false }) { Text("Keep editing") }
-            },
+        DestructiveConfirmDialog(
+            title = DestructiveDialogCopy.REMOVE_LYRICS_TITLE,
+            message = DestructiveDialogCopy.REMOVE_LYRICS_BODY,
+            confirmLabel = DestructiveDialogCopy.REMOVE_LYRICS_CONFIRM,
+            cancelLabel = "Keep editing",
+            onConfirm = onClear,
+            onDismiss = { showClearConfirm = false },
         )
     } else {
         AlertDialog(
@@ -1135,7 +1134,10 @@ private fun LyricsEditorDialog(
             dismissButton = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (hasCustomLyrics) {
-                        OutlinedButton(onClick = { showClearConfirm = true }) {
+                        TextButton(
+                            onClick = { showClearConfirm = true },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        ) {
                             Text("Clear")
                         }
                         Spacer(Modifier.size(8.dp))

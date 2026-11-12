@@ -1,8 +1,10 @@
 package com.launchpoint.wavdrop.ui.components
 
+import com.launchpoint.wavdrop.ui.screen.nowplaying.QueueBulkClear
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -112,9 +114,122 @@ class DestructiveConfirmDialogTest {
         assertTrue(playlistDetails.contains("viewModel.deletePlaylist { onNavigateBack() }"))
     }
 
-    @Test fun `J backup recovery and queue dialogs are not routed through the new dialog`() {
+    // ───────────── P5-UX-03B: Queue and Now Playing adopt the shared dialog ─────────────
+    // NOTE: the copy assertions exercise real code (QueueBulkClear / DestructiveDialogCopy). The wiring assertions are
+    // source-structure checks: they do NOT prove rendered placement, colours, Back-key or runtime behaviour (A15 QA slice).
+
+    private val queue get() = src("ui/screen/nowplaying/QueueSheet.kt")
+    private val nowPlaying get() = src("ui/screen/nowplaying/NowPlayingScreen.kt")
+    private val queueDialogBlock get() =
+        queue.substringAfter("val bulkClear = pendingBulkClear").substringBefore("dialog (Phase C)")
+    private val lyricsFn get() = nowPlaying.substringAfter("private fun LyricsEditorDialog(")
+    private val lyricsConfirmBlock get() = lyricsFn.substringAfter("if (showClearConfirm) {").substringBefore("} else {")
+
+    // A / B. Both bulk clears share one dialog with explicit labels
+    @Test fun `A and B both queue bulk clears share one DestructiveConfirmDialog with explicit labels`() {
+        assertEquals(1, Regex("DestructiveConfirmDialog\\(").findAll(queueDialogBlock).count())
+        assertTrue(queueDialogBlock.contains("title = bulkClear.dialogTitle"))
+        assertTrue(queueDialogBlock.contains("message = bulkClear.dialogBody(count)"))
+        assertTrue(queueDialogBlock.contains("confirmLabel = bulkClear.confirmLabel"))
+        assertFalse("raw AlertDialog is gone from the bulk-clear block", queueDialogBlock.contains("AlertDialog("))
+        assertEquals("Clear earlier", QueueBulkClear.Earlier.confirmLabel)
+        assertEquals("Clear Up Next", QueueBulkClear.UpNext.confirmLabel)
+        assertEquals("Clear earlier queue?", QueueBulkClear.Earlier.dialogTitle)
+        assertEquals("Clear Up Next?", QueueBulkClear.UpNext.dialogTitle)
+    }
+
+    // C. Counts and queue-specific messages
+    @Test fun `C queue messages keep the count and do not imply files or history are deleted`() {
+        val earlier = QueueBulkClear.Earlier.dialogBody(3)
+        val upNext = QueueBulkClear.UpNext.dialogBody(1)
+        assertTrue(earlier.startsWith("3 previously played tracks will be removed from the playback queue."))
+        assertTrue(upNext.startsWith("1 upcoming track will be removed from the playback queue."))
+        assertTrue(QueueBulkClear.UpNext.dialogBody(2).startsWith("2 upcoming tracks "))
+        for (m in listOf(earlier, upNext)) {
+            assertTrue(m.contains("The song playing now stays."))
+            assertTrue(m.contains("Your music files, playlists and listening history are not affected."))
+            assertFalse(m.contains("deleted"))
+        }
+        assertNotEquals(earlier, QueueBulkClear.UpNext.dialogBody(3))
+    }
+
+    // D. Cancel / Back never run the clear
+    @Test fun `D dismissal only clears the pending request and never runs the bulk clear`() {
+        assertTrue(queueDialogBlock.contains("onDismiss = { pendingBulkClear = null }"))
+        assertEquals(1, Regex("runBulkClear\\(").findAll(queueDialogBlock).count())
+        val onConfirm = queueDialogBlock.substringAfter("onConfirm = {").substringBefore("onDismiss =")
+        assertTrue(onConfirm.contains("runBulkClear(bulkClear)"))
+        assertFalse(queueDialogBlock.substringAfter("onDismiss =").contains("runBulkClear"))
+    }
+
+    // E. Existing queue feedback intact
+    @Test fun `E existing clear callbacks and snackbar feedback are unchanged`() {
+        assertTrue(queue.contains("QueueBulkClear.Earlier -> onClearEarlier()"))
+        assertTrue(queue.contains("QueueBulkClear.UpNext -> onClearUpNext()"))
+        assertTrue(queue.contains("snackbarHostState.showSnackbar(kind.clearedMessage)"))
+        assertEquals("Earlier queue cleared", QueueBulkClear.Earlier.clearedMessage)
+        assertEquals("Up Next cleared", QueueBulkClear.UpNext.clearedMessage)
+        assertTrue(queueDialogBlock.contains("LaunchedEffect(Unit) { pendingBulkClear = null }"))
+        assertTrue(queue.contains("pendingBulkClear = QueueBulkClear.Earlier"))
+        assertTrue(queue.contains("pendingBulkClear = QueueBulkClear.UpNext"))
+    }
+
+    // F / G. Now Playing lyrics removal uses shared copy and the Keep editing label
+    @Test fun `F and G Now Playing uses the shared lyrics copy and keeps the Keep editing label`() {
+        val block = lyricsConfirmBlock
+        assertTrue(block.contains("DestructiveConfirmDialog("))
+        assertTrue(block.contains("title = DestructiveDialogCopy.REMOVE_LYRICS_TITLE"))
+        assertTrue(block.contains("message = DestructiveDialogCopy.REMOVE_LYRICS_BODY"))
+        assertTrue(block.contains("confirmLabel = DestructiveDialogCopy.REMOVE_LYRICS_CONFIRM"))
+        assertTrue(block.contains("cancelLabel = \"Keep editing\""))
+        assertFalse(nowPlaying.contains("Your custom lyrics for this track will be removed."))
+        assertFalse(block.contains("AlertDialog("))
+    }
+
+    // H. Cancel keeps the editor and the draft
+    @Test fun `H cancel returns to the editor without clearing and the draft state outlives the confirmation`() {
+        assertTrue(lyricsConfirmBlock.contains("onDismiss = { showClearConfirm = false }"))
+        assertFalse(lyricsConfirmBlock.substringAfter("onDismiss =").contains("onClear"))
+        // The draft and the flag live in the composable's own remember, above the if/else, so swapping dialogs cannot reset them.
+        val ifIdx = lyricsFn.indexOf("if (showClearConfirm)")
+        assertTrue(lyricsFn.indexOf("var text by remember") in 0 until ifIdx)
+        assertTrue(lyricsFn.indexOf("var showClearConfirm by remember") in 0 until ifIdx)
+    }
+
+    // I. Only confirmation reaches the existing clear callback
+    @Test fun `I only the confirmation reaches the existing lyrics-clear callback`() {
+        assertEquals(1, Regex("onConfirm\\s*=\\s*onClear").findAll(lyricsFn).count())
+        assertEquals("parameter declaration plus that single use", 2, Regex("\\bonClear\\b").findAll(lyricsFn.substringBefore("private fun ArtworkWithLyricsOverlay")).count())
+        assertTrue(lyricsFn.contains("onClick = { showClearConfirm = true }"))
+        assertTrue(nowPlaying.contains("clearCustomLyrics"))
+    }
+
+    @Test fun `editor Clear is an error-coloured text button and Save stays the primary action`() {
+        val clear = lyricsFn.substringAfter("if (hasCustomLyrics) {").substringBefore("Spacer(")
+        assertTrue(clear.contains("TextButton("))
+        assertTrue(clear.contains("colorScheme.error"))
+        assertFalse(nowPlaying.contains("OutlinedButton"))
+        assertTrue(lyricsFn.substringAfter("confirmButton = {").substringBefore("dismissButton = {").contains("Button("))
+    }
+
+    // J. Styling and native placement are retained in the (unmodified) shared component
+    @Test fun `J shared dialog styling and native button slots are retained and now used by Queue and Now Playing`() {
+        assertTrue(queue.contains("DestructiveConfirmDialog"))
+        assertTrue(nowPlaying.contains("DestructiveConfirmDialog"))
+        assertTrue(dialog.contains("colorScheme.error"))
+        assertTrue(dialog.indexOf("confirmButton = {") in 0 until dialog.indexOf("dismissButton = {"))
+        assertFalse(dialog.contains("Row("))
+    }
+
+    // K. Track Details and playlist deletion dialogs unchanged
+    @Test fun `K Track Details and playlist dialogs are unchanged`() {
+        assertTrue(trackDetails.contains("DestructiveDialogCopy.DELETE_TRACK_CONFIRM"))
+        assertTrue(trackDetails.contains("DestructiveDialogCopy.REMOVE_LYRICS_CONFIRM"))
+        for (s in listOf(playlists, playlistDetails)) assertTrue(s.contains("DestructiveDialogCopy.DELETE_PLAYLIST_CONFIRM"))
+    }
+
+    // L. Backup Recovery stays outside the shared dialog
+    @Test fun `L backup recovery is not routed through the shared dialog`() {
         assertFalse(src("ui/screen/backupimport/BackupImportPreviewScreen.kt").contains("DestructiveConfirmDialog"))
-        assertFalse(src("ui/screen/nowplaying/QueueSheet.kt").contains("DestructiveConfirmDialog"))
-        assertFalse(src("ui/screen/nowplaying/NowPlayingScreen.kt").contains("DestructiveConfirmDialog"))
     }
 }

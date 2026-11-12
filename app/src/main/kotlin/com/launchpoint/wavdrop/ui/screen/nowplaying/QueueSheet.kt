@@ -101,6 +101,8 @@ import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.QueueSaveResult
 import com.launchpoint.wavdrop.playback.NowPlayingState
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.CountLabels
+import com.launchpoint.wavdrop.ui.components.DestructiveConfirmDialog
 import com.launchpoint.wavdrop.ui.components.LocalArtworkCornerStyle
 import com.launchpoint.wavdrop.ui.components.LocalCompactMode
 import com.launchpoint.wavdrop.ui.components.shareSong
@@ -984,21 +986,15 @@ private fun QueueSheetContent(
                 // Queue changed underneath the dialog and there is nothing left to clear.
                 LaunchedEffect(Unit) { pendingBulkClear = null }
             } else {
-                AlertDialog(
-                    onDismissRequest = { pendingBulkClear = null },
-                    title = { Text(bulkClear.dialogTitle) },
-                    text = { Text(bulkClear.dialogBody(count)) },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                pendingBulkClear = null
-                                runBulkClear(bulkClear)
-                            },
-                        ) { Text("Clear") }
+                DestructiveConfirmDialog(
+                    title = bulkClear.dialogTitle,
+                    message = bulkClear.dialogBody(count),
+                    confirmLabel = bulkClear.confirmLabel,
+                    onConfirm = {
+                        pendingBulkClear = null
+                        runBulkClear(bulkClear)
                     },
-                    dismissButton = {
-                        TextButton(onClick = { pendingBulkClear = null }) { Text("Cancel") }
-                    },
+                    onDismiss = { pendingBulkClear = null },
                 )
             }
         }
@@ -1259,18 +1255,25 @@ private fun QueueSectionHeader(
 }
 
 /** The two explicit bulk queue clears and their confirmation / feedback copy. */
-private enum class QueueBulkClear(
+internal enum class QueueBulkClear(
     val dialogTitle: String,
+    val confirmLabel: String,
     val clearedMessage: String,
 ) {
-    Earlier("Clear earlier queue?", "Earlier queue cleared"),
-    UpNext("Clear Up Next?", "Up Next cleared");
+    Earlier("Clear earlier queue?", "Clear earlier", "Earlier queue cleared"),
+    UpNext("Clear Up Next?", "Clear Up Next", "Up Next cleared");
 
+    /** P5-UX-03B: names what leaves the playback queue and what is not touched. */
     fun dialogBody(count: Int): String = when (this) {
-        Earlier -> "Remove $count previously played tracks from this queue?"
-        UpNext -> "Remove $count upcoming tracks from this queue?"
+        Earlier -> "${CountLabels.format(count, "previously played track")} will be removed from the playback queue. " +
+            QUEUE_CLEAR_REASSURANCE
+        UpNext -> "${CountLabels.format(count, "upcoming track")} will be removed from the playback queue. " +
+            QUEUE_CLEAR_REASSURANCE
     }
 }
+
+internal const val QUEUE_CLEAR_REASSURANCE =
+    "The song playing now stays. Your music files, playlists and listening history are not affected."
 
 // ── Playing-now row (highlighted) ─────────────────────────────────────────────
 
