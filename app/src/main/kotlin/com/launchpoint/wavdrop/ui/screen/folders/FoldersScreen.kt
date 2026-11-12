@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.FolderSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
@@ -272,7 +273,7 @@ private fun FolderRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${folder.songCount} songs · ${formatTotalDuration(folder.totalDurationMs)}",
+                text = "${CountLabels.songs(folder.songCount)} · ${formatTotalDuration(folder.totalDurationMs)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )

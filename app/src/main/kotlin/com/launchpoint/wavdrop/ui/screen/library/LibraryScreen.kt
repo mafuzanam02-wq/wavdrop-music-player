@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
 import com.launchpoint.wavdrop.ui.components.PrimaryNavigationBar
@@ -316,8 +317,7 @@ private fun SectionDivider() {
 }
 
 private fun pluralCount(count: Int, singular: String, plural: String): String {
-    val label = if (count == 1) singular else plural
-    return "${NUMBER_FORMAT.format(count)} $label"
+    return CountLabels.format(count, singular, plural, NUMBER_FORMAT.format(count))
 }
 
 private fun formatLibraryDuration(ms: Long): String {

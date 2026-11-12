@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
 import com.launchpoint.wavdrop.ui.components.DestructiveConfirmDialog
 import com.launchpoint.wavdrop.ui.components.DestructiveDialogCopy
@@ -295,7 +296,7 @@ private fun PlaylistRow(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text  = "${playlist.songCount} songs",
+                    text  = CountLabels.songs(playlist.songCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )

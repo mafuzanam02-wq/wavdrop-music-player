@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.library.FolderGrouper
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
@@ -92,7 +93,7 @@ fun FolderDetailsScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text  = "${state.songs.size} songs",
+                            text  = CountLabels.songs(state.songs.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         )

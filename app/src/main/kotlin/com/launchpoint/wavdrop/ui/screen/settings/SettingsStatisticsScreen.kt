@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.ui.components.MiniPlayer
 import com.launchpoint.wavdrop.ui.components.PrimaryDestination
@@ -442,7 +443,7 @@ private fun InsightsCollectionRow(
             )
         }
         Text(
-            text  = "$count songs",
+            text  = CountLabels.songs(count),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
         )

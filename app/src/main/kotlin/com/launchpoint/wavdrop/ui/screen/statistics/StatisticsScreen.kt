@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.SongStatsSummary
 import com.launchpoint.wavdrop.data.model.StatsDashboardSummary
@@ -163,7 +164,7 @@ private fun DashboardContent(
             sectionKey = "most_played",
             songs = summary.mostPlayedSongs,
             emptyMessage = "No plays recorded yet. Play songs to rank this section.",
-            metric = { "${it.playCount} plays" },
+            metric = { CountLabels.plays(it.playCount) },
             onTrackDetailsClick = onTrackDetailsClick,
         )
 
@@ -181,7 +182,7 @@ private fun DashboardContent(
             sectionKey = "most_skipped",
             songs = summary.mostSkippedSongs,
             emptyMessage = "No skips recorded yet. Skipped tracks will appear here.",
-            metric = { "${it.skipCount} skips" },
+            metric = { CountLabels.skips(it.skipCount) },
             onTrackDetailsClick = onTrackDetailsClick,
         )
     }

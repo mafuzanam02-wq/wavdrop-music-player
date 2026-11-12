@@ -482,7 +482,7 @@ private fun SearchAlbumRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${album.songCount} songs",
+                text = CountLabels.songs(album.songCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                 maxLines = 1,
@@ -532,7 +532,7 @@ private fun SearchPlaylistRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${playlist.songCount} songs",
+                text = CountLabels.songs(playlist.songCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )
@@ -587,7 +587,7 @@ private fun SearchSmartCollectionRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${collection.songCount} songs",
+                text = CountLabels.songs(collection.songCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )
@@ -635,7 +635,7 @@ private fun SearchFolderRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${folder.songCount} songs",
+                text = CountLabels.songs(folder.songCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )
@@ -810,8 +810,8 @@ private fun highlightQuery(
 }
 
 private fun artistSearchMeta(artist: ArtistSummary): String = buildString {
-    append("${artist.songCount} songs")
-    if (artist.albumCount > 0) append(" - ${artist.albumCount} albums")
+    append(CountLabels.songs(artist.songCount))
+    if (artist.albumCount > 0) append(" - ${CountLabels.albums(artist.albumCount)}")
 }
 
 private fun Song.searchFolderKey(): String? {

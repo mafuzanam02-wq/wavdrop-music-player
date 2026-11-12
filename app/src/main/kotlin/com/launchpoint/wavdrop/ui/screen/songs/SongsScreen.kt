@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.ui.components.motion.PullToRefreshContainer
 import com.launchpoint.wavdrop.ui.scan.LibraryScanStatus
 import com.launchpoint.wavdrop.ui.scan.LibraryScanUiState
@@ -382,7 +383,7 @@ private fun SongListContent(
                             modifier = Modifier.size(18.dp).padding(end = 2.dp),
                         )
                         Text(
-                            text     = "Shuffle ${songs.size} songs",
+                            text     = "Shuffle ${CountLabels.songs(songs.size)}",
                             style    = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(start = 6.dp),
                         )

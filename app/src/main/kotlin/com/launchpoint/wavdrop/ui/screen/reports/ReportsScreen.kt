@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.AlbumReportSummary
 import com.launchpoint.wavdrop.data.model.ArtistReportSummary
 import com.launchpoint.wavdrop.data.model.ListeningReportSummary
@@ -137,7 +138,7 @@ private fun ReportsContent(
             title = "Top Songs",
             songs = report.topSongs,
             emptyMessage = "No top songs yet. Play music to rank tracks by listening activity.",
-            metric = { "${it.playCount} plays" },
+            metric = { CountLabels.plays(it.playCount) },
             onTrackDetailsClick = onTrackDetailsClick,
         )
 
@@ -145,7 +146,7 @@ private fun ReportsContent(
             title = "Top Artists",
             artists = report.topArtists,
             emptyMessage = "No top artists yet. Play songs to build artist activity.",
-            metric = { "${it.playCount} plays" },
+            metric = { CountLabels.plays(it.playCount) },
             onArtistClick = onArtistClick,
         )
 
@@ -153,7 +154,7 @@ private fun ReportsContent(
             title = "Top Albums",
             albums = report.topAlbums,
             emptyMessage = "No top albums yet. Play songs to build album activity.",
-            metric = { "${it.playCount} plays" },
+            metric = { CountLabels.plays(it.playCount) },
             onAlbumClick = onAlbumClick,
         )
 
@@ -287,7 +288,7 @@ private fun HabitsSection(
             ReportRow(
                 title = "Most played track",
                 subtitle = track.song.displayTitle,
-                metric = "${track.playCount} plays",
+                metric = CountLabels.plays(track.playCount),
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
         } ?: EmptySectionRow("No most-played track yet. Play music to choose one.")
@@ -296,7 +297,7 @@ private fun HabitsSection(
             ReportRow(
                 title = "Most played artist",
                 subtitle = artist.artistKey,
-                metric = "${artist.playCount} plays",
+                metric = CountLabels.plays(artist.playCount),
                 onClick = { onArtistClick(artist.artistKey) },
             )
         }
@@ -305,7 +306,7 @@ private fun HabitsSection(
             ReportRow(
                 title = "Most played album",
                 subtitle = album.albumKey,
-                metric = "${album.playCount} plays",
+                metric = CountLabels.plays(album.playCount),
                 onClick = { onAlbumClick(album.albumKey) },
             )
         }
@@ -314,7 +315,7 @@ private fun HabitsSection(
             ReportRow(
                 title = "Most skipped track",
                 subtitle = track.song.displayTitle,
-                metric = "${track.skipCount} skips",
+                metric = CountLabels.skips(track.skipCount),
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
         }
@@ -387,7 +388,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.artistReportRows(
     items(artists, key = { "artist_${it.artistKey}_${metric(it)}" }) { artist ->
         ReportRow(
             title = artist.artistKey,
-            subtitle = "${artist.songCount} songs - ${artist.albumCount} albums",
+            subtitle = "${CountLabels.songs(artist.songCount)} - ${CountLabels.albums(artist.albumCount)}",
             metric = metric(artist),
             onClick = { onArtistClick(artist.artistKey) },
         )

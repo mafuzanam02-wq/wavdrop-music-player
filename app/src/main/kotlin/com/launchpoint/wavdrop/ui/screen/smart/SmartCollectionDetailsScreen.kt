@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.MostPlayedDisplayLimit
 import com.launchpoint.wavdrop.data.model.MostPlayedPeriod
@@ -101,7 +102,7 @@ fun SmartCollectionDetailsScreen(
             coroutineScope.launch {
                 snackbarHostState.showSnackbar(
                     when (result) {
-                        is SaveAsPlaylistResult.Success       -> "Saved '${result.name}' with ${result.added} songs."
+                        is SaveAsPlaylistResult.Success       -> "Saved '${result.name}' with ${CountLabels.songs(result.added)}."
                         is SaveAsPlaylistResult.DuplicateName -> "Could not create a unique playlist name."
                         SaveAsPlaylistResult.Empty            -> "No songs to save."
                         SaveAsPlaylistResult.Error            -> "Something went wrong."
@@ -297,7 +298,7 @@ fun SmartCollectionDetailsScreen(
 }
 
 private fun playCountLabel(count: Int): String =
-    if (count == 1) "1 play" else "$count plays"
+    CountLabels.plays(count)
 
 @Composable
 private fun MostPlayedContent(

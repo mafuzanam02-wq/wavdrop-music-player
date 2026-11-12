@@ -76,7 +76,7 @@ fun AddToPlaylistDialog(
                                         ),
                                     )
                                     Text(
-                                        text  = if (alreadyAdded) "Already added" else "${playlist.songCount} songs",
+                                        text  = if (alreadyAdded) "Already added" else CountLabels.songs(playlist.songCount),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                     )

@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.Song
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -238,7 +239,7 @@ private fun AddSongsBottomBar(
                 onClick = onAdd,
                 enabled = selectedCount > 0 && !isAdding,
             ) {
-                Text("Add $selectedCount songs")
+                Text("Add ${CountLabels.songs(selectedCount)}")
             }
         }
     }

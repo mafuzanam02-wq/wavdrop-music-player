@@ -82,6 +82,7 @@ import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.data.repository.PlaylistOperationResult
@@ -271,7 +272,7 @@ fun PlaylistDetailsScreen(
                             )
                             if (songCount > 0) {
                                 Text(
-                                    text  = "$songCount songs",
+                                    text  = CountLabels.songs(songCount),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                 )
@@ -746,7 +747,7 @@ private fun PlaylistStatsCard(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "$totalPlayCount plays",
+                text = CountLabels.plays(totalPlayCount),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
                 modifier = Modifier.padding(top = 4.dp),
@@ -892,7 +893,7 @@ private fun EmptyContent(
 }
 
 private fun playlistSongCountLabel(songCount: Int): String =
-    if (songCount == 1) "1 song" else "$songCount songs"
+    CountLabels.songs(songCount)
 
 private fun formatPlaylistDuration(durationMs: Long): String {
     val totalMinutes = durationMs.coerceAtLeast(0L) / 60_000L

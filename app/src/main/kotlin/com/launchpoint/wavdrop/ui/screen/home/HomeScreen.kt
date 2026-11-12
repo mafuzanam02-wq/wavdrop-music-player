@@ -42,6 +42,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.ui.components.motion.PullToRefreshContainer
 import com.launchpoint.wavdrop.ui.scan.LibraryScanStatus
 import com.launchpoint.wavdrop.ui.scan.LibraryScanUiState
@@ -371,7 +372,7 @@ private fun HomeHeaderTitle(
 }
 
 private fun HomeDashboardUiState.librarySummary(): String =
-    if (totalSongs > 0) "$totalSongs songs" else "Your music library"
+    if (totalSongs > 0) CountLabels.songs(totalSongs) else "Your music library"
 
 internal enum class HomeListeningActivityPreview {
     RECENTLY_PLAYED,
@@ -769,7 +770,7 @@ private fun WrappedPreviewCard(
     val highlight = when {
         wrapped.topArtistKey != null -> "Top artist: ${wrapped.topArtistKey}"
         wrapped.topSong != null -> "Top track: ${wrapped.topSong.displayTitle}"
-        else -> "${wrapped.totalPlayCount} plays"
+        else -> CountLabels.plays(wrapped.totalPlayCount)
     }
 
     val interactionSource = remember { MutableInteractionSource() }
@@ -1143,7 +1144,7 @@ private fun PlaylistPreviewRow(
 ) {
     DashboardPreviewRow(
         title = playlist.name,
-        subtitle = "${playlist.songCount} songs",
+        subtitle = CountLabels.songs(playlist.songCount),
         icon = Icons.AutoMirrored.Filled.QueueMusic,
         onClick = onClick,
         modifier = modifier,
@@ -1283,7 +1284,7 @@ private fun SongListContent(
                                 .padding(end = 2.dp),
                         )
                         Text(
-                            text     = "Shuffle ${songs.size} songs",
+                            text     = "Shuffle ${CountLabels.songs(songs.size)}",
                             style    = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(start = 6.dp),
                         )

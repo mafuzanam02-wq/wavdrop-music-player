@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.AlbumSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
@@ -289,7 +290,7 @@ private fun AlbumRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text  = "${album.songCount} songs · ${formatTotalDuration(album.totalDurationMs)}",
+                text  = "${CountLabels.songs(album.songCount)} · ${formatTotalDuration(album.totalDurationMs)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )

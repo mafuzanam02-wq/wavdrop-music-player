@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.AlbumReportSummary
 import com.launchpoint.wavdrop.data.model.ArtistReportSummary
 import com.launchpoint.wavdrop.data.model.ListeningAnalyticsEmptyReason
@@ -174,7 +175,7 @@ private fun MonthlyContent(
             sectionKey = "top_songs",
             songs = report.topSongs,
             emptyMessage = "No plays recorded for this month. Play music during this month to rank songs.",
-            metric = { "${it.playCount} plays this month" },
+            metric = { "${CountLabels.plays(it.playCount)} this month" },
             onTrackDetailsClick = onTrackDetailsClick,
         )
 
@@ -183,7 +184,7 @@ private fun MonthlyContent(
             subtitle = "Ranked by plays recorded this month",
             artists = report.topArtists,
             emptyMessage = "No artist data for this month. Play songs during this month to fill it.",
-            metric = { "${it.playCount} plays this month" },
+            metric = { "${CountLabels.plays(it.playCount)} this month" },
             onArtistClick = onArtistClick,
         )
 
@@ -192,7 +193,7 @@ private fun MonthlyContent(
             subtitle = "Ranked by plays recorded this month",
             albums = report.topAlbums,
             emptyMessage = "No album data for this month. Play songs during this month to fill it.",
-            metric = { "${it.playCount} plays this month" },
+            metric = { "${CountLabels.plays(it.playCount)} this month" },
             onAlbumClick = onAlbumClick,
         )
 
@@ -420,7 +421,7 @@ private fun HabitsSection(
             ReportRow(
                 title = "Most skipped track",
                 subtitle = track.song.displayTitle,
-                metric = "${track.skipCount} skips this month",
+                metric = "${CountLabels.skips(track.skipCount)} this month",
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
         } ?: EmptySectionRow("No skips recorded yet. Skips from this month will appear here.")
@@ -486,7 +487,7 @@ private fun LazyListScope.monthArtistSection(
     items(artists, key = { "artist_${it.artistKey}" }) { artist ->
         ReportRow(
             title = artist.artistKey,
-            subtitle = "${artist.songCount} songs",
+            subtitle = CountLabels.songs(artist.songCount),
             metric = metric(artist),
             onClick = { onArtistClick(artist.artistKey) },
         )

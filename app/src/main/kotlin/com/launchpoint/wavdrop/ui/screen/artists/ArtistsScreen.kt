@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.ArtistSummary
 import com.launchpoint.wavdrop.data.search.AlphabetIndex
 import com.launchpoint.wavdrop.ui.components.AlphabetSideIndex
@@ -282,8 +283,8 @@ private fun ArtistRow(
                 overflow = TextOverflow.Ellipsis,
             )
             val meta = buildString {
-                append("${artist.songCount} songs")
-                if (artist.albumCount > 0) append(" · ${artist.albumCount} albums")
+                append(CountLabels.songs(artist.songCount))
+                if (artist.albumCount > 0) append(" · ${CountLabels.albums(artist.albumCount)}")
                 val dur = formatTotalDuration(artist.totalDurationMs)
                 if (dur.isNotEmpty()) append(" · $dur")
             }

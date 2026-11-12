@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.ArtistAlbumInsight
 import com.launchpoint.wavdrop.data.model.ArtistInsightsSummary
 import com.launchpoint.wavdrop.data.model.Song
@@ -184,7 +185,7 @@ fun ArtistDetailsScreen(
                 title = "Top Songs",
                 songs = state.insights.topSongs,
                 emptyMessage = "No top songs yet. Play this artist to rank tracks.",
-                metric = { "${it.playCount} plays" },
+                metric = { CountLabels.plays(it.playCount) },
                 onSongClick = viewModel::playSong,
             )
 
@@ -536,8 +537,8 @@ private fun ArtistAlbumInsightRow(
 ) {
     InsightRow(
         title = album.albumKey,
-        subtitle = "${album.songCount} songs",
-        metric = "${album.playCount} plays",
+        subtitle = CountLabels.songs(album.songCount),
+        metric = CountLabels.plays(album.playCount),
         onClick = onClick,
         modifier = modifier,
     )
@@ -617,9 +618,8 @@ private fun EmptySectionRow(message: String) {
 
 private fun artistMeta(songCount: Int, albumCount: Int): String =
     buildString {
-        append("$songCount songs")
-        if (albumCount > 1) append(" - $albumCount albums")
-        if (albumCount == 1) append(" - 1 album")
+        append(CountLabels.songs(songCount))
+        if (albumCount > 0) append(" - ${CountLabels.albums(albumCount)}")
     }
 
 private fun formatArtistDuration(ms: Long): String {

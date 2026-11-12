@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.model.SmartCollection
 import com.launchpoint.wavdrop.data.model.SmartCollectionType
 import com.launchpoint.wavdrop.ui.components.LoadingStateContent
@@ -163,7 +164,7 @@ private fun SmartCollectionRow(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text  = "${collection.songCount} songs",
+                    text  = CountLabels.songs(collection.songCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )

@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.data.artwork.ArtworkResolver
 import com.launchpoint.wavdrop.data.model.Song
 import com.launchpoint.wavdrop.ui.components.AddToPlaylistDialog
@@ -305,7 +306,7 @@ private fun AlbumHeader(
                 }
             }
             Text(
-                text     = "${state.songs.size} songs · ${formatTotalDuration(state.totalDurationMs)}",
+                text     = "${CountLabels.songs(state.songs.size)} · ${formatTotalDuration(state.totalDurationMs)}",
                 style    = MaterialTheme.typography.labelMedium,
                 color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f),
                 modifier = Modifier.padding(top = 8.dp),
