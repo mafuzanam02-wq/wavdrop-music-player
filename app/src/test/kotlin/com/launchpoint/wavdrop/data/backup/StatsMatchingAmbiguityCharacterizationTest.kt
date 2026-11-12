@@ -278,21 +278,22 @@ class StatsMatchingAmbiguityCharacterizationTest {
     }
 
     /**
-     * CHARACTERIZED RISK, not endorsed: URI corroboration compares only duration and the TOLERANT TITLE, never artist. A stale URI
-     * (MediaStore id reuse after a rescan) that points at a different artist's song with the same title and a duration inside
-     * tolerance is therefore accepted as an exact match. Recorded so a future policy slice has a regression anchor.
+     * P5-REL-04B1: in P5-REL-04A this was a CHARACTERIZED RISK (URI corroboration ignored the artist, so a stale URI pointing at a
+     * same-title, different-artist song within tolerance was accepted). With known, contradicting artists the URI is now rejected and
+     * the rejected song is excluded from later tiers, so the row is not attached to the South song. Detailed coverage lives in
+     * [UriArtistCorroborationTest].
      */
     @Test
-    fun `F - characterized risk - a URI pointing at a same-title different-artist song within tolerance is accepted`() {
+    fun `F - a URI pointing at a same-title different-artist song within tolerance is no longer accepted`() {
         val b = backup(
             listOf(bSong(11, liveSouth.uri, "Harbor", "Artist North", "Album One", 170_424)),
             listOf(stat(11, liveSouth.uri, 11, 3)),
         )
 
-        val result = WavdropBackupStatsMatcher.match(b, live)
+        val result = WavdropBackupStatsMatcher.match(b, listOf(liveSouth))
 
-        assertEquals("attributed to the South song by URI corroboration", liveSouth, result.matchedRows.single().first)
-        assertEquals(1, result.diagnostics.matchedByUri)
+        assertTrue(result.matchedRows.isEmpty())
+        assertEquals(0, result.diagnostics.matchedByUri)
     }
 
     @Test

@@ -85,9 +85,35 @@ class BackupUriCollisionSafetyTest {
         assertEquals(listOf(l), match(backup(listOf(bsong(5, title = "Title 5", album = "Old Album"))), l).matchedRows.map { it.first })
     }
 
-    @Test fun `6b changed artist with the same title and duration is accepted`() {
+    /**
+     * P5-REL-04B1 supersedes the P5-AUDIT-11 expectation that a changed artist is accepted. Approved policy: when BOTH artists are
+     * known and contradict, the URI is not corroborated (a retag and a reused URI are indistinguishable, so the safe outcome wins).
+     * The contradicted owner is excluded from later tiers and, with no independently safe destination, the statistics stay unmatched
+     * (the import path quarantines them).
+     */
+    @Test fun `6b changed known artist with the same title and duration is no longer accepted by URI`() {
         val l = local(5, artist = "Corrected Artist")
-        assertEquals(listOf(l), match(backup(listOf(bsong(5, artist = "Old Artist"))), l).matchedRows.map { it.first })
+        val b = backup(listOf(bsong(5, artist = "Old Artist")))
+        val r = match(b, l)
+        assertTrue(r.matchedRows.isEmpty())
+        assertEquals(0, r.diagnostics.matchedByUri)
+        assertEquals(1, r.unmatchedCount)
+        assertTrue("the contradicted owner must not re-enter through a weaker tier", resolvedIds(b, l).isEmpty())
+        val quarantined = QuarantinePlanner.plan(b, "fp", resolvedIds(b, l).keys, emptySet()).newCandidates.single()
+        assertEquals(99, quarantined.stats!!.playCount)
+        assertEquals(1_000L, quarantined.stats!!.lastPlayedAt)
+    }
+
+    @Test fun `6c a placeholder artist on either side does not block an otherwise corroborated URI`() {
+        val knownLocal = local(5, artist = "Real Artist")
+        assertEquals(listOf(knownLocal), match(backup(listOf(bsong(5, artist = "Unknown Artist"))), knownLocal).matchedRows.map { it.first })
+        val unknownLocal = local(6, artist = "<unknown>")
+        assertEquals(listOf(unknownLocal), match(backup(listOf(bsong(6, artist = "Real Artist"))), unknownLocal).matchedRows.map { it.first })
+    }
+
+    @Test fun `6d the same artist spelled with different case accents or whitespace is still accepted`() {
+        val l = local(5, artist = "Beyoncé")
+        assertEquals(listOf(l), match(backup(listOf(bsong(5, artist = "  BEYONCE "))), l).matchedRows.map { it.first })
     }
 
     @Test fun `7 a file moved to another folder keeps its URI match when title and duration agree`() {

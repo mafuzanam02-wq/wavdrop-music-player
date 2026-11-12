@@ -12,7 +12,7 @@ import kotlin.math.abs
  * tier when it yields exactly ONE candidate — multiple candidates at the same
  * tier are counted as ambiguous instead of guessing:
  *
- *  1. Exact content URI (same device, no rescan)
+ *  1. Exact content URI (same device, no rescan), corroborated by duration, title and - when both are known - artist
  *  2. Folder path + title + duration (±[DURATION_TOLERANCE_MS])
  *  3. Title + artist + album + duration tolerance
  *  4. Title + artist + duration tolerance (album tag changed)
@@ -229,13 +229,30 @@ object WavdropBackupStatsMatcher {
 
     private val PLACEHOLDER_TITLES = setOf("", "unknown", "unknown title", "untitled", "unknown track", "<unknown>")
 
+    /** Tolerant keys (lower-case, marks/apostrophes dropped) that mean "no artist information". */
+    private val PLACEHOLDER_ARTISTS = setOf("", "unknown", "unknown artist", "<unknown>")
+
     private fun uriCorroborated(b: BackupSong, local: Song): Boolean {
         if (b.duration <= 0L || local.duration <= 0L) return false
         if (abs(local.duration - b.duration) > DURATION_TOLERANCE_MS) return false
         val strict = b.title.strictKey()
         val bt = b.title.tolerantKey()
         if (bt.isBlank() || strict in PLACEHOLDER_TITLES || bt in PLACEHOLDER_TITLES) return false
-        return bt == local.title.tolerantKey()
+        if (bt != local.title.tolerantKey()) return false
+        return !artistsContradict(b.artist, local.artist)
+    }
+
+    /**
+     * P5-REL-04B1: a reused or stale URI can point at a DIFFERENT artist's song that shares a title and a near-equal duration. Two
+     * artists contradict each other only when BOTH are known (not blank, not an "unknown" placeholder) and their tolerant keys differ.
+     * An unknown artist neither corroborates nor contradicts, so it can never reject a URI nor turn one into a match; title and duration
+     * are still required above. Case, whitespace, accent and apostrophe differences are normalized away by the tolerant key.
+     */
+    private fun artistsContradict(backupArtist: String, localArtist: String): Boolean {
+        val b = backupArtist.tolerantKey()
+        val l = localArtist.tolerantKey()
+        if (b in PLACEHOLDER_ARTISTS || l in PLACEHOLDER_ARTISTS) return false
+        return b != l
     }
 
     private fun String.strictKey() = MusicTextNormalizer.normalizeStrict(this)
