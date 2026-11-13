@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.screen.wrapped
 import android.app.Activity
 import android.graphics.Rect as AndroidRect
 import android.provider.Settings
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -273,7 +274,7 @@ internal fun wrappedDataSourceDisclosure(scope: WrappedScope): String = when (sc
         "Wrapped is based on listening activity recorded by Wavdrop on this device. Imported totals may appear in Statistics, but they are not included here."
 }
 
-private data class WrappedVisualSettings(
+internal data class WrappedVisualSettings(
     val useArtworkBackgrounds: Boolean,
     val backgroundIntensity: WrappedBackgroundIntensity,
     val fallbackTheme: WrappedFallbackTheme,
@@ -1654,15 +1655,22 @@ private fun FeaturedTrack(
 // ── Pages ─────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun IntroPage(
+internal fun IntroPage(
     wrapped: WrappedSummary,
     periodCopy: WrappedPeriodCopy,
     visualSettings: WrappedVisualSettings,
     modifier: Modifier = Modifier,
 ) {
-    val artworkUri = ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId)
-        .takeIf { visualSettings.useArtworkBackgrounds }
-    var artworkLoaded by remember(artworkUri) { mutableStateOf(false) }
+    // P5-WR-VID-02A1: an export host may supply already-decoded artwork (or its unavailability) so the first composed
+    // frame is final. Absent (the live default) the page loads artwork through Coil exactly as before.
+    val exportArtwork = LocalWrappedExportArtwork.current
+    val exportReady = exportArtwork as? WrappedExportArtwork.Ready
+    val artworkUri = when {
+        !visualSettings.useArtworkBackgrounds -> null
+        exportArtwork == null -> ArtworkResolver.albumArtworkUri(wrapped.mostPlayedSong?.song?.albumId)
+        else -> exportReady?.sourceKey
+    }
+    var artworkLoaded by remember(artworkUri) { mutableStateOf(exportReady != null && artworkUri != null) }
     val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
     val fallbackPalette = visualSettings.fallbackTheme.toPalette(
         motif = WrappedDecorativeMotif.Patterns,
@@ -1685,14 +1693,23 @@ private fun IntroPage(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (artworkUri != null) {
-                AsyncImage(
-                    model = artworkUri,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    onSuccess = { artworkLoaded = true },
-                    onError = { artworkLoaded = false },
-                )
+                if (exportReady != null) {
+                    Image(
+                        bitmap = exportReady.bitmap,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    AsyncImage(
+                        model = artworkUri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        onSuccess = { artworkLoaded = true },
+                        onError = { artworkLoaded = false },
+                    )
+                }
             }
             Crossfade(
                 targetState = artworkLoaded && artworkUri != null,
