@@ -432,7 +432,7 @@ private fun EmptyContent(
             Text(
                 text = "Your Wrapped starts here.",
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = rememberWrappedScaffoldAccentText(),
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(12.dp))
@@ -1099,6 +1099,8 @@ private fun InsightCard(
     val shape = RoundedCornerShape(tokens.cornerRadius)
     val primary = MaterialTheme.colorScheme.primary
     val isEditorial = tokens.cardTreatment == WrappedCardTreatment.EDITORIAL
+    // Accent-as-text colour for this card's treatment (decorative accent uses below keep the raw primary).
+    val accentText = rememberWrappedInsightAccentText(tokens)
 
     // Structural fill: translucent+bordered (GLASS), opaque solid (EDITORIAL), gradient+halo (IMMERSIVE).
     val fill: Modifier = when (tokens.cardTreatment) {
@@ -1107,8 +1109,8 @@ private fun InsightCard(
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = tokens.containerAlpha))
                 .background(
                     Brush.verticalGradient(
-                        0f to primary.copy(alpha = 0.12f),
-                        0.55f to Color.Transparent,
+                        0f to primary.copy(alpha = WRAPPED_GLASS_HAZE_ALPHA),
+                        WRAPPED_GLASS_HAZE_END_STOP to Color.Transparent,
                     ),
                 )
                 .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = tokens.borderAlpha), shape)
@@ -1118,7 +1120,7 @@ private fun InsightCard(
             Modifier.background(
                 Brush.verticalGradient(
                     0f to primary.copy(alpha = tokens.containerAlpha),
-                    1f to MaterialTheme.colorScheme.surface.copy(alpha = 0.32f),
+                    1f to MaterialTheme.colorScheme.surface.copy(alpha = WRAPPED_IMMERSIVE_SURFACE_ALPHA),
                 ),
             )
     }
@@ -1155,7 +1157,7 @@ private fun InsightCard(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (isEditorial) FontWeight.Bold else FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = accentText,
                 )
                 if (isEditorial) {
                     // Editorial "magazine" structure: a crisp divider under the label.
@@ -1165,7 +1167,9 @@ private fun InsightCard(
                 } else {
                     Spacer(Modifier.height(20.dp))
                 }
-                content()
+                CompositionLocalProvider(LocalWrappedAccentText provides accentText) {
+                    content()
+                }
             }
         }
     }
@@ -1206,19 +1210,23 @@ private fun WrappedArtworkCard(
     val tokens = LocalWrappedStyleTokens.current
     val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
     val fallbackPalette = visualSettings.fallbackTheme.toPalette(fallbackMotif, intensityStyle)
+    val cardContainer = if (effectiveArtworkUri != null) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        fallbackPalette.containerColor
+    }
+    // Accent text is only used when no artwork is shown (artwork-backed text keeps its white foreground).
+    val accentText = rememberWrappedContainerAccentText(
+        container = cardContainer,
+        motif = listOf(fallbackPalette.primary, fallbackPalette.secondary),
+    )
     Card(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .wrappedCardReveal(tokens),
         shape = RoundedCornerShape(tokens.cornerRadius),
-        colors = CardDefaults.cardColors(
-            containerColor = if (effectiveArtworkUri != null) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                fallbackPalette.containerColor
-            },
-        ),
+        colors = CardDefaults.cardColors(containerColor = cardContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
@@ -1269,10 +1277,12 @@ private fun WrappedArtworkCard(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
                     color = if (artworkLoaded) Color.White.copy(alpha = 0.85f)
-                             else MaterialTheme.colorScheme.primary,
+                             else accentText,
                 )
                 Spacer(Modifier.height(20.dp))
-                content(artworkLoaded)
+                CompositionLocalProvider(LocalWrappedAccentText provides accentText) {
+                    content(artworkLoaded)
+                }
             }
         }
     }
@@ -1413,6 +1423,10 @@ private fun WrappedDecorativeCard(
 ) {
     val intensityStyle = visualSettings.backgroundIntensity.toVisualStyle()
     val palette = visualSettings.fallbackTheme.toPalette(motif, intensityStyle)
+    val accentText = rememberWrappedContainerAccentText(
+        container = palette.containerColor,
+        motif = listOf(palette.primary, palette.secondary),
+    )
     Card(
         modifier = modifier
             .fillMaxSize()
@@ -1445,10 +1459,12 @@ private fun WrappedDecorativeCard(
                     Text(
                         text = label,
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = accentText,
                     )
                     Spacer(Modifier.height(20.dp))
-                    content()
+                    CompositionLocalProvider(LocalWrappedAccentText provides accentText) {
+                        content()
+                    }
                 }
             }
         }
@@ -1557,7 +1573,7 @@ private fun FeaturedTrack(
 ) {
     val titleColor   = if (onArtwork) Color.White else MaterialTheme.colorScheme.onSurface
     val subColor     = if (onArtwork) Color.White.copy(alpha = 0.72f) else wrappedSupportingTextColor(0.7f)
-    val accentColor  = if (onArtwork) Color.White else MaterialTheme.colorScheme.primary
+    val accentColor  = if (onArtwork) Color.White else currentWrappedAccentText()
     val captionColor = if (onArtwork) Color.White.copy(alpha = 0.55f) else wrappedSupportingTextColor(0.55f)
     Text(
         text = song.song.displayTitle,
@@ -1591,7 +1607,7 @@ private fun FeaturedTrack(
     TextButton(
         onClick = onDetailsClick,
         colors = ButtonDefaults.textButtonColors(
-            contentColor = if (onArtwork) Color.White else MaterialTheme.colorScheme.primary,
+            contentColor = if (onArtwork) Color.White else currentWrappedAccentText(),
         ),
     ) {
         Text("View track details")
@@ -1950,7 +1966,7 @@ private fun SkipHabitsPage(
             Text(
                 text = "Most skipped track",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = currentWrappedAccentText(),
             )
             RankedTrackRow(
                 rank = null,
@@ -2076,7 +2092,7 @@ private fun RankedResultRow(
                     MaterialTheme.typography.titleMedium
                 },
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = currentWrappedAccentText(),
                 modifier = Modifier.width(22.dp),
                 textAlign = TextAlign.Center,
             )
@@ -2106,7 +2122,7 @@ private fun RankedResultRow(
         Text(
             text = metric,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = currentWrappedAccentText(),
             maxLines = 1,
         )
     }
@@ -2168,7 +2184,7 @@ private fun RecentPlaysPage(
                         Text(
                             text = StatisticsFormatters.formatLastPlayed(summary.lastPlayedAt),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = currentWrappedAccentText(),
                             maxLines = 1,
                         )
                     }
