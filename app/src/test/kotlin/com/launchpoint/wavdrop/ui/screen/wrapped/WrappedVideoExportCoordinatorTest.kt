@@ -439,6 +439,225 @@ class WrappedVideoExportCoordinatorTest {
         assertTrue(foreignPart.exists()); assertTrue(otherFile.exists())
     }
 
+    // ---- P5-WR-VID-04: seven-day completed-MP4 retention ----------------------------------------------------
+
+    private val NOW = 2_000_000_000_000L
+    private val WEEK = WRAPPED_VIDEO_RETENTION_MILLIS
+    private val uuidA = "11111111-1111-4111-8111-111111111111"
+    private val uuidB = "22222222-2222-4222-8222-222222222222"
+    private val uuidC = "33333333-3333-4333-8333-333333333333"
+
+    private fun dirs(): Pair<File, File> =
+        File(root, "wrapped_slide_export").also { it.mkdirs() } to File(root, WRAPPED_VIDEO_DIR).also { it.mkdirs() }
+
+    private fun mp4(dir: File, name: String, modified: Long) =
+        File(dir, name).also { it.writeBytes(byteArrayOf(1, 2, 3)); assertTrue(it.setLastModified(modified)) }
+
+    private fun retentionSweep(slides: File, videos: File, problems: MutableList<String>? = null,
+                               delete: (File) -> Boolean = { it.delete() }) =
+        sweepWrappedVideoOrphans(slides, videos, NOW, delete) { problems?.add(it) }
+
+    @Test fun `retention constant is exactly seven days`() {
+        assertEquals(7L * 24 * 60 * 60 * 1000, WRAPPED_VIDEO_RETENTION_MILLIS)
+    }
+
+    @Test fun `an mp4 newer than seven days is preserved`() {
+        val (s, v) = dirs()
+        val f = mp4(v, "wavdrop_wrapped_$uuidA.mp4", NOW - WEEK + 60_000)
+        assertEquals(0, retentionSweep(s, v)); assertTrue(f.exists())
+    }
+
+    @Test fun `an mp4 exactly seven days old is preserved and one millisecond more is deleted`() {
+        val (s, v) = dirs()
+        val exact = mp4(v, "wavdrop_wrapped_$uuidA.mp4", NOW - WEEK)
+        val over = mp4(v, "wavdrop_wrapped_$uuidB.mp4", NOW - WEEK - 1)
+        assertEquals(1, retentionSweep(s, v))
+        assertTrue("exactly seven days is not older than seven days", exact.exists())
+        assertFalse(over.exists())
+    }
+
+    @Test fun `several mp4s older than seven days are all deleted`() {
+        val (s, v) = dirs()
+        val a = mp4(v, "wavdrop_wrapped_$uuidA.mp4", NOW - WEEK - 86_400_000L)
+        val b = mp4(v, "wavdrop_wrapped_$uuidB.mp4", NOW - 30 * 86_400_000L)
+        val fresh = mp4(v, "wavdrop_wrapped_$uuidC.mp4", NOW - 1_000)
+        assertEquals(2, retentionSweep(s, v))
+        assertFalse(a.exists()); assertFalse(b.exists()); assertTrue(fresh.exists())
+    }
+
+    @Test fun `a future-dated mp4 is preserved`() {
+        val (s, v) = dirs()
+        val f = mp4(v, "wavdrop_wrapped_$uuidA.mp4", NOW + 10 * WEEK)
+        assertEquals(0, retentionSweep(s, v)); assertTrue(f.exists())
+    }
+
+    @Test fun `malformed export names and unrelated mp4s are preserved even when very old`() {
+        val (s, v) = dirs()
+        val old = NOW - 100 * 86_400_000L
+        val keep = listOf(
+            "wavdrop_wrapped_notauuid.mp4", "wavdrop_wrapped_$uuidA.mp4.bak", "wavdrop_wrapped_$uuidA.MP4",
+            "wavdrop_wrapped_$uuidA .mp4", "wavdrop_wrapped_.mp4", "holiday.mp4", "xwavdrop_wrapped_$uuidA.mp4",
+            "wavdrop_wrapped_$uuidA.txt",
+        ).map { mp4(v, it, old) }
+        assertEquals(0, retentionSweep(s, v))
+        keep.forEach { assertTrue(it.name, it.exists()) }
+    }
+
+    @Test fun `a directory that looks like an expired export and a matching-prefix sibling directory are preserved`() {
+        val (s, v) = dirs()
+        val old = NOW - 100 * 86_400_000L
+        val lookalike = File(v, "wavdrop_wrapped_$uuidA.mp4").also { it.mkdirs(); it.setLastModified(old) }
+        val sibling = File(root, WRAPPED_VIDEO_DIR + "_old").also { it.mkdirs() }
+        val inSibling = mp4(sibling, "wavdrop_wrapped_$uuidB.mp4", old)
+        assertEquals(0, retentionSweep(s, v))
+        assertTrue(lookalike.isDirectory); assertTrue(inSibling.exists())
+    }
+
+    @Test fun `a symlink that escapes the video directory is preserved and its target is untouched`() {
+        val (s, v) = dirs()
+        val old = NOW - 100 * 86_400_000L
+        val outside = mp4(File(root, "elsewhere").also { it.mkdirs() }, "wavdrop_wrapped_$uuidB.mp4", old)
+        val link = File(v, "wavdrop_wrapped_$uuidA.mp4")
+        val created = try { Files.createSymbolicLink(link.toPath(), outside.toPath()); true } catch (e: Exception) { false }
+        org.junit.Assume.assumeTrue("symlinks unavailable on this machine", created)
+        assertEquals(0, retentionSweep(s, v))
+        assertTrue(Files.isSymbolicLink(link.toPath())); assertTrue(outside.exists())
+    }
+
+    @Test fun `a symlink to another file inside the directory is not followed either`() {
+        val (s, v) = dirs()
+        val target = mp4(v, "wavdrop_wrapped_$uuidB.mp4", NOW - 1_000)
+        val link = File(v, "wavdrop_wrapped_$uuidA.mp4")
+        val created = try { Files.createSymbolicLink(link.toPath(), target.toPath()); true } catch (e: Exception) { false }
+        org.junit.Assume.assumeTrue("symlinks unavailable on this machine", created)
+        assertEquals(0, retentionSweep(s, v))
+        assertTrue(target.exists())
+    }
+
+    @Test fun `a path that only reaches the video directory through dot-dot or lives elsewhere is never expired`() {
+        val (_, v) = dirs()
+        val old = NOW - 100 * 86_400_000L
+        val outside = mp4(File(root, "elsewhere").also { it.mkdirs() }, "wavdrop_wrapped_$uuidA.mp4", old)
+        val viaDotDot = File(v, "../elsewhere/wavdrop_wrapped_$uuidA.mp4")
+        assertTrue(viaDotDot.exists())
+        assertFalse(isExpiredWrappedVideo(viaDotDot, v, NOW))
+        assertFalse(isExpiredWrappedVideo(outside, v, NOW))
+        val inside = mp4(v, "wavdrop_wrapped_$uuidB.mp4", old)
+        assertTrue("control: the same age inside the directory is expired", isExpiredWrappedVideo(inside, v, NOW))
+    }
+
+    @Test fun `the image share cache and other app files are never touched`() {
+        val (s, v) = dirs()
+        val old = NOW - 100 * 86_400_000L
+        val share = File(root, "wrapped_share").also { it.mkdirs() }
+        val png = File(share, "wavdrop_wrapped_1794569066673_$uuidA.png").also { it.writeBytes(byteArrayOf(1)); it.setLastModified(old) }
+        val shareMp4 = mp4(share, "wavdrop_wrapped_$uuidB.mp4", old)
+        val db = File(root, "wavdrop.db").also { it.writeBytes(byteArrayOf(1)); it.setLastModified(old) }
+        assertEquals(0, retentionSweep(s, v))
+        assertTrue(png.exists()); assertTrue(shareMp4.exists()); assertTrue(db.exists())
+    }
+
+    @Test fun `part files and slide directories are still cleaned alongside retention`() {
+        val (s, v) = dirs()
+        val orphanDir = File(s, WRAPPED_EXPORT_DIR_PREFIX + "dead").also { it.mkdirs() }
+        File(orphanDir, "a.png").writeBytes(byteArrayOf(1))
+        val part = File(v, "wavdrop_wrapped_$uuidA.mp4.99.part").also { it.writeBytes(byteArrayOf(1)); it.setLastModified(NOW) }
+        val expired = mp4(v, "wavdrop_wrapped_$uuidB.mp4", NOW - WEEK - 5)
+        assertEquals(3, retentionSweep(s, v))
+        assertFalse(orphanDir.exists()); assertFalse(part.exists()); assertFalse(expired.exists())
+    }
+
+    @Test fun `a video older than seven days is pruned even if it was the last one published by an earlier export`() = blocking {
+        val (s, v) = dirs()
+        val first = coordinator(
+            sweep = { sweepWrappedVideoOrphans(s, v, NOW) { } },
+            encode = { _, _, _ -> completed(mp4(v, "wavdrop_wrapped_$uuidA.mp4", NOW - 1_000)) },
+        )
+        first.start(plan(id = "last1"))
+        val done = first.await("done") { it is WrappedVideoExportState.Completed } as WrappedVideoExportState.Completed
+        first.joinCurrent()
+        assertTrue(done.file.exists())
+        // Eight days later the next export starts; the earlier (last published) video has outlived the grace window.
+        val later = NOW + 8 * 86_400_000L
+        val second = coordinator(
+            sweep = { sweepWrappedVideoOrphans(s, v, later) { } },
+            encode = { _, _, _ -> completed(mp4(v, "wavdrop_wrapped_$uuidB.mp4", later - 1_000)) },
+        )
+        second.start(plan(id = "last2"))
+        val done2 = second.await("done") { it is WrappedVideoExportState.Completed } as WrappedVideoExportState.Completed
+        second.joinCurrent()
+        assertFalse("older last-published video is pruned", done.file.exists())
+        assertTrue("the new export is intact", done2.file.exists())
+    }
+
+    @Test fun `a failed deletion is reported, skipped and does not stop the rest of the sweep`() {
+        val (s, v) = dirs()
+        val a = mp4(v, "wavdrop_wrapped_$uuidA.mp4", NOW - WEEK - 1)
+        val b = mp4(v, "wavdrop_wrapped_$uuidB.mp4", NOW - WEEK - 1)
+        val problems = ArrayList<String>()
+        val removed = retentionSweep(s, v, problems = problems, delete = { f -> if (f.name.contains(uuidA)) false else f.delete() })
+        assertEquals(1, removed)
+        assertEquals(1, problems.size); assertTrue(problems[0].contains(a.name))
+        assertTrue(a.exists()); assertFalse(b.exists())
+        val thrown = retentionSweep(s, v, problems = problems, delete = { throw SecurityException("nope") })
+        assertEquals(0, thrown); assertTrue(a.exists())
+    }
+
+    @Test fun `a sweep that throws is reported and the new export still completes`() = blocking {
+        val problems = ArrayList<String>()
+        val c = coordinator(sweep = { throw SecurityException("denied") }, onCleanupProblem = { problems += it })
+        c.start(plan(id = "swf"))
+        c.await("done") { it is WrappedVideoExportState.Completed }
+        c.joinCurrent()
+        assertTrue(c.state.value is WrappedVideoExportState.Completed)
+        assertEquals(1, problems.size)
+        assertFalse(guard.isHeld)
+    }
+
+    @Test fun `cleanup runs before the new export generates its slides`() = blocking {
+        val events = java.util.Collections.synchronizedList(ArrayList<String>())
+        val c = coordinator(
+            sweep = { events += "sweep"; 0 },
+            generate = { events += "generate"; success(it.exportId) },
+        )
+        c.start(plan(id = "ord"))
+        c.await("done") { it is WrappedVideoExportState.Completed }
+        c.joinCurrent()
+        assertEquals(listOf("sweep", "generate"), events.toList())
+    }
+
+    @Test fun `a second export cannot start or sweep while one holds the guard`() = blocking {
+        val sweeps = AtomicInteger()
+        val gate = CompletableDeferred<Unit>()
+        val first = coordinator(generate = { gate.await(); success(it.exportId) }, sweep = { sweeps.incrementAndGet() })
+        val second = coordinator(sweep = { sweeps.incrementAndGet() })
+        assertTrue(first.start(plan(id = "g1")))
+        assertFalse(second.start(plan(id = "g2")))
+        assertEquals(WrappedVideoExportState.Idle, second.state.value)
+        gate.complete(Unit)
+        first.await("done") { it is WrappedVideoExportState.Completed }
+        first.joinCurrent()
+        assertEquals(1, sweeps.get())
+    }
+
+    @Test fun `a successful new export is never removed by its own startup sweep`() = blocking {
+        val (s, v) = dirs()
+        val oldExport = mp4(v, "wavdrop_wrapped_$uuidA.mp4", NOW - 100 * 86_400_000L)
+        val fakeNow = { NOW }
+        val c = coordinator(
+            sweep = { sweepWrappedVideoOrphans(s, v, fakeNow()) { } },
+            encode = { _, p, _ -> completed(mp4(v, "wavdrop_wrapped_${uuidC}.mp4", NOW - 10)) },
+        )
+        c.start(plan(id = "own"))
+        val done = c.await("done") { it is WrappedVideoExportState.Completed } as WrappedVideoExportState.Completed
+        c.joinCurrent()
+        assertFalse("expired older export was pruned at start", oldExport.exists())
+        assertTrue(done.file.exists())
+        // Within the grace window a later sweep keeps it too.
+        assertEquals(0, sweepWrappedVideoOrphans(s, v, NOW + 3 * 86_400_000L) { })
+        assertTrue(done.file.exists())
+    }
+
     @Test fun `the sweep runs only inside a started export, after the guard is held`() = blocking {
         val sweeps = AtomicInteger()
         val gate = CompletableDeferred<Unit>()

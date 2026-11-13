@@ -167,7 +167,14 @@ internal class WrappedVideoExportCoordinator(
         var slideDir: File? = null
         var published: File? = null
         try {
-            withContext(ioDispatcher) { sweepOrphans() }
+            // Housekeeping only: a failing sweep (old cache files) must never fail the new export.
+            try {
+                withContext(ioDispatcher) { sweepOrphans() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onCleanupProblem("cache sweep failed: ${e.javaClass.simpleName}")
+            }
             currentCoroutineContext().ensureActive()
             val slides = generateSlides(plan)
             val success = when (slides) {
@@ -226,17 +233,80 @@ internal class WrappedVideoExportCoordinator(
 }
 
 /**
- * Removes what an earlier PROCESS left behind: slide directories named by the export prefix and `.part` files in the
- * video directory. Called only while the export guard is held, so no export of this process can own any of them.
- * Completed `.mp4` files and every other name are never touched. Returns the number of entries removed.
+ * P5-WR-VID-04: completed Wrapped MP4s become eligible for deletion once strictly older than this. The age is the file's
+ * last-modified time, an approximation of "cache age" (it is not a verified export-completion timestamp). The grace
+ * period is also the only protection for a video an external app may still be reading: a chooser gives no signal when
+ * a receiver finishes, so none is assumed.
  */
-internal fun sweepWrappedVideoOrphans(slideBaseDir: File, videoDir: File): Int {
+internal const val WRAPPED_VIDEO_RETENTION_DAYS = 7L
+internal val WRAPPED_VIDEO_RETENTION_MILLIS: Long = java.util.concurrent.TimeUnit.DAYS.toMillis(WRAPPED_VIDEO_RETENTION_DAYS)
+
+/** Exactly the name [wrappedVideoFileName] produces for a UUID export id. */
+private val COMPLETED_VIDEO_NAME = Regex(
+    "^" + Regex.escape(WRAPPED_VIDEO_FILE_PREFIX) +
+        "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\.mp4$",
+)
+
+private val sweepLog = java.util.logging.Logger.getLogger("WrappedVideoRetention")
+
+/**
+ * True when [file] is a completed-export MP4 that retention may delete: a regular, non-symlink file with the exact
+ * `wavdrop_wrapped_<UUID>.mp4` name, directly inside [videoDir] by canonical path, and strictly older than
+ * [retentionMillis]. There is no other exemption: age alone decides. A missing/zero timestamp or a future one is never expired; the comparison only subtracts
+ * two positive longs with `modified <= now`, so it cannot overflow.
+ */
+internal fun isExpiredWrappedVideo(
+    file: File,
+    videoDir: File,
+    nowMillis: Long,
+    retentionMillis: Long = WRAPPED_VIDEO_RETENTION_MILLIS,
+): Boolean = try {
+    val path = file.toPath()
+    val attrs = java.nio.file.Files.readAttributes(
+        path, java.nio.file.attribute.BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS,
+    )
+    val canonical = file.canonicalFile
+    val modified = attrs.lastModifiedTime().toMillis()
+    COMPLETED_VIDEO_NAME.matches(file.name) &&
+        attrs.isRegularFile && !attrs.isSymbolicLink &&
+        canonical.parentFile == videoDir.canonicalFile && canonical.name == file.name &&
+        modified > 0L && modified <= nowMillis && nowMillis - modified > retentionMillis
+} catch (e: java.io.IOException) {
+    false
+} catch (e: SecurityException) {
+    false
+}
+
+/**
+ * Housekeeping that runs only while the export guard is held (so no export of this process can own anything below):
+ *  - removes what an earlier PROCESS left behind: slide directories named by the export prefix and `.part` files;
+ *  - removes completed MP4s that are strictly older than the retention period (see [isExpiredWrappedVideo]). The seven
+ *    days are the grace window for an external app still holding a shared video; no video is exempt merely because it
+ *    was the last one published. The export about to start has not created its file yet, so it can never be swept.
+ * Every other name, folder and file is never touched. A deletion that fails is reported through [onProblem] and skipped;
+ * nothing here throws for a single bad entry. Returns the number of entries removed.
+ */
+internal fun sweepWrappedVideoOrphans(
+    slideBaseDir: File,
+    videoDir: File,
+    nowMillis: Long = System.currentTimeMillis(),
+    deleteFile: (File) -> Boolean = { it.delete() },
+    onProblem: (String) -> Unit = { sweepLog.warning(it) },
+): Int {
     var removed = 0
     slideBaseDir.listFiles()?.forEach { f ->
         if (f.isDirectory && f.name.startsWith(WRAPPED_EXPORT_DIR_PREFIX) && f.deleteRecursively()) removed++
     }
     videoDir.listFiles()?.forEach { f ->
-        if (f.isFile && f.name.startsWith(WRAPPED_VIDEO_FILE_PREFIX) && f.name.endsWith(".part") && f.delete()) removed++
+        try {
+            val orphanPart = f.isFile && f.name.startsWith(WRAPPED_VIDEO_FILE_PREFIX) && f.name.endsWith(".part")
+            val expired = !orphanPart && isExpiredWrappedVideo(f, videoDir, nowMillis)
+            if (orphanPart || expired) {
+                if (deleteFile(f)) removed++ else onProblem("could not delete ${if (expired) "expired video" else "part file"}: ${f.name}")
+            }
+        } catch (e: Exception) {
+            onProblem("cleanup failed for ${f.name}: ${e.javaClass.simpleName}")
+        }
     }
     return removed
 }
