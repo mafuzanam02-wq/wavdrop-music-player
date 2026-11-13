@@ -73,8 +73,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
@@ -591,6 +593,12 @@ private fun WrappedContent(
     val latestStoryPlaying by rememberUpdatedState(storyPlaying)
     val latestStoryProgress by rememberUpdatedState(slideProgress.value)
 
+    // Image sharing: one in-flight export per Wrapped screen. The scope is cancelled when the screen leaves
+    // composition; the gate is released in runWrappedShare's finally on every path.
+    val shareGate = remember { WrappedShareGate() }
+    val shareScope = rememberCoroutineScope()
+    var shareInFlight by remember { mutableStateOf(false) }
+
     fun saveStorySnapshot() {
         viewModel.saveStorySnapshot(
             reportKey = reportKey,
@@ -797,10 +805,31 @@ private fun WrappedContent(
                         onClick = {
                             val rect = pagerBoundsInWindow ?: return@IconButton
                             val act = activity ?: return@IconButton
+                            if (shareInFlight || shareGate.isActive) return@IconButton
                             storyPlaying = false
-                            shareWrappedSlide(act, rect)
+                            // Request identity: the export is stale if the report or page changes meanwhile.
+                            val requestedReport = latestReportKey
+                            val requestedPage = latestStoryPage
+                            shareInFlight = true
+                            shareScope.launch {
+                                try {
+                                    shareWrappedSlide(
+                                        activity = act,
+                                        srcRect = rect,
+                                        gate = shareGate,
+                                        isCurrent = {
+                                            latestReportKey == requestedReport &&
+                                                latestStoryPage == requestedPage &&
+                                                !pagerState.isScrollInProgress
+                                        },
+                                    )
+                                } finally {
+                                    shareInFlight = false
+                                }
+                            }
                         },
-                        enabled = !pagerState.isScrollInProgress && pagerBoundsInWindow != null && activity != null,
+                        enabled = !pagerState.isScrollInProgress && !shareInFlight &&
+                            pagerBoundsInWindow != null && activity != null,
                         modifier = Modifier.align(Alignment.CenterEnd),
                     ) {
                         Icon(
