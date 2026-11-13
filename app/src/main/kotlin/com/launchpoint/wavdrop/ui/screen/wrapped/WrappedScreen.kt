@@ -135,7 +135,6 @@ import java.util.Locale
 
 // Base page count: Intro + 8 existing pages (Overview, Streaks, Patterns, Top Track/Artist/Album,
 // Most Skipped, Recent Plays). Milestone page appended conditionally.
-private const val WRAPPED_BASE_COUNT = 9
 
 internal data class WrappedPeriodCopy(
     val shortLabel: String,
@@ -176,7 +175,6 @@ internal fun shouldShowWrappedMilestonePage(
 ): Boolean =
     scope == WrappedScope.YEARLY && preferenceEnabled && hasMilestones
 
-private const val WRAPPED_ALL_TIME_PAGE_COUNT = 7
 
 internal enum class WrappedOverviewRow(val label: String) {
     LISTENING_DAYS("Listening Days"),
@@ -232,19 +230,74 @@ internal fun wrappedSkipRatePercent(totalPlays: Int, totalSkips: Int): Int {
         .roundToInt()
 }
 
+/** Identity of a story page. The single source of page order for both the live pager and the static export. */
+internal enum class WrappedPageId {
+    INTRO, OVERVIEW, STREAKS, PATTERNS, TOP_TRACKS, TOP_ARTISTS, TOP_ALBUMS, SKIP_HABITS, RECENT_PLAYS, MILESTONES,
+}
+
+/** Ordered pages for a report. All Time has no per-day pages; Monthly/Yearly add Streaks and Patterns; Yearly may add Milestones. */
+internal fun wrappedPageIds(scope: WrappedScope, showMilestonePage: Boolean): List<WrappedPageId> = when (scope) {
+    WrappedScope.ALL_TIME -> listOf(
+        WrappedPageId.INTRO, WrappedPageId.OVERVIEW, WrappedPageId.TOP_TRACKS, WrappedPageId.TOP_ARTISTS,
+        WrappedPageId.TOP_ALBUMS, WrappedPageId.SKIP_HABITS, WrappedPageId.RECENT_PLAYS,
+    )
+    else -> listOf(
+        WrappedPageId.INTRO, WrappedPageId.OVERVIEW, WrappedPageId.STREAKS, WrappedPageId.PATTERNS,
+        WrappedPageId.TOP_TRACKS, WrappedPageId.TOP_ARTISTS, WrappedPageId.TOP_ALBUMS,
+        WrappedPageId.SKIP_HABITS, WrappedPageId.RECENT_PLAYS,
+    ) + if (showMilestonePage) listOf(WrappedPageId.MILESTONES) else emptyList()
+}
+
 internal fun wrappedPageCount(
     scope: WrappedScope,
     milestonePreferenceEnabled: Boolean,
     hasMilestones: Boolean,
-): Int = when (scope) {
-    WrappedScope.ALL_TIME -> WRAPPED_ALL_TIME_PAGE_COUNT
-    else -> WRAPPED_BASE_COUNT + if (
-        shouldShowWrappedMilestonePage(
-            scope = scope,
-            preferenceEnabled = milestonePreferenceEnabled,
-            hasMilestones = hasMilestones,
+): Int = wrappedPageIds(
+    scope,
+    shouldShowWrappedMilestonePage(
+        scope = scope,
+        preferenceEnabled = milestonePreferenceEnabled,
+        hasMilestones = hasMilestones,
+    ),
+).size
+
+/**
+ * The one page-id -> composable mapping, shared by the live pager and the static export. Live callers pass real
+ * navigation callbacks and the settled-page / reduced-motion flags; the export passes no-ops with
+ * isCurrentPage = true and reduceMotion = true so counters show their final values.
+ */
+@Composable
+internal fun WrappedPageContent(
+    pageId: WrappedPageId,
+    wrapped: WrappedSummary,
+    periodCopy: WrappedPeriodCopy,
+    visualSettings: WrappedVisualSettings,
+    milestones: List<WrappedMilestone>,
+    periodLabel: String,
+    isCurrentPage: Boolean,
+    reduceMotion: Boolean,
+    onTrackDetails: (Long) -> Unit,
+    onArtistDetails: (String) -> Unit,
+    onAlbumDetails: (String) -> Unit,
+) {
+    when (pageId) {
+        WrappedPageId.INTRO -> IntroPage(wrapped, periodCopy, visualSettings)
+        WrappedPageId.OVERVIEW -> OverviewPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
+        WrappedPageId.STREAKS -> StreaksPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
+        WrappedPageId.PATTERNS -> PatternsPage(wrapped, periodCopy, visualSettings)
+        WrappedPageId.TOP_TRACKS -> TopTracksPage(wrapped, periodCopy, visualSettings, onTrackDetails)
+        WrappedPageId.TOP_ARTISTS -> TopArtistsPage(wrapped, periodCopy, visualSettings, onArtistDetails)
+        WrappedPageId.TOP_ALBUMS -> TopAlbumsPage(wrapped, periodCopy, visualSettings, onAlbumDetails)
+        WrappedPageId.SKIP_HABITS ->
+            SkipHabitsPage(wrapped, periodCopy, visualSettings, onTrackDetails, isCurrentPage, reduceMotion)
+        WrappedPageId.RECENT_PLAYS -> RecentPlaysPage(wrapped, periodCopy, onTrackDetails)
+        WrappedPageId.MILESTONES -> MilestonePage(
+            milestones = milestones,
+            periodLabel = periodLabel,
+            visualSettings = visualSettings,
+            reduceMotion = reduceMotion,
         )
-    ) 1 else 0
+    }
 }
 
 // Intro gets 4 s; ranked list slides (Top Tracks/Artists/Albums) get 6 s to allow reading;
@@ -530,6 +583,7 @@ private fun WrappedContent(
         preferenceEnabled = state.showMilestoneCelebrations,
         hasMilestones = milestones.isNotEmpty(),
     )
+    val pageIds = wrappedPageIds(state.selectedScope, showMilestonePage)
     val pageCount = wrappedPageCount(
         scope = state.selectedScope,
         milestonePreferenceEnabled = state.showMilestoneCelebrations,
@@ -734,38 +788,19 @@ private fun WrappedContent(
                     }
                 } else Modifier
                 Box(modifier = Modifier.fillMaxSize().then(tapToggleModifier)) {
-                when (state.selectedScope) {
-                    WrappedScope.ALL_TIME -> when (page) {
-                        0    -> IntroPage(wrapped, periodCopy, visualSettings)
-                        1    -> OverviewPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
-                        2    -> TopTracksPage(wrapped, periodCopy, visualSettings, openTrackDetails)
-                        3    -> TopArtistsPage(wrapped, periodCopy, visualSettings, openArtistDetails)
-                        4    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, openAlbumDetails)
-                        5    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, openTrackDetails, isCurrentPage, reduceMotion)
-                        else -> RecentPlaysPage(wrapped, periodCopy, openTrackDetails)
-                    }
-                    else -> when (page) {
-                        0    -> IntroPage(wrapped, periodCopy, visualSettings)
-                        1    -> OverviewPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
-                        2    -> StreaksPage(wrapped, periodCopy, isCurrentPage, reduceMotion)
-                        3    -> PatternsPage(wrapped, periodCopy, visualSettings)
-                        4    -> TopTracksPage(wrapped, periodCopy, visualSettings, openTrackDetails)
-                        5    -> TopArtistsPage(wrapped, periodCopy, visualSettings, openArtistDetails)
-                        6    -> TopAlbumsPage(wrapped, periodCopy, visualSettings, openAlbumDetails)
-                        7    -> SkipHabitsPage(wrapped, periodCopy, visualSettings, openTrackDetails, isCurrentPage, reduceMotion)
-                        8    -> RecentPlaysPage(wrapped, periodCopy, openTrackDetails)
-                        else -> if (showMilestonePage) {
-                            MilestonePage(
-                                milestones = milestones,
-                                periodLabel = state.currentPeriod.displayLabel,
-                                visualSettings = visualSettings,
-                                reduceMotion = reduceMotion,
-                            )
-                        } else {
-                            RecentPlaysPage(wrapped, periodCopy, openTrackDetails)
-                        }
-                    }
-                }
+                WrappedPageContent(
+                    pageId = pageIds.getOrElse(page) { WrappedPageId.RECENT_PLAYS },
+                    wrapped = wrapped,
+                    periodCopy = periodCopy,
+                    visualSettings = visualSettings,
+                    milestones = milestones,
+                    periodLabel = state.currentPeriod.displayLabel,
+                    isCurrentPage = isCurrentPage,
+                    reduceMotion = reduceMotion,
+                    onTrackDetails = openTrackDetails,
+                    onArtistDetails = openArtistDetails,
+                    onAlbumDetails = openAlbumDetails,
+                )
                 } // Box(tapToggleModifier)
             }
 
