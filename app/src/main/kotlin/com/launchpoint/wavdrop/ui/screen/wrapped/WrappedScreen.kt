@@ -76,6 +76,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Alignment
@@ -1204,10 +1205,17 @@ private fun InsightCard(
     }
 }
 
+/**
+ * P5-WR-VID-02A0: explicit, scoped "static render" mode for offscreen page capture. When true, entrance motion is
+ * skipped so the first composed frame is the final state. Defaults to false and is never provided by the live screen,
+ * so it does not change app behaviour or the system animation setting.
+ */
+internal val LocalWrappedStaticRender = staticCompositionLocalOf { false }
+
 /** One-shot, per-style entrance fade (+ rise for IMMERSIVE). Draw-phase; disabled under reduced motion. */
 @Composable
 private fun Modifier.wrappedCardReveal(tokens: WrappedStyleTokens): Modifier {
-    val reduceMotion = rememberReducedMotion()
+    val reduceMotion = rememberReducedMotion() || LocalWrappedStaticRender.current
     var appeared by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { appeared = true }
     val progress by animateFloatAsState(
@@ -1749,7 +1757,7 @@ private fun IntroPage(
 }
 
 @Composable
-private fun OverviewPage(
+internal fun OverviewPage(
     wrapped: WrappedSummary,
     periodCopy: WrappedPeriodCopy,
     isVisible: Boolean = false,

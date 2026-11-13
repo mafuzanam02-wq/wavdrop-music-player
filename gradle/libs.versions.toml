@@ -17,7 +17,7 @@ work                  = "2.9.1"
 coil                  = "2.7.0"
 junit                 = "4.13.2"
 junitExt              = "1.2.1"
-espresso              = "3.6.1"
+espresso              = "3.7.0"
 
 [libraries]
 # Core
@@ -80,6 +80,7 @@ junit               = { group = "junit",                  name = "junit",       
 androidx-test-junit = { group = "androidx.test.ext",      name = "junit",          version.ref = "junitExt" }
 androidx-espresso   = { group = "androidx.test.espresso", name = "espresso-core",  version.ref = "espresso" }
 androidx-compose-ui-test = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 
 [plugins]
 android-application = { id = "com.android.application",          version.ref = "agp" }
