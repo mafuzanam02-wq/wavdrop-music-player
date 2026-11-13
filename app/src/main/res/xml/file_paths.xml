@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="wrapped_share" path="wrapped_share/" />
+    <!-- P5-WR-VID-02C: finished Wrapped MP4s only. Intermediate slide images are deliberately not mapped. -->
+    <cache-path name="wrapped_video" path="wrapped_video_export/" />
 </paths>

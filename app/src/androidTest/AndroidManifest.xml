@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+            P5-WR-VID-02C test-only receiving app: a separate package (the test APK) that accepts video/mp4 ACTION_SEND
+            and reads the shared content:// URI, proving the FileProvider grant works for a real external uid.
+        -->
+        <activity
+            android:name="com.launchpoint.wavdrop.ui.screen.wrapped.WrappedVideoReceiverActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/mp4" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

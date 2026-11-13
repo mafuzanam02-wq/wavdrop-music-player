@@ -41,7 +41,8 @@ class WrappedShareIntentContractTest {
         val paths = projectFile("src/main/res/xml/file_paths.xml").readText()
         assertTrue(paths.contains("<cache-path"))
         assertTrue("export dir must be the only shared path", paths.contains("path=\"$WRAPPED_SHARE_DIR/\""))
-        assertEquals("only one shared root", 1, Regex("<[a-z-]+-path ").findAll(paths).count())
+        // P5-WR-VID-02C added exactly one more root (the dedicated video directory); see WrappedVideoShareIntentContractTest.
+        assertEquals("image share path + dedicated video path", 2, Regex("<[a-z-]+-path ").findAll(paths).count())
 
         val manifest = projectFile("src/main/AndroidManifest.xml").readText()
         val provider = manifest.substringAfter("androidx.core.content.FileProvider").substringBefore("</provider>")

@@ -3,6 +3,7 @@ package com.launchpoint.wavdrop.ui.screen.wrapped
 import android.app.Activity
 import android.graphics.Rect as AndroidRect
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -412,6 +413,8 @@ fun WrappedScreen(
     viewModel: WrappedViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // P5-WR-VID-02C: screen-scoped video export (cancelled and cleaned up when this screen leaves composition).
+    val videoExport = rememberWrappedVideoExportController()
 
     Scaffold(
         topBar = {
@@ -464,10 +467,13 @@ fun WrappedScreen(
                 onTrackDetailsClick = onTrackDetailsClick,
                 onArtistClick = onArtistClick,
                 onAlbumClick = onAlbumClick,
+                videoExport = videoExport,
                 modifier = Modifier.padding(innerPadding),
                 )
             }
         }
+        // Zero-size, clipped, semantics-free mount for the export render host (only present while slides generate).
+        WrappedVideoExportHostMount(videoExport)
     }
 }
 
@@ -554,6 +560,7 @@ private fun WrappedContent(
     onTrackDetailsClick: (Long) -> Unit,
     onArtistClick: (String) -> Unit,
     onAlbumClick: (String) -> Unit,
+    videoExport: WrappedVideoExportController,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -876,6 +883,30 @@ private fun WrappedContent(
                     }
                 }
             }
+            // P5-WR-VID-02C: video export. The plan is an immutable snapshot of THIS report, taken at the tap.
+            val videoState by videoExport.coordinator.state.collectAsStateWithLifecycle()
+            WrappedVideoExportBar(
+                state = videoState,
+                exportEnabled = isWrappedVideoExportEligible(wrapped) && !videoState.isActive,
+                shareEnabled = activity != null,
+                onExport = {
+                    videoExport.coordinator.start(
+                        buildWrappedExportPlan(
+                            summary = wrapped,
+                            visualSettings = visualSettings,
+                            visualStyle = state.visualStyle,
+                            milestonePreferenceEnabled = state.showMilestoneCelebrations,
+                        ),
+                    )
+                },
+                onCancel = videoExport.coordinator::cancel,
+                onShare = { file ->
+                    val act = activity ?: return@WrappedVideoExportBar
+                    wrappedVideoShareMessage(launchWrappedVideoShare(act, file))?.let {
+                        Toast.makeText(act, it, Toast.LENGTH_SHORT).show()
+                    }
+                },
+            )
         }
     }
 }
