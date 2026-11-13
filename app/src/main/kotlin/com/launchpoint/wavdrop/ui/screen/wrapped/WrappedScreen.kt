@@ -116,6 +116,7 @@ import com.launchpoint.wavdrop.data.model.WrappedSummary
 import com.launchpoint.wavdrop.data.settings.WrappedBackgroundIntensity
 import com.launchpoint.wavdrop.data.settings.WrappedFallbackTheme
 import com.launchpoint.wavdrop.ui.components.ArtworkImage
+import com.launchpoint.wavdrop.ui.components.CountLabels
 import com.launchpoint.wavdrop.ui.components.motion.rememberReducedMotion
 import com.launchpoint.wavdrop.ui.components.motion.wavdropPressFeedback
 import com.launchpoint.wavdrop.ui.theme.WavdropMotion
@@ -171,6 +172,27 @@ internal fun shouldShowWrappedMilestonePage(
     scope == WrappedScope.YEARLY && preferenceEnabled && hasMilestones
 
 private const val WRAPPED_ALL_TIME_PAGE_COUNT = 7
+
+internal enum class WrappedOverviewRow(val label: String) {
+    LISTENING_DAYS("Listening Days"),
+    UNIQUE_TRACKS("Unique Tracks"),
+    UNIQUE_ARTISTS("Unique Artists"),
+    BUSIEST_DAY("Busiest Day"),
+    AVG_PLAYS_PER_LISTENING_DAY("Avg plays per listening day"),
+}
+
+/** All Time has no per-day data (WrappedBuilder zero-fills it), so those rows are omitted there. */
+internal fun wrappedOverviewRows(scope: WrappedScope): List<WrappedOverviewRow> =
+    if (scope == WrappedScope.ALL_TIME) {
+        listOf(WrappedOverviewRow.UNIQUE_TRACKS, WrappedOverviewRow.UNIQUE_ARTISTS)
+    } else {
+        WrappedOverviewRow.values().toList()
+    }
+
+internal fun wrappedArtistSubtitle(songCount: Int, albumCount: Int): String =
+    "${CountLabels.songs(songCount)} · ${CountLabels.albums(albumCount)}"
+
+internal fun wrappedMilestoneIntro(periodLabel: String): String = "Moments from $periodLabel."
 
 internal fun <T> wrappedTopThree(items: List<T>): List<T> = items.take(3)
 
@@ -1659,11 +1681,17 @@ private fun OverviewPage(
             )
         }
         Spacer(Modifier.height(20.dp))
-        StatRow("Listening Days", animDays.toString())
-        StatRow("Unique Tracks", animUniqueTracks.toString())
-        StatRow("Unique Artists", animUniqueArtists.toString())
-        StatRow("Busiest Day", formatBusiestDay(wrapped.busiestDay, wrapped.busiestDayPlayCount))
-        StatRow("Avg Plays / Day", formatDecimal(wrapped.averagePlaysPerActiveDay))
+        wrappedOverviewRows(wrapped.period.scope).forEach { row ->
+            when (row) {
+                WrappedOverviewRow.LISTENING_DAYS -> StatRow(row.label, animDays.toString())
+                WrappedOverviewRow.UNIQUE_TRACKS -> StatRow(row.label, animUniqueTracks.toString())
+                WrappedOverviewRow.UNIQUE_ARTISTS -> StatRow(row.label, animUniqueArtists.toString())
+                WrappedOverviewRow.BUSIEST_DAY ->
+                    StatRow(row.label, formatBusiestDay(wrapped.busiestDay, wrapped.busiestDayPlayCount))
+                WrappedOverviewRow.AVG_PLAYS_PER_LISTENING_DAY ->
+                    StatRow(row.label, formatDecimal(wrapped.averagePlaysPerActiveDay))
+            }
+        }
     }
 }
 
@@ -1876,7 +1904,7 @@ private fun SkipHabitsPage(
             RankedTrackRow(
                 rank = null,
                 track = track,
-                metric = "${track.skipCount} skips",
+                metric = CountLabels.skips(track.skipCount),
                 onClick = { onTrackDetailsClick(track.song.id) },
             )
         }
@@ -1920,7 +1948,7 @@ private fun RankedWrappedCard(
 private fun RankedTrackRow(
     rank: Int?,
     track: SongStatsSummary,
-    metric: String = "${track.playCount} plays",
+    metric: String = CountLabels.plays(track.playCount),
     onClick: () -> Unit,
 ) {
     RankedResultRow(
@@ -1950,8 +1978,8 @@ private fun RankedArtistRow(
     RankedResultRow(
         rank = rank,
         title = artist.artistKey,
-        subtitle = "${artist.songCount} songs · ${artist.albumCount} albums",
-        metric = "${artist.playCount} plays",
+        subtitle = wrappedArtistSubtitle(artist.songCount, artist.albumCount),
+        metric = CountLabels.plays(artist.playCount),
         onClick = onClick,
     )
 }
@@ -1966,7 +1994,7 @@ private fun RankedAlbumRow(
         rank = rank,
         title = album.albumKey,
         subtitle = album.artist.ifBlank { "Unknown Artist" },
-        metric = "${album.playCount} plays",
+        metric = CountLabels.plays(album.playCount),
         onClick = onClick,
     )
 }
@@ -2118,7 +2146,7 @@ private fun MilestonePage(
         modifier = modifier,
     ) {
         Text(
-            text = "Moments from your $periodLabel.",
+            text = wrappedMilestoneIntro(periodLabel),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )
@@ -2160,13 +2188,13 @@ private fun MilestoneRow(milestone: WrappedMilestone) {
 
 // ── Milestone model + computation ─────────────────────────────────────────────
 
-private data class WrappedMilestone(
+internal data class WrappedMilestone(
     val icon: ImageVector,
     val label: String,
     val detail: String,
 )
 
-private fun computeMilestones(wrapped: WrappedSummary): List<WrappedMilestone> {
+internal fun computeMilestones(wrapped: WrappedSummary): List<WrappedMilestone> {
     val result = mutableListOf<WrappedMilestone>()
 
     val playMilestones = listOf(100, 500, 1_000, 5_000, 10_000)
@@ -2181,7 +2209,7 @@ private fun computeMilestones(wrapped: WrappedSummary): List<WrappedMilestone> {
         result += WrappedMilestone(
             icon   = Icons.Default.MusicNote,
             label  = label,
-            detail = "${wrapped.totalPlayCount} plays this year",
+            detail = CountLabels.plays(wrapped.totalPlayCount) + " this year",
         )
     }
 
@@ -2214,7 +2242,7 @@ private fun computeMilestones(wrapped: WrappedSummary): List<WrappedMilestone> {
         result += WrappedMilestone(
             icon   = Icons.Default.LibraryMusic,
             label  = label,
-            detail = "${wrapped.uniqueSongsPlayedCount} different tracks played",
+            detail = CountLabels.format(wrapped.uniqueSongsPlayedCount, "different track", "different tracks") + " played",
         )
     }
 
@@ -2232,7 +2260,7 @@ private fun computeMilestones(wrapped: WrappedSummary): List<WrappedMilestone> {
         result += WrappedMilestone(
             icon   = Icons.Default.DateRange,
             label  = label,
-            detail = "${wrapped.listeningDaysCount} days with music this year",
+            detail = CountLabels.format(wrapped.listeningDaysCount, "day", "days") + " with music this year",
         )
     }
 
@@ -2246,8 +2274,8 @@ private fun formatCount(n: Int): String = when {
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
-private fun formatBusiestDay(day: LocalDate?, playCount: Int): String =
-    day?.let { "${BUSIEST_DAY_FORMATTER.format(it)} · $playCount plays" } ?: "None"
+internal fun formatBusiestDay(day: LocalDate?, playCount: Int): String =
+    day?.let { "${BUSIEST_DAY_FORMATTER.format(it)} · ${CountLabels.plays(playCount)}" } ?: "None"
 
 private fun formatStreak(days: Int): String = if (days == 1) "1 day" else "$days days"
 
