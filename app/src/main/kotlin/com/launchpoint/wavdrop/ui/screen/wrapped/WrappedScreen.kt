@@ -439,7 +439,7 @@ private fun EmptyContent(
             Text(
                 text = "Play music in Wavdrop to build private monthly and yearly recaps.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = wrappedSupportingTextColor(0.6f),
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
@@ -663,7 +663,7 @@ private fun WrappedContent(
         Text(
             text = wrappedDataSourceDisclosure(state.selectedScope),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            color = wrappedSupportingTextColor(0.5f),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
 
@@ -696,7 +696,7 @@ private fun WrappedContent(
                     Text(
                         text = emptyBody,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = wrappedSupportingTextColor(0.6f),
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -926,7 +926,7 @@ private fun WrappedYearSelector(
         Text(
             text = helperText,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            color = wrappedSupportingTextColor(0.5f),
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
@@ -1022,7 +1022,7 @@ private fun WrappedMonthSelector(
         Text(
             text = helperText,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            color = wrappedSupportingTextColor(0.5f),
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
@@ -1500,7 +1500,7 @@ private fun BigStat(value: String, label: String, modifier: Modifier = Modifier)
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            color = wrappedSupportingTextColor(0.6f),
         )
     }
 }
@@ -1517,7 +1517,7 @@ private fun StatRow(label: String, value: String) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            color = wrappedSupportingTextColor(0.7f),
             modifier = Modifier
                 .weight(1f)
                 .padding(end = 8.dp),
@@ -1542,7 +1542,7 @@ private fun NoDataText(message: String, modifier: Modifier = Modifier) {
     Text(
         text = message,
         style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        color = wrappedSupportingTextColor(0.6f),
         modifier = modifier,
     )
 }
@@ -1556,9 +1556,9 @@ private fun FeaturedTrack(
     onArtwork: Boolean = false,
 ) {
     val titleColor   = if (onArtwork) Color.White else MaterialTheme.colorScheme.onSurface
-    val subColor     = if (onArtwork) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+    val subColor     = if (onArtwork) Color.White.copy(alpha = 0.72f) else wrappedSupportingTextColor(0.7f)
     val accentColor  = if (onArtwork) Color.White else MaterialTheme.colorScheme.primary
-    val captionColor = if (onArtwork) Color.White.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    val captionColor = if (onArtwork) Color.White.copy(alpha = 0.55f) else wrappedSupportingTextColor(0.55f)
     Text(
         text = song.song.displayTitle,
         style = MaterialTheme.typography.headlineMedium,
@@ -1925,7 +1925,7 @@ private fun SkipHabitsPage(
         Text(
             text = "How often you moved on ${periodCopy.thisPeriod}.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            color = wrappedSupportingTextColor(0.6f),
         )
         Spacer(Modifier.height(20.dp))
         Row(
@@ -1980,7 +1980,7 @@ private fun RankedWrappedCard(
         Text(
             text = supportingCopy,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            color = wrappedSupportingTextColor(0.6f),
         )
         Spacer(Modifier.height(14.dp))
         content()
@@ -1989,7 +1989,7 @@ private fun RankedWrappedCard(
             Text(
                 text = note,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f),
+                color = wrappedSupportingTextColor(0.52f),
             )
         }
     }
@@ -2098,7 +2098,7 @@ private fun RankedResultRow(
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = wrappedSupportingTextColor(0.6f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -2160,7 +2160,7 @@ private fun RecentPlaysPage(
                             Text(
                                 text = summary.song.displayArtist.ifBlank { "Unknown Artist" },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                color = wrappedSupportingTextColor(0.6f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -2199,7 +2199,7 @@ private fun MilestonePage(
         Text(
             text = wrappedMilestoneIntro(periodLabel),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            color = wrappedSupportingTextColor(0.55f),
         )
         Spacer(Modifier.height(16.dp))
         milestones.forEach { milestone ->
@@ -2231,7 +2231,7 @@ private fun MilestoneRow(milestone: WrappedMilestone) {
             Text(
                 text = milestone.detail,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = wrappedSupportingTextColor(0.6f),
             )
         }
     }

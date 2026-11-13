@@ -99,3 +99,20 @@ fun WrappedVisualStyle.toStyleTokens(): WrappedStyleTokens = when (this) {
 
 /** Broadcasts the active style tokens to Wrapped surfaces without threading them through signatures. */
 val LocalWrappedStyleTokens = compositionLocalOf { WrappedVisualStyle.DEFAULT.toStyleTokens() }
+
+/**
+ * P5-WR-UX-01B2: floor for the alpha of `onSurface` supporting text (captions, helper and secondary copy).
+ * Composited WCAG contrast shows 0.5–0.62 falls below 4.5:1 on the light scaffold and on Studio Cards; the
+ * worst case across the supported accents, fallback themes and card treatments needs 0.595 (dark) / 0.661
+ * (light). 0.68 clears both with margin while staying below the 0.7 tier, so the existing hierarchy stays.
+ * Disabled/dimmed controls, dividers and decorative strokes are not text and keep their own alphas.
+ */
+internal const val WRAPPED_SUPPORTING_TEXT_MIN_ALPHA = 0.68f
+
+internal fun wrappedSupportingTextAlpha(requestedAlpha: Float): Float =
+    maxOf(requestedAlpha, WRAPPED_SUPPORTING_TEXT_MIN_ALPHA)
+
+@androidx.compose.runtime.Composable
+internal fun wrappedSupportingTextColor(requestedAlpha: Float): androidx.compose.ui.graphics.Color =
+    androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+        .copy(alpha = wrappedSupportingTextAlpha(requestedAlpha))
