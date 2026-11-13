@@ -55,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateIntAsState
@@ -449,6 +450,43 @@ private fun EmptyContent(
     }
 }
 
+/**
+ * Drives the slide progress bar and auto-advance. Restarts on page change (progress already reset by the caller),
+ * on play/pause toggle (progress preserved from the cancellation point), and on report change.
+ *
+ * The report reset in WrappedContent calls [Animatable.snapTo], which cancels any in-flight animateTo here without
+ * changing [page] or [playing] when the old report was on page 0 and playing. Keying on [reportKey] and
+ * [activeReportKey] relaunches the effect after that cancellation; it stays idle while a reset is pending
+ * ([activeReportKey] != [reportKey]) so an obsolete report can never advance, and resumes once the reset publishes
+ * the new [activeReportKey]. On resume the remaining duration is proportional to the remaining progress fraction.
+ */
+@Composable
+internal fun WrappedStoryAutoAdvance(
+    page: Int,
+    playing: Boolean,
+    reduceMotion: Boolean,
+    reportKey: Any,
+    activeReportKey: Any,
+    progress: Animatable<Float, AnimationVector1D>,
+    isLastPage: Boolean,
+    durationMs: Int,
+    onAdvance: suspend () -> Unit,
+    onComplete: () -> Unit,
+) {
+    val latestOnAdvance by rememberUpdatedState(onAdvance)
+    val latestOnComplete by rememberUpdatedState(onComplete)
+    LaunchedEffect(page, playing, reportKey, activeReportKey) {
+        if (!playing || reduceMotion || activeReportKey != reportKey) return@LaunchedEffect
+        val remainingFraction = (1f - progress.value).coerceIn(0f, 1f)
+        val remainingMs = (durationMs * remainingFraction).roundToInt().coerceAtLeast(1)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = remainingMs, easing = LinearEasing),
+        )
+        if (isLastPage) latestOnComplete() else latestOnAdvance()
+    }
+}
+
 @Composable
 private fun WrappedContent(
     state: WrappedUiState.Content,
@@ -586,26 +624,19 @@ private fun WrappedContent(
         onAlbumClick(albumKey)
     }
 
-    // Drives the progress bar and auto-advance. Restarts on page change (progress already
-    // reset above) or on play/pause toggle (progress preserved from cancellation point).
-    // On resume, remaining duration is proportional to the remaining progress fraction so the
-    // bar always reaches 1f at the same per-slide rate regardless of where it was paused.
-    LaunchedEffect(currentStoryPage, storyPlaying) {
-        if (!storyPlaying || reduceMotion) return@LaunchedEffect
-        val isLastPage = currentStoryPage >= pageCount - 1
-        val durationMs = wrappedSlideDurationMs(currentStoryPage, state.selectedScope, showMilestonePage)
-        val remainingFraction = (1f - slideProgress.value).coerceIn(0f, 1f)
-        val remainingMs = (durationMs * remainingFraction).roundToInt().coerceAtLeast(1)
-        slideProgress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = remainingMs, easing = LinearEasing),
-        )
-        if (isLastPage) {
-            storyPlaying = false
-        } else {
-            pagerState.animateScrollToPage(currentStoryPage + 1)
-        }
-    }
+    // Drives the progress bar and auto-advance (see WrappedStoryAutoAdvance for the key contract).
+    WrappedStoryAutoAdvance(
+        page = currentStoryPage,
+        playing = storyPlaying,
+        reduceMotion = reduceMotion,
+        reportKey = reportKey,
+        activeReportKey = activeReportKey,
+        progress = slideProgress,
+        isLastPage = currentStoryPage >= pageCount - 1,
+        durationMs = wrappedSlideDurationMs(currentStoryPage, state.selectedScope, showMilestonePage),
+        onAdvance = { pagerState.animateScrollToPage(currentStoryPage + 1) },
+        onComplete = { storyPlaying = false },
+    )
     // ─────────────────────────────────────────────────────────────────────────
 
     Column(modifier = modifier.fillMaxSize()) {
