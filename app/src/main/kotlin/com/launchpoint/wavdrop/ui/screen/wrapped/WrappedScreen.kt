@@ -1035,6 +1035,17 @@ private fun WrappedMonthSelector(
 
 // ── Page indicator ────────────────────────────────────────────────────────────
 
+/**
+ * Spoken position of the story, one-based ("Story page 3 of 9"). Null for an empty story or an out-of-range
+ * [currentPage] (e.g. a transitional frame after the page count shrank) so no misleading position is announced.
+ */
+internal fun wrappedStoryPageDescription(currentPage: Int, pageCount: Int): String? =
+    if (pageCount > 0 && currentPage in 0 until pageCount) {
+        "Story page ${currentPage + 1} of $pageCount"
+    } else {
+        null
+    }
+
 @Composable
 private fun PageIndicator(
     pageCount: Int,
@@ -1042,8 +1053,17 @@ private fun PageIndicator(
     reduceMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val positionDescription = wrappedStoryPageDescription(currentPage, pageCount)
     Row(
-        modifier = modifier,
+        // The dots are decorative boxes without semantics of their own, so the Row is the single node that
+        // announces the position (no parent/child duplication).
+        modifier = modifier.then(
+            if (positionDescription != null) {
+                Modifier.semantics { contentDescription = positionDescription }
+            } else {
+                Modifier
+            },
+        ),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
